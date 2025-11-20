@@ -1,5 +1,6 @@
 {
   "expo": {
+    "scheme": "ironpath",
     "name": "iron-path-app",
     "slug": "iron-path-app",
     "version": "1.0.0",
