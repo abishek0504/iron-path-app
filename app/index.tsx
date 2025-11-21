@@ -1,63 +1,97 @@
-import { useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search } from 'lucide-react-native';
-import { masterExerciseList } from '../src/data/exercises';
+import { supabase } from '../src/lib/supabase';
 
-export default function HomeScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
+export default function AuthScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const router = useRouter();
 
-  const filteredExercises = masterExerciseList.filter((exercise) =>
-    exercise.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleSelectExercise = (exercise: string) => {
-    router.push({
-      pathname: '/tracker',
-      params: { exercise },
+  // 1. Check if user is already logged in
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        router.replace('/(tabs)/home'); // Skip login if already authenticated
+      }
+      setIsCheckingSession(false);
     });
+  }, []);
+
+  // 2. Login Logic
+  const signIn = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) Alert.alert("Login Failed", error.message);
+    else router.replace('/(tabs)/home');
+    setLoading(false);
   };
 
-  return (
-    <SafeAreaView className="flex-1 bg-gray-900">
-      <View className="flex-1 p-4">
-        <Text className="text-3xl font-bold text-blue-400 mb-6">Exercise Selector</Text>
-        
-        {/* Search Bar */}
-        <View className="flex-row items-center bg-gray-800 rounded-lg px-4 py-3 mb-4">
-          <Search size={20} color="#9ca3af" />
-          <TextInput
-            className="flex-1 ml-3 text-white text-base"
-            placeholder="Search exercises..."
-            placeholderTextColor="#9ca3af"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="none"
-          />
-        </View>
+  // 3. Sign Up Logic
+  const signUp = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+    if (error) Alert.alert("Error", error.message);
+    else Alert.alert("Success", "Check your email for the verification link!");
+    setLoading(false);
+  };
 
-        {/* Exercise List */}
-        <FlatList
-          data={filteredExercises}
-          keyExtractor={(item) => item}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              className="bg-black p-4 rounded-lg mb-3 active:bg-gray-900 border border-gray-800"
-              onPress={() => handleSelectExercise(item)}
-            >
-              <Text className="text-white text-lg font-medium">{item}</Text>
-            </TouchableOpacity>
-          )}
-          ListEmptyComponent={() => (
-            <Text className="text-gray-500 text-center mt-10">
-              No exercises found matching "{searchQuery}"
-            </Text>
-          )}
-          contentContainerClassName="pb-20"
-        />
+  if (isCheckingSession) {
+    return (
+      <View className="flex-1 bg-gray-900 justify-center items-center">
+        <ActivityIndicator size="large" color="#2563eb" />
       </View>
-    </SafeAreaView>
+    );
+  }
+
+  return (
+    <View className="flex-1 bg-gray-900 justify-center px-6">
+      <Text className="text-4xl font-bold text-blue-500 mb-2 text-center">IronPath</Text>
+      <Text className="text-gray-400 mb-8 text-center">Track your progress. Build your path.</Text>
+      
+      <TextInput
+        className="bg-gray-800 text-white p-4 rounded-lg mb-4 border border-gray-700"
+        placeholder="Email"
+        placeholderTextColor="#666"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+      />
+      
+      <TextInput
+        className="bg-gray-800 text-white p-4 rounded-lg mb-8 border border-gray-700"
+        placeholder="Password"
+        placeholderTextColor="#666"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+      />
+
+      <TouchableOpacity 
+        className="bg-blue-600 p-4 rounded-lg mb-4"
+        onPress={signIn}
+        disabled={loading}
+      >
+        <Text className="text-white text-center font-bold text-lg">
+          {loading ? "Loading..." : "Sign In"}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity 
+        className="border border-blue-600 p-4 rounded-lg"
+        onPress={signUp}
+        disabled={loading}
+      >
+        <Text className="text-blue-400 text-center font-bold text-lg">Create Account</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
