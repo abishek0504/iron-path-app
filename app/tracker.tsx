@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform, StyleSheet, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 
@@ -59,53 +59,71 @@ export default function TrackerScreen() {
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-gray-900 p-6 justify-center"
+      style={styles.container}
     >
-      <Text className="text-3xl font-bold text-white mb-2">{exercise}</Text>
-      <Text className="text-gray-400 mb-8">Log your working set</Text>
+      <ScrollView contentContainerStyle={styles.contentContainer}>
+        <Text style={styles.title}>{exercise}</Text>
+        <Text style={styles.subtitle}>Log your working set</Text>
 
-      <View className="flex-row justify-between mb-6">
-        <View className="w-[48%]">
-          <Text className="text-gray-400 mb-2">Weight (lbs)</Text>
-          <TextInput 
-            className="bg-gray-800 text-white p-4 rounded-lg text-xl text-center border border-gray-700"
-            keyboardType="numeric"
-            placeholder="0"
-            placeholderTextColor="#555"
-            value={weight}
-            onChangeText={setWeight}
-          />
+        <View style={styles.inputRow}>
+          <View style={styles.inputHalf}>
+            <Text style={styles.label}>Weight (lbs)</Text>
+            <TextInput 
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="0"
+              placeholderTextColor="#999"
+              value={weight}
+              onChangeText={setWeight}
+            />
+          </View>
+
+          <View style={styles.inputHalf}>
+            <Text style={styles.label}>Reps</Text>
+            <TextInput 
+              style={styles.input}
+              keyboardType="numeric"
+              placeholder="0"
+              placeholderTextColor="#999"
+              value={reps}
+              onChangeText={setReps}
+            />
+          </View>
         </View>
 
-        <View className="w-[48%]">
-          <Text className="text-gray-400 mb-2">Reps</Text>
-          <TextInput 
-            className="bg-gray-800 text-white p-4 rounded-lg text-xl text-center border border-gray-700"
-            keyboardType="numeric"
-            placeholder="0"
-            placeholderTextColor="#555"
-            value={reps}
-            onChangeText={setReps}
-          />
-        </View>
-      </View>
+        <TouchableOpacity 
+          style={[styles.buttonPrimary, isSubmitting && styles.buttonDisabled]}
+          onPress={logSet}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.buttonText}>
+            {isSubmitting ? 'Saving...' : 'Log Set'}
+          </Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity 
-        className={`p-4 rounded-lg mb-4 ${isSubmitting ? 'bg-blue-800' : 'bg-blue-600'}`}
-        onPress={logSet}
-        disabled={isSubmitting}
-      >
-        <Text className="text-white text-center font-bold text-lg">
-          {isSubmitting ? 'Saving...' : 'Log Set'}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        onPress={() => router.back()}
-        className="p-4"
-      >
-        <Text className="text-gray-500 text-center text-lg">Cancel</Text>
-      </TouchableOpacity>
+        <TouchableOpacity 
+          onPress={() => router.back()}
+          style={styles.buttonSecondary}
+        >
+          <Text style={styles.buttonTextSecondary}>Cancel</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#111827' },
+  contentContainer: { padding: 24, paddingTop: 60, justifyContent: 'center', flexGrow: 1 },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', marginBottom: 8 },
+  subtitle: { color: '#9ca3af', textAlign: 'center', marginBottom: 32 },
+  inputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
+  inputHalf: { width: '48%' },
+  label: { color: '#9ca3af', marginBottom: 8, fontSize: 16 },
+  input: { backgroundColor: '#1f2937', color: 'white', padding: 16, borderRadius: 8, borderWidth: 1, borderColor: '#374151', fontSize: 20, textAlign: 'center' },
+  buttonPrimary: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, marginBottom: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
+  buttonDisabled: { backgroundColor: '#1e40af' },
+  buttonSecondary: { borderWidth: 1, borderColor: '#2563eb', padding: 16, borderRadius: 8 },
+  buttonText: { color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 18 },
+  buttonTextSecondary: { color: '#60a5fa', textAlign: 'center', fontWeight: 'bold', fontSize: 16 },
+});
