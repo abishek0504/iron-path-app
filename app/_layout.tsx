@@ -9,6 +9,7 @@ export default function RootLayout() {
       <Stack.Screen name="signup-success" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="tracker" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="planner-day" options={{ presentation: 'modal' }} />
     </Stack>
   );
 }
