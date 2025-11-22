@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { X, Plus } from 'lucide-react-native';
@@ -19,10 +19,15 @@ export default function PlannerDayScreen() {
   const [userFeedback, setUserFeedback] = useState<string>('');
 
   useEffect(() => {
-    loadPlan();
     loadUserProfile();
     loadUserFeedback();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadPlan();
+    }, [planId])
+  );
 
   const loadPlan = async () => {
     if (!planId) return;
