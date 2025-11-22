@@ -2,27 +2,25 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export default function WelcomeScreen() {
+export default function SignupSuccessScreen() {
   const router = useRouter();
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>IronPath</Text>
-        <Text style={styles.subtitle}>Track your progress. Build your path.</Text>
+        <Text style={styles.title}>Thank You for Signing Up!</Text>
+        <Text style={styles.message}>
+          Please check your email to confirm your account before logging in.
+        </Text>
+        <Text style={styles.subMessage}>
+          We've sent a confirmation email to your inbox. Click the link in the email to verify your account.
+        </Text>
         
         <TouchableOpacity 
-          style={styles.buttonPrimary}
-          onPress={() => router.push('/login')}
+          style={styles.button}
+          onPress={() => router.replace('/login')}
         >
-          <Text style={styles.buttonText}>Sign In</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.buttonSecondary}
-          onPress={() => router.push('/signup')}
-        >
-          <Text style={styles.buttonTextSecondary}>Create Account</Text>
+          <Text style={styles.buttonText}>Go to Login</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -37,32 +35,35 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 24,
   },
   title: {
-    fontSize: 42,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#3b82f6',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
   },
-  subtitle: {
+  message: {
     fontSize: 18,
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 26,
+  },
+  subMessage: {
+    fontSize: 14,
     color: '#9ca3af',
     textAlign: 'center',
-    marginBottom: 48,
+    marginBottom: 40,
+    lineHeight: 20,
   },
-  buttonPrimary: {
+  button: {
     backgroundColor: '#2563eb',
     padding: 16,
     borderRadius: 8,
-    marginBottom: 16,
-  },
-  buttonSecondary: {
-    borderWidth: 1,
-    borderColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    minWidth: 200,
   },
   buttonText: {
     color: 'white',
@@ -70,10 +71,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 18,
   },
-  buttonTextSecondary: {
-    color: '#60a5fa',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
 });
+
