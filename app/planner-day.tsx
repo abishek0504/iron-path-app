@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { X, Plus } from 'lucide-react-native';
+import { X, Plus, ArrowLeft } from 'lucide-react-native';
 
 export default function PlannerDayScreen() {
   const router = useRouter();
@@ -237,10 +237,11 @@ Return ONLY the JSON array, no other text.`;
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>{day}</Text>
-          <TouchableOpacity onPress={() => router.back()}>
-            <X color="#9ca3af" size={24} />
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <ArrowLeft color="#9ca3af" size={24} />
           </TouchableOpacity>
+          <Text style={styles.title}>{day}</Text>
+          <View style={styles.headerSpacer} />
         </View>
 
         <View style={styles.focusCard}>
@@ -362,6 +363,12 @@ Return ONLY the JSON array, no other text.`;
               <Text style={styles.buttonTextSecondary}>Provide Feedback</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity
+            style={styles.buttonDone}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.buttonTextDone}>Done</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -407,8 +414,10 @@ Return ONLY the JSON array, no other text.`;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111827' },
   contentContainer: { padding: 24, paddingTop: 20 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6' },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
+  backButton: { marginRight: 16 },
+  headerSpacer: { width: 40 },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', flex: 1 },
   focusCard: { backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 24, borderWidth: 1, borderColor: '#374151' },
   focusLabel: { color: '#9ca3af', fontSize: 14, marginBottom: 8 },
   focusInput: { color: 'white', fontSize: 18, fontWeight: '500' },
@@ -427,12 +436,14 @@ const styles = StyleSheet.create({
   fieldInput: { backgroundColor: '#111827', color: 'white', padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#374151' },
   notesInput: { backgroundColor: '#111827', color: 'white', padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#374151', minHeight: 60 },
   emptyText: { color: '#9ca3af', textAlign: 'center', marginVertical: 24 },
-  buttonContainer: { marginTop: 24, marginBottom: 40 },
+  buttonContainer: { marginTop: 24, marginBottom: 40, gap: 12 },
   buttonPrimary: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', minHeight: 52, flexDirection: 'row' },
   buttonDisabled: { backgroundColor: '#1e40af', opacity: 0.7 },
   buttonSecondary: { borderWidth: 1, borderColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center' },
+  buttonDone: { backgroundColor: '#374151', padding: 16, borderRadius: 8, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
   buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   buttonTextSecondary: { color: '#60a5fa', fontWeight: 'bold', fontSize: 16 },
+  buttonTextDone: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', padding: 24 },
   modalContent: { backgroundColor: '#1f2937', borderRadius: 12, padding: 24, borderWidth: 1, borderColor: '#374151' },
   modalTitle: { color: 'white', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
