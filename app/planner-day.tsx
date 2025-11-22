@@ -199,20 +199,10 @@ Return ONLY the JSON array, no other text.`;
   };
 
   const addManualExercise = () => {
-    const newExercise = {
-      name: "New Exercise",
-      target_sets: 3,
-      target_reps: "8-12",
-      rest_time_sec: 60,
-      notes: ""
-    };
-    const updatedExercises = [...(dayData.exercises || []), newExercise];
-    const updatedDayData = {
-      ...dayData,
-      exercises: updatedExercises,
-      focus: dayData.focus === "Rest" ? "Custom" : dayData.focus
-    };
-    savePlan(updatedDayData);
+    router.push({
+      pathname: '/exercise-select',
+      params: { planId: planId || '', day: day || '' }
+    });
   };
 
   const saveFeedback = async () => {
@@ -273,13 +263,27 @@ Return ONLY the JSON array, no other text.`;
         {dayData.exercises?.map((exercise: any, index: number) => (
           <View key={index} style={styles.exerciseCard}>
             <View style={styles.exerciseHeader}>
-              <TextInput
-                style={styles.exerciseName}
-                value={exercise.name}
-                onChangeText={(text) => updateExercise(index, 'name', text)}
-                placeholder="Exercise name"
-                placeholderTextColor="#6b7280"
-              />
+              {exercise.name === "New Exercise" ? (
+                <TouchableOpacity
+                  style={styles.exerciseNameContainer}
+                  onPress={() => {
+                    router.push({
+                      pathname: '/exercise-select',
+                      params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
+                    });
+                  }}
+                >
+                  <Text style={styles.exerciseNamePlaceholder}>{exercise.name}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TextInput
+                  style={styles.exerciseName}
+                  value={exercise.name}
+                  onChangeText={(text) => updateExercise(index, 'name', text)}
+                  placeholder="Exercise name"
+                  placeholderTextColor="#6b7280"
+                />
+              )}
               <TouchableOpacity onPress={() => removeExercise(index)}>
                 <X color="#ef4444" size={20} />
               </TouchableOpacity>
@@ -409,7 +413,9 @@ const styles = StyleSheet.create({
   addButtonText: { color: '#3b82f6', fontSize: 16, fontWeight: '600' },
   exerciseCard: { backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
   exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  exerciseNameContainer: { flex: 1 },
   exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
+  exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
   exerciseRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   exerciseField: { flex: 1 },
   fieldLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },
