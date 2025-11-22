@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Search, LogOut } from 'lucide-react-native';
@@ -27,48 +27,59 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-900">
-      <View className="flex-1 p-4">
-        <View className="flex-row justify-between items-center mb-6">
-          <Text className="text-3xl font-bold text-blue-400">Exercise Selector</Text>
-          <TouchableOpacity onPress={handleLogout}>
-             <LogOut color="#ef4444" size={24} />
+    <SafeAreaView style={styles.container}>
+      <FlatList
+        data={filteredExercises}
+        keyExtractor={(item) => item}
+        ListHeaderComponent={
+          <>
+            <View style={styles.header}>
+              <Text style={styles.title}>Exercise Selector</Text>
+              <TouchableOpacity onPress={handleLogout}>
+                <LogOut color="#ef4444" size={24} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.searchContainer}>
+              <Search size={20} color="#9ca3af" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search exercises..."
+                placeholderTextColor="#9ca3af"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+              />
+            </View>
+          </>
+        }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.exerciseItem}
+            onPress={() => handleSelectExercise(item)}
+          >
+            <Text style={styles.exerciseText}>{item}</Text>
           </TouchableOpacity>
-        </View>
-        
-        {/* Search Bar */}
-        <View className="flex-row items-center bg-gray-800 rounded-lg px-4 py-3 mb-4 border border-gray-700">
-          <Search size={20} color="#9ca3af" />
-          <TextInput
-            className="flex-1 ml-3 text-white text-base"
-            placeholder="Search exercises..."
-            placeholderTextColor="#9ca3af"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="none"
-          />
-        </View>
-
-        {/* Exercise List */}
-        <FlatList
-          data={filteredExercises}
-          keyExtractor={(item) => item}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              className="bg-black p-4 rounded-lg mb-3 active:bg-gray-900 border border-gray-800"
-              onPress={() => handleSelectExercise(item)}
-            >
-              <Text className="text-white text-lg font-medium">{item}</Text>
-            </TouchableOpacity>
-          )}
-          ListEmptyComponent={() => (
-            <Text className="text-gray-500 text-center mt-10">
-              No exercises found matching "{searchQuery}"
-            </Text>
-          )}
-          contentContainerClassName="pb-20"
-        />
-      </View>
+        )}
+        ListEmptyComponent={() => (
+          <Text style={styles.emptyText}>
+            No exercises found matching "{searchQuery}"
+          </Text>
+        )}
+        contentContainerStyle={styles.listContainer}
+      />
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#111827' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, paddingTop: 60, paddingHorizontal: 24 },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6' },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1f2937', borderRadius: 8, padding: 16, marginBottom: 16, marginHorizontal: 24, borderWidth: 1, borderColor: '#374151' },
+  searchInput: { flex: 1, marginLeft: 12, color: 'white', fontSize: 16 },
+  exerciseItem: { backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, marginHorizontal: 24, borderWidth: 1, borderColor: '#374151' },
+  exerciseText: { color: 'white', fontSize: 18, fontWeight: '500' },
+  emptyText: { color: '#9ca3af', textAlign: 'center', marginTop: 40 },
+  listContainer: { paddingBottom: 20 },
+});
