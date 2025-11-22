@@ -18,9 +18,9 @@ export default function SignupSuccessScreen() {
         
         <TouchableOpacity 
           style={styles.button}
-          onPress={() => router.replace('/login')}
+          onPress={() => router.replace('/onboarding')}
         >
-          <Text style={styles.buttonText}>Go to Login</Text>
+          <Text style={styles.buttonText}>Continue to Onboarding</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
