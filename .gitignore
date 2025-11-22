@@ -43,3 +43,6 @@ yarn-error.*
 # environment variables
 .env
 .env.local
+
+# Dependency directories
+node_modules/

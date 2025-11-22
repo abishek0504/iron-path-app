@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 
@@ -7,91 +7,174 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const router = useRouter();
 
-  // 1. Check if user is already logged in
   useEffect(() => {
+    console.log("Checking session...");
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log("Session check complete. User:", session?.user?.email);
       if (session) {
-        router.replace('/(tabs)/home'); // Skip login if already authenticated
+        router.replace('/(tabs)/home');
       }
+      setIsCheckingSession(false);
+    }).catch(err => {
+      console.error("Session Check Error:", err);
       setIsCheckingSession(false);
     });
   }, []);
 
-  // 2. Login Logic
   const signIn = async () => {
+    setErrorMessage('');
+    if (!email || !password) {
+      setErrorMessage("Please enter both email and password.");
+      return;
+    }
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) Alert.alert("Login Failed", error.message);
-    else router.replace('/(tabs)/home');
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setErrorMessage(error.message);
+      else router.replace('/(tabs)/home');
+    } catch (err: any) {
+      setErrorMessage(err.message || "Network failed");
+    }
     setLoading(false);
   };
 
-  // 3. Sign Up Logic
   const signUp = async () => {
+    setErrorMessage('');
+    if (!email || !password) return setErrorMessage("Fill in all fields");
+    if (password.length < 6) return setErrorMessage("Password too short (min 6 chars)");
+    
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) Alert.alert("Error", error.message);
-    else Alert.alert("Success", "Check your email for the verification link!");
+    try {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setErrorMessage(error.message);
+      else setErrorMessage("Success! Check your email.");
+    } catch (err: any) {
+      setErrorMessage(err.message || "Network failed");
+    }
     setLoading(false);
   };
 
   if (isCheckingSession) {
     return (
-      <View className="flex-1 bg-gray-900 justify-center items-center">
+      <View style={styles.container}>
         <ActivityIndicator size="large" color="#2563eb" />
+        <Text style={styles.text}>Loading IronPath...</Text>
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-gray-900 justify-center px-6">
-      <Text className="text-4xl font-bold text-blue-500 mb-2 text-center">IronPath</Text>
-      <Text className="text-gray-400 mb-8 text-center">Track your progress. Build your path.</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>IronPath</Text>
+      <Text style={styles.subtitle}>Track your progress. Build your path.</Text>
       
       <TextInput
-        className="bg-gray-800 text-white p-4 rounded-lg mb-4 border border-gray-700"
+        style={styles.input}
         placeholder="Email"
-        placeholderTextColor="#666"
+        placeholderTextColor="#999"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
       />
       
       <TextInput
-        className="bg-gray-800 text-white p-4 rounded-lg mb-8 border border-gray-700"
+        style={styles.input}
         placeholder="Password"
-        placeholderTextColor="#666"
+        placeholderTextColor="#999"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
       />
 
-      <TouchableOpacity 
-        className="bg-blue-600 p-4 rounded-lg mb-4"
-        onPress={signIn}
-        disabled={loading}
-      >
-        <Text className="text-white text-center font-bold text-lg">
-          {loading ? "Loading..." : "Sign In"}
-        </Text>
+      {/* ERROR MESSAGE AREA */}
+      {errorMessage ? (
+        <View style={styles.errorContainer}>
+           <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
+
+      <TouchableOpacity style={styles.buttonPrimary} onPress={signIn} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? "Loading..." : "Sign In"}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity 
-        className="border border-blue-600 p-4 rounded-lg"
-        onPress={signUp}
-        disabled={loading}
-      >
-        <Text className="text-blue-400 text-center font-bold text-lg">Create Account</Text>
+      <TouchableOpacity style={styles.buttonSecondary} onPress={signUp} disabled={loading}>
+        <Text style={styles.buttonTextSecondary}>Create Account</Text>
       </TouchableOpacity>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#111827', // Dark Gray
+    justifyContent: 'center',
+    padding: 24,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#3b82f6', // Blue
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  subtitle: {
+    color: '#9ca3af', // Gray
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  text: {
+    color: 'white',
+    marginTop: 10,
+  },
+  input: {
+    backgroundColor: '#1f2937', // Darker Gray
+    color: 'white',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  buttonPrimary: {
+    backgroundColor: '#2563eb',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  buttonSecondary: {
+    borderWidth: 1,
+    borderColor: '#2563eb',
+    padding: 16,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: 'white',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  buttonTextSecondary: {
+    color: '#60a5fa',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(127, 29, 29, 0.5)',
+    padding: 12,
+    borderRadius: 4,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+  },
+  errorText: {
+    color: '#fecaca',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  }
+});
