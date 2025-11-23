@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ActivityIndicator, ScrollView } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ActivityIndicator, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown } from 'lucide-react-native';
@@ -72,6 +72,8 @@ export default function WorkoutActiveScreen() {
   const [showLoggingScreen, setShowLoggingScreen] = useState(false);
   const [completedExerciseIndex, setCompletedExerciseIndex] = useState<number | null>(null);
   const [setLogs, setSetLogs] = useState<Array<{ reps: string; weight: string; duration: string; notes: string }>>([]);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showLoggingExitConfirm, setShowLoggingExitConfirm] = useState(false);
 
   useEffect(() => {
     loadWorkoutData();
@@ -88,8 +90,10 @@ export default function WorkoutActiveScreen() {
           if (!prev) return null;
           if (prev.seconds <= 1) {
             if (restTimerInterval.current) clearInterval(restTimerInterval.current);
-            // Auto-advance to next set
-            handleRestComplete();
+            // Auto-advance to next set - use setTimeout to ensure state updates are processed
+            setTimeout(() => {
+              handleRestComplete();
+            }, 0);
             return null;
           }
           return { ...prev, seconds: prev.seconds - 1 };
@@ -124,6 +128,66 @@ export default function WorkoutActiveScreen() {
       if (exerciseTimerInterval.current) clearInterval(exerciseTimerInterval.current);
     };
   }, [exerciseTimer?.active]);
+
+  const reconstructProgressFromLogs = async (
+    exercises: any[],
+    currentExerciseIndex: number,
+    currentSetIndex: number,
+    planId: number,
+    day: string,
+    userId: string
+  ): Promise<WorkoutProgress> => {
+    // Query logs for this plan/day to see what's been completed
+    const { data: logs } = await supabase
+      .from('workout_logs')
+      .select('exercise_name, performed_at')
+      .eq('user_id', userId)
+      .eq('plan_id', planId)
+      .eq('day', day)
+      .order('performed_at', { ascending: true });
+
+    // Initialize progress structure
+    const progress: WorkoutProgress = {
+      exercises: exercises.map((exercise, index) => ({
+        exerciseIndex: index,
+        name: exercise.name,
+        completed: false,
+        sets: Array.from({ length: exercise.target_sets || 3 }, (_, setIndex) => ({
+          setIndex,
+          completed: false,
+          reps: null,
+          weight: null,
+          duration: null
+        }))
+      })),
+      currentExerciseIndex,
+      currentSetIndex
+    };
+
+    // Count completed exercises based on logs
+    // An exercise is complete if we have logs for all its sets
+    if (logs) {
+      const exerciseLogCounts = new Map<string, number>();
+      logs.forEach(log => {
+        const count = exerciseLogCounts.get(log.exercise_name) || 0;
+        exerciseLogCounts.set(log.exercise_name, count + 1);
+      });
+
+      exercises.forEach((exercise, index) => {
+        const logCount = exerciseLogCounts.get(exercise.name) || 0;
+        const targetSets = exercise.target_sets || 3;
+        if (logCount >= targetSets) {
+          progress.exercises[index].completed = true;
+          // Mark all sets as completed
+          progress.exercises[index].sets.forEach(set => {
+            set.completed = true;
+          });
+        }
+      });
+    }
+
+    return progress;
+  };
 
   const loadWorkoutData = async () => {
     setLoading(true);
@@ -205,46 +269,80 @@ export default function WorkoutActiveScreen() {
       setExerciseDetails(detailsMap);
 
       // Check for existing active workout session
-      const { data: existingSession } = await supabase
+      const { data: existingSession, error: sessionQueryError } = await supabase
         .from('workout_sessions')
         .select('*')
         .eq('user_id', user.id)
         .eq('plan_id', parseInt(planId))
         .eq('day', day)
         .eq('status', 'active')
-        .single();
+        .maybeSingle();
 
-      if (existingSession && existingSession.progress) {
+      if (sessionQueryError && sessionQueryError.code !== 'PGRST116') {
+        // Only log if it's not a "table not found" error
+        if (!sessionQueryError.message?.includes('schema cache') && !sessionQueryError.message?.includes('Could not find the table')) {
+          console.error('Error querying session:', JSON.stringify(sessionQueryError, null, 2));
+        }
+      }
+
+      // Initialize progress from plan
+      const initialProgress = initializeProgress(dayData.exercises);
+      
+      if (existingSession) {
         setWorkoutSession(existingSession);
-        setProgress(existingSession.progress);
+        // Reconstruct progress from logs and session position
+        // Handle both old schema (with progress) and new schema (with current_exercise_index)
+        const currentExerciseIndex = existingSession.current_exercise_index ?? 
+          (existingSession.progress?.currentExerciseIndex ?? 0);
+        const currentSetIndex = existingSession.current_set_index ?? 
+          (existingSession.progress?.currentSetIndex ?? 0);
+        
+        const reconstructedProgress = await reconstructProgressFromLogs(
+          dayData.exercises,
+          currentExerciseIndex,
+          currentSetIndex,
+          parseInt(planId),
+          day,
+          user.id
+        );
+        setProgress(reconstructedProgress);
       } else {
-        // Create new workout session
-        const initialProgress = initializeProgress(dayData.exercises);
-        try {
-          const { data: newSession, error: sessionError } = await supabase
-            .from('workout_sessions')
-            .insert([{
-              user_id: user.id,
-              plan_id: parseInt(planId),
-              day: day,
-              status: 'active',
-              progress: initialProgress
-            }])
-            .select()
-            .single();
-
-          if (sessionError) {
-            console.error('Error creating session:', sessionError);
-            // Fallback to AsyncStorage
-            await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(initialProgress));
-            setProgress(initialProgress);
-          } else {
-            setWorkoutSession(newSession);
+        // Check AsyncStorage for local progress
+        const localProgress = await AsyncStorage.getItem(`workout_session_${planId}_${day}`);
+        if (localProgress) {
+          try {
+            const parsed = JSON.parse(localProgress);
+            setProgress(parsed);
+          } catch {
             setProgress(initialProgress);
           }
-        } catch (error) {
-          console.error('Error creating session:', error);
-          await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(initialProgress));
+        } else {
+          // Create new workout session with minimal state
+          try {
+            const { data: newSession, error: sessionError } = await supabase
+              .from('workout_sessions')
+              .insert([{
+                user_id: user.id,
+                plan_id: parseInt(planId),
+                day: day,
+                status: 'active',
+                current_exercise_index: 0,
+                current_set_index: 0
+              }])
+              .select()
+              .single();
+
+            if (sessionError) {
+              // Only log if it's not a "table not found" error (table might not exist yet)
+              if (!sessionError.message?.includes('schema cache') && !sessionError.message?.includes('Could not find the table')) {
+                console.error('Error creating session:', JSON.stringify(sessionError, null, 2));
+              }
+            } else {
+              setWorkoutSession(newSession);
+            }
+          } catch (error: any) {
+            console.error('Error creating session:', error?.message || error);
+          }
           setProgress(initialProgress);
         }
       }
@@ -276,28 +374,27 @@ export default function WorkoutActiveScreen() {
   };
 
   const saveProgress = async (updatedProgress: WorkoutProgress) => {
-    if (!workoutSession) {
-      // Try to save to AsyncStorage
-      await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
-      setProgress(updatedProgress);
-      return;
-    }
+    // Always save to AsyncStorage for fast local access
+    await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
+    setProgress(updatedProgress);
 
-    try {
-      const { error } = await supabase
-        .from('workout_sessions')
-        .update({ progress: updatedProgress })
-        .eq('id', workoutSession.id);
+    // Save only current position to database (minimal state)
+    if (workoutSession) {
+      try {
+        const { error } = await supabase
+          .from('workout_sessions')
+          .update({
+            current_exercise_index: updatedProgress.currentExerciseIndex,
+            current_set_index: updatedProgress.currentSetIndex
+          })
+          .eq('id', workoutSession.id);
 
-      if (error) {
-        console.error('Error saving progress:', error);
-        await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
-      } else {
-        setProgress(updatedProgress);
+        if (error && !error.message?.includes('schema cache') && !error.message?.includes('Could not find the table')) {
+          console.error('Error saving session position:', error);
+        }
+      } catch (error) {
+        // Silently fail - AsyncStorage is our fallback
       }
-    } catch (error) {
-      console.error('Error saving progress:', error);
-      await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
     }
   };
 
@@ -431,27 +528,38 @@ export default function WorkoutActiveScreen() {
       updatedProgress.currentExerciseIndex = completedExerciseIndex + 1;
       updatedProgress.currentSetIndex = 0;
       await saveProgress(updatedProgress);
+      setProgress(updatedProgress);
       setShowLoggingScreen(false);
       setCompletedExerciseIndex(null);
       setSetLogs([]);
     } else {
-      // Workout complete
+      // Workout complete - mark all exercises as complete
+      updatedProgress.exercises.forEach(ex => ex.completed = true);
+      await saveProgress(updatedProgress);
+      
       if (workoutSession) {
         await supabase
           .from('workout_sessions')
           .update({
             status: 'completed',
             completed_at: new Date().toISOString(),
-            progress: updatedProgress
+            current_exercise_index: updatedProgress.currentExerciseIndex,
+            current_set_index: updatedProgress.currentSetIndex
           })
           .eq('id', workoutSession.id);
       }
+      
+      // Clear AsyncStorage
+      await AsyncStorage.removeItem(`workout_session_${planId}_${day}`);
+      
+      // Update state to trigger completion screen
+      setProgress(updatedProgress);
       setShowLoggingScreen(false);
-      Alert.alert("Workout Complete!", "Great job completing your workout!", [
-        { text: "OK", onPress: () => router.back() }
-      ]);
+      setCompletedExerciseIndex(null);
+      setSetLogs([]);
     }
   };
+
 
   const saveSetsToLogs = async (exercise: any, sets: SetProgress[], logs: Array<{ reps: string; weight: string; duration: string; notes: string }>) => {
     try {
@@ -460,7 +568,7 @@ export default function WorkoutActiveScreen() {
 
       // Parse target reps to get a numeric value for comparison
       // For ranges like "8-12", we'll store the minimum as scheduled_reps
-      const parseTargetReps = (target: string): number => {
+      const parseTargetReps = (target: string): number | null => {
         if (!target) return null;
         if (target.includes('-')) {
           const [min] = target.split('-').map(n => parseInt(n.trim()));
@@ -493,6 +601,9 @@ export default function WorkoutActiveScreen() {
           return {
             user_id: user.id,
             exercise_name: exercise.name,
+            plan_id: parseInt(planId),
+            day: day,
+            session_id: workoutSession?.id || null,
             weight: set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight || 0),
             reps: set.reps ? parseFloat(set.reps.toString()) : (scheduledReps || 0),
             scheduled_reps: scheduledReps,
@@ -511,7 +622,9 @@ export default function WorkoutActiveScreen() {
 
   const handleRestComplete = () => {
     setRestTimer(null);
-    // Progress already updated, component will re-render showing next set
+    // Progress was updated in handleCompleteSet before timer started
+    // Force a state update to ensure UI reflects the current set index
+    setProgress(prev => ({ ...prev }));
   };
 
   const handleStartRestTimer = () => {
@@ -539,17 +652,6 @@ export default function WorkoutActiveScreen() {
     };
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading workout...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   const isBodyweightExercise = (exerciseName: string, detail: ExerciseDetail | undefined): boolean => {
     // Check if exercise name matches common bodyweight exercises
     const nameMatch = BODYWEIGHT_EXERCISES.some(bw => 
@@ -564,21 +666,59 @@ export default function WorkoutActiveScreen() {
     return nameMatch || hasNoEquipment;
   };
 
-  const handleCloseWorkout = () => {
-    const allExercisesComplete = progress.exercises.every(ex => ex.completed);
+  const handleCloseWorkout = useCallback(() => {
+    // Check if workout is complete - if so, just navigate back
+    const allExercisesComplete = progress.exercises.length > 0 && progress.exercises.every(ex => ex.completed);
     if (allExercisesComplete) {
       router.back();
-    } else {
-      Alert.alert(
-        "Exit Workout?",
-        "Your progress will be saved. You can resume later.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Exit", onPress: () => router.back() }
-        ]
-      );
+      return;
     }
-  };
+    
+    // Show confirmation modal
+    setShowExitConfirm(true);
+  }, [progress]);
+
+  const handleConfirmExit = useCallback(async () => {
+    setShowExitConfirm(false);
+    try {
+      // Save current progress before exiting
+      await saveProgress(progress);
+      
+      // Ensure session status is 'active' so user can resume
+      if (workoutSession) {
+        const { error: updateError } = await supabase
+          .from('workout_sessions')
+          .update({ 
+            status: 'active',
+            current_exercise_index: progress.currentExerciseIndex,
+            current_set_index: progress.currentSetIndex
+          })
+          .eq('id', workoutSession.id);
+        
+        if (updateError) {
+          console.error('Error updating session status:', updateError);
+        }
+      }
+      
+      // Small delay to ensure database update completes
+      await new Promise(resolve => setTimeout(resolve, 100));
+      router.back();
+    } catch (error) {
+      console.error('Error saving progress on exit:', error);
+      router.back();
+    }
+  }, [progress, router, workoutSession]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.loadingText}>Loading workout...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Show logging screen if exercise is complete
   if (showLoggingScreen && completedExerciseIndex !== null) {
@@ -593,9 +733,24 @@ export default function WorkoutActiveScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Log {exercise.name}</Text>
-          <TouchableOpacity onPress={handleCloseWorkout}>
-            <X color="#9ca3af" size={24} />
-          </TouchableOpacity>
+          <View style={{ position: 'relative' }}>
+            <Pressable 
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                setShowLoggingExitConfirm(true);
+              }}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              style={({ pressed }) => [
+                { 
+                  opacity: pressed ? 0.7 : 1,
+                  padding: 8,
+                  borderRadius: 4
+                }
+              ]}
+            >
+              <X color="#9ca3af" size={24} />
+            </Pressable>
+          </View>
         </View>
 
         <ScrollView style={styles.loggingScrollView} contentContainerStyle={styles.loggingContainer}>
@@ -781,26 +936,12 @@ export default function WorkoutActiveScreen() {
           })}
 
           <View style={styles.loggingButtons}>
-            {!isLastExercise && (
-              <TouchableOpacity
-                style={[styles.loggingButton, styles.loggingButtonPrimary]}
-                onPress={handleSaveExerciseLogs}
-              >
-                <Text style={styles.loggingButtonText}>Continue to Next Exercise</Text>
-              </TouchableOpacity>
-            )}
             <TouchableOpacity
-              style={[
-                styles.loggingButton,
-                isLastExercise ? styles.loggingButtonPrimary : styles.loggingButtonSecondary
-              ]}
+              style={[styles.loggingButton, styles.loggingButtonPrimary]}
               onPress={handleSaveExerciseLogs}
             >
-              <Text style={[
-                styles.loggingButtonText,
-                !isLastExercise && styles.loggingButtonTextSecondary
-              ]}>
-                {isLastExercise ? 'Finish Workout' : 'Save & Finish Workout'}
+              <Text style={styles.loggingButtonText}>
+                {isLastExercise ? 'Finish Workout' : 'Continue to Next Exercise'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -839,16 +980,36 @@ export default function WorkoutActiveScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{day} Workout</Text>
-          <TouchableOpacity onPress={handleCloseWorkout}>
-            <X color="#9ca3af" size={24} />
-          </TouchableOpacity>
+          <View style={{ position: 'relative' }}>
+            <Pressable 
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                console.log('X button pressed - completion screen');
+                router.back();
+              }}
+              onPressIn={(e) => {
+                e?.stopPropagation?.();
+                console.log('X button press started - completion');
+              }}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              style={({ pressed }) => [
+                { 
+                  opacity: pressed ? 0.7 : 1,
+                  padding: 8,
+                  borderRadius: 4
+                }
+              ]}
+            >
+              <X color="#9ca3af" size={24} />
+            </Pressable>
+          </View>
         </View>
         <View style={styles.completionContainer}>
           <Text style={styles.completionTitle}>Workout Complete! 🎉</Text>
           <Text style={styles.completionSubtitle}>Great job completing your workout!</Text>
           <TouchableOpacity
             style={styles.completeWorkoutButton}
-            onPress={handleCloseWorkout}
+            onPress={() => router.back()}
           >
             <Text style={styles.completeWorkoutButtonText}>Return to Home</Text>
           </TouchableOpacity>
@@ -859,11 +1020,89 @@ export default function WorkoutActiveScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Exit Confirmation Modal */}
+      <Modal
+        visible={showExitConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowExitConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Exit Workout?</Text>
+            <Text style={styles.modalMessage}>Your progress will be saved. You can resume later.</Text>
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setShowExitConfirm(false)}
+              >
+                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonConfirm]}
+                onPress={handleConfirmExit}
+              >
+                <Text style={styles.modalButtonText}>Exit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Logging Exit Confirmation Modal */}
+      <Modal
+        visible={showLoggingExitConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLoggingExitConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Exit Logging?</Text>
+            <Text style={styles.modalMessage}>Your logged data will not be saved. Continue logging?</Text>
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setShowLoggingExitConfirm(false)}
+              >
+                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButton, styles.modalButtonDanger]}
+                onPress={() => {
+                  setShowLoggingExitConfirm(false);
+                  setShowLoggingScreen(false);
+                  setCompletedExerciseIndex(null);
+                  setSetLogs([]);
+                }}
+              >
+                <Text style={styles.modalButtonText}>Exit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{day} Workout</Text>
-        <TouchableOpacity onPress={handleCloseWorkout}>
-          <X color="#9ca3af" size={24} />
-        </TouchableOpacity>
+        <View style={{ position: 'relative' }}>
+          <Pressable 
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              handleCloseWorkout();
+            }}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            style={({ pressed }) => [
+              { 
+                opacity: pressed ? 0.7 : 1,
+                padding: 8,
+                borderRadius: 4
+              }
+            ]}
+          >
+            <X color="#9ca3af" size={24} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.progressBar}>
@@ -1350,5 +1589,65 @@ const styles = StyleSheet.create({
   logInputDisabled: {
     backgroundColor: '#374151',
     opacity: 0.5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: '#374151',
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  modalMessage: {
+    color: '#9ca3af',
+    fontSize: 16,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#1f2937',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#2563eb',
+  },
+  modalButtonDanger: {
+    backgroundColor: '#dc2626',
+  },
+  modalButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  modalButtonTextCancel: {
+    color: '#9ca3af',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

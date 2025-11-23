@@ -12,6 +12,7 @@ export default function HomeScreen() {
   const [activePlan, setActivePlan] = useState<any>(null);
   const [todayData, setTodayData] = useState<any>(null);
   const [currentDay, setCurrentDay] = useState<string>('');
+  const [hasActiveWorkout, setHasActiveWorkout] = useState<boolean>(false);
 
   useEffect(() => {
     const dayIndex = new Date().getDay();
@@ -20,8 +21,48 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadActivePlan();
-    }, [])
+      const check = async () => {
+        // Load plan first
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: planData, error: planError } = await supabase
+          .from('workout_plans')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .single();
+
+        if (planError && planError.code !== 'PGRST116') {
+          console.error('Error loading plan:', planError);
+          return;
+        }
+
+        if (planData) {
+          setActivePlan(planData);
+          
+          // Check for active workout session
+          if (currentDay) {
+            const { data: sessionData, error: sessionError } = await supabase
+              .from('workout_sessions')
+              .select('id')
+              .eq('user_id', user.id)
+              .eq('plan_id', planData.id)
+              .eq('day', currentDay)
+              .eq('status', 'active')
+              .maybeSingle();
+            
+            // Only set based on data existence, ignore acceptable errors
+            if (sessionError && sessionError.code !== 'PGRST116' && !sessionError.message?.includes('schema cache')) {
+              console.error('Error checking active workout:', sessionError);
+            }
+            // Set based on whether data exists, regardless of acceptable errors
+            setHasActiveWorkout(!!sessionData);
+          }
+        }
+      };
+      check();
+    }, [currentDay])
   );
 
   useEffect(() => {
@@ -32,6 +73,12 @@ export default function HomeScreen() {
       } else {
         setTodayData({ focus: "Rest", exercises: [] });
       }
+    }
+  }, [activePlan, currentDay]);
+
+  useEffect(() => {
+    if (activePlan && currentDay) {
+      checkActiveWorkout();
     }
   }, [activePlan, currentDay]);
 
@@ -51,6 +98,43 @@ export default function HomeScreen() {
     } else if (data) {
       setActivePlan(data);
     }
+  };
+
+  const checkActiveWorkout = async () => {
+    if (!currentDay) return;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Get active plan if not already loaded
+    let plan = activePlan;
+    if (!plan) {
+      const { data: planData } = await supabase
+        .from('workout_plans')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .single();
+      plan = planData;
+    }
+
+    if (!plan) return;
+
+    const { data, error } = await supabase
+      .from('workout_sessions')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('plan_id', plan.id)
+      .eq('day', currentDay)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    // Only log non-acceptable errors
+    if (error && error.code !== 'PGRST116' && !error.message?.includes('schema cache')) {
+      console.error('Error checking active workout:', error);
+    }
+    // Set based on whether data exists, regardless of acceptable errors
+    setHasActiveWorkout(!!data);
   };
 
   const handleLogout = async () => {
@@ -120,7 +204,9 @@ export default function HomeScreen() {
               style={styles.startButton}
               onPress={handleStartWorkout}
             >
-              <Text style={styles.startButtonText}>Start Workout</Text>
+              <Text style={styles.startButtonText}>
+                {hasActiveWorkout ? 'Continue Workout' : 'Start Workout'}
+              </Text>
             </TouchableOpacity>
           </>
         )}
