@@ -1,10 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, TextInput, Modal } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, TextInput, Modal, Platform, FlatList, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { X, Plus, ArrowLeft } from 'lucide-react-native';
+import { X, Plus, ArrowLeft, ChevronUp, ChevronDown, GripVertical } from 'lucide-react-native';
+
+// Import draggable list for all platforms
+let DraggableFlatList: any = null;
+let ScaleDecorator: any = null;
+
+try {
+  const draggableModule = require('react-native-draggable-flatlist');
+  DraggableFlatList = draggableModule.default || draggableModule;
+  ScaleDecorator = draggableModule.ScaleDecorator || (({ children }: any) => children);
+} catch (e) {
+  console.warn('Failed to load draggable flatlist:', e);
+}
 
 export default function PlannerDayScreen() {
   const router = useRouter();
@@ -17,6 +29,10 @@ export default function PlannerDayScreen() {
   const [hasGenerated, setHasGenerated] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [userFeedback, setUserFeedback] = useState<string>('');
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [dragStartY, setDragStartY] = useState<number>(0);
+  const dragAllowedRef = React.useRef<number | null>(null);
 
   useEffect(() => {
     loadUserProfile();
@@ -203,6 +219,78 @@ Return ONLY the JSON array, no other text.`;
     savePlan(updatedDayData);
   };
 
+  const moveExercise = (index: number, direction: 'up' | 'down') => {
+    const exercises = [...dayData.exercises];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    if (newIndex < 0 || newIndex >= exercises.length) return;
+    
+    [exercises[index], exercises[newIndex]] = [exercises[newIndex], exercises[index]];
+    const updatedDayData = {
+      ...dayData,
+      exercises
+    };
+    savePlan(updatedDayData);
+  };
+
+  const handleDragEnd = ({ data }: { data: any[] }) => {
+    // Only allow drag end if drag was started from grip handle
+    if (dragAllowedRef.current !== null) {
+      const updatedDayData = {
+        ...dayData,
+        exercises: data
+      };
+      savePlan(updatedDayData);
+    }
+    dragAllowedRef.current = null;
+  };
+
+  // Web drag handlers using touch/mouse events (React Native Responder System)
+  const handleWebTouchStart = (index: number, e: any) => {
+    if (Platform.OS === 'web') {
+      const touch = e.nativeEvent.touches?.[0] || e.nativeEvent;
+      setDraggedIndex(index);
+      setDragStartY(touch.clientY || touch.pageY || 0);
+    }
+  };
+
+  const handleWebTouchMove = (index: number, e: any) => {
+    if (Platform.OS === 'web' && draggedIndex !== null) {
+      const touch = e.nativeEvent.touches?.[0] || e.nativeEvent;
+      const currentY = touch.clientY || touch.pageY || 0;
+      
+      // Find which card we're over based on position
+      // This is a simplified approach - in production you'd use refs to get element positions
+      if (Math.abs(currentY - dragStartY) > 20) {
+        // Only update if we've moved significantly
+        const cardHeight = 150; // Approximate card height
+        const offset = Math.round((currentY - dragStartY) / cardHeight);
+        const newIndex = Math.max(0, Math.min(dayData.exercises.length - 1, draggedIndex + offset));
+        
+        if (newIndex !== draggedIndex && newIndex !== dragOverIndex) {
+          setDragOverIndex(newIndex);
+        }
+      }
+    }
+  };
+
+  const handleWebTouchEnd = () => {
+    if (Platform.OS === 'web' && draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
+      const exercises = [...dayData.exercises];
+      const [draggedItem] = exercises.splice(draggedIndex, 1);
+      exercises.splice(dragOverIndex, 0, draggedItem);
+      
+      const updatedDayData = {
+        ...dayData,
+        exercises
+      };
+      savePlan(updatedDayData);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    setDragStartY(0);
+  };
+
   const addManualExercise = () => {
     router.push({
       pathname: '/exercise-select',
@@ -233,144 +321,261 @@ Return ONLY the JSON array, no other text.`;
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.contentContainer}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <ArrowLeft color="#9ca3af" size={24} />
-          </TouchableOpacity>
-          <Text style={styles.title}>{day}</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-
-        <View style={styles.focusCard}>
-          <Text style={styles.focusLabel}>Focus</Text>
-          <TextInput
-            style={styles.focusInput}
-            value={dayData.focus || "Rest"}
-            onChangeText={(text) => {
-              const updated = { ...dayData, focus: text };
-              savePlan(updated);
-            }}
-            placeholder="e.g., Push, Pull, Legs"
-            placeholderTextColor="#6b7280"
-          />
-        </View>
-
-        <View style={styles.exercisesHeader}>
-          <Text style={styles.sectionTitle}>Exercises ({dayData.exercises?.length || 0})</Text>
-          <TouchableOpacity style={styles.addButton} onPress={addManualExercise}>
-            <Plus color="#3b82f6" size={20} />
-            <Text style={styles.addButtonText}>Add</Text>
-          </TouchableOpacity>
-        </View>
-
-        {dayData.exercises?.map((exercise: any, index: number) => (
-          <View key={index} style={styles.exerciseCard}>
-            <View style={styles.exerciseHeader}>
-              {exercise.name === "New Exercise" ? (
-                <TouchableOpacity
-                  style={styles.exerciseNameContainer}
-                  onPress={() => {
-                    router.push({
-                      pathname: '/exercise-select',
-                      params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
-                    });
-                  }}
-                >
-                  <Text style={styles.exerciseNamePlaceholder}>{exercise.name}</Text>
-                </TouchableOpacity>
-              ) : (
-                <TextInput
-                  style={styles.exerciseName}
-                  value={exercise.name}
-                  onChangeText={(text) => updateExercise(index, 'name', text)}
-                  placeholder="Exercise name"
-                  placeholderTextColor="#6b7280"
-                />
-              )}
-              <TouchableOpacity onPress={() => removeExercise(index)}>
-                <X color="#ef4444" size={20} />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.exerciseRow}>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Sets</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={exercise.target_sets?.toString() || '3'}
-                  onChangeText={(text) => updateExercise(index, 'target_sets', parseInt(text) || 3)}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Reps</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={exercise.target_reps || '8-12'}
-                  onChangeText={(text) => updateExercise(index, 'target_reps', text)}
-                />
-              </View>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Rest (sec)</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={exercise.rest_time_sec?.toString() || '60'}
-                  onChangeText={(text) => updateExercise(index, 'rest_time_sec', parseInt(text) || 60)}
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-
-            <TextInput
-              style={styles.notesInput}
-              value={exercise.notes || ''}
-              onChangeText={(text) => updateExercise(index, 'notes', text)}
-              placeholder="Notes (optional)"
-              placeholderTextColor="#6b7280"
-              multiline
-            />
-          </View>
-        ))}
-
-        {dayData.exercises?.length === 0 && (
-          <Text style={styles.emptyText}>No exercises yet. Add manually or generate some!</Text>
-        )}
-
-        <View style={styles.buttonContainer}>
-          {!hasGenerated ? (
+  const renderExerciseCard = (item: any, index: number, drag?: () => void, isActive?: boolean) => {
+    const isDragging = draggedIndex === index;
+    
+    return (
+      <View
+          style={[
+            styles.exerciseCard, 
+            (isActive || isDragging) && styles.exerciseCardActive
+          ]}
+          onStartShouldSetResponder={Platform.OS === 'web' ? () => true : () => false}
+          onMoveShouldSetResponder={Platform.OS === 'web' ? () => true : () => false}
+          onResponderGrant={Platform.OS === 'web' ? (e) => handleWebTouchStart(index, e) : undefined}
+          onResponderMove={Platform.OS === 'web' ? (e) => handleWebTouchMove(index, e) : undefined}
+          onResponderRelease={Platform.OS === 'web' ? handleWebTouchEnd : undefined}
+          onResponderTerminate={Platform.OS === 'web' ? handleWebTouchEnd : undefined}
+        >
+        <View style={styles.exerciseHeader}>
+          {Platform.OS !== 'web' && drag ? (
             <TouchableOpacity
-              style={[styles.buttonPrimary, generating && styles.buttonDisabled]}
-              onPress={generateForDay}
-              disabled={generating}
+              activeOpacity={0.7}
+              onLongPress={() => {
+                dragAllowedRef.current = index;
+                drag();
+              }}
+              delayLongPress={400}
+              disabled={isActive}
+              style={styles.dragHandleContainer}
+              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
-              {generating ? (
-                <>
-                  <ActivityIndicator color="white" style={{ marginRight: 8 }} />
-                  <Text style={styles.buttonText}>Generating...</Text>
-                </>
-              ) : (
-                <Text style={styles.buttonText}>Generate Supplementary Exercises</Text>
-              )}
+              <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              style={styles.buttonSecondary}
-              onPress={() => setShowFeedback(true)}
-            >
-              <Text style={styles.buttonTextSecondary}>Provide Feedback</Text>
-            </TouchableOpacity>
+            <View style={styles.dragHandleContainer}>
+              <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
+            </View>
           )}
-          <TouchableOpacity
-            style={styles.buttonDone}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.buttonTextDone}>Done</Text>
+          {item.name === "New Exercise" ? (
+            <TouchableOpacity
+              style={styles.exerciseNameContainer}
+              onPress={() => {
+                router.push({
+                  pathname: '/exercise-select',
+                  params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
+                });
+              }}
+            >
+              <Text style={styles.exerciseNamePlaceholder}>{item.name}</Text>
+            </TouchableOpacity>
+          ) : (
+            <TextInput
+              style={styles.exerciseName}
+              value={item.name}
+              onChangeText={(text) => updateExercise(index, 'name', text)}
+              placeholder="Exercise name"
+              placeholderTextColor="#6b7280"
+              editable={!isActive && !isDragging}
+            />
+          )}
+          <TouchableOpacity onPress={() => removeExercise(index)}>
+            <X color="#ef4444" size={20} />
           </TouchableOpacity>
         </View>
-      </ScrollView>
+        
+        <View style={styles.exerciseRow}>
+          <View style={styles.exerciseField}>
+            <Text style={styles.fieldLabel}>Sets</Text>
+            <TextInput
+              style={styles.fieldInput}
+              value={item.target_sets?.toString() || '3'}
+              onChangeText={(text) => updateExercise(index, 'target_sets', parseInt(text) || 3)}
+              keyboardType="numeric"
+              editable={!isActive && !isDragging}
+            />
+          </View>
+          <View style={styles.exerciseField}>
+            <Text style={styles.fieldLabel}>Reps</Text>
+            <TextInput
+              style={styles.fieldInput}
+              value={item.target_reps || '8-12'}
+              onChangeText={(text) => updateExercise(index, 'target_reps', text)}
+              editable={!isActive && !isDragging}
+            />
+          </View>
+          <View style={styles.exerciseField}>
+            <Text style={styles.fieldLabel}>Rest (sec)</Text>
+            <TextInput
+              style={styles.fieldInput}
+              value={item.rest_time_sec?.toString() || '60'}
+              onChangeText={(text) => updateExercise(index, 'rest_time_sec', parseInt(text) || 60)}
+              keyboardType="numeric"
+              editable={!isActive && !isDragging}
+            />
+          </View>
+        </View>
+
+        <TextInput
+          style={styles.notesInput}
+          value={item.notes || ''}
+          onChangeText={(text) => updateExercise(index, 'notes', text)}
+          placeholder="Notes (optional)"
+          placeholderTextColor="#6b7280"
+          multiline
+          editable={!isActive && !isDragging}
+        />
+      </View>
+    );
+  };
+
+  const renderHeader = () => (
+    <View style={styles.headerSection}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <ArrowLeft color="#9ca3af" size={24} />
+        </TouchableOpacity>
+        <Text style={styles.title}>{day}</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <View style={styles.focusCard}>
+        <Text style={styles.focusLabel}>Focus</Text>
+        <TextInput
+          style={styles.focusInput}
+          value={dayData.focus || "Rest"}
+          onChangeText={(text) => {
+            const updated = { ...dayData, focus: text };
+            savePlan(updated);
+          }}
+          placeholder="e.g., Push, Pull, Legs"
+          placeholderTextColor="#6b7280"
+        />
+      </View>
+
+      <View style={styles.exercisesHeader}>
+        <Text style={styles.sectionTitle}>Exercises ({dayData.exercises?.length || 0})</Text>
+        <TouchableOpacity style={styles.addButton} onPress={addManualExercise}>
+          <Plus color="#3b82f6" size={20} />
+          <Text style={styles.addButtonText}>Add</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderFooter = () => (
+    <View style={styles.footerSection}>
+      {dayData.exercises?.length === 0 && (
+        <Text style={styles.emptyText}>No exercises yet. Add manually or generate some!</Text>
+      )}
+
+      <View style={styles.buttonContainer}>
+        {!hasGenerated ? (
+          <TouchableOpacity
+            style={[styles.buttonPrimary, generating && styles.buttonDisabled]}
+            onPress={generateForDay}
+            disabled={generating}
+          >
+            {generating ? (
+              <>
+                <ActivityIndicator color="white" style={{ marginRight: 8 }} />
+                <Text style={styles.buttonText}>Generating...</Text>
+              </>
+            ) : (
+              <Text style={styles.buttonText}>Generate Supplementary Exercises</Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.buttonSecondary}
+            onPress={() => setShowFeedback(true)}
+          >
+            <Text style={styles.buttonTextSecondary}>Provide Feedback</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={styles.buttonDone}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.buttonTextDone}>Done</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {Platform.OS === 'web' ? (
+        // Web: Use FlatList with custom drag handlers
+        <FlatList
+          data={dayData.exercises || []}
+          keyExtractor={(item: any, index: number) => `exercise-${index}`}
+          renderItem={({ item, index }: { item: any; index: number }) => (
+            <View>
+              {dragOverIndex === index && draggedIndex !== null && draggedIndex !== index && (
+                <View style={styles.insertLine} />
+              )}
+              {renderExerciseCard(item, index)}
+            </View>
+          )}
+          ListHeaderComponent={renderHeader}
+          ListFooterComponent={renderFooter}
+          contentContainerStyle={styles.listContent}
+        />
+      ) : DraggableFlatList ? (
+        // Native: Use DraggableFlatList with gesture-handler
+        <DraggableFlatList
+          data={dayData.exercises || []}
+          onDragEnd={handleDragEnd}
+          keyExtractor={(item: any, index: number) => `exercise-${index}`}
+          activationDistance={10000}
+          simultaneousHandlers={[]}
+          renderItem={({ item, index, drag, isActive }: any) => {
+            // Store the drag function in a ref so we can call it only from the grip handle
+            const dragRef = React.useRef(drag);
+            dragRef.current = drag;
+            
+            // Create a no-op drag function that only works if explicitly allowed
+            const conditionalDrag = () => {
+              // Only allow drag if it was explicitly initiated from the grip handle
+              if (dragAllowedRef.current === index) {
+                dragRef.current();
+              }
+            };
+            
+            return (
+              <ScaleDecorator>
+                <View>
+                  {dragOverIndex === index && draggedIndex !== null && draggedIndex !== index && (
+                    <View style={styles.insertLine} />
+                  )}
+                  <View 
+                    style={{ pointerEvents: isActive ? 'none' : 'auto' }}
+                    // Prevent the card from being draggable by default
+                    onStartShouldSetResponder={() => false}
+                    onMoveShouldSetResponder={() => false}
+                  >
+                    {renderExerciseCard(item, index, conditionalDrag, isActive)}
+                  </View>
+                </View>
+              </ScaleDecorator>
+            );
+          }}
+          ListHeaderComponent={renderHeader}
+          ListFooterComponent={renderFooter}
+          contentContainerStyle={styles.listContent}
+        />
+      ) : (
+        // Fallback: Regular FlatList
+        <FlatList
+          data={dayData.exercises || []}
+          keyExtractor={(item: any, index: number) => `exercise-${index}`}
+          renderItem={({ item, index }: { item: any; index: number }) => renderExerciseCard(item, index)}
+          ListHeaderComponent={renderHeader}
+          ListFooterComponent={renderFooter}
+          contentContainerStyle={styles.listContent}
+        />
+      )}
 
       <Modal visible={showFeedback} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -413,7 +618,9 @@ Return ONLY the JSON array, no other text.`;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111827' },
-  contentContainer: { padding: 24, paddingTop: 20 },
+  listContent: { padding: 24, paddingTop: 20, paddingBottom: 40 },
+  headerSection: { marginBottom: 0 },
+  footerSection: { marginTop: 0 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { marginRight: 16 },
   headerSpacer: { width: 40 },
@@ -425,8 +632,19 @@ const styles = StyleSheet.create({
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   addButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   addButtonText: { color: '#3b82f6', fontSize: 16, fontWeight: '600' },
-  exerciseCard: { backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
-  exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  exerciseCard: { 
+    backgroundColor: '#1f2937', 
+    padding: 16, 
+    borderRadius: 8, 
+    marginBottom: 12, 
+    borderWidth: 1, 
+    borderColor: '#374151',
+    ...(Platform.OS === 'web' ? { userSelect: 'none' as any, WebkitUserSelect: 'none' as any } : {})
+  },
+  exerciseCardActive: { opacity: 0.8, transform: [{ scale: 1.03 }], borderColor: '#3b82f6' },
+  insertLine: { height: 3, backgroundColor: '#3b82f6', marginVertical: 4, marginHorizontal: 0, borderRadius: 2 },
+  exerciseHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 12 },
+  dragHandleContainer: { padding: 8, marginLeft: -8, marginRight: 4, justifyContent: 'center', alignItems: 'center' },
   exerciseNameContainer: { flex: 1 },
   exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
   exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
