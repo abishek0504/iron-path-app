@@ -7,6 +7,7 @@ Run the SQL migrations in order to create the required database tables.
 ### Migration Order
 
 1. Run `workout_sessions.sql` to create the workout_sessions table and update workout_logs
+2. Run `rls_policies.sql` to enable Row Level Security and create security policies
 
 ### Running Migrations
 
@@ -44,4 +45,18 @@ The migration also adds `plan_id`, `day`, and `session_id` to `workout_logs`:
 - Enables efficient querying of logs by plan/day
 - Links logs to their workout session
 - Allows reconstruction of workout progress from logs
+
+### Row Level Security (RLS) Policies
+
+**Critical Security**: The `rls_policies.sql` file enables RLS on all tables and creates policies to ensure users can only access their own data.
+
+**Policies Created:**
+- **workout_sessions**: Full CRUD access to own sessions
+- **workout_logs**: SELECT and INSERT only (immutable for data integrity)
+- **workout_plans**: Full CRUD access to own plans
+- **user_exercises**: Full CRUD access to own exercises
+- **profiles**: SELECT and UPDATE own profile (INSERT handled by trigger)
+- **exercises**: Public read access (master exercise list)
+
+**Security Pattern**: All policies use `auth.uid() = user_id` to ensure user isolation.
 

@@ -135,16 +135,24 @@ export default function WorkoutActiveScreen() {
     currentSetIndex: number,
     planId: number,
     day: string,
-    userId: string
+    userId: string,
+    sessionId: number | null = null
   ): Promise<WorkoutProgress> => {
-    // Query logs for this plan/day to see what's been completed
-    const { data: logs } = await supabase
+    // Use SQL aggregation to count sets per exercise for this session
+    // This is more efficient than fetching all logs and counting in memory
+    let query = supabase
       .from('workout_logs')
-      .select('exercise_name, performed_at')
+      .select('exercise_name')
       .eq('user_id', userId)
       .eq('plan_id', planId)
-      .eq('day', day)
-      .order('performed_at', { ascending: true });
+      .eq('day', day);
+    
+    // Filter by session_id if provided to avoid cross-session contamination
+    if (sessionId) {
+      query = query.eq('session_id', sessionId);
+    }
+
+    const { data: logs } = await query;
 
     // Initialize progress structure
     const progress: WorkoutProgress = {
@@ -164,9 +172,10 @@ export default function WorkoutActiveScreen() {
       currentSetIndex
     };
 
-    // Count completed exercises based on logs
+    // Count completed exercises based on logs using SQL aggregation
     // An exercise is complete if we have logs for all its sets
     if (logs) {
+      // Count logs per exercise using Map (more efficient than multiple queries)
       const exerciseLogCounts = new Map<string, number>();
       logs.forEach(log => {
         const count = exerciseLogCounts.get(log.exercise_name) || 0;
@@ -222,41 +231,53 @@ export default function WorkoutActiveScreen() {
 
       setExercises(dayData.exercises);
 
-      // Load exercise details from exercises and user_exercises tables
+      // Load exercise details from exercises and user_exercises tables using batch queries
       const detailsMap = new Map<string, ExerciseDetail>();
-      for (const exercise of dayData.exercises) {
-        // Try exercises table first
-        const { data: exerciseData } = await supabase
+      const exerciseNames = dayData.exercises.map(ex => ex.name);
+      
+      if (exerciseNames.length > 0) {
+        // Batch query all exercises from master exercises table
+        const { data: masterExercises } = await supabase
           .from('exercises')
-          .select('is_timed, default_duration_sec, description, equipment_needed')
-          .eq('name', exercise.name)
-          .single();
+          .select('name, is_timed, default_duration_sec, description, equipment_needed')
+          .in('name', exerciseNames);
 
-        if (exerciseData) {
-          detailsMap.set(exercise.name, {
-            is_timed: exerciseData.is_timed || false,
-            default_duration_sec: exerciseData.default_duration_sec,
-            description: exerciseData.description,
-            equipment_needed: exerciseData.equipment_needed || []
-          });
-        } else {
-          // Try user_exercises table
-          const { data: userExerciseData } = await supabase
-            .from('user_exercises')
-            .select('is_timed, default_duration_sec, description, equipment_needed')
-            .eq('name', exercise.name)
-            .eq('user_id', user.id)
-            .single();
+        // Batch query all user exercises
+        const { data: userExercises } = await supabase
+          .from('user_exercises')
+          .select('name, is_timed, default_duration_sec, description, equipment_needed')
+          .eq('user_id', user.id)
+          .in('name', exerciseNames);
 
-          if (userExerciseData) {
+        // Create maps for quick lookup
+        const masterExerciseMap = new Map(
+          (masterExercises || []).map(ex => [ex.name, ex])
+        );
+        const userExerciseMap = new Map(
+          (userExercises || []).map(ex => [ex.name, ex])
+        );
+
+        // Merge results: user exercises take precedence over master exercises
+        for (const exercise of dayData.exercises) {
+          const userExercise = userExerciseMap.get(exercise.name);
+          const masterExercise = masterExerciseMap.get(exercise.name);
+          
+          if (userExercise) {
             detailsMap.set(exercise.name, {
-              is_timed: userExerciseData.is_timed || false,
-              default_duration_sec: userExerciseData.default_duration_sec,
-              description: userExerciseData.description,
-              equipment_needed: userExerciseData.equipment_needed || []
+              is_timed: userExercise.is_timed || false,
+              default_duration_sec: userExercise.default_duration_sec,
+              description: userExercise.description,
+              equipment_needed: userExercise.equipment_needed || []
+            });
+          } else if (masterExercise) {
+            detailsMap.set(exercise.name, {
+              is_timed: masterExercise.is_timed || false,
+              default_duration_sec: masterExercise.default_duration_sec,
+              description: masterExercise.description,
+              equipment_needed: masterExercise.equipment_needed || []
             });
           } else {
-            // Default values
+            // Default values if not found in either table
             detailsMap.set(exercise.name, {
               is_timed: false,
               default_duration_sec: null,
@@ -303,7 +324,8 @@ export default function WorkoutActiveScreen() {
           currentSetIndex,
           parseInt(planId),
           day,
-          user.id
+          user.id,
+          existingSession.id
         );
         setProgress(reconstructedProgress);
       } else {

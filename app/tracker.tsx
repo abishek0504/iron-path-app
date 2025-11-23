@@ -31,14 +31,18 @@ export default function TrackerScreen() {
 
     try {
       // 2. INSERT DATA WITH USER_ID
+      // Note: plan_id, day, and session_id are nullable for standalone logging
       const { error } = await supabase
         .from('workout_logs')
         .insert([
           { 
             user_id: user.id,
-            exercise: exercise,
+            exercise_name: exercise,
             weight: Number(weight), 
-            reps: Number(reps) 
+            reps: Number(reps),
+            plan_id: null,
+            day: null,
+            session_id: null
           }
         ]);
 

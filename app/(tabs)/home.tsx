@@ -24,7 +24,10 @@ export default function HomeScreen() {
       const check = async () => {
         // Load plan first
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+          setHasActiveWorkout(false);
+          return;
+        }
 
         const { data: planData, error: planError } = await supabase
           .from('workout_plans')
@@ -35,6 +38,7 @@ export default function HomeScreen() {
 
         if (planError && planError.code !== 'PGRST116') {
           console.error('Error loading plan:', planError);
+          setHasActiveWorkout(false);
           return;
         }
 
@@ -58,7 +62,12 @@ export default function HomeScreen() {
             }
             // Set based on whether data exists, regardless of acceptable errors
             setHasActiveWorkout(!!sessionData);
+          } else {
+            setHasActiveWorkout(false);
           }
+        } else {
+          setActivePlan(null);
+          setHasActiveWorkout(false);
         }
       };
       check();
@@ -76,66 +85,8 @@ export default function HomeScreen() {
     }
   }, [activePlan, currentDay]);
 
-  useEffect(() => {
-    if (activePlan && currentDay) {
-      checkActiveWorkout();
-    }
-  }, [activePlan, currentDay]);
+  // Removed duplicate checkActiveWorkout useEffect - handled in useFocusEffect
 
-  const loadActivePlan = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('workout_plans')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error loading plan:', error);
-    } else if (data) {
-      setActivePlan(data);
-    }
-  };
-
-  const checkActiveWorkout = async () => {
-    if (!currentDay) return;
-    
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // Get active plan if not already loaded
-    let plan = activePlan;
-    if (!plan) {
-      const { data: planData } = await supabase
-        .from('workout_plans')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .single();
-      plan = planData;
-    }
-
-    if (!plan) return;
-
-    const { data, error } = await supabase
-      .from('workout_sessions')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('plan_id', plan.id)
-      .eq('day', currentDay)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    // Only log non-acceptable errors
-    if (error && error.code !== 'PGRST116' && !error.message?.includes('schema cache')) {
-      console.error('Error checking active workout:', error);
-    }
-    // Set based on whether data exists, regardless of acceptable errors
-    setHasActiveWorkout(!!data);
-  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
