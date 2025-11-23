@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { X, Check, Clock, Play, SkipForward } from 'lucide-react-native';
+import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -10,7 +10,25 @@ interface ExerciseDetail {
   is_timed: boolean;
   default_duration_sec: number | null;
   description: string | null;
+  equipment_needed?: string[];
 }
+
+const BODYWEIGHT_EXERCISES = [
+  'Pull Up', 'Pull-Up', 'Pullup', 'Chin Up', 'Chin-Up',
+  'Push Up', 'Push-Up', 'Pushup',
+  'Dip', 'Dips',
+  'Sit Up', 'Sit-Up', 'Situp',
+  'Crunch', 'Crunches',
+  'Plank', 'Planks',
+  'Burpee', 'Burpees',
+  'Mountain Climber', 'Mountain Climbers',
+  'Bodyweight Squat', 'Air Squat',
+  'Lunge', 'Lunges', // Can be bodyweight
+  'Jumping Jack', 'Jumping Jacks',
+  'Pistol Squat',
+  'Handstand Push Up', 'Handstand Push-Up',
+  'Muscle Up', 'Muscle-Up'
+];
 
 interface SetProgress {
   setIndex: number;
@@ -53,7 +71,7 @@ export default function WorkoutActiveScreen() {
   // Exercise completion logging
   const [showLoggingScreen, setShowLoggingScreen] = useState(false);
   const [completedExerciseIndex, setCompletedExerciseIndex] = useState<number | null>(null);
-  const [setLogs, setSetLogs] = useState<Array<{ reps: string; weight: string; duration: string }>>([]);
+  const [setLogs, setSetLogs] = useState<Array<{ reps: string; weight: string; duration: string; notes: string }>>([]);
 
   useEffect(() => {
     loadWorkoutData();
@@ -146,7 +164,7 @@ export default function WorkoutActiveScreen() {
         // Try exercises table first
         const { data: exerciseData } = await supabase
           .from('exercises')
-          .select('is_timed, default_duration_sec, description')
+          .select('is_timed, default_duration_sec, description, equipment_needed')
           .eq('name', exercise.name)
           .single();
 
@@ -154,13 +172,14 @@ export default function WorkoutActiveScreen() {
           detailsMap.set(exercise.name, {
             is_timed: exerciseData.is_timed || false,
             default_duration_sec: exerciseData.default_duration_sec,
-            description: exerciseData.description
+            description: exerciseData.description,
+            equipment_needed: exerciseData.equipment_needed || []
           });
         } else {
           // Try user_exercises table
           const { data: userExerciseData } = await supabase
             .from('user_exercises')
-            .select('is_timed, default_duration_sec, description')
+            .select('is_timed, default_duration_sec, description, equipment_needed')
             .eq('name', exercise.name)
             .eq('user_id', user.id)
             .single();
@@ -169,14 +188,16 @@ export default function WorkoutActiveScreen() {
             detailsMap.set(exercise.name, {
               is_timed: userExerciseData.is_timed || false,
               default_duration_sec: userExerciseData.default_duration_sec,
-              description: userExerciseData.description
+              description: userExerciseData.description,
+              equipment_needed: userExerciseData.equipment_needed || []
             });
           } else {
             // Default values
             detailsMap.set(exercise.name, {
               is_timed: false,
               default_duration_sec: null,
-              description: null
+              description: null,
+              equipment_needed: []
             });
           }
         }
@@ -362,7 +383,8 @@ export default function WorkoutActiveScreen() {
       setSetLogs(Array.from({ length: totalSets }, () => ({
         reps: '',
         weight: lastWeight ? lastWeight.toString() : '',
-        duration: ''
+        duration: '',
+        notes: ''
       })));
       setCompletedExerciseIndex(exerciseIndex);
       setShowLoggingScreen(true);
@@ -390,16 +412,17 @@ export default function WorkoutActiveScreen() {
     // Update progress with logged data
     const updatedProgress = { ...progress };
     for (let i = 0; i < totalSets; i++) {
+      const logData = setLogs[i] || {};
       if (isTimed) {
-        updatedProgress.exercises[completedExerciseIndex].sets[i].duration = parseInt(setLogs[i].duration) || 0;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].duration = parseInt(logData.duration) || 0;
       } else {
-        updatedProgress.exercises[completedExerciseIndex].sets[i].reps = parseInt(setLogs[i].reps) || 0;
-        updatedProgress.exercises[completedExerciseIndex].sets[i].weight = parseFloat(setLogs[i].weight) || null;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].reps = parseInt(logData.reps) || 0;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].weight = parseFloat(logData.weight) || null;
       }
     }
 
     // Save to workout_logs
-    await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets);
+    await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets, setLogs);
     
     updatedProgress.exercises[completedExerciseIndex].completed = true;
     
@@ -430,23 +453,56 @@ export default function WorkoutActiveScreen() {
     }
   };
 
-  const saveSetsToLogs = async (exercise: any, sets: SetProgress[]) => {
+  const saveSetsToLogs = async (exercise: any, sets: SetProgress[], logs: Array<{ reps: string; weight: string; duration: string; notes: string }>) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const logs = sets
-        .filter(s => s.completed)
-        .map(set => ({
-          user_id: user.id,
-          exercise_name: exercise.name,
-          weight: set.weight || 0,
-          reps: set.reps || 0,
-          notes: set.duration ? `Duration: ${set.duration}s` : undefined
-        }));
+      // Parse target reps to get a numeric value for comparison
+      // For ranges like "8-12", we'll store the minimum as scheduled_reps
+      const parseTargetReps = (target: string): number => {
+        if (!target) return null;
+        if (target.includes('-')) {
+          const [min] = target.split('-').map(n => parseInt(n.trim()));
+          return min || null;
+        }
+        const parsed = parseInt(target);
+        return isNaN(parsed) ? null : parsed;
+      };
+      
+      // Parse target duration for timed exercises
+      const parseTargetDuration = (target: string): number | null => {
+        if (!target) return null;
+        const parsed = parseInt(target);
+        return isNaN(parsed) ? null : parsed;
+      };
+      
+      const scheduledReps = exercise.is_timed ? null : parseTargetReps(exercise.target_reps || '8-12');
+      // For scheduled_weight: 0 for bodyweight exercises, null for timed exercises
+      // Weighted exercises will have weight logged by user, scheduled_weight is 0 to indicate "not bodyweight" or can be null
+      const scheduledWeight = exercise.is_timed ? null : 0;
+      const scheduledDuration = exercise.is_timed ? parseTargetDuration(exercise.target_duration || exercise.default_duration_sec?.toString()) : null;
 
-      if (logs.length > 0) {
-        await supabase.from('workout_logs').insert(logs);
+      const dbLogs = sets
+        .filter(s => s.completed)
+        .map((set, index) => {
+          const logData = logs[index] || {};
+          const notesParts = [];
+          if (logData.notes) notesParts.push(logData.notes);
+          
+          return {
+            user_id: user.id,
+            exercise_name: exercise.name,
+            weight: set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight || 0),
+            reps: set.reps ? parseFloat(set.reps.toString()) : (scheduledReps || 0),
+            scheduled_reps: scheduledReps,
+            scheduled_weight: scheduledWeight,
+            notes: notesParts.length > 0 ? notesParts.join(' | ') : null
+          };
+        });
+
+      if (dbLogs.length > 0) {
+        await supabase.from('workout_logs').insert(dbLogs);
       }
     } catch (error) {
       console.error('Error saving to workout_logs:', error);
@@ -494,6 +550,36 @@ export default function WorkoutActiveScreen() {
     );
   }
 
+  const isBodyweightExercise = (exerciseName: string, detail: ExerciseDetail | undefined): boolean => {
+    // Check if exercise name matches common bodyweight exercises
+    const nameMatch = BODYWEIGHT_EXERCISES.some(bw => 
+      exerciseName.toLowerCase().includes(bw.toLowerCase())
+    );
+    
+    // Check if equipment_needed is empty or only contains bodyweight-related items
+    const equipment = detail?.equipment_needed || [];
+    const hasNoEquipment = equipment.length === 0 || 
+      equipment.every(eq => eq.toLowerCase().includes('bodyweight') || eq.toLowerCase().includes('none'));
+    
+    return nameMatch || hasNoEquipment;
+  };
+
+  const handleCloseWorkout = () => {
+    const allExercisesComplete = progress.exercises.every(ex => ex.completed);
+    if (allExercisesComplete) {
+      router.back();
+    } else {
+      Alert.alert(
+        "Exit Workout?",
+        "Your progress will be saved. You can resume later.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Exit", onPress: () => router.back() }
+        ]
+      );
+    }
+  };
+
   // Show logging screen if exercise is complete
   if (showLoggingScreen && completedExerciseIndex !== null) {
     const exercise = exercises[completedExerciseIndex];
@@ -501,81 +587,198 @@ export default function WorkoutActiveScreen() {
     const isTimed = detail?.is_timed || false;
     const totalSets = exercise.target_sets || 3;
     const isLastExercise = completedExerciseIndex === exercises.length - 1;
+    const isBodyweight = isBodyweightExercise(exercise.name, detail);
 
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Log {exercise.name}</Text>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={handleCloseWorkout}>
             <X color="#9ca3af" size={24} />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.loggingContainer}>
+        <ScrollView style={styles.loggingScrollView} contentContainerStyle={styles.loggingContainer}>
           <Text style={styles.loggingTitle}>All sets complete!</Text>
-          <Text style={styles.loggingSubtitle}>Log your results for each set</Text>
+          <Text style={styles.loggingSubtitle}>Log your results and compare to target</Text>
 
-          {Array.from({ length: totalSets }, (_, setIndex) => (
-            <View key={setIndex} style={styles.setLogCard}>
-              <Text style={styles.setLogTitle}>Set {setIndex + 1}</Text>
-              {isTimed ? (
-                <View style={styles.logInputGroup}>
-                  <Text style={styles.logLabel}>Duration (seconds)</Text>
-                  <TextInput
-                    style={styles.logInput}
-                    value={setLogs[setIndex]?.duration || ''}
-                    onChangeText={(text) => {
-                      const newLogs = [...setLogs];
-                      newLogs[setIndex] = { ...newLogs[setIndex], duration: text };
-                      setSetLogs(newLogs);
-                    }}
-                    keyboardType="numeric"
-                    placeholder="0"
-                    placeholderTextColor="#6b7280"
-                  />
-                  {detail?.default_duration_sec && (
-                    <Text style={styles.targetHint}>Target: {detail.default_duration_sec}s</Text>
-                  )}
-                </View>
-              ) : (
-                <View style={styles.logInputRow}>
-                  <View style={styles.logInputHalf}>
-                    <Text style={styles.logLabel}>Weight (lbs)</Text>
-                    <TextInput
-                      style={styles.logInput}
-                      value={setLogs[setIndex]?.weight || ''}
-                      onChangeText={(text) => {
-                        const newLogs = [...setLogs];
-                        newLogs[setIndex] = { ...newLogs[setIndex], weight: text };
-                        setSetLogs(newLogs);
-                      }}
-                      keyboardType="numeric"
-                      placeholder="0"
-                      placeholderTextColor="#6b7280"
-                    />
-                  </View>
-                  <View style={styles.logInputHalf}>
-                    <Text style={styles.logLabel}>Reps</Text>
-                    <TextInput
-                      style={styles.logInput}
-                      value={setLogs[setIndex]?.reps || ''}
-                      onChangeText={(text) => {
-                        const newLogs = [...setLogs];
-                        newLogs[setIndex] = { ...newLogs[setIndex], reps: text };
-                        setSetLogs(newLogs);
-                      }}
-                      keyboardType="numeric"
-                      placeholder="0"
-                      placeholderTextColor="#6b7280"
-                    />
-                    {exercise.target_reps && (
-                      <Text style={styles.targetHint}>Target: {exercise.target_reps}</Text>
+          {Array.from({ length: totalSets }, (_, setIndex) => {
+            const targetReps = exercise.target_reps || '8-12';
+            const loggedReps = setLogs[setIndex]?.reps || '';
+            const loggedWeight = setLogs[setIndex]?.weight || '';
+            const loggedDuration = setLogs[setIndex]?.duration || '';
+            const targetDuration = detail?.default_duration_sec || 60;
+            
+            // Parse target reps (handle ranges like "8-12")
+            const parseTargetReps = (target: string): { min: number; max: number } => {
+              if (target.includes('-')) {
+                const [min, max] = target.split('-').map(n => parseInt(n.trim()));
+                return { min: min || 8, max: max || 12 };
+              }
+              const num = parseInt(target);
+              return { min: num || 8, max: num || 12 };
+            };
+            
+            const targetRepsRange = parseTargetReps(targetReps);
+            const actualReps = parseInt(loggedReps);
+            const repsMatch = actualReps >= targetRepsRange.min && actualReps <= targetRepsRange.max;
+            const actualDuration = parseInt(loggedDuration);
+            const durationMatch = actualDuration >= targetDuration * 0.9 && actualDuration <= targetDuration * 1.1;
+
+            return (
+              <View key={setIndex} style={styles.setLogCard}>
+                <Text style={styles.setLogTitle}>Set {setIndex + 1} of {totalSets}</Text>
+                
+                {/* Scheduled/Target Values */}
+                <View style={styles.targetSection}>
+                  <Text style={styles.targetSectionTitle}>Scheduled</Text>
+                  <View style={styles.targetRow}>
+                    {isTimed ? (
+                      <View style={styles.targetItem}>
+                        <Text style={styles.targetLabel}>Duration:</Text>
+                        <Text style={styles.targetValue}>{targetDuration}s</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <View style={styles.targetItem}>
+                          <Text style={styles.targetLabel}>Reps:</Text>
+                          <Text style={styles.targetValue}>{targetReps}</Text>
+                        </View>
+                        <View style={styles.targetItem}>
+                          <Text style={styles.targetLabel}>Weight:</Text>
+                          <Text style={styles.targetValue}>
+                            {isBodyweight ? 'Bodyweight' : 'Weighted'}
+                          </Text>
+                        </View>
+                      </>
                     )}
                   </View>
                 </View>
-              )}
-            </View>
-          ))}
+
+                {/* Logged Values */}
+                <View style={styles.loggedSection}>
+                  <Text style={styles.loggedSectionTitle}>Logged</Text>
+                  {isTimed ? (
+                    <View style={styles.logInputGroup}>
+                      <Text style={styles.logLabel}>Duration (seconds)</Text>
+                        <View style={styles.inputWithComparison}>
+                          <TextInput
+                            style={[
+                              styles.logInput,
+                              styles.logInputFlex,
+                              loggedDuration && !durationMatch && styles.logInputWarning
+                            ]}
+                            value={loggedDuration}
+                            onChangeText={(text) => {
+                              const newLogs = [...setLogs];
+                              newLogs[setIndex] = { ...newLogs[setIndex], duration: text, notes: newLogs[setIndex]?.notes || '' };
+                              setSetLogs(newLogs);
+                            }}
+                            keyboardType="numeric"
+                            placeholder="0"
+                            placeholderTextColor="#6b7280"
+                          />
+                          {loggedDuration && (
+                            <View style={styles.comparisonBadge}>
+                              {durationMatch ? (
+                                <Check color="#10b981" size={16} />
+                              ) : (
+                                <TrendingDown color="#ef4444" size={16} />
+                              )}
+                              <Text style={[styles.comparisonText, durationMatch ? styles.comparisonTextGood : styles.comparisonTextBad]}>
+                                {actualDuration >= targetDuration ? 'Met' : 'Below'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                    </View>
+                  ) : (
+                    <View style={styles.logInputRow}>
+                      <View style={styles.logInputHalf}>
+                        <Text style={styles.logLabel}>Weight (lbs)</Text>
+                        <TextInput
+                          style={[
+                            styles.logInput,
+                            isBodyweight && styles.logInputDisabled
+                          ]}
+                          value={loggedWeight}
+                          onChangeText={(text) => {
+                            if (!isBodyweight) {
+                              const newLogs = [...setLogs];
+                              newLogs[setIndex] = { ...newLogs[setIndex], weight: text, notes: newLogs[setIndex]?.notes || '' };
+                              setSetLogs(newLogs);
+                            }
+                          }}
+                          keyboardType="numeric"
+                          placeholder={isBodyweight ? "Bodyweight" : "0"}
+                          placeholderTextColor="#6b7280"
+                          editable={!isBodyweight}
+                        />
+                      </View>
+                      <View style={styles.logInputHalf}>
+                        <Text style={styles.logLabel}>Reps</Text>
+                        <View style={styles.inputWithComparison}>
+                          <TextInput
+                            style={[
+                              styles.logInput,
+                              styles.logInputFlex,
+                              loggedReps && !repsMatch && styles.logInputWarning
+                            ]}
+                            value={loggedReps}
+                            onChangeText={(text) => {
+                              const newLogs = [...setLogs];
+                              newLogs[setIndex] = { ...newLogs[setIndex], reps: text, notes: newLogs[setIndex]?.notes || '' };
+                              setSetLogs(newLogs);
+                            }}
+                            keyboardType="numeric"
+                            placeholder="0"
+                            placeholderTextColor="#6b7280"
+                          />
+                          {loggedReps && (
+                            <View style={styles.comparisonBadge}>
+                              {repsMatch ? (
+                                <Check color="#10b981" size={16} />
+                              ) : actualReps > targetRepsRange.max ? (
+                                <TrendingUp color="#3b82f6" size={16} />
+                              ) : (
+                                <TrendingDown color="#ef4444" size={16} />
+                              )}
+                              <Text style={[
+                                styles.comparisonText,
+                                repsMatch ? styles.comparisonTextGood : 
+                                actualReps > targetRepsRange.max ? styles.comparisonTextBetter : 
+                                styles.comparisonTextBad
+                              ]}>
+                                {repsMatch ? 'Met' : actualReps > targetRepsRange.max ? 'Above' : 'Below'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                  
+                  {/* Notes Input */}
+                  <View style={styles.logInputGroup}>
+                    <Text style={styles.logLabel}>Notes (optional)</Text>
+                    <TextInput
+                      style={[styles.logInput, styles.logInputMultiline]}
+                      value={setLogs[setIndex]?.notes || ''}
+                      onChangeText={(text) => {
+                        const newLogs = [...setLogs];
+                        newLogs[setIndex] = { ...newLogs[setIndex], notes: text, reps: newLogs[setIndex]?.reps || '', weight: newLogs[setIndex]?.weight || '', duration: newLogs[setIndex]?.duration || '' };
+                        setSetLogs(newLogs);
+                      }}
+                      placeholder="How did this set feel? Any issues?"
+                      placeholderTextColor="#6b7280"
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+                </View>
+              </View>
+            );
+          })}
 
           <View style={styles.loggingButtons}>
             {!isLastExercise && (
@@ -601,7 +804,7 @@ export default function WorkoutActiveScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -625,12 +828,40 @@ export default function WorkoutActiveScreen() {
   const isTimed = detail?.is_timed || false;
   const allSetsComplete = exerciseProgress?.sets.every(s => s.completed) || false;
   const restTime = exercise.rest_time_sec || 60;
+  const isBodyweight = isBodyweightExercise(exercise.name, detail);
+  
+  // Check if all exercises are completed
+  const allExercisesComplete = progress.exercises.every(ex => ex.completed);
+
+  // Show completion screen if all exercises are done
+  if (allExercisesComplete) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>{day} Workout</Text>
+          <TouchableOpacity onPress={handleCloseWorkout}>
+            <X color="#9ca3af" size={24} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.completionContainer}>
+          <Text style={styles.completionTitle}>Workout Complete! 🎉</Text>
+          <Text style={styles.completionSubtitle}>Great job completing your workout!</Text>
+          <TouchableOpacity
+            style={styles.completeWorkoutButton}
+            onPress={handleCloseWorkout}
+          >
+            <Text style={styles.completeWorkoutButtonText}>Return to Home</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{day} Workout</Text>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={handleCloseWorkout}>
           <X color="#9ca3af" size={24} />
         </TouchableOpacity>
       </View>
@@ -665,7 +896,7 @@ export default function WorkoutActiveScreen() {
           {!isTimed && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Weight:</Text>
-              <Text style={styles.infoValue}>Bodyweight</Text>
+              <Text style={styles.infoValue}>{isBodyweight ? 'Bodyweight' : 'Weighted'}</Text>
             </View>
           )}
           <View style={styles.infoRow}>
@@ -917,9 +1148,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
-  loggingContainer: {
+  loggingScrollView: {
     flex: 1,
+  },
+  loggingContainer: {
     padding: 24,
+    paddingBottom: 40,
   },
   loggingTitle: {
     fontSize: 28,
@@ -936,14 +1170,55 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: '#374151',
   },
   setLogTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
+    marginBottom: 16,
+  },
+  targetSection: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  targetSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9ca3af',
+    marginBottom: 8,
+  },
+  targetRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  targetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  targetLabel: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  targetValue: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  loggedSection: {
+    marginTop: 8,
+  },
+  loggedSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9ca3af',
     marginBottom: 12,
   },
   logInputGroup: {
@@ -969,6 +1244,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#374151',
     fontSize: 16,
+  },
+  logInputFlex: {
+    flex: 1,
+  },
+  logInputMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  logInputWarning: {
+    borderColor: '#ef4444',
+  },
+  inputWithComparison: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  comparisonBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#111827',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  comparisonText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  comparisonTextGood: {
+    color: '#10b981',
+  },
+  comparisonTextBetter: {
+    color: '#3b82f6',
+  },
+  comparisonTextBad: {
+    color: '#ef4444',
   },
   targetHint: {
     color: '#6b7280',
@@ -1001,5 +1315,40 @@ const styles = StyleSheet.create({
   },
   loggingButtonTextSecondary: {
     color: '#3b82f6',
+  },
+  completionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  completionTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#10b981',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  completionSubtitle: {
+    fontSize: 18,
+    color: '#9ca3af',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  completeWorkoutButton: {
+    backgroundColor: '#2563eb',
+    padding: 18,
+    borderRadius: 12,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  completeWorkoutButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  logInputDisabled: {
+    backgroundColor: '#374151',
+    opacity: 0.5,
   },
 });
