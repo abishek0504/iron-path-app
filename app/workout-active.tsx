@@ -233,7 +233,7 @@ export default function WorkoutActiveScreen() {
 
       // Load exercise details from exercises and user_exercises tables using batch queries
       const detailsMap = new Map<string, ExerciseDetail>();
-      const exerciseNames = dayData.exercises.map(ex => ex.name);
+      const exerciseNames = dayData.exercises.map((ex: any) => ex.name);
       
       if (exerciseNames.length > 0) {
         // Batch query all exercises from master exercises table
