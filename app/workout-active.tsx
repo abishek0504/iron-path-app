@@ -493,11 +493,14 @@ export default function WorkoutActiveScreen() {
     };
 
     // Check if all sets are complete for this exercise
+    const totalSets = exercise.target_sets || 3;
     const allSetsComplete = updatedProgress.exercises[exerciseIndex].sets.every(s => s.completed);
     
-    if (allSetsComplete) {
+    // Also check if we've reached the last set (prevent going past target)
+    const isLastSet = setIndex >= totalSets - 1;
+    
+    if (allSetsComplete || isLastSet) {
       // Show logging screen
-      const totalSets = exercise.target_sets || 3;
       const lastWeight = await getLastWeight(exercise.name);
       setSetLogs(Array.from({ length: totalSets }, () => ({
         reps: '',
@@ -509,14 +512,17 @@ export default function WorkoutActiveScreen() {
       setShowLoggingScreen(true);
       setExerciseTimer(null);
     } else {
-      // Move to next set and start rest timer
-      updatedProgress.currentSetIndex = setIndex + 1;
-      await saveProgress(updatedProgress);
-      
-      // Start rest timer
-      const restTime = exercise.rest_time_sec || 60;
-      setRestTimer({ active: true, seconds: restTime });
-      setExerciseTimer(null);
+      // Move to next set and start rest timer (only if not at last set)
+      const nextSetIndex = setIndex + 1;
+      if (nextSetIndex < totalSets) {
+        updatedProgress.currentSetIndex = nextSetIndex;
+        await saveProgress(updatedProgress);
+        
+        // Start rest timer
+        const restTime = exercise.rest_time_sec || 60;
+        setRestTimer({ active: true, seconds: restTime });
+        setExerciseTimer(null);
+      }
     }
   };
 
@@ -626,8 +632,9 @@ export default function WorkoutActiveScreen() {
             plan_id: parseInt(planId),
             day: day,
             session_id: workoutSession?.id || null,
-            weight: set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight || 0),
-            reps: set.reps ? parseFloat(set.reps.toString()) : (scheduledReps || 0),
+            // For timed exercises, keep null values instead of defaulting to 0
+            weight: set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? null),
+            reps: set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? null),
             scheduled_reps: scheduledReps,
             scheduled_weight: scheduledWeight,
             notes: notesParts.length > 0 ? notesParts.join(' | ') : null

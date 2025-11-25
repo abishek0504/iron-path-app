@@ -73,13 +73,13 @@ export default function PlannerScreen() {
       // Create empty week schedule
       const emptyPlan = {
         week_schedule: {
-          Sunday: { focus: "Rest", exercises: [] },
-          Monday: { focus: "Rest", exercises: [] },
-          Tuesday: { focus: "Rest", exercises: [] },
-          Wednesday: { focus: "Rest", exercises: [] },
-          Thursday: { focus: "Rest", exercises: [] },
-          Friday: { focus: "Rest", exercises: [] },
-          Saturday: { focus: "Rest", exercises: [] },
+          Sunday: { exercises: [] },
+          Monday: { exercises: [] },
+          Tuesday: { exercises: [] },
+          Wednesday: { exercises: [] },
+          Thursday: { exercises: [] },
+          Friday: { exercises: [] },
+          Saturday: { exercises: [] },
         }
       };
 
@@ -151,25 +151,23 @@ The response must be STRICTLY valid JSON in this exact format:
 {
   "week_schedule": {
     "Monday": {
-      "focus": "Push",
       "exercises": [
         {
           "name": "Bench Press",
           "target_sets": 3,
           "target_reps": "8-12",
           "rest_time_sec": 90,
-          "notes": "Keep elbows tucked"
+          "notes": "Keep elbows tucked and squeeze scapula at top"
         }
       ]
     },
     "Tuesday": {
-      "focus": "Pull",
       "exercises": [...]
     }
   }
 }
 
-Include all 7 days (Monday through Sunday). Days with no workout should have an empty exercises array and focus should be "Rest". Use exercises from common gym exercises like Bench Press, Squat, Deadlift, Overhead Press, Barbell Row, Pull Up, etc.`;
+Include all 7 days (Monday through Sunday). Days with no workout should have an empty exercises array. Use exercises from common gym exercises like Bench Press, Squat, Deadlift, Overhead Press, Barbell Row, Pull Up, etc. Include technique tips and focus points in the "notes" field for each exercise.`;
 
       const result = await model.generateContent(prompt);
       const response = result.response;
@@ -222,9 +220,9 @@ Include all 7 days (Monday through Sunday). Days with no workout should have an 
 
   const getDayData = (dayName: string) => {
     if (!activePlan?.plan_data?.week_schedule) {
-      return { focus: "Rest", exercises: [] };
+      return { exercises: [] };
     }
-    return activePlan.plan_data.week_schedule[dayName] || { focus: "Rest", exercises: [] };
+    return activePlan.plan_data.week_schedule[dayName] || { exercises: [] };
   };
 
   const handleDayPress = (dayName: string) => {
@@ -295,7 +293,7 @@ Include all 7 days (Monday through Sunday). Days with no workout should have an 
               >
                 <Text style={styles.dayName}>{dayName}</Text>
                 <Text style={styles.dayFocus}>
-                  {dayData.focus || "Rest"} {exerciseCount > 0 && `• ${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}`}
+                  {exerciseCount > 0 ? `${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}` : "Rest"}
                 </Text>
               </TouchableOpacity>
             );

@@ -9,6 +9,36 @@ Run the SQL migrations in order to create the required database tables.
 1. Run `workout_sessions.sql` to create the workout_sessions table and update workout_logs
 2. Run `rls_policies.sql` to enable Row Level Security and create security policies
 
+### Resetting Workout Sessions
+
+To reset active workout sessions for testing or debugging, use `reset_workout_sessions.sql`:
+
+**Option 1 (Recommended)**: Mark all active sessions as abandoned (preserves history)
+```sql
+UPDATE public.workout_sessions
+SET status = 'abandoned', completed_at = timezone('utc'::text, now())
+WHERE status = 'active';
+```
+
+**Option 2**: Delete all active sessions (removes history completely)
+```sql
+DELETE FROM public.workout_sessions WHERE status = 'active';
+```
+
+**Option 3**: Reset sessions for a specific user
+```sql
+UPDATE public.workout_sessions
+SET status = 'abandoned', completed_at = timezone('utc'::text, now())
+WHERE status = 'active' AND user_id = 'YOUR_USER_ID';
+```
+
+**Option 4**: Reset sessions for a specific plan
+```sql
+UPDATE public.workout_sessions
+SET status = 'abandoned', completed_at = timezone('utc'::text, now())
+WHERE status = 'active' AND plan_id = YOUR_PLAN_ID;
+```
+
 ### Running Migrations
 
 You can run these migrations in your Supabase SQL Editor or via the Supabase CLI:

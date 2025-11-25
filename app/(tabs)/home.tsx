@@ -21,11 +21,13 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      let isMounted = true;
+      
       const check = async () => {
         // Load plan first
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          setHasActiveWorkout(false);
+          if (isMounted) setHasActiveWorkout(false);
           return;
         }
 
@@ -38,11 +40,11 @@ export default function HomeScreen() {
 
         if (planError && planError.code !== 'PGRST116') {
           console.error('Error loading plan:', planError);
-          setHasActiveWorkout(false);
+          if (isMounted) setHasActiveWorkout(false);
           return;
         }
 
-        if (planData) {
+        if (planData && isMounted) {
           setActivePlan(planData);
           
           // Check for active workout session
@@ -61,16 +63,21 @@ export default function HomeScreen() {
               console.error('Error checking active workout:', sessionError);
             }
             // Set based on whether data exists, regardless of acceptable errors
-            setHasActiveWorkout(!!sessionData);
+            if (isMounted) setHasActiveWorkout(!!sessionData);
           } else {
-            setHasActiveWorkout(false);
+            if (isMounted) setHasActiveWorkout(false);
           }
-        } else {
+        } else if (isMounted) {
           setActivePlan(null);
           setHasActiveWorkout(false);
         }
       };
+      
       check();
+      
+      return () => {
+        isMounted = false;
+      };
     }, [currentDay])
   );
 
@@ -80,7 +87,7 @@ export default function HomeScreen() {
       if (schedule && schedule[currentDay]) {
         setTodayData(schedule[currentDay]);
       } else {
-        setTodayData({ focus: "Rest", exercises: [] });
+        setTodayData({ exercises: [] });
       }
     }
   }, [activePlan, currentDay]);
@@ -102,7 +109,7 @@ export default function HomeScreen() {
     });
   };
 
-  const isRestDay = !todayData?.exercises || todayData.exercises.length === 0 || todayData.focus === "Rest";
+  const isRestDay = !todayData?.exercises || todayData.exercises.length === 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -130,7 +137,7 @@ export default function HomeScreen() {
         ) : (
           <>
             <View style={styles.workoutCard}>
-              <Text style={styles.focusText}>{todayData?.focus || "Workout"}</Text>
+              <Text style={styles.focusText}>Workout</Text>
               <Text style={styles.exerciseCount}>
                 {todayData?.exercises?.length || 0} exercise{todayData?.exercises?.length !== 1 ? 's' : ''}
               </Text>

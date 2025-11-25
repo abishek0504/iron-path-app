@@ -81,7 +81,7 @@ export default function ExerciseSelectScreen() {
       }
 
       const updatedPlan = { ...plan };
-      const dayData = updatedPlan.plan_data.week_schedule[day] || { focus: "Custom", exercises: [] };
+      const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
       // Add new exercise
       const newExercise = {
@@ -93,7 +93,6 @@ export default function ExerciseSelectScreen() {
       };
 
       dayData.exercises = [...(dayData.exercises || []), newExercise];
-      dayData.focus = dayData.focus === "Rest" ? "Custom" : dayData.focus;
       updatedPlan.plan_data.week_schedule[day] = dayData;
 
       // Save plan
@@ -171,7 +170,7 @@ export default function ExerciseSelectScreen() {
       }
 
       const updatedPlan = { ...plan };
-      const dayData = updatedPlan.plan_data.week_schedule[day] || { focus: "Custom", exercises: [] };
+      const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
       const newExercise = {
         name: newCustomExercise.name,
@@ -187,7 +186,6 @@ export default function ExerciseSelectScreen() {
       } else {
         dayData.exercises = [...(dayData.exercises || []), newExercise];
       }
-      dayData.focus = dayData.focus === "Rest" ? "Custom" : dayData.focus;
       updatedPlan.plan_data.week_schedule[day] = dayData;
 
       const { error: updateError } = await supabase
@@ -236,7 +234,7 @@ export default function ExerciseSelectScreen() {
       }
 
       const updatedPlan = { ...plan };
-      const dayData = updatedPlan.plan_data.week_schedule[day] || { focus: "Custom", exercises: [] };
+      const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
       // Add custom exercise
       const newExercise = {
@@ -255,7 +253,6 @@ export default function ExerciseSelectScreen() {
         // Add new exercise
         dayData.exercises = [...(dayData.exercises || []), newExercise];
       }
-      dayData.focus = dayData.focus === "Rest" ? "Custom" : dayData.focus;
       updatedPlan.plan_data.week_schedule[day] = dayData;
 
       // Save plan

@@ -22,7 +22,7 @@ export default function PlannerDayScreen() {
   const router = useRouter();
   const { day, planId } = useLocalSearchParams<{ day: string; planId: string }>();
   const [plan, setPlan] = useState<any>(null);
-  const [dayData, setDayData] = useState<any>({ focus: "Rest", exercises: [] });
+  const [dayData, setDayData] = useState<any>({ exercises: [] });
   const [generating, setGenerating] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -33,10 +33,18 @@ export default function PlannerDayScreen() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [dragStartY, setDragStartY] = useState<number>(0);
   const dragAllowedRef = React.useRef<number | null>(null);
+  const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadUserProfile();
     loadUserFeedback();
+    
+    // Cleanup: save any pending changes when component unmounts
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, []);
 
   useFocusEffect(
@@ -44,6 +52,7 @@ export default function PlannerDayScreen() {
       loadPlan();
     }, [planId])
   );
+
 
   const loadPlan = async () => {
     if (!planId) return;
@@ -61,7 +70,8 @@ export default function PlannerDayScreen() {
     } else if (data) {
       setPlan(data);
       if (day && data.plan_data?.week_schedule?.[day]) {
-        setDayData(data.plan_data.week_schedule[day]);
+        const loadedDayData = data.plan_data.week_schedule[day];
+        setDayData(loadedDayData);
       }
     }
   };
@@ -96,23 +106,50 @@ export default function PlannerDayScreen() {
     }
   };
 
-  const savePlan = async (updatedDayData: any) => {
+  const savePlan = async (updatedDayData: any, immediate: boolean = false, skipStateUpdate: boolean = false) => {
     if (!plan || !day) return;
 
-    const updatedPlan = { ...plan };
-    updatedPlan.plan_data.week_schedule[day] = updatedDayData;
-
-    const { error } = await supabase
-      .from('workout_plans')
-      .update({ plan_data: updatedPlan.plan_data })
-      .eq('id', plan.id);
-
-    if (error) {
-      console.error('Error saving plan:', error);
-      Alert.alert("Error", "Failed to save changes.");
-    } else {
+    // Update local state immediately for instant UI feedback (unless skipping for focus input)
+    if (!skipStateUpdate) {
       setDayData(updatedDayData);
+      const updatedPlan = { ...plan };
+      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
       setPlan(updatedPlan);
+    }
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Debounce database save - only save after user stops typing for 1 second
+    const performSave = async () => {
+      const updatedPlan = { ...plan };
+      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      
+      const { error } = await supabase
+        .from('workout_plans')
+        .update({ plan_data: updatedPlan.plan_data })
+        .eq('id', plan.id);
+
+      if (error) {
+        console.error('Error saving plan:', error);
+        // Don't show alert on every keystroke - only log error
+      } else {
+        // Only update state after successful save to avoid re-render issues
+        if (skipStateUpdate) {
+          setDayData(updatedDayData);
+          setPlan(updatedPlan);
+        }
+      }
+    };
+
+    if (immediate) {
+      // Save immediately for actions like delete, reorder, etc.
+      await performSave();
+    } else {
+      // Debounce for text input changes
+      saveTimeoutRef.current = setTimeout(performSave, 1000);
     }
   };
 
@@ -185,11 +222,10 @@ Return ONLY the JSON array, no other text.`;
       const updatedExercises = [...existingExercises, ...newExercises];
       const updatedDayData = {
         ...dayData,
-        exercises: updatedExercises,
-        focus: dayData.focus === "Rest" ? "Generated" : dayData.focus
+        exercises: updatedExercises
       };
 
-      await savePlan(updatedDayData);
+      await savePlan(updatedDayData, true);
       setHasGenerated(true);
       Alert.alert("Success", `Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
     } catch (error: any) {
@@ -206,7 +242,8 @@ Return ONLY the JSON array, no other text.`;
       ...dayData,
       exercises: updatedExercises
     };
-    savePlan(updatedDayData);
+    // Immediate save for delete action
+    savePlan(updatedDayData, true);
   };
 
   const updateExercise = (index: number, field: string, value: any) => {
@@ -216,7 +253,8 @@ Return ONLY the JSON array, no other text.`;
       ...dayData,
       exercises: updatedExercises
     };
-    savePlan(updatedDayData);
+    // Debounced save - updates local state immediately, saves to DB after 1 second of inactivity
+    savePlan(updatedDayData, false);
   };
 
   const moveExercise = (index: number, direction: 'up' | 'down') => {
@@ -230,7 +268,8 @@ Return ONLY the JSON array, no other text.`;
       ...dayData,
       exercises
     };
-    savePlan(updatedDayData);
+    // Immediate save for reorder action
+    savePlan(updatedDayData, true);
   };
 
   const handleDragEnd = ({ data }: { data: any[] }) => {
@@ -240,7 +279,8 @@ Return ONLY the JSON array, no other text.`;
         ...dayData,
         exercises: data
       };
-      savePlan(updatedDayData);
+      // Immediate save for drag action
+      savePlan(updatedDayData, true);
     }
     dragAllowedRef.current = null;
   };
@@ -248,15 +288,19 @@ Return ONLY the JSON array, no other text.`;
   // Web drag handlers using touch/mouse events (React Native Responder System)
   const handleWebTouchStart = (index: number, e: any) => {
     if (Platform.OS === 'web') {
-      const touch = e.nativeEvent.touches?.[0] || e.nativeEvent;
+      // Only allow drag if initiated from grip handle
+      if (dragAllowedRef.current !== index) {
+        return;
+      }
+      const touch = e.nativeEvent?.touches?.[0] || e.nativeEvent || e;
       setDraggedIndex(index);
       setDragStartY(touch.clientY || touch.pageY || 0);
     }
   };
 
   const handleWebTouchMove = (index: number, e: any) => {
-    if (Platform.OS === 'web' && draggedIndex !== null) {
-      const touch = e.nativeEvent.touches?.[0] || e.nativeEvent;
+    if (Platform.OS === 'web' && draggedIndex !== null && draggedIndex === index) {
+      const touch = e.nativeEvent?.touches?.[0] || e.nativeEvent || e;
       const currentY = touch.clientY || touch.pageY || 0;
       
       // Find which card we're over based on position
@@ -273,6 +317,36 @@ Return ONLY the JSON array, no other text.`;
       }
     }
   };
+  
+  // Add global mouse move handler for web drag
+  useEffect(() => {
+    if (Platform.OS === 'web' && draggedIndex !== null) {
+      const handleMouseMove = (e: MouseEvent) => {
+        const currentY = e.clientY;
+        if (Math.abs(currentY - dragStartY) > 20) {
+          const cardHeight = 150;
+          const offset = Math.round((currentY - dragStartY) / cardHeight);
+          const newIndex = Math.max(0, Math.min(dayData.exercises.length - 1, draggedIndex + offset));
+          
+          if (newIndex !== draggedIndex && newIndex !== dragOverIndex) {
+            setDragOverIndex(newIndex);
+          }
+        }
+      };
+      
+      const handleMouseUp = () => {
+        handleWebTouchEnd();
+      };
+      
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [Platform.OS, draggedIndex, dragStartY, dragOverIndex, dayData.exercises.length]);
 
   const handleWebTouchEnd = () => {
     if (Platform.OS === 'web' && draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
@@ -284,7 +358,8 @@ Return ONLY the JSON array, no other text.`;
         ...dayData,
         exercises
       };
-      savePlan(updatedDayData);
+      // Immediate save for drag action
+      savePlan(updatedDayData, true);
     }
     setDraggedIndex(null);
     setDragOverIndex(null);
@@ -330,12 +405,9 @@ Return ONLY the JSON array, no other text.`;
             styles.exerciseCard, 
             (isActive || isDragging) && styles.exerciseCardActive
           ]}
-          onStartShouldSetResponder={Platform.OS === 'web' ? () => true : () => false}
-          onMoveShouldSetResponder={Platform.OS === 'web' ? () => true : () => false}
-          onResponderGrant={Platform.OS === 'web' ? (e) => handleWebTouchStart(index, e) : undefined}
-          onResponderMove={Platform.OS === 'web' ? (e) => handleWebTouchMove(index, e) : undefined}
-          onResponderRelease={Platform.OS === 'web' ? handleWebTouchEnd : undefined}
-          onResponderTerminate={Platform.OS === 'web' ? handleWebTouchEnd : undefined}
+          // Only allow drag from grip handle, not entire card
+          onStartShouldSetResponder={Platform.OS === 'web' ? () => false : () => false}
+          onMoveShouldSetResponder={Platform.OS === 'web' ? () => false : () => false}
         >
         <View style={styles.exerciseHeader}>
           {Platform.OS !== 'web' && drag ? (
@@ -349,6 +421,24 @@ Return ONLY the JSON array, no other text.`;
               disabled={isActive}
               style={styles.dragHandleContainer}
               hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            >
+              <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
+            </TouchableOpacity>
+          ) : Platform.OS === 'web' ? (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onMouseDown={(e: any) => {
+                e.stopPropagation();
+                e.preventDefault();
+                dragAllowedRef.current = index;
+                handleWebTouchStart(index, e);
+              }}
+              onTouchStart={(e: any) => {
+                e.stopPropagation();
+                dragAllowedRef.current = index;
+                handleWebTouchStart(index, e);
+              }}
+              style={styles.dragHandleContainer}
             >
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
             </TouchableOpacity>
@@ -376,7 +466,14 @@ Return ONLY the JSON array, no other text.`;
               onChangeText={(text) => updateExercise(index, 'name', text)}
               placeholder="Exercise name"
               placeholderTextColor="#6b7280"
-              editable={!isActive && !isDragging}
+              editable={!isActive}
+              onFocus={() => {
+                // Prevent drag when focusing on input
+                if (Platform.OS === 'web') {
+                  dragAllowedRef.current = null;
+                  setDraggedIndex(null);
+                }
+              }}
             />
           )}
           <TouchableOpacity onPress={() => removeExercise(index)}>
@@ -392,7 +489,7 @@ Return ONLY the JSON array, no other text.`;
               value={item.target_sets?.toString() || '3'}
               onChangeText={(text) => updateExercise(index, 'target_sets', parseInt(text) || 3)}
               keyboardType="numeric"
-              editable={!isActive && !isDragging}
+              editable={!isActive}
             />
           </View>
           <View style={styles.exerciseField}>
@@ -401,7 +498,7 @@ Return ONLY the JSON array, no other text.`;
               style={styles.fieldInput}
               value={item.target_reps || '8-12'}
               onChangeText={(text) => updateExercise(index, 'target_reps', text)}
-              editable={!isActive && !isDragging}
+              editable={!isActive}
             />
           </View>
           <View style={styles.exerciseField}>
@@ -411,7 +508,7 @@ Return ONLY the JSON array, no other text.`;
               value={item.rest_time_sec?.toString() || '60'}
               onChangeText={(text) => updateExercise(index, 'rest_time_sec', parseInt(text) || 60)}
               keyboardType="numeric"
-              editable={!isActive && !isDragging}
+              editable={!isActive}
             />
           </View>
         </View>
@@ -423,7 +520,14 @@ Return ONLY the JSON array, no other text.`;
           placeholder="Notes (optional)"
           placeholderTextColor="#6b7280"
           multiline
-          editable={!isActive && !isDragging}
+          editable={!isActive}
+          onFocus={() => {
+            // Prevent drag when focusing on input
+            if (Platform.OS === 'web') {
+              dragAllowedRef.current = null;
+              setDraggedIndex(null);
+            }
+          }}
         />
       </View>
     );
@@ -437,20 +541,6 @@ Return ONLY the JSON array, no other text.`;
         </TouchableOpacity>
         <Text style={styles.title}>{day}</Text>
         <View style={styles.headerSpacer} />
-      </View>
-
-      <View style={styles.focusCard}>
-        <Text style={styles.focusLabel}>Focus</Text>
-        <TextInput
-          style={styles.focusInput}
-          value={dayData.focus || "Rest"}
-          onChangeText={(text) => {
-            const updated = { ...dayData, focus: text };
-            savePlan(updated);
-          }}
-          placeholder="e.g., Push, Pull, Legs"
-          placeholderTextColor="#6b7280"
-        />
       </View>
 
       <View style={styles.exercisesHeader}>
@@ -551,9 +641,6 @@ Return ONLY the JSON array, no other text.`;
                   )}
                   <View 
                     style={{ pointerEvents: isActive ? 'none' : 'auto' }}
-                    // Prevent the card from being draggable by default
-                    onStartShouldSetResponder={() => false}
-                    onMoveShouldSetResponder={() => false}
                   >
                     {renderExerciseCard(item, index, conditionalDrag, isActive)}
                   </View>
@@ -625,9 +712,6 @@ const styles = StyleSheet.create({
   backButton: { marginRight: 16 },
   headerSpacer: { width: 40 },
   title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', flex: 1 },
-  focusCard: { backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 24, borderWidth: 1, borderColor: '#374151' },
-  focusLabel: { color: '#9ca3af', fontSize: 14, marginBottom: 8 },
-  focusInput: { color: 'white', fontSize: 18, fontWeight: '500' },
   exercisesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   addButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
