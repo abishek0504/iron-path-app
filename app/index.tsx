@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,6 +8,10 @@ export default function WelcomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
+        <Image 
+          source={require('../assets/splash-icon.png')} 
+          style={styles.logo}
+        />
         <Text style={styles.title}>IronPath</Text>
         <Text style={styles.subtitle}>Track your progress. Build your path.</Text>
         
@@ -38,6 +42,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 24,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    alignSelf: 'center',
+    marginBottom: 24,
   },
   title: {
     fontSize: 42,

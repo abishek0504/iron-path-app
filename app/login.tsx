@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 
@@ -53,6 +53,10 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
+      <Image 
+        source={require('../assets/splash-icon.png')} 
+        style={styles.logo}
+      />
       <Text style={styles.title}>IronPath</Text>
       <Text style={styles.subtitle}>Track your progress. Build your path.</Text>
       
@@ -102,6 +106,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#111827',
     justifyContent: 'center',
     padding: 24,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    alignSelf: 'center',
+    marginBottom: 24,
   },
   title: {
     fontSize: 32,

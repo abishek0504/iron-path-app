@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 
@@ -71,6 +71,10 @@ export default function SignupScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      <Image 
+        source={require('../assets/splash-icon.png')} 
+        style={styles.logo}
+      />
       <Text style={styles.title}>Create Account</Text>
       <Text style={styles.subtitle}>Join IronPath</Text>
       
@@ -131,6 +135,13 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111827' },
   contentContainer: { padding: 24, paddingTop: 60 },
+  logo: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    alignSelf: 'center',
+    marginBottom: 24,
+  },
   title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', marginBottom: 8 },
   subtitle: { color: '#9ca3af', textAlign: 'center', marginBottom: 32 },
   input: { backgroundColor: '#1f2937', color: 'white', padding: 16, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#374151', justifyContent: 'center' },
