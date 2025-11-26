@@ -14,6 +14,7 @@ export default function RootLayout() {
       <Stack.Screen name="planner-day" options={{ presentation: 'modal' }} />
       <Stack.Screen name="exercise-select" options={{ presentation: 'modal' }} />
       <Stack.Screen name="workout-active" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="edit-profile" options={{ presentation: 'modal' }} />
     </Stack>
   );
 
