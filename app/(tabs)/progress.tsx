@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, Modal, ActivityIndicator, RefreshControl, TextInput, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
-import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
 
 type ViewMode = 'week' | 'month' | 'timeline';
@@ -67,6 +67,7 @@ export default function ProgressScreen() {
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [deleteConfirmType, setDeleteConfirmType] = useState<'set' | 'workout'>('set');
   const [deleteConfirmData, setDeleteConfirmData] = useState<{sessionIdx?: number; exerciseIdx?: number; setIdx?: number; setId?: number | null; sessionId?: number | null} | null>(null);
+  const [unsavedChangesVisible, setUnsavedChangesVisible] = useState(false);
   
   // Week view state
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => {
@@ -642,12 +643,14 @@ export default function ProgressScreen() {
   const handleEdit = () => {
     if (selectedWorkout) {
       setEditingWorkout(JSON.parse(JSON.stringify(selectedWorkout))); // Deep copy
+      setDeletedSetIds(new Set()); // Reset deleted sets tracking
       setIsEditing(true);
     }
   };
 
   const handleCancelEdit = () => {
     setIsEditing(false);
+    setDeletedSetIds(new Set()); // Clear deleted sets tracking
     if (selectedWorkout) {
       setEditingWorkout(JSON.parse(JSON.stringify(selectedWorkout)));
     }
@@ -665,25 +668,66 @@ export default function ProgressScreen() {
         return;
       }
 
-      // Collect all sets that need to be updated
+      // Collect all sets that need to be updated and new sets that need to be created
       const updates: Array<{ id: number; weight: number | null; reps: number | null; notes: string | null }> = [];
+      const newSets: Array<{ sessionIdx: number; exerciseName: string; weight: number | null; reps: number | null; notes: string | null; sessionId: number | null; planId: number | null; day: string | null; performedAt: string }> = [];
 
-      editingWorkout.sessions.forEach(session => {
+      editingWorkout.sessions.forEach((session, sessionIdx) => {
         session.exercises.forEach(exercise => {
           exercise.sets.forEach(set => {
+            // Skip sets that are marked for deletion
+            if (set.id && deletedSetIds.has(set.id)) {
+              return;
+            }
+            
             if (set.id) {
+              // Existing set - update it
               updates.push({
                 id: set.id,
                 weight: set.weight,
                 reps: set.reps,
                 notes: set.notes
               });
+            } else {
+              // New set - create it
+              // Only create if it has valid data (weight or reps)
+              if (set.weight !== null || set.reps !== null) {
+                newSets.push({
+                  sessionIdx,
+                  exerciseName: exercise.name,
+                  weight: set.weight,
+                  reps: set.reps,
+                  notes: set.notes,
+                  sessionId: session.session.id,
+                  planId: session.session.plan_id,
+                  day: session.session.day,
+                  performedAt: selectedWorkout.date // Use the workout date
+                });
+              }
             }
           });
         });
       });
 
-      // Update each log entry
+      // Delete sets that were marked for deletion
+      if (deletedSetIds.size > 0) {
+        for (const setId of deletedSetIds) {
+          const { error } = await supabase
+            .from('workout_logs')
+            .delete()
+            .eq('id', setId)
+            .eq('user_id', user.id);
+
+          if (error) {
+            console.error('Error deleting set:', error);
+            Alert.alert("Error", `Failed to delete set: ${error.message}`);
+            setSaving(false);
+            return;
+          }
+        }
+      }
+
+      // Update existing log entries
       for (const update of updates) {
         const { error } = await supabase
           .from('workout_logs')
@@ -703,9 +747,37 @@ export default function ProgressScreen() {
         }
       }
 
+      // Create new log entries
+      if (newSets.length > 0) {
+        const workoutDate = new Date(selectedWorkout.date);
+        const inserts = newSets.map(newSet => ({
+          user_id: user.id,
+          exercise_name: newSet.exerciseName,
+          weight: newSet.weight,
+          reps: newSet.reps,
+          notes: newSet.notes,
+          performed_at: workoutDate.toISOString(),
+          session_id: newSet.sessionId,
+          plan_id: newSet.planId,
+          day: newSet.day
+        }));
+
+        const { error: insertError } = await supabase
+          .from('workout_logs')
+          .insert(inserts);
+
+        if (insertError) {
+          console.error('Error creating new logs:', insertError);
+          Alert.alert("Error", `Failed to create new sets: ${insertError.message}`);
+          setSaving(false);
+          return;
+        }
+      }
+
       // Reload data and exit edit mode
       await loadWorkoutData();
       setIsEditing(false);
+      setDeletedSetIds(new Set()); // Clear deleted sets tracking
       setSelectedWorkout(editingWorkout);
       Alert.alert("Success", "Workout updated successfully!");
     } catch (error: any) {
@@ -742,6 +814,50 @@ export default function ProgressScreen() {
     setEditingWorkout(updated);
   };
 
+  const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
+  const [newExerciseName, setNewExerciseName] = useState('');
+  const [deletedSetIds, setDeletedSetIds] = useState<Set<number>>(new Set());
+
+  const handleAddExercise = () => {
+    if (!editingWorkout || editingWorkout.sessions.length === 0) return;
+    setNewExerciseName('');
+    setShowAddExerciseModal(true);
+  };
+
+  const confirmAddExercise = () => {
+    if (!newExerciseName || !newExerciseName.trim()) {
+      Alert.alert("Error", "Please enter an exercise name.");
+      return;
+    }
+
+    if (!editingWorkout || editingWorkout.sessions.length === 0) return;
+
+    const updated = JSON.parse(JSON.stringify(editingWorkout));
+    // Add to the first session (or create a new exercise in the first session)
+    if (updated.sessions.length > 0) {
+      const firstSession = updated.sessions[0];
+      // Check if exercise already exists
+      let exerciseEntry = firstSession.exercises.find((e: any) => e.name === newExerciseName.trim());
+      if (!exerciseEntry) {
+        exerciseEntry = {
+          name: newExerciseName.trim(),
+          sets: []
+        };
+        firstSession.exercises.push(exerciseEntry);
+      }
+      // Add an empty set to the exercise
+      exerciseEntry.sets.push({
+        id: null, // New set, no ID yet
+        weight: null,
+        reps: null,
+        notes: null
+      });
+      setEditingWorkout(updated);
+      setShowAddExerciseModal(false);
+      setNewExerciseName('');
+    }
+  };
+
   const handleDeleteSet = async (sessionIdx: number, exerciseIdx: number, setIdx: number, setId: number | null) => {
     if (!setId) return;
 
@@ -755,35 +871,15 @@ export default function ProgressScreen() {
     const { sessionIdx, exerciseIdx, setId } = deleteConfirmData;
     if (sessionIdx === undefined || exerciseIdx === undefined || !setId) return;
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        Alert.alert("Error", "You must be logged in to delete sets.");
-        setDeleteConfirmVisible(false);
-        setDeleteConfirmData(null);
-        return;
-      }
-
-      const { error } = await supabase
-        .from('workout_logs')
-        .delete()
-        .eq('id', setId)
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('Error deleting set:', error);
-        Alert.alert("Error", `Failed to delete set: ${error.message}`);
-        setDeleteConfirmVisible(false);
-        setDeleteConfirmData(null);
-        return;
-      }
-
-      // Update local state immediately
-      if (selectedWorkout) {
-        const updatedWorkout = JSON.parse(JSON.stringify(selectedWorkout));
-        const session = updatedWorkout.sessions[sessionIdx];
+    if (isEditing) {
+      // In edit mode: just mark for deletion and update local state
+      setDeletedSetIds(prev => new Set(prev).add(setId));
+      
+      if (editingWorkout) {
+        const updated = JSON.parse(JSON.stringify(editingWorkout));
+        const session = updated.sessions[sessionIdx];
         if (session && session.exercises[exerciseIdx]) {
-          // Remove the deleted set
+          // Remove the deleted set from local state
           session.exercises[exerciseIdx].sets = session.exercises[exerciseIdx].sets.filter((s: any) => s.id !== setId);
           
           // Remove exercise if no sets remain
@@ -803,29 +899,82 @@ export default function ProgressScreen() {
           
           // Remove session if no exercises remain
           if (session.exercises.length === 0) {
-            updatedWorkout.sessions = updatedWorkout.sessions.filter((_: any, idx: number) => idx !== sessionIdx);
+            updated.sessions = updated.sessions.filter((_: any, idx: number) => idx !== sessionIdx);
           }
           
-          setSelectedWorkout(updatedWorkout);
-          if (editingWorkout) {
-            setEditingWorkout(JSON.parse(JSON.stringify(updatedWorkout)));
-          }
+          setEditingWorkout(updated);
         }
       }
+      
+      setDeleteConfirmVisible(false);
+      setDeleteConfirmData(null);
+    } else {
+      // Not in edit mode: delete immediately from database
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          Alert.alert("Error", "You must be logged in to delete sets.");
+          setDeleteConfirmVisible(false);
+          setDeleteConfirmData(null);
+          return;
+        }
 
-      // Reload data in background
-      loadWorkoutData();
-      setDeleteConfirmVisible(false);
-      // Restore workout detail modal if it was open (set deletion doesn't close the modal)
-      if (deleteConfirmData?.wasModalOpen) {
-        setModalVisible(true);
+        const { error } = await supabase
+          .from('workout_logs')
+          .delete()
+          .eq('id', setId)
+          .eq('user_id', user.id);
+
+        if (error) {
+          console.error('Error deleting set:', error);
+          Alert.alert("Error", `Failed to delete set: ${error.message}`);
+          setDeleteConfirmVisible(false);
+          setDeleteConfirmData(null);
+          return;
+        }
+
+        // Update local state immediately
+        if (selectedWorkout) {
+          const updatedWorkout = JSON.parse(JSON.stringify(selectedWorkout));
+          const session = updatedWorkout.sessions[sessionIdx];
+          if (session && session.exercises[exerciseIdx]) {
+            // Remove the deleted set
+            session.exercises[exerciseIdx].sets = session.exercises[exerciseIdx].sets.filter((s: any) => s.id !== setId);
+            
+            // Remove exercise if no sets remain
+            if (session.exercises[exerciseIdx].sets.length === 0) {
+              session.exercises = session.exercises.filter((_: any, idx: number) => idx !== exerciseIdx);
+            } else {
+              // Recalculate total volume
+              session.totalVolume = 0;
+              session.exercises.forEach((ex: any) => {
+                ex.sets.forEach((s: any) => {
+                  if (s.weight && s.reps) {
+                    session.totalVolume += s.weight * s.reps;
+                  }
+                });
+              });
+            }
+            
+            // Remove session if no exercises remain
+            if (session.exercises.length === 0) {
+              updatedWorkout.sessions = updatedWorkout.sessions.filter((_: any, idx: number) => idx !== sessionIdx);
+            }
+            
+            setSelectedWorkout(updatedWorkout);
+          }
+        }
+
+        // Reload data in background
+        loadWorkoutData();
+        setDeleteConfirmVisible(false);
+        setDeleteConfirmData(null);
+      } catch (error: any) {
+        console.error('Error deleting set:', error);
+        setDeleteConfirmVisible(false);
+        setDeleteConfirmData(null);
+        Alert.alert("Error", "Failed to delete set.");
       }
-      setDeleteConfirmData(null);
-    } catch (error: any) {
-      console.error('Error deleting set:', error);
-      setDeleteConfirmVisible(false);
-      setDeleteConfirmData(null);
-      Alert.alert("Error", "Failed to delete set.");
     }
   };
 
@@ -978,21 +1127,7 @@ export default function ProgressScreen() {
         transparent={true}
         onRequestClose={() => {
           if (isEditing) {
-            Alert.alert(
-              "Unsaved Changes",
-              "You have unsaved changes. Are you sure you want to close?",
-              [
-                { text: "Cancel", style: "cancel" },
-                { 
-                  text: "Discard", 
-                  style: "destructive",
-                  onPress: () => {
-                    setIsEditing(false);
-                    setModalVisible(false);
-                  }
-                }
-              ]
-            );
+            setUnsavedChangesVisible(true);
           } else {
             setModalVisible(false);
           }
@@ -1021,51 +1156,30 @@ export default function ProgressScreen() {
                     )}
                   </>
                 ) : (
-                  <>
-                    <TouchableOpacity 
-                      onPress={handleSaveEdit} 
-                      style={[styles.modalActionButton, styles.modalSaveButton]}
-                      disabled={saving}
-                    >
-                      {saving ? (
-                        <ActivityIndicator size="small" color="#3b82f6" />
-                      ) : (
-                        <Save color="#3b82f6" size={20} />
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      onPress={handleCancelEdit} 
-                      style={styles.modalActionButton}
-                      disabled={saving}
-                    >
-                      <X color="#9ca3af" size={20} />
-                    </TouchableOpacity>
-                  </>
+                  <TouchableOpacity 
+                    onPress={handleSaveEdit} 
+                    style={[styles.modalActionButton, styles.modalSaveButton]}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <ActivityIndicator size="small" color="#3b82f6" />
+                    ) : (
+                      <Save color="#3b82f6" size={20} />
+                    )}
+                  </TouchableOpacity>
                 )}
                 <TouchableOpacity 
                   onPress={() => {
                     if (isEditing) {
-                      Alert.alert(
-                        "Unsaved Changes",
-                        "You have unsaved changes. Are you sure you want to close?",
-                        [
-                          { text: "Cancel", style: "cancel" },
-                          { 
-                            text: "Discard", 
-                            style: "destructive",
-                            onPress: () => {
-                              setIsEditing(false);
-                              setModalVisible(false);
-                            }
-                          }
-                        ]
-                      );
+                      setUnsavedChangesVisible(true);
                     } else {
                       setModalVisible(false);
                     }
                   }}
+                  style={styles.modalActionButton}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.modalClose}>✕</Text>
+                  <X color="#9ca3af" size={24} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1096,7 +1210,20 @@ export default function ProgressScreen() {
                         <View key={setIdx} style={styles.modalSet}>
                           {isEditing ? (
                             <View style={styles.modalSetEdit}>
-                              <Text style={styles.modalSetLabel}>Set {setIdx + 1}</Text>
+                              <View style={styles.modalSetEditHeader}>
+                                <Text style={styles.modalSetLabel}>Set {setIdx + 1}</Text>
+                                {set.id && (
+                                  <TouchableOpacity 
+                                    onPress={() => {
+                                      handleDeleteSet(idx, exIdx, setIdx, set.id);
+                                    }}
+                                    style={styles.modalDeleteSetButton}
+                                    activeOpacity={0.7}
+                                  >
+                                    <Trash2 color="#ef4444" size={16} />
+                                  </TouchableOpacity>
+                                )}
+                              </View>
                               <View style={styles.modalSetInputs}>
                                 <View style={styles.modalSetInputGroup}>
                                   <Text style={styles.modalSetInputLabel}>Weight (lbs)</Text>
@@ -1143,17 +1270,6 @@ export default function ProgressScreen() {
                                   <Text style={styles.modalNotes}>{set.notes}</Text>
                                 )}
                               </View>
-                              {set.id && (
-                                <TouchableOpacity 
-                                  onPress={() => {
-                                    handleDeleteSet(idx, exIdx, setIdx, set.id);
-                                  }}
-                                  style={styles.modalDeleteSetButton}
-                                  activeOpacity={0.7}
-                                >
-                                  <Trash2 color="#ef4444" size={16} />
-                                </TouchableOpacity>
-                              )}
                             </View>
                           )}
                         </View>
@@ -1163,8 +1279,89 @@ export default function ProgressScreen() {
                 </View>
               ))}
             </ScrollView>
+            
+            {/* Add Exercise Button - Only shown in edit mode */}
+            {isEditing && displayWorkout.sessions.length > 0 && (
+              <View style={styles.modalAddExerciseContainer}>
+                <TouchableOpacity
+                  style={styles.modalAddExerciseButton}
+                  onPress={handleAddExercise}
+                  activeOpacity={0.7}
+                >
+                  <Plus color="#3b82f6" size={20} />
+                  <Text style={styles.modalAddExerciseText}>Add Exercise</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
           
+          {/* Add Exercise Modal */}
+          {showAddExerciseModal && (
+            <View style={styles.addExerciseModalOverlay}>
+              <View style={styles.addExerciseModalContent}>
+                <Text style={styles.addExerciseModalTitle}>Add Exercise</Text>
+                <TextInput
+                  style={styles.addExerciseModalInput}
+                  placeholder="Enter exercise name"
+                  placeholderTextColor="#6b7280"
+                  value={newExerciseName}
+                  onChangeText={setNewExerciseName}
+                  autoCapitalize="words"
+                  autoFocus
+                />
+                <View style={styles.addExerciseModalButtons}>
+                  <TouchableOpacity
+                    style={[styles.addExerciseModalButton, styles.addExerciseModalButtonCancel]}
+                    onPress={() => {
+                      setShowAddExerciseModal(false);
+                      setNewExerciseName('');
+                    }}
+                  >
+                    <Text style={styles.addExerciseModalButtonCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addExerciseModalButton, styles.addExerciseModalButtonAdd]}
+                    onPress={confirmAddExercise}
+                  >
+                    <Text style={styles.addExerciseModalButtonAddText}>Add</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Unsaved Changes Confirmation Overlay - Rendered inside workout detail modal */}
+          {unsavedChangesVisible && (
+            <View style={styles.deleteConfirmOverlay}>
+              <View style={styles.deleteConfirmContent}>
+                <Text style={styles.deleteConfirmTitle}>Unsaved Changes</Text>
+                <Text style={styles.deleteConfirmMessage}>
+                  You have unsaved changes. Are you sure you want to close?
+                </Text>
+                <View style={styles.deleteConfirmButtons}>
+                  <TouchableOpacity
+                    style={[styles.deleteConfirmButton, styles.deleteConfirmButtonCancel]}
+                    onPress={() => {
+                      setUnsavedChangesVisible(false);
+                    }}
+                  >
+                    <Text style={styles.deleteConfirmButtonCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.deleteConfirmButton, styles.deleteConfirmButtonDelete]}
+                    onPress={() => {
+                      handleCancelEdit();
+                      setUnsavedChangesVisible(false);
+                      setModalVisible(false);
+                    }}
+                  >
+                    <Text style={styles.deleteConfirmButtonDeleteText}>Discard</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
           {/* Delete Confirmation Overlay - Rendered inside workout detail modal */}
           {deleteConfirmVisible && (
             <View style={styles.deleteConfirmOverlay}>
@@ -1174,10 +1371,12 @@ export default function ProgressScreen() {
                 </Text>
                 <Text style={styles.deleteConfirmMessage}>
                   {deleteConfirmType === 'set' 
-                    ? 'Are you sure you want to delete this set? This action cannot be undone.'
+                    ? isEditing 
+                      ? 'Are you sure you want to delete this set? You can undo this by canceling your edits.'
+                      : 'Are you sure you want to delete this set?'
                     : deleteConfirmData?.sessionId
-                      ? 'Are you sure you want to delete this entire workout? This will delete all sets and the workout session. This action cannot be undone.'
-                      : 'Are you sure you want to delete all sets from this workout? This action cannot be undone.'}
+                      ? 'Are you sure you want to delete this entire workout? This will delete all sets and the workout session.'
+                      : 'Are you sure you want to delete all sets from this workout?'}
                 </Text>
                 <View style={styles.deleteConfirmButtons}>
                   <TouchableOpacity
@@ -1780,6 +1979,12 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     lineHeight: 22,
   },
+  modalSetEditHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   modalSetEdit: {
     marginTop: 8,
   },
@@ -1903,6 +2108,95 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Add Exercise Button
+  modalAddExerciseContainer: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    backgroundColor: '#111827',
+  },
+  modalAddExerciseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1f2937',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+    gap: 8,
+  },
+  modalAddExerciseText: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Add Exercise Modal
+  addExerciseModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    zIndex: 1001,
+  },
+  addExerciseModalContent: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  addExerciseModalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 16,
+  },
+  addExerciseModalInput: {
+    backgroundColor: '#111827',
+    color: 'white',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  addExerciseModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  addExerciseModalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  addExerciseModalButtonCancel: {
+    backgroundColor: '#374151',
+  },
+  addExerciseModalButtonAdd: {
+    backgroundColor: '#3b82f6',
+  },
+  addExerciseModalButtonCancelText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  addExerciseModalButtonAddText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 
