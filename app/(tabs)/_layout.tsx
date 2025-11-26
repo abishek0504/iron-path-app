@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Dumbbell, Calendar, Activity } from "lucide-react-native";
+import { Dumbbell, Calendar, TrendingUp } from "lucide-react-native";
 
 export default function TabLayout() {
   return (
@@ -25,10 +25,10 @@ export default function TabLayout() {
         }} 
       />
       <Tabs.Screen 
-        name="tracker" 
+        name="progress" 
         options={{ 
-          title: "History", 
-          tabBarIcon: ({ color }) => <Activity size={24} color={color} /> 
+          title: "Progress", 
+          tabBarIcon: ({ color }) => <TrendingUp size={24} color={color} /> 
         }} 
       />
     </Tabs>

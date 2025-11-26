@@ -13,6 +13,7 @@ export default function HomeScreen() {
   const [todayData, setTodayData] = useState<any>(null);
   const [currentDay, setCurrentDay] = useState<string>('');
   const [hasActiveWorkout, setHasActiveWorkout] = useState<boolean>(false);
+  const [isWorkoutCompleted, setIsWorkoutCompleted] = useState<boolean>(false);
 
   useEffect(() => {
     const dayIndex = new Date().getDay();
@@ -49,7 +50,7 @@ export default function HomeScreen() {
           
           // Check for active workout session
           if (currentDay) {
-            const { data: sessionData, error: sessionError } = await supabase
+            const { data: activeSession, error: activeSessionError } = await supabase
               .from('workout_sessions')
               .select('id')
               .eq('user_id', user.id)
@@ -58,18 +59,39 @@ export default function HomeScreen() {
               .eq('status', 'active')
               .maybeSingle();
             
+            // Check for completed workout session
+            const { data: completedSession, error: completedSessionError } = await supabase
+              .from('workout_sessions')
+              .select('id')
+              .eq('user_id', user.id)
+              .eq('plan_id', planData.id)
+              .eq('day', currentDay)
+              .eq('status', 'completed')
+              .maybeSingle();
+            
             // Only set based on data existence, ignore acceptable errors
-            if (sessionError && sessionError.code !== 'PGRST116' && !sessionError.message?.includes('schema cache')) {
-              console.error('Error checking active workout:', sessionError);
+            if (activeSessionError && activeSessionError.code !== 'PGRST116' && !activeSessionError.message?.includes('schema cache')) {
+              console.error('Error checking active workout:', activeSessionError);
             }
-            // Set based on whether data exists, regardless of acceptable errors
-            if (isMounted) setHasActiveWorkout(!!sessionData);
+            if (completedSessionError && completedSessionError.code !== 'PGRST116' && !completedSessionError.message?.includes('schema cache')) {
+              console.error('Error checking completed workout:', completedSessionError);
+            }
+            
+            // Set states based on whether data exists
+            if (isMounted) {
+              setHasActiveWorkout(!!activeSession);
+              setIsWorkoutCompleted(!!completedSession && !activeSession);
+            }
           } else {
-            if (isMounted) setHasActiveWorkout(false);
+            if (isMounted) {
+              setHasActiveWorkout(false);
+              setIsWorkoutCompleted(false);
+            }
           }
         } else if (isMounted) {
           setActivePlan(null);
           setHasActiveWorkout(false);
+          setIsWorkoutCompleted(false);
         }
       };
       
@@ -159,11 +181,22 @@ export default function HomeScreen() {
             </View>
 
             <TouchableOpacity
-              style={styles.startButton}
+              style={[
+                styles.startButton,
+                isWorkoutCompleted && styles.startButtonCompleted
+              ]}
               onPress={handleStartWorkout}
+              disabled={isWorkoutCompleted}
             >
-              <Text style={styles.startButtonText}>
-                {hasActiveWorkout ? 'Continue Workout' : 'Start Workout'}
+              <Text style={[
+                styles.startButtonText,
+                isWorkoutCompleted && styles.startButtonTextCompleted
+              ]}>
+                {isWorkoutCompleted 
+                  ? 'Completed' 
+                  : hasActiveWorkout 
+                    ? 'Continue Workout' 
+                    : 'Start Workout'}
               </Text>
             </TouchableOpacity>
           </>
@@ -192,5 +225,7 @@ const styles = StyleSheet.create({
   exerciseItem: { color: 'white', fontSize: 16, marginBottom: 8 },
   moreExercises: { color: '#9ca3af', fontSize: 14, marginTop: 4 },
   startButton: { backgroundColor: '#2563eb', padding: 18, borderRadius: 8, alignItems: 'center', justifyContent: 'center', minHeight: 56 },
+  startButtonCompleted: { backgroundColor: '#374151', opacity: 0.6 },
   startButtonText: { color: 'white', fontSize: 20, fontWeight: 'bold' },
+  startButtonTextCompleted: { color: '#9ca3af' },
 });
