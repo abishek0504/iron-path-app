@@ -804,8 +804,8 @@ export default function WorkoutActiveScreen() {
             };
             
             const targetRepsRange = parseTargetReps(targetReps);
-            const actualReps = parseInt(loggedReps);
-            const repsMatch = actualReps >= targetRepsRange.min && actualReps <= targetRepsRange.max;
+            const actualReps = loggedReps ? parseInt(loggedReps) : null;
+            const repsMatch = actualReps !== null && !isNaN(actualReps) && actualReps >= targetRepsRange.min && actualReps <= targetRepsRange.max;
             const actualDuration = parseInt(loggedDuration);
             const durationMatch = actualDuration >= targetDuration * 0.9 && actualDuration <= targetDuration * 1.1;
 
@@ -905,8 +905,7 @@ export default function WorkoutActiveScreen() {
                           <TextInput
                             style={[
                               styles.logInput,
-                              styles.logInputFlex,
-                              loggedReps && !repsMatch && styles.logInputWarning
+                              styles.logInputFlex
                             ]}
                             value={loggedReps}
                             onChangeText={(text) => {
@@ -918,7 +917,7 @@ export default function WorkoutActiveScreen() {
                             placeholder="0"
                             placeholderTextColor="#6b7280"
                           />
-                          {loggedReps && (
+                          {loggedReps && actualReps !== null && !isNaN(actualReps) && (
                             <View style={styles.comparisonBadge}>
                               {repsMatch ? (
                                 <Check color="#10b981" size={16} />

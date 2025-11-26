@@ -486,29 +486,53 @@ Return ONLY the JSON array, no other text.`;
             <Text style={styles.fieldLabel}>Sets</Text>
             <TextInput
               style={styles.fieldInput}
-              value={item.target_sets?.toString() || '3'}
-              onChangeText={(text) => updateExercise(index, 'target_sets', parseInt(text) || 3)}
+              value={item.target_sets?.toString() || ''}
+              onChangeText={(text) => {
+                if (text === '') {
+                  updateExercise(index, 'target_sets', null);
+                } else {
+                  const num = parseInt(text);
+                  if (!isNaN(num)) {
+                    updateExercise(index, 'target_sets', num);
+                  }
+                }
+              }}
               keyboardType="numeric"
               editable={!isActive}
+              placeholder="3"
+              placeholderTextColor="#6b7280"
             />
           </View>
           <View style={styles.exerciseField}>
             <Text style={styles.fieldLabel}>Reps</Text>
             <TextInput
               style={styles.fieldInput}
-              value={item.target_reps || '8-12'}
-              onChangeText={(text) => updateExercise(index, 'target_reps', text)}
+              value={item.target_reps || ''}
+              onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
               editable={!isActive}
+              placeholder="8-12"
+              placeholderTextColor="#6b7280"
             />
           </View>
           <View style={styles.exerciseField}>
             <Text style={styles.fieldLabel}>Rest (sec)</Text>
             <TextInput
               style={styles.fieldInput}
-              value={item.rest_time_sec?.toString() || '60'}
-              onChangeText={(text) => updateExercise(index, 'rest_time_sec', parseInt(text) || 60)}
+              value={item.rest_time_sec?.toString() || ''}
+              onChangeText={(text) => {
+                if (text === '') {
+                  updateExercise(index, 'rest_time_sec', null);
+                } else {
+                  const num = parseInt(text);
+                  if (!isNaN(num)) {
+                    updateExercise(index, 'rest_time_sec', num);
+                  }
+                }
+              }}
               keyboardType="numeric"
               editable={!isActive}
+              placeholder="60"
+              placeholderTextColor="#6b7280"
             />
           </View>
         </View>
