@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Image, ActivityIndicator, Platform } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Image, ActivityIndicator, Platform, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, Upload, X } from 'lucide-react-native';
+import { Camera, Upload, X, Check } from 'lucide-react-native';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
@@ -27,6 +27,9 @@ export default function EditProfileScreen() {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(-100)).current;
 
   useEffect(() => {
     loadProfile();
@@ -184,6 +187,40 @@ export default function EditProfileScreen() {
     }
   };
 
+  const showToastMessage = () => {
+    setShowToast(true);
+    Animated.parallel([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(toastTranslateY, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(toastTranslateY, {
+          toValue: -100,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setShowToast(false);
+        router.back();
+      });
+    }, 2000);
+  };
+
   const saveProfile = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -209,16 +246,31 @@ export default function EditProfileScreen() {
 
     if (error) {
       Alert.alert('Error', error.message);
+      setLoading(false);
     } else {
-      Alert.alert('Success', 'Profile updated successfully', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+      setLoading(false);
+      showToastMessage();
     }
-    setLoading(false);
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      {showToast && (
+        <Animated.View
+          style={[
+            styles.toastContainer,
+            {
+              opacity: toastOpacity,
+              transform: [{ translateY: toastTranslateY }],
+            },
+          ]}
+        >
+          <View style={styles.toastContent}>
+            <Check size={20} color="#10b981" />
+            <Text style={styles.toastText}>Changes saved</Text>
+          </View>
+        </Animated.View>
+      )}
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()}>
@@ -665,5 +717,36 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  toastContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#10b981',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
