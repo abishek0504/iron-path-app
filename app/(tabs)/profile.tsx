@@ -1,14 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Image, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Edit, LogOut } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
 
+const kgToLbs = (kg: number): number => kg / 0.453592;
+const cmToFtIn = (cm: number): { feet: number; inches: number } => {
+  const totalInches = cm / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  return { feet, inches };
+};
+
 export default function ProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
 
   useFocusEffect(
     useCallback(() => {
@@ -34,6 +43,8 @@ export default function ProfileScreen() {
       console.error('Error loading profile:', error);
     } else if (data) {
       setProfile(data);
+      // Load unit preference from database, default to true (imperial) if not set
+      setUseImperial(data.use_imperial !== null && data.use_imperial !== undefined ? data.use_imperial : true);
     }
     setLoading(false);
   };
@@ -100,18 +111,37 @@ export default function ProfileScreen() {
 
           <View style={styles.infoCard}>
             <Text style={styles.infoLabel}>Current Weight</Text>
-            <Text style={styles.infoValue}>{profile.current_weight ? `${profile.current_weight} lbs` : 'Not set'}</Text>
+            <Text style={styles.infoValue}>
+              {profile.current_weight 
+                ? useImperial 
+                  ? `${kgToLbs(profile.current_weight).toFixed(1)} lbs`
+                  : `${profile.current_weight.toFixed(1)} kg`
+                : 'Not set'}
+            </Text>
           </View>
 
           <View style={styles.infoCard}>
             <Text style={styles.infoLabel}>Goal Weight</Text>
-            <Text style={styles.infoValue}>{profile.goal_weight ? `${profile.goal_weight} lbs` : 'Not set'}</Text>
+            <Text style={styles.infoValue}>
+              {profile.goal_weight 
+                ? useImperial 
+                  ? `${kgToLbs(profile.goal_weight).toFixed(1)} lbs`
+                  : `${profile.goal_weight.toFixed(1)} kg`
+                : 'Not set'}
+            </Text>
           </View>
 
           {profile.height && (
             <View style={styles.infoCard}>
               <Text style={styles.infoLabel}>Height</Text>
-              <Text style={styles.infoValue}>{profile.height} cm</Text>
+              <Text style={styles.infoValue}>
+                {useImperial 
+                  ? (() => {
+                      const { feet, inches } = cmToFtIn(profile.height);
+                      return `${feet}'${inches}"`;
+                    })()
+                  : `${profile.height.toFixed(1)} cm`}
+              </Text>
             </View>
           )}
 

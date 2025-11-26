@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Image, ActivityIndicator, Platform, Animated } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Image, ActivityIndicator, Platform, Animated, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
@@ -8,6 +8,17 @@ import { Camera, Upload, X, Check } from 'lucide-react-native';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
+
+const lbsToKg = (lbs: number): number => lbs * 0.453592;
+const kgToLbs = (kg: number): number => kg / 0.453592;
+
+const ftInToCm = (feet: number, inches: number): number => (feet * 30.48) + (inches * 2.54);
+const cmToFtIn = (cm: number): { feet: number; inches: number } => {
+  const totalInches = cm / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  return { feet, inches };
+};
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -21,8 +32,11 @@ export default function EditProfileScreen() {
   const [currentWeight, setCurrentWeight] = useState('');
   const [goalWeight, setGoalWeight] = useState('');
   const [height, setHeight] = useState('');
+  const [heightFeet, setHeightFeet] = useState('');
+  const [heightInches, setHeightInches] = useState('');
   const [goal, setGoal] = useState('');
   const [profilePictureUri, setProfilePictureUri] = useState<string | null>(null);
+  const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
 
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
@@ -35,6 +49,52 @@ export default function EditProfileScreen() {
     loadProfile();
     requestImagePermission();
   }, []);
+
+  useEffect(() => {
+    if (profile) {
+      // Reload display values when unit preference changes
+      // Database always stores weight in kg, so we need to convert for display
+      if (profile.current_weight !== null && profile.current_weight !== undefined) {
+        const weightInKg = parseFloat(String(profile.current_weight));
+        if (!isNaN(weightInKg)) {
+          if (useImperial) {
+            // Convert from kg (database) to lbs (display)
+            const weightInLbs = kgToLbs(weightInKg);
+            setCurrentWeight(weightInLbs.toFixed(1));
+          } else {
+            // Display in kg (same as database)
+            setCurrentWeight(weightInKg.toFixed(1));
+          }
+        }
+      }
+      if (profile.goal_weight !== null && profile.goal_weight !== undefined) {
+        const goalWeightInKg = parseFloat(String(profile.goal_weight));
+        if (!isNaN(goalWeightInKg)) {
+          if (useImperial) {
+            // Convert from kg (database) to lbs (display)
+            const goalWeightInLbs = kgToLbs(goalWeightInKg);
+            setGoalWeight(goalWeightInLbs.toFixed(1));
+          } else {
+            // Display in kg (same as database)
+            setGoalWeight(goalWeightInKg.toFixed(1));
+          }
+        }
+      }
+      if (profile.height) {
+        const heightInCm = profile.height;
+        if (useImperial) {
+          const { feet, inches } = cmToFtIn(heightInCm);
+          setHeightFeet(feet.toString());
+          setHeightInches(inches.toString());
+          setHeight('');
+        } else {
+          setHeight(heightInCm.toFixed(1));
+          setHeightFeet('');
+          setHeightInches('');
+        }
+      }
+    }
+  }, [useImperial, profile]);
 
   const requestImagePermission = async () => {
     if (Platform.OS !== 'web') {
@@ -64,12 +124,70 @@ export default function EditProfileScreen() {
 
     if (data) {
       setProfile(data);
+      // Load unit preference from database, default to true (imperial) if not set
+      const loadedUseImperial = data.use_imperial !== null && data.use_imperial !== undefined ? data.use_imperial : true;
+      setUseImperial(loadedUseImperial);
+      
       setFullName(data.full_name || '');
       setAge(data.age?.toString() || '');
       setGender(data.gender || '');
-      setCurrentWeight(data.current_weight?.toString() || '');
-      setGoalWeight(data.goal_weight?.toString() || '');
-      setHeight(data.height?.toString() || '');
+      
+      // Always convert from kg (database storage) to display units
+      // Database always stores weight in kg, so we need to convert for display
+      if (data.current_weight !== null && data.current_weight !== undefined) {
+        const weightInKg = parseFloat(String(data.current_weight));
+        if (!isNaN(weightInKg)) {
+          if (loadedUseImperial) {
+            // Convert from kg (database) to lbs (display)
+            const weightInLbs = kgToLbs(weightInKg);
+            setCurrentWeight(weightInLbs.toFixed(1));
+          } else {
+            // Display in kg (same as database)
+            setCurrentWeight(weightInKg.toFixed(1));
+          }
+        } else {
+          setCurrentWeight('');
+        }
+      } else {
+        setCurrentWeight('');
+      }
+      
+      if (data.goal_weight !== null && data.goal_weight !== undefined) {
+        const goalWeightInKg = parseFloat(String(data.goal_weight));
+        if (!isNaN(goalWeightInKg)) {
+          if (loadedUseImperial) {
+            // Convert from kg (database) to lbs (display)
+            const goalWeightInLbs = kgToLbs(goalWeightInKg);
+            setGoalWeight(goalWeightInLbs.toFixed(1));
+          } else {
+            // Display in kg (same as database)
+            setGoalWeight(goalWeightInKg.toFixed(1));
+          }
+        } else {
+          setGoalWeight('');
+        }
+      } else {
+        setGoalWeight('');
+      }
+      
+      if (data.height) {
+        const heightInCm = data.height;
+        if (loadedUseImperial) {
+          const { feet, inches } = cmToFtIn(heightInCm);
+          setHeightFeet(feet.toString());
+          setHeightInches(inches.toString());
+          setHeight('');
+        } else {
+          setHeight(heightInCm.toFixed(1));
+          setHeightFeet('');
+          setHeightInches('');
+        }
+      } else {
+        setHeightFeet('');
+        setHeightInches('');
+        setHeight('');
+      }
+      
       setGoal(data.goal || '');
       setProfilePictureUri(data.avatar_url || null);
     }
@@ -229,14 +347,39 @@ export default function EditProfileScreen() {
       return;
     }
 
+    let weightKg: number | null = null;
+    let goalWeightKg: number | null = null;
+    let heightCm: number | null = null;
+
+    if (currentWeight) {
+      const weightValue = parseFloat(currentWeight);
+      weightKg = useImperial ? lbsToKg(weightValue) : weightValue;
+    }
+
+    if (goalWeight) {
+      const goalWeightValue = parseFloat(goalWeight);
+      goalWeightKg = useImperial ? lbsToKg(goalWeightValue) : goalWeightValue;
+    }
+
+    if (useImperial) {
+      const feet = parseInt(heightFeet, 10);
+      const inches = parseInt(heightInches, 10);
+      if (!isNaN(feet) && !isNaN(inches)) {
+        heightCm = ftInToCm(feet, inches);
+      }
+    } else if (height) {
+      heightCm = parseFloat(height);
+    }
+
     const updateData: any = {
       full_name: fullName,
       age: age ? parseInt(age, 10) : null,
       gender: gender || null,
-      current_weight: currentWeight ? parseFloat(currentWeight) : null,
-      goal_weight: goalWeight ? parseFloat(goalWeight) : null,
-      height: height ? parseFloat(height) : null,
+      current_weight: weightKg,
+      goal_weight: goalWeightKg,
+      height: heightCm,
       goal: goal || null,
+      use_imperial: useImperial,
     };
 
     const { error } = await supabase
@@ -323,6 +466,101 @@ export default function EditProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
           
+          <View style={styles.unitToggleContainer}>
+            <Text style={styles.unitToggleLabel}>Units</Text>
+            <View style={styles.unitToggleRow}>
+              <Text style={[styles.unitToggleText, !useImperial && styles.unitToggleTextActive]}>Metric</Text>
+              <Switch
+                value={useImperial}
+                onValueChange={(value) => {
+                  const newUseImperial = value;
+                  
+                  // Convert weight values - database always stores in kg
+                  // If switching from imperial to metric: convert displayed lbs back to kg (database format)
+                  // If switching from metric to imperial: convert kg (database format) to lbs
+                  if (profile) {
+                    if (profile.current_weight) {
+                      const weightInKg = Number(profile.current_weight);
+                      if (newUseImperial) {
+                        setCurrentWeight(kgToLbs(weightInKg).toFixed(1));
+                      } else {
+                        setCurrentWeight(weightInKg.toFixed(1));
+                      }
+                    }
+                    
+                    if (profile.goal_weight) {
+                      const goalWeightInKg = Number(profile.goal_weight);
+                      if (newUseImperial) {
+                        setGoalWeight(kgToLbs(goalWeightInKg).toFixed(1));
+                      } else {
+                        setGoalWeight(goalWeightInKg.toFixed(1));
+                      }
+                    }
+                    
+                    if (profile.height) {
+                      const heightInCm = Number(profile.height);
+                      if (newUseImperial) {
+                        const { feet, inches } = cmToFtIn(heightInCm);
+                        setHeightFeet(feet.toString());
+                        setHeightInches(inches.toString());
+                        setHeight('');
+                      } else {
+                        setHeight(heightInCm.toFixed(1));
+                        setHeightFeet('');
+                        setHeightInches('');
+                      }
+                    }
+                  } else {
+                    // If profile not loaded yet, convert from current displayed values
+                    if (currentWeight) {
+                      const weightValue = parseFloat(currentWeight);
+                      if (useImperial && !newUseImperial) {
+                        // Converting from lbs (display) to kg (database format)
+                        setCurrentWeight(lbsToKg(weightValue).toFixed(1));
+                      } else if (!useImperial && newUseImperial) {
+                        // Converting from kg (display) to lbs
+                        setCurrentWeight(kgToLbs(weightValue).toFixed(1));
+                      }
+                    }
+                    
+                    if (goalWeight) {
+                      const goalWeightValue = parseFloat(goalWeight);
+                      if (useImperial && !newUseImperial) {
+                        setGoalWeight(lbsToKg(goalWeightValue).toFixed(1));
+                      } else if (!useImperial && newUseImperial) {
+                        setGoalWeight(kgToLbs(goalWeightValue).toFixed(1));
+                      }
+                    }
+                    
+                    if (useImperial && !newUseImperial) {
+                      const feet = parseInt(heightFeet, 10);
+                      const inches = parseInt(heightInches, 10);
+                      if (!isNaN(feet) && !isNaN(inches)) {
+                        const cm = ftInToCm(feet, inches);
+                        setHeight(cm.toFixed(1));
+                        setHeightFeet('');
+                        setHeightInches('');
+                      }
+                    } else if (!useImperial && newUseImperial) {
+                      const cm = parseFloat(height);
+                      if (!isNaN(cm)) {
+                        const { feet, inches } = cmToFtIn(cm);
+                        setHeightFeet(feet.toString());
+                        setHeightInches(inches.toString());
+                        setHeight('');
+                      }
+                    }
+                  }
+                  
+                  setUseImperial(newUseImperial);
+                }}
+                trackColor={{ false: '#374151', true: '#3b82f6' }}
+                thumbColor="#ffffff"
+              />
+              <Text style={[styles.unitToggleText, useImperial && styles.unitToggleTextActive]}>Imperial</Text>
+            </View>
+          </View>
+          
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Full Name</Text>
             <TextInput
@@ -362,40 +600,63 @@ export default function EditProfileScreen() {
 
           <View style={styles.row}>
             <View style={[styles.inputGroup, styles.halfWidth]}>
-              <Text style={styles.label}>Current Weight (lbs)</Text>
+              <Text style={styles.label}>Current Weight {useImperial ? '(lbs)' : '(kg)'}</Text>
               <TextInput
                 style={styles.input}
                 value={currentWeight}
                 onChangeText={setCurrentWeight}
                 keyboardType="numeric"
-                placeholder="150"
+                placeholder={useImperial ? "150" : "68"}
                 placeholderTextColor="#666"
               />
             </View>
 
             <View style={[styles.inputGroup, styles.halfWidth]}>
-              <Text style={styles.label}>Goal Weight (lbs)</Text>
+              <Text style={styles.label}>Goal Weight {useImperial ? '(lbs)' : '(kg)'}</Text>
               <TextInput
                 style={styles.input}
                 value={goalWeight}
                 onChangeText={setGoalWeight}
                 keyboardType="numeric"
-                placeholder="140"
+                placeholder={useImperial ? "140" : "64"}
                 placeholderTextColor="#666"
               />
             </View>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Height (cm)</Text>
-            <TextInput
-              style={styles.input}
-              value={height}
-              onChangeText={setHeight}
-              keyboardType="numeric"
-              placeholder="175"
-              placeholderTextColor="#666"
-            />
+            <Text style={styles.label}>Height {useImperial ? '(ft/in)' : '(cm)'}</Text>
+            {useImperial ? (
+              <View style={styles.heightRow}>
+                <TextInput
+                  style={[styles.input, styles.heightInput]}
+                  value={heightFeet}
+                  onChangeText={setHeightFeet}
+                  keyboardType="number-pad"
+                  placeholder="5"
+                  placeholderTextColor="#666"
+                />
+                <Text style={styles.heightSeparator}>ft</Text>
+                <TextInput
+                  style={[styles.input, styles.heightInput]}
+                  value={heightInches}
+                  onChangeText={setHeightInches}
+                  keyboardType="number-pad"
+                  placeholder="10"
+                  placeholderTextColor="#666"
+                />
+                <Text style={styles.heightSeparator}>in</Text>
+              </View>
+            ) : (
+              <TextInput
+                style={styles.input}
+                value={height}
+                onChangeText={setHeight}
+                keyboardType="numeric"
+                placeholder="175"
+                placeholderTextColor="#666"
+              />
+            )}
           </View>
 
           <View style={styles.inputGroup}>
@@ -748,5 +1009,45 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  unitToggleContainer: {
+    backgroundColor: '#1f2937',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginBottom: 24,
+  },
+  unitToggleLabel: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  unitToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  unitToggleText: {
+    color: '#9ca3af',
+    fontSize: 16,
+  },
+  unitToggleTextActive: {
+    color: '#3b82f6',
+    fontWeight: '600',
+  },
+  heightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heightInput: {
+    flex: 1,
+    minWidth: 60,
+  },
+  heightSeparator: {
+    color: '#9ca3af',
+    fontSize: 14,
   },
 });
