@@ -18,6 +18,18 @@ const EQUIPMENT_OPTIONS = [
 
 export default function OnboardingEquipmentScreen() {
   const router = useRouter();
+
+  const safeBack = () => {
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/onboarding');
+      }
+    } catch (error) {
+      router.push('/onboarding');
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<string[]>([]);
   const [fullGymAccess, setFullGymAccess] = useState(false);
@@ -133,7 +145,7 @@ export default function OnboardingEquipmentScreen() {
       <View style={styles.buttonRow}>
         <TouchableOpacity
           style={styles.buttonSecondary}
-          onPress={() => router.back()}
+          onPress={safeBack}
           disabled={loading}
         >
           <Text style={styles.buttonSecondaryText}>Back</Text>

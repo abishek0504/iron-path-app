@@ -7,6 +7,18 @@ import { supabase } from '../src/lib/supabase';
 
 export default function ExerciseSelectScreen() {
   const router = useRouter();
+
+  const safeBack = () => {
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/(tabs)/planner');
+      }
+    } catch (error) {
+      router.push('/(tabs)/planner');
+    }
+  };
   const { planId, day, exerciseIndex } = useLocalSearchParams<{ planId: string; day: string; exerciseIndex?: string }>();
   const [searchQuery, setSearchQuery] = useState('');
   const [masterExercises, setMasterExercises] = useState<string[]>([]);
@@ -106,7 +118,7 @@ export default function ExerciseSelectScreen() {
       }
 
       Alert.alert("Success", "Exercise added!");
-      router.back();
+      safeBack();
     } catch (error: any) {
       console.error('Error adding exercise:', error);
       Alert.alert("Error", error.message || "Failed to add exercise.");
@@ -204,7 +216,7 @@ export default function ExerciseSelectScreen() {
       setNewExerciseName('');
       setNewExerciseDescription('');
       Alert.alert("Success", "Custom exercise created and added!");
-      router.back();
+      safeBack();
     } catch (error: any) {
       console.error('Error creating custom exercise:', error);
       Alert.alert("Error", error.message || "Failed to create custom exercise.");
@@ -266,7 +278,7 @@ export default function ExerciseSelectScreen() {
       }
 
       Alert.alert("Success", "Custom exercise added!");
-      router.back();
+      safeBack();
     } catch (error: any) {
       console.error('Error adding custom exercise:', error);
       Alert.alert("Error", error.message || "Failed to add exercise.");
@@ -284,7 +296,7 @@ export default function ExerciseSelectScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Select Exercise</Text>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={safeBack}>
           <X color="#9ca3af" size={24} />
         </TouchableOpacity>
       </View>

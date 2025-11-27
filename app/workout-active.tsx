@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ActivityIndicator, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown } from 'lucide-react-native';
+import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -54,6 +54,18 @@ interface WorkoutProgress {
 export default function WorkoutActiveScreen() {
   const router = useRouter();
   const { day, planId } = useLocalSearchParams<{ day: string; planId: string }>();
+
+  const safeBack = () => {
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/(tabs)/home');
+      }
+    } catch (error) {
+      router.push('/(tabs)/home');
+    }
+  };
   
   const [plan, setPlan] = useState<any>(null);
   const [exercises, setExercises] = useState<any[]>([]);
@@ -64,7 +76,7 @@ export default function WorkoutActiveScreen() {
   
   // Timer states
   const [restTimer, setRestTimer] = useState<{ active: boolean; seconds: number } | null>(null);
-  const [exerciseTimer, setExerciseTimer] = useState<{ active: boolean; seconds: number } | null>(null);
+  const [exerciseTimer, setExerciseTimer] = useState<{ active: boolean; seconds: number; countdown: boolean; targetDuration: number; paused: boolean } | null>(null);
   const restTimerInterval = useRef<NodeJS.Timeout | null>(null);
   const exerciseTimerInterval = useRef<NodeJS.Timeout | null>(null);
   
@@ -72,6 +84,8 @@ export default function WorkoutActiveScreen() {
   const [showLoggingScreen, setShowLoggingScreen] = useState(false);
   const [completedExerciseIndex, setCompletedExerciseIndex] = useState<number | null>(null);
   const [setLogs, setSetLogs] = useState<Array<{ reps: string; weight: string; duration: string; notes: string }>>([]);
+  const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
+  const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showLoggingExitConfirm, setShowLoggingExitConfirm] = useState(false);
 
@@ -111,11 +125,32 @@ export default function WorkoutActiveScreen() {
   }, [restTimer?.active]);
 
   useEffect(() => {
-    if (exerciseTimer?.active) {
+    if (exerciseTimer?.active && !exerciseTimer?.paused) {
       exerciseTimerInterval.current = setInterval(() => {
         setExerciseTimer(prev => {
           if (!prev) return null;
-          return { ...prev, seconds: prev.seconds + 1 };
+          
+          if (prev.countdown) {
+            // 3-second countdown phase
+            if (prev.seconds <= 1) {
+              // Countdown finished, start exercise timer
+              return {
+                active: true,
+                seconds: prev.targetDuration,
+                countdown: false,
+                targetDuration: prev.targetDuration,
+                paused: false
+              };
+            }
+            return { ...prev, seconds: prev.seconds - 1 };
+          } else {
+            // Exercise countdown phase
+            if (prev.seconds <= 1) {
+              // Timer finished - keep active but set to 0 so UI shows complete button
+              return { ...prev, seconds: 0, active: true, paused: false };
+            }
+            return { ...prev, seconds: prev.seconds - 1 };
+          }
         });
       }, 1000);
     } else {
@@ -127,7 +162,45 @@ export default function WorkoutActiveScreen() {
     return () => {
       if (exerciseTimerInterval.current) clearInterval(exerciseTimerInterval.current);
     };
-  }, [exerciseTimer?.active]);
+  }, [exerciseTimer?.active, exerciseTimer?.paused]);
+
+  // Ensure duration maps are initialized when logging screen is shown
+  useEffect(() => {
+    if (showLoggingScreen && completedExerciseIndex !== null) {
+      const exercise = exercises[completedExerciseIndex];
+      const detail = exerciseDetails.get(exercise.name);
+      const isTimed = detail?.is_timed || false;
+      
+      if (isTimed) {
+        const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+        const totalSets = exercise.target_sets || 3;
+        
+        // Check if maps need initialization
+        let needsInit = false;
+        for (let i = 0; i < totalSets; i++) {
+          if (!durationMinutes.has(i) || !durationSeconds.has(i)) {
+            needsInit = true;
+            break;
+          }
+        }
+        
+        if (needsInit) {
+          const minsMap = new Map(durationMinutes);
+          const secsMap = new Map(durationSeconds);
+          for (let i = 0; i < totalSets; i++) {
+            if (!minsMap.has(i) || !secsMap.has(i)) {
+              const mins = Math.floor(targetDuration / 60);
+              const secs = targetDuration % 60;
+              minsMap.set(i, mins.toString());
+              secsMap.set(i, secs.toString());
+            }
+          }
+          setDurationMinutes(minsMap);
+          setDurationSeconds(secsMap);
+        }
+      }
+    }
+  }, [showLoggingScreen, completedExerciseIndex, exercises, exerciseDetails]);
 
   const reconstructProgressFromLogs = async (
     exercises: any[],
@@ -204,7 +277,7 @@ export default function WorkoutActiveScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         Alert.alert("Error", "You must be logged in.");
-        router.back();
+        safeBack();
         return;
       }
 
@@ -217,7 +290,7 @@ export default function WorkoutActiveScreen() {
 
       if (planError || !planData) {
         Alert.alert("Error", "Failed to load workout plan.");
-        router.back();
+        safeBack();
         return;
       }
 
@@ -225,7 +298,7 @@ export default function WorkoutActiveScreen() {
       const dayData = planData.plan_data?.week_schedule?.[day];
       if (!dayData || !dayData.exercises) {
         Alert.alert("Error", "No exercises found for this day.");
-        router.back();
+        safeBack();
         return;
       }
 
@@ -447,8 +520,15 @@ export default function WorkoutActiveScreen() {
     const isTimed = detail?.is_timed || false;
 
     if (isTimed) {
-      // Start exercise timer
-      setExerciseTimer({ active: true, seconds: 0 });
+      // Start 3-second countdown, then countdown from target duration
+      const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+      setExerciseTimer({ 
+        active: true, 
+        seconds: 3, // Start with 3-second countdown
+        countdown: true,
+        targetDuration: targetDuration,
+        paused: false
+      });
     } else {
       // Just mark set as complete (no logging yet)
       handleCompleteSet();
@@ -457,8 +537,8 @@ export default function WorkoutActiveScreen() {
 
   const handleCompleteTimedExercise = () => {
     if (!exerciseTimer) return;
+    // Timer completed - save target duration
     setExerciseTimer(null);
-    // Mark set as complete
     handleCompleteSet();
   };
 
@@ -484,12 +564,29 @@ export default function WorkoutActiveScreen() {
       };
     }
     
+    // For timed exercises, save the target duration if timer completed, or 0 if skipped
+    const detail = exerciseDetails.get(exercise.name);
+    const isTimed = detail?.is_timed || false;
+    let duration = null;
+    if (isTimed && exerciseTimer) {
+      if (exerciseTimer.seconds === 0 && !exerciseTimer.countdown) {
+        // Timer completed - save target duration
+        duration = exerciseTimer.targetDuration;
+      } else {
+        // Timer was skipped - save 0
+        duration = 0;
+      }
+    } else if (isTimed) {
+      // Timer was cleared (skipped) - save 0
+      duration = 0;
+    }
+    
     updatedProgress.exercises[exerciseIndex].sets[setIndex] = {
       setIndex,
       completed: true,
       reps: null, // Will be filled in logging screen
       weight: null,
-      duration: exerciseTimer ? exerciseTimer.seconds : null
+      duration: duration
     };
 
     // Check if all sets are complete for this exercise
@@ -502,12 +599,50 @@ export default function WorkoutActiveScreen() {
     if (allSetsComplete || isLastSet) {
       // Show logging screen
       const lastWeight = await getLastWeight(exercise.name);
-      setSetLogs(Array.from({ length: totalSets }, () => ({
-        reps: '',
-        weight: lastWeight ? lastWeight.toString() : '',
-        duration: '',
-        notes: ''
-      })));
+      const detail = exerciseDetails.get(exercise.name);
+      const isTimed = detail?.is_timed || false;
+      
+      // Parse target reps to get initial value (use min from range if range)
+      const parseTargetRepsForInit = (target: string): string => {
+        if (!target) return '';
+        if (target.includes('-')) {
+          const [min] = target.split('-').map(n => parseInt(n.trim()));
+          return min ? min.toString() : '';
+        }
+        const num = parseInt(target);
+        return isNaN(num) ? '' : num.toString();
+      };
+      
+      // Initialize logs with target values (user can edit if different)
+      const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+      const targetRepsValue = parseTargetRepsForInit(exercise.target_reps || '8-12');
+      
+      const initialLogs = Array.from({ length: totalSets }, (_, i) => {
+        return {
+          reps: isTimed ? '' : targetRepsValue,
+          weight: lastWeight ? lastWeight.toString() : '',
+          duration: '',
+          notes: ''
+        };
+      });
+      
+      setSetLogs(initialLogs);
+      
+      // Initialize duration minutes/seconds for timed exercises with target duration
+      if (isTimed) {
+        const minsMap = new Map<number, string>();
+        const secsMap = new Map<number, string>();
+        for (let i = 0; i < totalSets; i++) {
+          // Always use target duration as default (user can edit if different)
+          const mins = Math.floor(targetDuration / 60);
+          const secs = targetDuration % 60;
+          minsMap.set(i, mins.toString());
+          secsMap.set(i, secs.toString());
+        }
+        setDurationMinutes(minsMap);
+        setDurationSeconds(secsMap);
+      }
+      
       setCompletedExerciseIndex(exerciseIndex);
       setShowLoggingScreen(true);
       setExerciseTimer(null);
@@ -539,7 +674,11 @@ export default function WorkoutActiveScreen() {
     for (let i = 0; i < totalSets; i++) {
       const logData = setLogs[i] || {};
       if (isTimed) {
-        updatedProgress.exercises[completedExerciseIndex].sets[i].duration = parseInt(logData.duration) || 0;
+        // Convert minutes and seconds to total seconds
+        const mins = durationMinutes.has(i) ? (parseInt(durationMinutes.get(i) || '0') || 0) : 0;
+        const secs = durationSeconds.has(i) ? (parseInt(durationSeconds.get(i) || '0') || 0) : 0;
+        const totalSeconds = mins * 60 + secs;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].duration = totalSeconds;
       } else {
         updatedProgress.exercises[completedExerciseIndex].sets[i].reps = parseInt(logData.reps) || 0;
         updatedProgress.exercises[completedExerciseIndex].sets[i].weight = parseFloat(logData.weight) || null;
@@ -668,7 +807,8 @@ export default function WorkoutActiveScreen() {
     setRestTimer({ active: true, seconds: restTime });
   };
 
-  const formatTime = (seconds: number): string => {
+  const formatTime = (seconds: number | null | undefined): string => {
+    if (!seconds && seconds !== 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -704,7 +844,7 @@ export default function WorkoutActiveScreen() {
     // Check if workout is complete - if so, just navigate back
     const allExercisesComplete = progress.exercises.length > 0 && progress.exercises.every(ex => ex.completed);
     if (allExercisesComplete) {
-      router.back();
+      safeBack();
       return;
     }
     
@@ -736,10 +876,10 @@ export default function WorkoutActiveScreen() {
       
       // Small delay to ensure database update completes
       await new Promise(resolve => setTimeout(resolve, 100));
-      router.back();
+      safeBack();
     } catch (error) {
       console.error('Error saving progress on exit:', error);
-      router.back();
+      safeBack();
     }
   }, [progress, router, workoutSession]);
 
@@ -795,8 +935,18 @@ export default function WorkoutActiveScreen() {
             const targetReps = exercise.target_reps || '8-12';
             const loggedReps = setLogs[setIndex]?.reps || '';
             const loggedWeight = setLogs[setIndex]?.weight || '';
-            const loggedDuration = setLogs[setIndex]?.duration || '';
-            const targetDuration = detail?.default_duration_sec || 60;
+            const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+            
+            // Get duration from minutes/seconds inputs (pre-populated with target)
+            const minsFromMap = durationMinutes.has(setIndex) ? durationMinutes.get(setIndex) : null;
+            const secsFromMap = durationSeconds.has(setIndex) ? durationSeconds.get(setIndex) : null;
+            const currentMins = minsFromMap !== null && minsFromMap !== undefined && minsFromMap !== '' ? minsFromMap : Math.floor(targetDuration / 60).toString();
+            const currentSecs = secsFromMap !== null && secsFromMap !== undefined && secsFromMap !== '' ? secsFromMap : (targetDuration % 60).toString();
+            
+            // Calculate total seconds for comparison
+            const mins = currentMins ? (parseInt(currentMins) || 0) : 0;
+            const secs = currentSecs ? (parseInt(currentSecs) || 0) : 0;
+            const actualDuration = mins * 60 + secs;
             
             // Parse target reps (handle ranges like "8-12")
             const parseTargetReps = (target: string): { min: number; max: number } => {
@@ -811,8 +961,8 @@ export default function WorkoutActiveScreen() {
             const targetRepsRange = parseTargetReps(targetReps);
             const actualReps = loggedReps ? parseInt(loggedReps) : null;
             const repsMatch = actualReps !== null && !isNaN(actualReps) && actualReps >= targetRepsRange.min && actualReps <= targetRepsRange.max;
-            const actualDuration = parseInt(loggedDuration);
-            const durationMatch = actualDuration >= targetDuration * 0.9 && actualDuration <= targetDuration * 1.1;
+            // Duration match: within 10% tolerance (90% to 110%)
+            const durationMatch = actualDuration > 0 && actualDuration >= targetDuration * 0.9 && actualDuration <= targetDuration * 1.1;
 
             return (
               <View key={setIndex} style={styles.setLogCard}>
@@ -825,7 +975,7 @@ export default function WorkoutActiveScreen() {
                     {isTimed ? (
                       <View style={styles.targetItem}>
                         <Text style={styles.targetLabel}>Duration:</Text>
-                        <Text style={styles.targetValue}>{targetDuration}s</Text>
+                        <Text style={styles.targetValue}>{formatTime(targetDuration)}</Text>
                       </View>
                     ) : (
                       <>
@@ -849,37 +999,78 @@ export default function WorkoutActiveScreen() {
                   <Text style={styles.loggedSectionTitle}>Logged</Text>
                   {isTimed ? (
                     <View style={styles.logInputGroup}>
-                      <Text style={styles.logLabel}>Duration (seconds)</Text>
-                        <View style={styles.inputWithComparison}>
-                          <TextInput
-                            style={[
-                              styles.logInput,
-                              styles.logInputFlex,
-                              loggedDuration && !durationMatch && styles.logInputWarning
-                            ]}
-                            value={loggedDuration}
-                            onChangeText={(text) => {
-                              const newLogs = [...setLogs];
-                              newLogs[setIndex] = { ...newLogs[setIndex], duration: text, notes: newLogs[setIndex]?.notes || '' };
-                              setSetLogs(newLogs);
-                            }}
-                            keyboardType="numeric"
-                            placeholder="0"
-                            placeholderTextColor="#6b7280"
-                          />
-                          {loggedDuration && (
-                            <View style={styles.comparisonBadge}>
-                              {durationMatch ? (
-                                <Check color="#10b981" size={16} />
-                              ) : (
-                                <TrendingDown color="#ef4444" size={16} />
-                              )}
-                              <Text style={[styles.comparisonText, durationMatch ? styles.comparisonTextGood : styles.comparisonTextBad]}>
-                                {actualDuration >= targetDuration ? 'Met' : 'Below'}
-                              </Text>
-                            </View>
-                          )}
+                      <Text style={styles.logLabel}>Duration</Text>
+                      <View style={styles.logInputRow}>
+                        <View style={styles.logInputHalf}>
+                          <Text style={styles.logLabel}>Min</Text>
+                          <View style={styles.inputWithComparison}>
+                            <TextInput
+                              style={[
+                                styles.logInput,
+                                styles.logInputFlex
+                              ]}
+                              value={currentMins}
+                              onChangeText={(text) => {
+                                // Allow empty string or valid number
+                                if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0)) {
+                                  setDurationMinutes(prev => {
+                                    const newMap = new Map(prev);
+                                    newMap.set(setIndex, text);
+                                    return newMap;
+                                  });
+                                }
+                              }}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              placeholderTextColor="#6b7280"
+                            />
+                          </View>
                         </View>
+                        <View style={styles.logInputHalf}>
+                          <Text style={styles.logLabel}>Sec</Text>
+                          <View style={styles.inputWithComparison}>
+                            <TextInput
+                              style={[
+                                styles.logInput,
+                                styles.logInputFlex
+                              ]}
+                              value={currentSecs}
+                              onChangeText={(text) => {
+                                // Allow empty string or valid number (0-59)
+                                if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0 && parseInt(text) < 60)) {
+                                  setDurationSeconds(prev => {
+                                    const newMap = new Map(prev);
+                                    newMap.set(setIndex, text);
+                                    return newMap;
+                                  });
+                                }
+                              }}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              placeholderTextColor="#6b7280"
+                            />
+                            {actualDuration > 0 && (
+                              <View style={styles.comparisonBadge}>
+                                {durationMatch ? (
+                                  <Check color="#10b981" size={16} />
+                                ) : actualDuration > targetDuration * 1.1 ? (
+                                  <TrendingUp color="#3b82f6" size={16} />
+                                ) : (
+                                  <TrendingDown color="#ef4444" size={16} />
+                                )}
+                                <Text style={[
+                                  styles.comparisonText,
+                                  durationMatch ? styles.comparisonTextGood :
+                                  actualDuration > targetDuration * 1.1 ? styles.comparisonTextBetter :
+                                  styles.comparisonTextBad
+                                ]}>
+                                  {durationMatch ? 'Met' : actualDuration > targetDuration * 1.1 ? 'Above' : 'Below'}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      </View>
                     </View>
                   ) : (
                     <View style={styles.logInputRow}>
@@ -1018,7 +1209,7 @@ export default function WorkoutActiveScreen() {
               onPress={(e) => {
                 e?.stopPropagation?.();
                 console.log('X button pressed - completion screen');
-                router.back();
+                safeBack();
               }}
               onPressIn={(e) => {
                 e?.stopPropagation?.();
@@ -1042,7 +1233,7 @@ export default function WorkoutActiveScreen() {
           <Text style={styles.completionSubtitle}>Great job completing your workout!</Text>
           <TouchableOpacity
             style={styles.completeWorkoutButton}
-            onPress={() => router.back()}
+            onPress={safeBack}
           >
             <Text style={styles.completeWorkoutButtonText}>Return to Home</Text>
           </TouchableOpacity>
@@ -1161,7 +1352,7 @@ export default function WorkoutActiveScreen() {
             <Text style={styles.infoLabel}>Target:</Text>
             <Text style={styles.infoValue}>
               {isTimed 
-                ? `${detail?.default_duration_sec || 60}s` 
+                ? `${formatTime(exercise.target_duration_sec || detail?.default_duration_sec || 60)}` 
                 : `${exercise.target_reps || '8-12'} reps`}
             </Text>
           </View>
@@ -1196,14 +1387,58 @@ export default function WorkoutActiveScreen() {
           <View style={styles.exerciseTimerContainer}>
             <Clock color="#10b981" size={32} />
             <Text style={styles.exerciseTimerText}>
-              {formatTime(exerciseTimer.seconds)}
+              {exerciseTimer.countdown ? exerciseTimer.seconds : formatTime(exerciseTimer.seconds)}
             </Text>
-            <TouchableOpacity
-              style={styles.completeTimerButton}
-              onPress={handleCompleteTimedExercise}
-            >
-              <Text style={styles.completeTimerButtonText}>Complete Exercise</Text>
-            </TouchableOpacity>
+            {exerciseTimer.countdown && (
+              <Text style={styles.countdownLabel}>Get ready...</Text>
+            )}
+            {exerciseTimer.seconds === 0 && !exerciseTimer.countdown ? (
+              <TouchableOpacity
+                style={styles.completeTimerButton}
+                onPress={handleCompleteTimedExercise}
+              >
+                <Text style={styles.completeTimerButtonText}>Complete Set</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.timerButtons}>
+                {!exerciseTimer.countdown && (
+                  <>
+                    {exerciseTimer.paused ? (
+                      <TouchableOpacity
+                        style={[styles.timerControlButton, { backgroundColor: '#10b981' }]}
+                        onPress={() => {
+                          setExerciseTimer(prev => prev ? { ...prev, paused: false } : null);
+                        }}
+                      >
+                        <Play color="white" size={20} />
+                        <Text style={styles.timerControlButtonText}>Resume</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={[styles.timerControlButton, { backgroundColor: '#f59e0b' }]}
+                        onPress={() => {
+                          setExerciseTimer(prev => prev ? { ...prev, paused: true } : null);
+                        }}
+                      >
+                        <Pause color="white" size={20} />
+                        <Text style={styles.timerControlButtonText}>Pause</Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
+                )}
+                <TouchableOpacity
+                  style={[styles.skipButton, { backgroundColor: '#10b981', marginLeft: 0 }]}
+                  onPress={() => {
+                    // Skip timer - save 0 seconds and complete the set
+                    setExerciseTimer(null);
+                    handleCompleteSet();
+                  }}
+                >
+                  <SkipForward color="white" size={20} />
+                  <Text style={styles.skipButtonText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
@@ -1231,12 +1466,23 @@ export default function WorkoutActiveScreen() {
         {!exerciseTimer?.active && !restTimer?.active && !allSetsComplete && (
           <View style={styles.actionButtons}>
             {!isSetComplete && (
-              <TouchableOpacity
-                style={styles.completeSetButton}
-                onPress={handleStartSet}
-              >
-                <Text style={styles.completeSetButtonText}>Complete Set</Text>
-              </TouchableOpacity>
+              <>
+                {isTimed ? (
+                  <TouchableOpacity
+                    style={styles.completeSetButton}
+                    onPress={handleStartSet}
+                  >
+                    <Text style={styles.completeSetButtonText}>Start Timer</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.completeSetButton}
+                    onPress={handleStartSet}
+                  >
+                    <Text style={styles.completeSetButtonText}>Complete Set</Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
           </View>
         )}
@@ -1362,6 +1608,30 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: 'bold',
     marginVertical: 16,
+  },
+  countdownLabel: {
+    color: '#10b981',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  timerButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  timerControlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  timerControlButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
   completeTimerButton: {
     backgroundColor: '#10b981',
