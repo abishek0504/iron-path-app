@@ -25,17 +25,17 @@ export default function TabLayout() {
         }} 
       />
       <Tabs.Screen 
-        name="profile" 
-        options={{ 
-          title: "Profile", 
-          tabBarIcon: ({ color }) => <User size={24} color={color} /> 
-        }} 
-      />
-      <Tabs.Screen 
         name="progress" 
         options={{ 
           title: "Progress", 
           tabBarIcon: ({ color }) => <TrendingUp size={24} color={color} /> 
+        }} 
+      />
+      <Tabs.Screen 
+        name="profile" 
+        options={{ 
+          title: "Profile", 
+          tabBarIcon: ({ color }) => <User size={24} color={color} /> 
         }} 
       />
     </Tabs>
