@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
+<<<<<<< Updated upstream
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Image, ActivityIndicator, Platform, Animated } from 'react-native';
+=======
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, ActivityIndicator, Platform, Animated, Switch } from 'react-native';
+import { Image } from 'expo-image';
+>>>>>>> Stashed changes
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Camera, Upload, X, Check } from 'lucide-react-native';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
@@ -28,6 +34,7 @@ export default function EditProfileScreen() {
   const [showGoalPicker, setShowGoalPicker] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const toastTranslateY = useRef(new Animated.Value(-100)).current;
 
@@ -113,20 +120,29 @@ export default function EditProfileScreen() {
         throw new Error('User not found');
       }
 
-      const response = await fetch(uri);
+      // Resize and compress the image to 400x400 pixels
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 400, height: 400 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      const response = await fetch(manipulatedImage.uri);
       const blob = await response.blob();
-      const fileExt = uri.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      
+      // Use jpg extension for consistency
+      const fileName = `${user.id}-${Date.now()}.jpg`;
       const filePath = `avatars/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(filePath, blob, {
-          contentType: `image/${fileExt}`,
+          contentType: 'image/jpeg',
           upsert: true,
         });
 
       if (uploadError) {
+        console.error('Upload error:', uploadError);
         throw uploadError;
       }
 
@@ -134,54 +150,86 @@ export default function EditProfileScreen() {
         .from('avatars')
         .getPublicUrl(filePath);
 
+      console.log('Public URL:', publicUrl);
+      console.log('File path:', filePath);
+
+      // Update local state immediately for preview
       setProfilePictureUri(publicUrl);
 
+      // Update database
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ avatar_url: publicUrl })
         .eq('id', user.id);
 
       if (updateError) {
+        console.error('Database update error:', updateError);
         throw updateError;
       }
 
+      // Reload profile to ensure state is in sync
+      await loadProfile();
+      
       Alert.alert('Success', 'Profile picture updated!');
     } catch (error: any) {
       console.error('Error uploading image:', error);
-      Alert.alert('Error', error.message || 'Failed to upload image');
+      Alert.alert('Error', error.message || 'Failed to upload image. Please check that the avatars storage bucket exists and has proper permissions.');
     } finally {
       setUploading(false);
     }
   };
 
-  const removeImage = async () => {
+  const removeImage = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteImage = async () => {
+    setShowDeleteConfirm(false);
     setUploading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      if (profilePictureUri) {
-        const urlParts = profilePictureUri.split('/');
-        const fileName = urlParts[urlParts.length - 1];
-        const filePath = `avatars/${fileName}`;
-
-        await supabase.storage
-          .from('avatars')
-          .remove([filePath]);
+      if (!user) {
+        setUploading(false);
+        return;
       }
 
-      const { error } = await supabase
+      if (profilePictureUri) {
+        // Extract the file path from the URL
+        // Supabase URLs are typically: https://[project].supabase.co/storage/v1/object/public/avatars/[filename]
+        const urlParts = profilePictureUri.split('/');
+        const fileName = urlParts[urlParts.length - 1].split('?')[0]; // Remove query params if any
+        const filePath = `avatars/${fileName}`;
+
+        console.log('Deleting file from storage:', filePath);
+
+        // Delete from storage
+        const { error: storageError } = await supabase.storage
+          .from('avatars')
+          .remove([filePath]);
+
+        if (storageError) {
+          console.error('Storage delete error:', storageError);
+          // Continue with database update even if storage delete fails
+        }
+      }
+
+      // Update database to remove avatar_url
+      const { error: updateError } = await supabase
         .from('profiles')
         .update({ avatar_url: null })
         .eq('id', user.id);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       setProfilePictureUri(null);
-      Alert.alert('Success', 'Profile picture removed');
+      
+      // Reload profile to ensure state is in sync
+      await loadProfile();
+      
+      Alert.alert('Success', 'Profile picture deleted');
     } catch (error: any) {
       console.error('Error removing image:', error);
-      Alert.alert('Error', 'Failed to remove image');
+      Alert.alert('Error', error.message || 'Failed to remove image');
     } finally {
       setUploading(false);
     }
@@ -237,6 +285,11 @@ export default function EditProfileScreen() {
       goal_weight: goalWeight ? parseFloat(goalWeight) : null,
       height: height ? parseFloat(height) : null,
       goal: goal || null,
+<<<<<<< Updated upstream
+=======
+      use_imperial: useImperial,
+      avatar_url: profilePictureUri || null,
+>>>>>>> Stashed changes
     };
 
     const { error } = await supabase
@@ -249,7 +302,7 @@ export default function EditProfileScreen() {
       setLoading(false);
     } else {
       setLoading(false);
-      showToastMessage();
+      router.push('/(tabs)/profile?saved=true');
     }
   };
 
@@ -294,19 +347,39 @@ export default function EditProfileScreen() {
             ) : (
               <>
                 {profilePictureUri ? (
-                  <Image source={{ uri: profilePictureUri }} style={styles.profilePicture} />
+                  <View style={styles.profilePictureWrapper}>
+                    <Image 
+                      key={profilePictureUri}
+                      source={{ uri: profilePictureUri }} 
+                      style={styles.profilePicture}
+                      contentFit="cover"
+                      transition={200}
+                      onError={(error) => {
+                        console.error('Image load error:', error);
+                        console.error('Image URL:', profilePictureUri);
+                      }}
+                      onLoad={() => {
+                        console.log('Image loaded successfully:', profilePictureUri);
+                      }}
+                    />
+                  </View>
                 ) : (
                   <View style={styles.placeholderPicture}>
                     <Text style={styles.placeholderPictureText}>No Photo</Text>
                   </View>
                 )}
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={removeImage}
-                  disabled={!profilePictureUri || uploading}
-                >
-                  <X size={16} color="#ffffff" />
-                </TouchableOpacity>
+                {profilePictureUri && (
+                  <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={() => {
+                      console.log('Remove button pressed');
+                      removeImage();
+                    }}
+                    disabled={uploading}
+                  >
+                    <X size={16} color="#ffffff" />
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>
@@ -323,6 +396,107 @@ export default function EditProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
           
+<<<<<<< Updated upstream
+=======
+          <View style={styles.unitToggleContainer}>
+            <Text style={styles.unitToggleLabel}>Units</Text>
+            <View style={styles.unitToggleRow}>
+              <Text style={[styles.unitToggleText, !useImperial && styles.unitToggleTextActive]}>Metric</Text>
+              <Switch
+                value={useImperial}
+                onValueChange={(value) => {
+                  const newUseImperial = value;
+                  
+                  // Convert weight values - database always stores in kg
+                  // If switching from imperial to metric: convert displayed lbs back to kg (database format)
+                  // If switching from metric to imperial: convert kg (database format) to lbs
+                  if (profile) {
+                    if (profile.current_weight) {
+                      const weightInKg = Number(profile.current_weight);
+                      if (newUseImperial) {
+                        setCurrentWeight(kgToLbs(weightInKg).toFixed(1));
+                      } else {
+                        setCurrentWeight(weightInKg.toFixed(1));
+                      }
+                    }
+                    
+                    if (profile.goal_weight) {
+                      const goalWeightInKg = Number(profile.goal_weight);
+                      if (newUseImperial) {
+                        setGoalWeight(kgToLbs(goalWeightInKg).toFixed(1));
+                      } else {
+                        setGoalWeight(goalWeightInKg.toFixed(1));
+                      }
+                    }
+                    
+                    if (profile.height) {
+                      const heightInCm = Number(profile.height);
+                      if (newUseImperial) {
+                        const { feet, inches } = cmToFtIn(heightInCm);
+                        setHeightFeet(feet.toString());
+                        setHeightInches(inches.toString());
+                        setHeight('');
+                      } else {
+                        setHeight(heightInCm.toFixed(1));
+                        setHeightFeet('');
+                        setHeightInches('');
+                      }
+                    }
+                  } else {
+                    // If profile not loaded yet, convert from current displayed values
+                    if (currentWeight) {
+                      const weightValue = parseFloat(currentWeight);
+                      if (useImperial && !newUseImperial) {
+                        // Converting from lbs (display) to kg (database format)
+                        setCurrentWeight(lbsToKg(weightValue).toFixed(1));
+                      } else if (!useImperial && newUseImperial) {
+                        // Converting from kg (display) to lbs
+                        setCurrentWeight(kgToLbs(weightValue).toFixed(1));
+                      }
+                    }
+                    
+                    if (goalWeight) {
+                      const goalWeightValue = parseFloat(goalWeight);
+                      if (useImperial && !newUseImperial) {
+                        setGoalWeight(lbsToKg(goalWeightValue).toFixed(1));
+                      } else if (!useImperial && newUseImperial) {
+                        setGoalWeight(kgToLbs(goalWeightValue).toFixed(1));
+                      }
+                    }
+                    
+                    // Use useImperial (current state) to determine what format the height is currently in
+                    if (useImperial && !newUseImperial) {
+                      // Currently in imperial, switching to metric
+                      const feet = parseInt(heightFeet, 10);
+                      const inches = parseInt(heightInches, 10);
+                      if (!isNaN(feet) && !isNaN(inches)) {
+                        const cm = ftInToCm(feet, inches);
+                        setHeight(cm.toFixed(1));
+                        setHeightFeet('');
+                        setHeightInches('');
+                      }
+                    } else if (!useImperial && newUseImperial) {
+                      // Currently in metric, switching to imperial
+                      const cm = parseFloat(height);
+                      if (!isNaN(cm)) {
+                        const { feet, inches } = cmToFtIn(cm);
+                        setHeightFeet(feet.toString());
+                        setHeightInches(inches.toString());
+                        setHeight('');
+                      }
+                    }
+                  }
+                  
+                  setUseImperial(newUseImperial);
+                }}
+                trackColor={{ false: '#374151', true: '#3b82f6' }}
+                thumbColor="#ffffff"
+              />
+              <Text style={[styles.unitToggleText, useImperial && styles.unitToggleTextActive]}>Imperial</Text>
+            </View>
+          </View>
+          
+>>>>>>> Stashed changes
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Full Name</Text>
             <TextInput
@@ -506,6 +680,37 @@ export default function EditProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteConfirmContent}>
+            <Text style={styles.deleteConfirmTitle}>Delete Profile Picture</Text>
+            <Text style={styles.deleteConfirmMessage}>
+              Are you sure you want to delete your profile picture? This action cannot be undone.
+            </Text>
+            <View style={styles.deleteConfirmButtons}>
+              <TouchableOpacity
+                style={styles.deleteConfirmCancelButton}
+                onPress={() => setShowDeleteConfirm(false)}
+              >
+                <Text style={styles.deleteConfirmCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteConfirmDeleteButton}
+                onPress={confirmDeleteImage}
+              >
+                <Text style={styles.deleteConfirmDeleteText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -564,11 +769,16 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: 16,
   },
-  profilePicture: {
+  profilePictureWrapper: {
     width: 150,
     height: 150,
     borderRadius: 75,
+    overflow: 'hidden',
     backgroundColor: '#374151',
+  },
+  profilePicture: {
+    width: 150,
+    height: 150,
   },
   placeholderPicture: {
     width: 150,
@@ -749,4 +959,94 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+<<<<<<< Updated upstream
+=======
+  unitToggleContainer: {
+    backgroundColor: '#1f2937',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginBottom: 24,
+  },
+  unitToggleLabel: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  unitToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  unitToggleText: {
+    color: '#9ca3af',
+    fontSize: 16,
+  },
+  unitToggleTextActive: {
+    color: '#3b82f6',
+    fontWeight: '600',
+  },
+  heightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heightInput: {
+    flex: 1,
+    minWidth: 60,
+  },
+  heightSeparator: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  deleteConfirmContent: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 24,
+    margin: 20,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  deleteConfirmTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  deleteConfirmMessage: {
+    color: '#9ca3af',
+    fontSize: 16,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  deleteConfirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  deleteConfirmCancelButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#374151',
+  },
+  deleteConfirmCancelText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteConfirmDeleteButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#ef4444',
+  },
+  deleteConfirmDeleteText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+>>>>>>> Stashed changes
 });

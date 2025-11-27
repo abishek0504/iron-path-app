@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Dumbbell, Calendar, Activity, User } from "lucide-react-native";
+import { Dumbbell, Calendar, User } from "lucide-react-native";
 
 export default function TabLayout() {
   return (
@@ -22,13 +22,6 @@ export default function TabLayout() {
         options={{ 
           title: "Plan", 
           tabBarIcon: ({ color }) => <Calendar size={24} color={color} /> 
-        }} 
-      />
-      <Tabs.Screen 
-        name="tracker" 
-        options={{ 
-          title: "History", 
-          tabBarIcon: ({ color }) => <Activity size={24} color={color} /> 
         }} 
       />
       <Tabs.Screen 

@@ -352,7 +352,14 @@ Return ONLY the JSON array, no other text.`;
     if (Platform.OS === 'web' && draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
       const exercises = [...dayData.exercises];
       const [draggedItem] = exercises.splice(draggedIndex, 1);
-      exercises.splice(dragOverIndex, 0, draggedItem);
+      
+      // When dragging downward, adjust the insertion index to account for the removed item
+      let insertIndex = dragOverIndex;
+      if (draggedIndex < dragOverIndex) {
+        insertIndex = dragOverIndex - 1;
+      }
+      
+      exercises.splice(insertIndex, 0, draggedItem);
       
       const updatedDayData = {
         ...dayData,
