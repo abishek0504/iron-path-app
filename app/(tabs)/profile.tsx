@@ -1,82 +1,29 @@
-<<<<<<< Updated upstream
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Image } from 'react-native';
-=======
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Switch, Animated, Platform } from 'react-native';
-import { Image } from 'expo-image';
->>>>>>> Stashed changes
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Image, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Edit, LogOut, Check } from 'lucide-react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Edit, LogOut } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
+
+const kgToLbs = (kg: number): number => kg / 0.453592;
+const cmToFtIn = (cm: number): { feet: number; inches: number } => {
+  const totalInches = cm / 2.54;
+  const feet = Math.floor(totalInches / 12);
+  const inches = Math.round(totalInches % 12);
+  return { feet, inches };
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-<<<<<<< Updated upstream
-=======
   const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
-  const [showToast, setShowToast] = useState(false);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
-  const toastTranslateY = useRef(new Animated.Value(-100)).current;
-  const hasShownToastForParam = useRef(false);
-
-  const showToastMessage = useCallback(() => {
-    setShowToast(true);
-    Animated.parallel([
-      Animated.timing(toastOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(toastTranslateY, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(toastOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(toastTranslateY, {
-          toValue: -100,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        setShowToast(false);
-      });
-    }, 2000);
-  }, [toastOpacity, toastTranslateY]);
->>>>>>> Stashed changes
 
   useFocusEffect(
     useCallback(() => {
       loadProfile();
-      // Reset the flag when the screen loses focus (user navigates away)
-      hasShownToastForParam.current = false;
     }, [])
   );
-
-  useEffect(() => {
-    // Only show toast if saved param is true AND we haven't shown it for this navigation
-    if (params.saved === 'true' && !hasShownToastForParam.current) {
-      hasShownToastForParam.current = true;
-      showToastMessage();
-      // Clear the param after a short delay to allow the navigation to complete
-      setTimeout(() => {
-        router.replace('/(tabs)/profile');
-      }, 100);
-    }
-  }, [params.saved, showToastMessage]);
 
   const loadProfile = async () => {
     setLoading(true);
@@ -96,15 +43,8 @@ export default function ProfileScreen() {
       console.error('Error loading profile:', error);
     } else if (data) {
       setProfile(data);
-<<<<<<< Updated upstream
-=======
       // Load unit preference from database, default to true (imperial) if not set
       setUseImperial(data.use_imperial !== null && data.use_imperial !== undefined ? data.use_imperial : true);
-      // Log avatar URL for debugging
-      if (data.avatar_url) {
-        console.log('Loaded avatar URL:', data.avatar_url);
-      }
->>>>>>> Stashed changes
     }
     setLoading(false);
   };
@@ -136,22 +76,6 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {showToast && (
-        <Animated.View
-          style={[
-            styles.toastContainer,
-            {
-              opacity: toastOpacity,
-              transform: [{ translateY: toastTranslateY }],
-            },
-          ]}
-        >
-          <View style={styles.toastContent}>
-            <Check size={20} color="#10b981" />
-            <Text style={styles.toastText}>Changes saved</Text>
-          </View>
-        </Animated.View>
-      )}
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
           <Text style={styles.title}>Profile</Text>
@@ -166,22 +90,7 @@ export default function ProfileScreen() {
 
         <View style={styles.profilePictureContainer}>
           {profile.avatar_url ? (
-            <View style={styles.profilePictureWrapper}>
-              <Image 
-                key={profile.avatar_url}
-                source={{ uri: profile.avatar_url }} 
-                style={styles.profilePicture}
-                contentFit="cover"
-                transition={200}
-                onError={(error) => {
-                  console.error('Image load error:', error);
-                  console.error('Image URL:', profile.avatar_url);
-                }}
-                onLoad={() => {
-                  console.log('Image loaded successfully:', profile.avatar_url);
-                }}
-              />
-            </View>
+            <Image source={{ uri: profile.avatar_url }} style={styles.profilePicture} />
           ) : (
             <View style={styles.placeholderPicture}>
               <Text style={styles.placeholderText}>No Photo</Text>
@@ -202,18 +111,37 @@ export default function ProfileScreen() {
 
           <View style={styles.infoCard}>
             <Text style={styles.infoLabel}>Current Weight</Text>
-            <Text style={styles.infoValue}>{profile.current_weight ? `${profile.current_weight} lbs` : 'Not set'}</Text>
+            <Text style={styles.infoValue}>
+              {profile.current_weight 
+                ? useImperial 
+                  ? `${kgToLbs(profile.current_weight).toFixed(1)} lbs`
+                  : `${profile.current_weight.toFixed(1)} kg`
+                : 'Not set'}
+            </Text>
           </View>
 
           <View style={styles.infoCard}>
             <Text style={styles.infoLabel}>Goal Weight</Text>
-            <Text style={styles.infoValue}>{profile.goal_weight ? `${profile.goal_weight} lbs` : 'Not set'}</Text>
+            <Text style={styles.infoValue}>
+              {profile.goal_weight 
+                ? useImperial 
+                  ? `${kgToLbs(profile.goal_weight).toFixed(1)} lbs`
+                  : `${profile.goal_weight.toFixed(1)} kg`
+                : 'Not set'}
+            </Text>
           </View>
 
           {profile.height && (
             <View style={styles.infoCard}>
               <Text style={styles.infoLabel}>Height</Text>
-              <Text style={styles.infoValue}>{profile.height} cm</Text>
+              <Text style={styles.infoValue}>
+                {useImperial 
+                  ? (() => {
+                      const { feet, inches } = cmToFtIn(profile.height);
+                      return `${feet}'${inches}"`;
+                    })()
+                  : `${profile.height.toFixed(1)} cm`}
+              </Text>
             </View>
           )}
 
@@ -300,16 +228,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f2937',
     borderRadius: 16,
   },
-  profilePictureWrapper: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    overflow: 'hidden',
-    backgroundColor: '#374151',
-  },
   profilePicture: {
     width: 150,
     height: 150,
+    borderRadius: 75,
+    backgroundColor: '#374151',
   },
   placeholderPicture: {
     width: 150,
@@ -359,37 +282,6 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     color: '#ef4444',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  toastContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-  },
-  toastContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#1f2937',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#10b981',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  toastText: {
-    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
   },
