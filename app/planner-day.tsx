@@ -32,6 +32,9 @@ export default function PlannerDayScreen() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [dragStartY, setDragStartY] = useState<number>(0);
+  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null }>>(new Map());
+  const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
+  const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -53,6 +56,19 @@ export default function PlannerDayScreen() {
     }, [planId])
   );
 
+  const handleBack = () => {
+    // For modal screens, try to go back, but fallback to planner tab if navigation fails
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/(tabs)/planner');
+      }
+    } catch (error) {
+      // Fallback: navigate to planner tab if back navigation fails
+      router.push('/(tabs)/planner');
+    }
+  };
 
   const loadPlan = async () => {
     if (!planId) return;
@@ -66,14 +82,76 @@ export default function PlannerDayScreen() {
     if (error) {
       console.error('Error loading plan:', error);
       Alert.alert("Error", "Failed to load workout plan.");
-      router.back();
+      handleBack();
     } else if (data) {
       setPlan(data);
       if (day && data.plan_data?.week_schedule?.[day]) {
         const loadedDayData = data.plan_data.week_schedule[day];
         setDayData(loadedDayData);
+        
+        // Load exercise details
+        await loadExerciseDetails(loadedDayData.exercises || []);
       }
     }
+  };
+
+  const loadExerciseDetails = async (exercises: any[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !exercises.length) return;
+
+    const exerciseNames = exercises.map((ex: any) => ex.name).filter(Boolean);
+    if (exerciseNames.length === 0) return;
+
+    const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null }>();
+
+    // Batch query all exercises from master exercises table
+    const { data: masterExercises } = await supabase
+      .from('exercises')
+      .select('name, is_timed, default_duration_sec')
+      .in('name', exerciseNames);
+
+    // Batch query all user exercises
+    const { data: userExercises } = await supabase
+      .from('user_exercises')
+      .select('name, is_timed, default_duration_sec')
+      .eq('user_id', user.id)
+      .in('name', exerciseNames);
+
+    // Create maps for quick lookup
+    const masterExerciseMap = new Map(
+      (masterExercises || []).map((ex: any) => [ex.name, ex])
+    );
+    const userExerciseMap = new Map(
+      (userExercises || []).map((ex: any) => [ex.name, ex])
+    );
+
+    // Merge results: user exercises take precedence over master exercises
+    for (const exercise of exercises) {
+      if (!exercise.name) continue;
+      
+      const userExercise = userExerciseMap.get(exercise.name);
+      const masterExercise = masterExerciseMap.get(exercise.name);
+      
+      if (userExercise) {
+        detailsMap.set(exercise.name, {
+          is_timed: userExercise.is_timed || false,
+          default_duration_sec: userExercise.default_duration_sec
+        });
+      } else if (masterExercise) {
+        detailsMap.set(exercise.name, {
+          is_timed: masterExercise.is_timed || false,
+          default_duration_sec: masterExercise.default_duration_sec
+        });
+      } else {
+        // Default values if not found in either table
+        detailsMap.set(exercise.name, {
+          is_timed: false,
+          default_duration_sec: null
+        });
+      }
+    }
+
+    setExerciseDetails(detailsMap);
   };
 
   const loadUserProfile = async () => {
@@ -403,8 +481,25 @@ Return ONLY the JSON array, no other text.`;
     }
   };
 
+  const getDurationMinutes = (seconds: number | null | undefined): number => {
+    if (!seconds && seconds !== 0) return 0;
+    return Math.floor(seconds / 60);
+  };
+
+  const getDurationSeconds = (seconds: number | null | undefined): number => {
+    if (!seconds && seconds !== 0) return 0;
+    return seconds % 60;
+  };
+
   const renderExerciseCard = (item: any, index: number, drag?: () => void, isActive?: boolean) => {
     const isDragging = draggedIndex === index;
+    const detail = exerciseDetails.get(item.name);
+    const isTimed = detail?.is_timed || false;
+    const defaultDuration = detail?.default_duration_sec || 60;
+    
+    // For timed exercises, use target_duration_sec if available, otherwise use default_duration_sec
+    // Store duration in seconds, but display in MM:SS format
+    const currentDuration = item.target_duration_sec !== undefined ? item.target_duration_sec : (isTimed ? defaultDuration : null);
     
     return (
       <View
@@ -432,15 +527,9 @@ Return ONLY the JSON array, no other text.`;
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
             </TouchableOpacity>
           ) : Platform.OS === 'web' ? (
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onMouseDown={(e: any) => {
-                e.stopPropagation();
-                e.preventDefault();
-                dragAllowedRef.current = index;
-                handleWebTouchStart(index, e);
-              }}
-              onTouchStart={(e: any) => {
+            <View
+              onStartShouldSetResponder={() => true}
+              onResponderGrant={(e: any) => {
                 e.stopPropagation();
                 dragAllowedRef.current = index;
                 handleWebTouchStart(index, e);
@@ -448,7 +537,7 @@ Return ONLY the JSON array, no other text.`;
               style={styles.dragHandleContainer}
             >
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
-            </TouchableOpacity>
+            </View>
           ) : (
             <View style={styles.dragHandleContainer}>
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
@@ -510,17 +599,130 @@ Return ONLY the JSON array, no other text.`;
               placeholderTextColor="#6b7280"
             />
           </View>
-          <View style={styles.exerciseField}>
-            <Text style={styles.fieldLabel}>Reps</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={item.target_reps || ''}
-              onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
-              editable={!isActive}
-              placeholder="8-12"
-              placeholderTextColor="#6b7280"
-            />
-          </View>
+          {isTimed ? (
+            <>
+              <View style={styles.exerciseField}>
+                <Text style={styles.fieldLabel}>Min</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={durationMinutes.has(index) ? durationMinutes.get(index) : (currentDuration !== null ? getDurationMinutes(currentDuration).toString() : '')}
+                  onChangeText={(text) => {
+                    // Allow empty string or valid number
+                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0)) {
+                      setDurationMinutes(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, text);
+                        return newMap;
+                      });
+                      // Auto-save when both fields have values or when cleared
+                      const mins = text === '' ? 0 : parseInt(text) || 0;
+                      const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
+                      const totalSeconds = mins * 60 + secs;
+                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Ensure value is saved on blur
+                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
+                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
+                    const totalSeconds = mins * 60 + secs;
+                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    // Clear cache to show formatted value
+                    setDurationMinutes(prev => {
+                      const newMap = new Map(prev);
+                      newMap.delete(index);
+                      return newMap;
+                    });
+                  }}
+                  onFocus={() => {
+                    // Initialize with current value when focused
+                    if (!durationMinutes.has(index) && currentDuration !== null) {
+                      setDurationMinutes(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, getDurationMinutes(currentDuration).toString());
+                        return newMap;
+                      });
+                    }
+                    // Prevent drag when focusing on input
+                    if (Platform.OS === 'web') {
+                      dragAllowedRef.current = null;
+                      setDraggedIndex(null);
+                    }
+                  }}
+                  keyboardType="numeric"
+                  editable={!isActive}
+                  placeholder="0"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+              <View style={styles.exerciseField}>
+                <Text style={styles.fieldLabel}>Sec</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={durationSeconds.has(index) ? durationSeconds.get(index) : (currentDuration !== null ? getDurationSeconds(currentDuration).toString() : '')}
+                  onChangeText={(text) => {
+                    // Allow empty string or valid number (0-59)
+                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0 && parseInt(text) < 60)) {
+                      setDurationSeconds(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, text);
+                        return newMap;
+                      });
+                      // Auto-save when both fields have values or when cleared
+                      const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
+                      const secs = text === '' ? 0 : parseInt(text) || 0;
+                      const totalSeconds = mins * 60 + secs;
+                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Ensure value is saved on blur
+                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
+                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
+                    const totalSeconds = mins * 60 + secs;
+                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    // Clear cache to show formatted value
+                    setDurationSeconds(prev => {
+                      const newMap = new Map(prev);
+                      newMap.delete(index);
+                      return newMap;
+                    });
+                  }}
+                  onFocus={() => {
+                    // Initialize with current value when focused
+                    if (!durationSeconds.has(index) && currentDuration !== null) {
+                      setDurationSeconds(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, getDurationSeconds(currentDuration).toString());
+                        return newMap;
+                      });
+                    }
+                    // Prevent drag when focusing on input
+                    if (Platform.OS === 'web') {
+                      dragAllowedRef.current = null;
+                      setDraggedIndex(null);
+                    }
+                  }}
+                  keyboardType="numeric"
+                  editable={!isActive}
+                  placeholder="0"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+            </>
+          ) : (
+            <View style={styles.exerciseField}>
+              <Text style={styles.fieldLabel}>Reps</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={item.target_reps || ''}
+                onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
+                editable={!isActive}
+                placeholder="8-12"
+                placeholderTextColor="#6b7280"
+              />
+            </View>
+          )}
           <View style={styles.exerciseField}>
             <Text style={styles.fieldLabel}>Rest (sec)</Text>
             <TextInput
@@ -567,7 +769,7 @@ Return ONLY the JSON array, no other text.`;
   const renderHeader = () => (
     <View style={styles.headerSection}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => handleBack()} style={styles.backButton}>
           <ArrowLeft color="#9ca3af" size={24} />
         </TouchableOpacity>
         <Text style={styles.title}>{day}</Text>
@@ -616,7 +818,7 @@ Return ONLY the JSON array, no other text.`;
         )}
         <TouchableOpacity
           style={styles.buttonDone}
-          onPress={() => router.back()}
+          onPress={() => handleBack()}
         >
           <Text style={styles.buttonTextDone}>Done</Text>
         </TouchableOpacity>

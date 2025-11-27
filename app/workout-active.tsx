@@ -626,15 +626,20 @@ export default function WorkoutActiveScreen() {
           const notesParts = [];
           if (logData.notes) notesParts.push(logData.notes);
           
+          // For timed exercises, use duration in reps field; for others, use weight/reps
+          const isTimed = exercise.is_timed || false;
+          const weight = isTimed ? null : (set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? null));
+          const reps = isTimed ? (set.duration ? parseFloat(set.duration.toString()) : (scheduledDuration ?? null)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? null));
+          
           return {
             user_id: user.id,
             exercise_name: exercise.name,
             plan_id: parseInt(planId),
             day: day,
             session_id: workoutSession?.id || null,
-            // For timed exercises, keep null values instead of defaulting to 0
-            weight: set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? null),
-            reps: set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? null),
+            // For timed exercises, duration is stored in reps field
+            weight: weight,
+            reps: reps,
             scheduled_reps: scheduledReps,
             scheduled_weight: scheduledWeight,
             notes: notesParts.length > 0 ? notesParts.join(' | ') : null

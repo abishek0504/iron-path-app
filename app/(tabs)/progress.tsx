@@ -38,6 +38,7 @@ interface WorkoutData {
         id: number | null; // Log ID for updates
         weight: number | null;
         reps: number | null;
+        duration: number | null; // Duration in seconds for timed exercises
         notes: string | null;
       }>;
     }>;
@@ -58,6 +59,7 @@ export default function ProgressScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [workoutData, setWorkoutData] = useState<WorkoutData[]>([]);
+  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean }>>(new Map());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutData | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<WorkoutData | null>(null);
@@ -88,6 +90,60 @@ export default function ProgressScreen() {
       loadWorkoutData();
     }, [])
   );
+
+  const loadExerciseDetails = async (logs: WorkoutLog[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const exerciseNames = [...new Set(logs.map(log => log.exercise_name).filter(Boolean))];
+    if (exerciseNames.length === 0) return;
+
+    const detailsMap = new Map<string, { is_timed: boolean }>();
+
+    // Batch query all exercises from master exercises table
+    const { data: masterExercises } = await supabase
+      .from('exercises')
+      .select('name, is_timed')
+      .in('name', exerciseNames);
+
+    // Batch query all user exercises
+    const { data: userExercises } = await supabase
+      .from('user_exercises')
+      .select('name, is_timed')
+      .eq('user_id', user.id)
+      .in('name', exerciseNames);
+
+    // Create maps for quick lookup
+    const masterExerciseMap = new Map(
+      (masterExercises || []).map((ex: any) => [ex.name, ex])
+    );
+    const userExerciseMap = new Map(
+      (userExercises || []).map((ex: any) => [ex.name, ex])
+    );
+
+    // Merge results: user exercises take precedence over master exercises
+    for (const exerciseName of exerciseNames) {
+      const userExercise = userExerciseMap.get(exerciseName);
+      const masterExercise = masterExerciseMap.get(exerciseName);
+      
+      if (userExercise) {
+        detailsMap.set(exerciseName, {
+          is_timed: userExercise.is_timed || false
+        });
+      } else if (masterExercise) {
+        detailsMap.set(exerciseName, {
+          is_timed: masterExercise.is_timed || false
+        });
+      } else {
+        // Default values if not found in either table
+        detailsMap.set(exerciseName, {
+          is_timed: false
+        });
+      }
+    }
+
+    setExerciseDetails(detailsMap);
+  };
 
   const loadWorkoutData = async (startDate?: Date, endDate?: Date) => {
     setLoading(true);
@@ -174,8 +230,48 @@ export default function ProgressScreen() {
         return !activeSessionIds.has(log.session_id);
       });
 
+      // Load exercise details to determine which exercises are timed
+      await loadExerciseDetails(filteredLogs);
+      
+      // Get exercise details for aggregation (will be available after loadExerciseDetails)
+      const detailsMap = new Map<string, { is_timed: boolean }>();
+      const exerciseNames = [...new Set(filteredLogs.map(log => log.exercise_name).filter(Boolean))];
+      
+      if (exerciseNames.length > 0) {
+        const { data: masterExercises } = await supabase
+          .from('exercises')
+          .select('name, is_timed')
+          .in('name', exerciseNames);
+
+        const { data: userExercises } = await supabase
+          .from('user_exercises')
+          .select('name, is_timed')
+          .eq('user_id', user.id)
+          .in('name', exerciseNames);
+
+        const masterExerciseMap = new Map(
+          (masterExercises || []).map((ex: any) => [ex.name, ex])
+        );
+        const userExerciseMap = new Map(
+          (userExercises || []).map((ex: any) => [ex.name, ex])
+        );
+
+        for (const exerciseName of exerciseNames) {
+          const userExercise = userExerciseMap.get(exerciseName);
+          const masterExercise = masterExerciseMap.get(exerciseName);
+          
+          if (userExercise) {
+            detailsMap.set(exerciseName, { is_timed: userExercise.is_timed || false });
+          } else if (masterExercise) {
+            detailsMap.set(exerciseName, { is_timed: masterExercise.is_timed || false });
+          } else {
+            detailsMap.set(exerciseName, { is_timed: false });
+          }
+        }
+      }
+
       // Aggregate data by date (only completed sessions and standalone logs)
-      const aggregated = aggregateWorkoutData(filteredLogs, completedSessions || []);
+      const aggregated = aggregateWorkoutData(filteredLogs, completedSessions || [], detailsMap);
       setWorkoutData(aggregated);
     } catch (error) {
       console.error('Error loading workout data:', error);
@@ -185,7 +281,7 @@ export default function ProgressScreen() {
     }
   };
 
-  const aggregateWorkoutData = (logs: WorkoutLog[], sessions: WorkoutSession[]): WorkoutData[] => {
+  const aggregateWorkoutData = (logs: WorkoutLog[], sessions: WorkoutSession[], exerciseDetailsMap: Map<string, { is_timed: boolean }>): WorkoutData[] => {
     const dataMap = new Map<string, WorkoutData>();
 
     // Group logs by date and session
@@ -261,17 +357,22 @@ export default function ProgressScreen() {
           sessionEntry.exercises.push(exerciseEntry);
         }
 
-        // Only add sets with valid data (at least weight or reps)
+        // Check if exercise is timed
+        const isTimed = exerciseDetailsMap.get(log.exercise_name)?.is_timed || false;
+        
+        // For timed exercises, reps field contains duration in seconds
+        // Only add sets with valid data (at least weight, reps, or duration for timed)
         if (log.weight !== null || log.reps !== null) {
           exerciseEntry.sets.push({
             id: log.id,
-            weight: log.weight,
-            reps: log.reps,
+            weight: isTimed ? null : log.weight,
+            reps: isTimed ? null : log.reps,
+            duration: isTimed ? log.reps : null, // For timed exercises, reps field stores duration
             notes: log.notes
           });
 
-          // Calculate volume (only if both weight and reps are present)
-          if (log.weight && log.reps) {
+          // Calculate volume (only if both weight and reps are present, and not timed)
+          if (!isTimed && log.weight && log.reps) {
             sessionEntry.totalVolume += log.weight * log.reps;
           }
         }
@@ -296,6 +397,13 @@ export default function ProgressScreen() {
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const formatDuration = (seconds: number | null | undefined): string => {
+    if (!seconds && seconds !== 0) return 'N/A';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const formatTime = (dateString: string): string => {
@@ -590,17 +698,22 @@ export default function ProgressScreen() {
                 )}
                 <View style={styles.timelineExercises}>
                   {session.exercises.map((exercise, exIdx) => {
+                    const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
                     // Filter out sets with no valid data
-                    const validSets = exercise.sets.filter(set => 
-                      (set.weight !== null && set.weight !== undefined) || 
-                      (set.reps !== null && set.reps !== undefined)
-                    );
+                    const validSets = exercise.sets.filter(set => {
+                      if (isTimed) {
+                        return set.duration !== null && set.duration !== undefined;
+                      }
+                      return (set.weight !== null && set.weight !== undefined) || 
+                             (set.reps !== null && set.reps !== undefined);
+                    });
                     
                     if (validSets.length === 0) return null;
                     
                     // Get first valid set for preview
                     const firstSet = validSets[0];
-                    const hasWeightAndReps = firstSet.weight !== null && firstSet.reps !== null;
+                    const hasWeightAndReps = !isTimed && firstSet.weight !== null && firstSet.reps !== null;
+                    const hasDuration = isTimed && firstSet.duration !== null;
                     
                     return (
                       <View key={exIdx} style={styles.timelineExercise}>
@@ -609,6 +722,9 @@ export default function ProgressScreen() {
                           {validSets.length} set{validSets.length !== 1 ? 's' : ''}
                           {hasWeightAndReps && (
                             ` • ${firstSet.weight}lbs × ${firstSet.reps}`
+                          )}
+                          {hasDuration && (
+                            ` • ${formatDuration(firstSet.duration)}`
                           )}
                         </Text>
                       </View>
@@ -674,29 +790,34 @@ export default function ProgressScreen() {
 
       editingWorkout.sessions.forEach((session, sessionIdx) => {
         session.exercises.forEach(exercise => {
+          const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
           exercise.sets.forEach(set => {
             // Skip sets that are marked for deletion
             if (set.id && deletedSetIds.has(set.id)) {
               return;
             }
             
+            // For timed exercises, use duration in reps field; for others, use weight/reps
+            const weight = isTimed ? null : set.weight;
+            const reps = isTimed ? set.duration : set.reps;
+            
             if (set.id) {
               // Existing set - update it
               updates.push({
                 id: set.id,
-                weight: set.weight,
-                reps: set.reps,
+                weight: weight,
+                reps: reps,
                 notes: set.notes
               });
             } else {
               // New set - create it
-              // Only create if it has valid data (weight or reps)
-              if (set.weight !== null || set.reps !== null) {
+              // Only create if it has valid data (weight or reps, or duration for timed)
+              if ((!isTimed && (set.weight !== null || set.reps !== null)) || (isTimed && set.duration !== null)) {
                 newSets.push({
                   sessionIdx,
                   exerciseName: exercise.name,
-                  weight: set.weight,
-                  reps: set.reps,
+                  weight: weight,
+                  reps: reps,
                   notes: set.notes,
                   sessionId: session.session.id,
                   planId: session.session.plan_id,
@@ -788,13 +909,13 @@ export default function ProgressScreen() {
     }
   };
 
-  const updateSetValue = (sessionIdx: number, exerciseIdx: number, setIdx: number, field: 'weight' | 'reps' | 'notes', value: string) => {
+  const updateSetValue = (sessionIdx: number, exerciseIdx: number, setIdx: number, field: 'weight' | 'reps' | 'notes' | 'duration', value: string) => {
     if (!editingWorkout) return;
 
     const updated = JSON.parse(JSON.stringify(editingWorkout));
     const set = updated.sessions[sessionIdx].exercises[exerciseIdx].sets[setIdx];
     
-    if (field === 'weight' || field === 'reps') {
+    if (field === 'weight' || field === 'reps' || field === 'duration') {
       set[field] = value === '' ? null : (field === 'weight' ? parseFloat(value) : parseInt(value));
     } else {
       set[field] = value;
@@ -1203,79 +1324,103 @@ export default function ProgressScreen() {
                     </View>
                   )}
 
-                  {session.exercises.map((exercise, exIdx) => (
-                    <View key={exIdx} style={styles.modalExercise}>
-                      <Text style={styles.modalExerciseName}>{exercise.name}</Text>
-                      {exercise.sets.map((set, setIdx) => (
-                        <View key={setIdx} style={styles.modalSet}>
-                          {isEditing ? (
-                            <View style={styles.modalSetEdit}>
-                              <View style={styles.modalSetEditHeader}>
-                                <Text style={styles.modalSetLabel}>Set {setIdx + 1}</Text>
-                                {set.id && (
-                                  <TouchableOpacity 
-                                    onPress={() => {
-                                      handleDeleteSet(idx, exIdx, setIdx, set.id);
-                                    }}
-                                    style={styles.modalDeleteSetButton}
-                                    activeOpacity={0.7}
-                                  >
-                                    <Trash2 color="#ef4444" size={16} />
-                                  </TouchableOpacity>
-                                )}
-                              </View>
-                              <View style={styles.modalSetInputs}>
-                                <View style={styles.modalSetInputGroup}>
-                                  <Text style={styles.modalSetInputLabel}>Weight (lbs)</Text>
-                                  <TextInput
-                                    style={styles.modalSetInput}
-                                    value={set.weight?.toString() || ''}
-                                    onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'weight', value)}
-                                    keyboardType="numeric"
-                                    placeholder="BW"
-                                    placeholderTextColor="#6b7280"
-                                  />
+                  {session.exercises.map((exercise, exIdx) => {
+                    const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
+                    return (
+                      <View key={exIdx} style={styles.modalExercise}>
+                        <Text style={styles.modalExerciseName}>{exercise.name}</Text>
+                        {exercise.sets.map((set, setIdx) => (
+                          <View key={setIdx} style={styles.modalSet}>
+                            {isEditing ? (
+                              <View style={styles.modalSetEdit}>
+                                <View style={styles.modalSetEditHeader}>
+                                  <Text style={styles.modalSetLabel}>Set {setIdx + 1}</Text>
+                                  {set.id && (
+                                    <TouchableOpacity 
+                                      onPress={() => {
+                                        handleDeleteSet(idx, exIdx, setIdx, set.id);
+                                      }}
+                                      style={styles.modalDeleteSetButton}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Trash2 color="#ef4444" size={16} />
+                                    </TouchableOpacity>
+                                  )}
+                                </View>
+                                <View style={styles.modalSetInputs}>
+                                  {!isTimed && (
+                                    <>
+                                      <View style={styles.modalSetInputGroup}>
+                                        <Text style={styles.modalSetInputLabel}>Weight (lbs)</Text>
+                                        <TextInput
+                                          style={styles.modalSetInput}
+                                          value={set.weight?.toString() || ''}
+                                          onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'weight', value)}
+                                          keyboardType="numeric"
+                                          placeholder="BW"
+                                          placeholderTextColor="#6b7280"
+                                        />
+                                      </View>
+                                      <View style={styles.modalSetInputGroup}>
+                                        <Text style={styles.modalSetInputLabel}>Reps</Text>
+                                        <TextInput
+                                          style={styles.modalSetInput}
+                                          value={set.reps?.toString() || ''}
+                                          onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'reps', value)}
+                                          keyboardType="numeric"
+                                          placeholder="0"
+                                          placeholderTextColor="#6b7280"
+                                        />
+                                      </View>
+                                    </>
+                                  )}
+                                  {isTimed && (
+                                    <View style={styles.modalSetInputGroup}>
+                                      <Text style={styles.modalSetInputLabel}>Duration (seconds)</Text>
+                                      <TextInput
+                                        style={styles.modalSetInput}
+                                        value={set.duration?.toString() || ''}
+                                        onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'duration', value)}
+                                        keyboardType="numeric"
+                                        placeholder="60"
+                                        placeholderTextColor="#6b7280"
+                                      />
+                                    </View>
+                                  )}
                                 </View>
                                 <View style={styles.modalSetInputGroup}>
-                                  <Text style={styles.modalSetInputLabel}>Reps</Text>
+                                  <Text style={styles.modalSetInputLabel}>Notes</Text>
                                   <TextInput
-                                    style={styles.modalSetInput}
-                                    value={set.reps?.toString() || ''}
-                                    onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'reps', value)}
-                                    keyboardType="numeric"
-                                    placeholder="0"
+                                    style={[styles.modalSetInput, styles.modalSetNotesInput]}
+                                    value={set.notes || ''}
+                                    onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'notes', value)}
+                                    placeholder="Optional notes..."
                                     placeholderTextColor="#6b7280"
+                                    multiline
                                   />
                                 </View>
                               </View>
-                              <View style={styles.modalSetInputGroup}>
-                                <Text style={styles.modalSetInputLabel}>Notes</Text>
-                                <TextInput
-                                  style={[styles.modalSetInput, styles.modalSetNotesInput]}
-                                  value={set.notes || ''}
-                                  onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'notes', value)}
-                                  placeholder="Optional notes..."
-                                  placeholderTextColor="#6b7280"
-                                  multiline
-                                />
+                            ) : (
+                              <View style={styles.modalSetRow}>
+                                <View style={styles.modalSetContent}>
+                                  <Text style={styles.modalSetText}>
+                                    {isTimed ? (
+                                      `Set ${setIdx + 1}: ${formatDuration(set.duration)}`
+                                    ) : (
+                                      `Set ${setIdx + 1}: ${set.weight ? `${set.weight}lbs` : 'BW'} × ${set.reps || 'N/A'} reps`
+                                    )}
+                                  </Text>
+                                  {set.notes && (
+                                    <Text style={styles.modalNotes}>{set.notes}</Text>
+                                  )}
+                                </View>
                               </View>
-                            </View>
-                          ) : (
-                            <View style={styles.modalSetRow}>
-                              <View style={styles.modalSetContent}>
-                                <Text style={styles.modalSetText}>
-                                  Set {setIdx + 1}: {set.weight ? `${set.weight}lbs` : 'BW'} × {set.reps || 'N/A'} reps
-                                </Text>
-                                {set.notes && (
-                                  <Text style={styles.modalNotes}>{set.notes}</Text>
-                                )}
-                              </View>
-                            </View>
-                          )}
-                        </View>
-                      ))}
-                    </View>
-                  ))}
+                            )}
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  })}
                 </View>
               ))}
             </ScrollView>
