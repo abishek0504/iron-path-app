@@ -270,8 +270,34 @@ export default function ProgressScreen() {
         }
       }
 
+      // Fetch workout plans to get exercise order
+      const planIds = [...new Set((completedSessions || []).map(s => s.plan_id).filter(Boolean))];
+      const planExerciseOrder = new Map<number, Map<string, string[]>>();
+      
+      if (planIds.length > 0) {
+        const { data: plans } = await supabase
+          .from('workout_plans')
+          .select('id, plan_data')
+          .in('id', planIds);
+        
+        if (plans) {
+          plans.forEach((plan: any) => {
+            const dayOrderMap = new Map<string, string[]>();
+            if (plan.plan_data?.week_schedule) {
+              Object.keys(plan.plan_data.week_schedule).forEach((day: string) => {
+                const dayData = plan.plan_data.week_schedule[day];
+                if (dayData?.exercises) {
+                  dayOrderMap.set(day, dayData.exercises.map((ex: any) => ex.name).filter(Boolean));
+                }
+              });
+            }
+            planExerciseOrder.set(plan.id, dayOrderMap);
+          });
+        }
+      }
+
       // Aggregate data by date (only completed sessions and standalone logs)
-      const aggregated = aggregateWorkoutData(filteredLogs, completedSessions || [], detailsMap);
+      const aggregated = aggregateWorkoutData(filteredLogs, completedSessions || [], detailsMap, planExerciseOrder);
       setWorkoutData(aggregated);
     } catch (error) {
       console.error('Error loading workout data:', error);
@@ -281,7 +307,7 @@ export default function ProgressScreen() {
     }
   };
 
-  const aggregateWorkoutData = (logs: WorkoutLog[], sessions: WorkoutSession[], exerciseDetailsMap: Map<string, { is_timed: boolean }>): WorkoutData[] => {
+  const aggregateWorkoutData = (logs: WorkoutLog[], sessions: WorkoutSession[], exerciseDetailsMap: Map<string, { is_timed: boolean }>, planExerciseOrder: Map<number, Map<string, string[]>>): WorkoutData[] => {
     const dataMap = new Map<string, WorkoutData>();
 
     // Group logs by date and session
@@ -377,6 +403,43 @@ export default function ProgressScreen() {
           }
         }
       }
+    });
+
+    // Sort exercises within each session by their order in the workout plan
+    dataMap.forEach((workout) => {
+      workout.sessions.forEach((session) => {
+        if (session.session.plan_id && session.session.day) {
+          // Get exercise order from plan if available
+          const planId = session.session.plan_id;
+          const day = session.session.day;
+          
+          const planOrder = planExerciseOrder.get(planId);
+          if (planOrder) {
+            const dayOrder = planOrder.get(day);
+            if (dayOrder && dayOrder.length > 0) {
+              // Sort exercises by their order in the plan
+              session.exercises.sort((a, b) => {
+                const indexA = dayOrder.indexOf(a.name);
+                const indexB = dayOrder.indexOf(b.name);
+                // If not found in plan, keep original order (put at end)
+                if (indexA === -1 && indexB === -1) return 0;
+                if (indexA === -1) return 1;
+                if (indexB === -1) return -1;
+                return indexA - indexB;
+              });
+            }
+          }
+        }
+        
+        // Sort sets within each exercise by their order (they should already be in order from logs)
+        session.exercises.forEach((exercise) => {
+          // Sets are already in order from logs, but ensure they're sorted by id or performed_at if available
+          exercise.sets.sort((a, b) => {
+            if (a.id && b.id) return a.id - b.id;
+            return 0;
+          });
+        });
+      });
     });
 
     // Sort by date descending

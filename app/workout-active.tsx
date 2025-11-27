@@ -685,13 +685,13 @@ export default function WorkoutActiveScreen() {
       }
     }
 
-    // Save to workout_logs
-    await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets, setLogs);
-    
     updatedProgress.exercises[completedExerciseIndex].completed = true;
     
     // Move to next exercise or finish workout
     if (completedExerciseIndex < exercises.length - 1) {
+      // Save to workout_logs before moving to next exercise
+      await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets, setLogs);
+      
       updatedProgress.currentExerciseIndex = completedExerciseIndex + 1;
       updatedProgress.currentSetIndex = 0;
       await saveProgress(updatedProgress);
@@ -700,12 +700,13 @@ export default function WorkoutActiveScreen() {
       setCompletedExerciseIndex(null);
       setSetLogs([]);
     } else {
-      // Workout complete - mark all exercises as complete
+      // Workout complete - mark session as completed FIRST, then save logs
       updatedProgress.exercises.forEach(ex => ex.completed = true);
       await saveProgress(updatedProgress);
       
+      // Mark session as completed BEFORE saving logs to ensure it shows in progress
       if (workoutSession) {
-        await supabase
+        const { error: sessionError } = await supabase
           .from('workout_sessions')
           .update({
             status: 'completed',
@@ -714,7 +715,14 @@ export default function WorkoutActiveScreen() {
             current_set_index: updatedProgress.currentSetIndex
           })
           .eq('id', workoutSession.id);
+        
+        if (sessionError) {
+          console.error('Error updating workout session:', sessionError);
+        }
       }
+      
+      // Save to workout_logs AFTER session is marked as completed
+      await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets, setLogs);
       
       // Clear AsyncStorage
       await AsyncStorage.removeItem(`workout_session_${planId}_${day}`);
@@ -733,6 +741,10 @@ export default function WorkoutActiveScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Get exercise detail to check if timed
+      const detail = exerciseDetails.get(exercise.name);
+      const isTimed = detail?.is_timed || false;
+
       // Parse target reps to get a numeric value for comparison
       // For ranges like "8-12", we'll store the minimum as scheduled_reps
       const parseTargetReps = (target: string): number | null => {
@@ -745,18 +757,11 @@ export default function WorkoutActiveScreen() {
         return isNaN(parsed) ? null : parsed;
       };
       
-      // Parse target duration for timed exercises
-      const parseTargetDuration = (target: string): number | null => {
-        if (!target) return null;
-        const parsed = parseInt(target);
-        return isNaN(parsed) ? null : parsed;
-      };
-      
-      const scheduledReps = exercise.is_timed ? null : parseTargetReps(exercise.target_reps || '8-12');
-      // For scheduled_weight: 0 for bodyweight exercises, null for timed exercises
-      // Weighted exercises will have weight logged by user, scheduled_weight is 0 to indicate "not bodyweight" or can be null
-      const scheduledWeight = exercise.is_timed ? null : 0;
-      const scheduledDuration = exercise.is_timed ? parseTargetDuration(exercise.target_duration || exercise.default_duration_sec?.toString()) : null;
+      const scheduledReps = isTimed ? null : parseTargetReps(exercise.target_reps || '8-12');
+      // For scheduled_weight: 0 for bodyweight exercises and timed exercises
+      // Weighted exercises will have weight logged by user, scheduled_weight is 0 to indicate "not bodyweight"
+      const scheduledWeight = 0; // Always 0 since weight column is NOT NULL
+      const scheduledDuration = isTimed ? (exercise.target_duration_sec || detail?.default_duration_sec || null) : null;
 
       const dbLogs = sets
         .filter(s => s.completed)
@@ -766,9 +771,9 @@ export default function WorkoutActiveScreen() {
           if (logData.notes) notesParts.push(logData.notes);
           
           // For timed exercises, use duration in reps field; for others, use weight/reps
-          const isTimed = exercise.is_timed || false;
-          const weight = isTimed ? null : (set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? null));
-          const reps = isTimed ? (set.duration ? parseFloat(set.duration.toString()) : (scheduledDuration ?? null)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? null));
+          // Timed exercises are bodyweight, so weight = 0 (required by NOT NULL constraint)
+          const weight = isTimed ? 0 : (set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? 0));
+          const reps = isTimed ? (set.duration !== null && set.duration !== undefined ? parseFloat(set.duration.toString()) : (scheduledDuration ?? 0)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? 0));
           
           return {
             user_id: user.id,
@@ -776,20 +781,26 @@ export default function WorkoutActiveScreen() {
             plan_id: parseInt(planId),
             day: day,
             session_id: workoutSession?.id || null,
-            // For timed exercises, duration is stored in reps field
+            // For timed exercises, duration is stored in reps field, weight is 0
             weight: weight,
             reps: reps,
             scheduled_reps: scheduledReps,
             scheduled_weight: scheduledWeight,
-            notes: notesParts.length > 0 ? notesParts.join(' | ') : null
+            notes: notesParts.length > 0 ? notesParts.join(' | ') : null,
+            performed_at: new Date().toISOString()
           };
         });
 
       if (dbLogs.length > 0) {
-        await supabase.from('workout_logs').insert(dbLogs);
+        const { error: insertError } = await supabase.from('workout_logs').insert(dbLogs);
+        if (insertError) {
+          console.error('Error saving to workout_logs:', insertError);
+          throw insertError;
+        }
       }
     } catch (error) {
       console.error('Error saving to workout_logs:', error);
+      throw error;
     }
   };
 
@@ -827,6 +838,9 @@ export default function WorkoutActiveScreen() {
   };
 
   const isBodyweightExercise = (exerciseName: string, detail: ExerciseDetail | undefined): boolean => {
+    // Timed exercises are always bodyweight (planks, skipping, etc.)
+    if (detail?.is_timed) return true;
+    
     // Check if exercise name matches common bodyweight exercises
     const nameMatch = BODYWEIGHT_EXERCISES.some(bw => 
       exerciseName.toLowerCase().includes(bw.toLowerCase())
@@ -937,11 +951,10 @@ export default function WorkoutActiveScreen() {
             const loggedWeight = setLogs[setIndex]?.weight || '';
             const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
             
-            // Get duration from minutes/seconds inputs (pre-populated with target)
-            const minsFromMap = durationMinutes.has(setIndex) ? durationMinutes.get(setIndex) : null;
-            const secsFromMap = durationSeconds.has(setIndex) ? durationSeconds.get(setIndex) : null;
-            const currentMins = minsFromMap !== null && minsFromMap !== undefined && minsFromMap !== '' ? minsFromMap : Math.floor(targetDuration / 60).toString();
-            const currentSecs = secsFromMap !== null && secsFromMap !== undefined && secsFromMap !== '' ? secsFromMap : (targetDuration % 60).toString();
+            // Get duration from minutes/seconds inputs (pre-populated with target only if not in map)
+            // If map has the key (even if empty string), use that value to allow user to clear and edit
+            const currentMins = durationMinutes.has(setIndex) ? (durationMinutes.get(setIndex) || '') : Math.floor(targetDuration / 60).toString();
+            const currentSecs = durationSeconds.has(setIndex) ? (durationSeconds.get(setIndex) || '') : (targetDuration % 60).toString();
             
             // Calculate total seconds for comparison
             const mins = currentMins ? (parseInt(currentMins) || 0) : 0;
