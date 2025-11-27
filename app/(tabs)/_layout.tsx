@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Dumbbell, Calendar, User } from "lucide-react-native";
+import { Dumbbell, Calendar, TrendingUp, User } from "lucide-react-native";
 
 export default function TabLayout() {
   return (
@@ -29,6 +29,13 @@ export default function TabLayout() {
         options={{ 
           title: "Profile", 
           tabBarIcon: ({ color }) => <User size={24} color={color} /> 
+        }} 
+      />
+      <Tabs.Screen 
+        name="progress" 
+        options={{ 
+          title: "Progress", 
+          tabBarIcon: ({ color }) => <TrendingUp size={24} color={color} /> 
         }} 
       />
     </Tabs>

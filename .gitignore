@@ -44,7 +44,7 @@ yarn-error.*
 .env
 .env.local
 
-# Dependency directories
+# dependency directories
 node_modules/
 
 # supabase schema
