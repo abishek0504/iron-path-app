@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, Image, ActivityIndicator, Platform, Animated, Switch } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, ActivityIndicator, Platform, Switch } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, Upload, X, Check } from 'lucide-react-native';
+import { Camera, Upload, X } from 'lucide-react-native';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
@@ -41,9 +42,7 @@ export default function EditProfileScreen() {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
-  const [showToast, setShowToast] = useState(false);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
-  const toastTranslateY = useRef(new Animated.Value(-100)).current;
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -231,11 +230,29 @@ export default function EditProfileScreen() {
         throw new Error('User not found');
       }
 
+      // Delete old avatar if it exists (clean up storage)
+      if (profilePictureUri) {
+        try {
+          const urlParts = profilePictureUri.split('/');
+          const oldFileName = urlParts[urlParts.length - 1].split('?')[0];
+          await supabase.storage
+            .from('avatars')
+            .remove([oldFileName]);
+        } catch (e) {
+          // Ignore errors when deleting old file
+          console.log('Could not delete old file:', e);
+        }
+      }
+
       const response = await fetch(uri);
       const blob = await response.blob();
-      const fileExt = uri.split('.').pop();
+      const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
+      // Ensure we use a clean filename - just user ID and timestamp, no folders
       const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      // Save directly to bucket root - NO folder structure
+      const filePath = fileName;
+
+      console.log('Uploading to path:', filePath);
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
@@ -245,12 +262,15 @@ export default function EditProfileScreen() {
         });
 
       if (uploadError) {
+        console.error('Upload error:', uploadError);
         throw uploadError;
       }
 
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
         .getPublicUrl(filePath);
+
+      console.log('Public URL:', publicUrl);
 
       setProfilePictureUri(publicUrl);
 
@@ -260,6 +280,7 @@ export default function EditProfileScreen() {
         .eq('id', user.id);
 
       if (updateError) {
+        console.error('Database update error:', updateError);
         throw updateError;
       }
 
@@ -272,72 +293,109 @@ export default function EditProfileScreen() {
     }
   };
 
-  const removeImage = async () => {
+  const removeImage = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteImage = async () => {
+    setShowDeleteConfirm(false);
     setUploading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      if (profilePictureUri) {
-        const urlParts = profilePictureUri.split('/');
-        const fileName = urlParts[urlParts.length - 1];
-        const filePath = `avatars/${fileName}`;
-
-        await supabase.storage
-          .from('avatars')
-          .remove([filePath]);
+      if (!user) {
+        setUploading(false);
+        return;
       }
 
-      const { error } = await supabase
+      // First, get the current profile from database to ensure we have the latest avatar_url
+      const { data: currentProfile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching profile:', fetchError);
+      }
+
+      // Use the avatar URL from database, fallback to local state
+      const avatarUrlToDelete = currentProfile?.avatar_url || profile?.avatar_url || profilePictureUri;
+
+      if (avatarUrlToDelete) {
+        // Extract the file path from the URL
+        // Supabase URLs are typically: https://[project].supabase.co/storage/v1/object/public/avatars/[filename]
+        const urlParts = avatarUrlToDelete.split('/');
+        const fileName = urlParts[urlParts.length - 1].split('?')[0]; // Remove query params if any
+        // File is stored directly in bucket root, no folder structure
+        const filePath = fileName;
+
+        console.log('Deleting file from storage:', filePath);
+
+        // Delete from storage
+        const { error: storageError } = await supabase.storage
+          .from('avatars')
+          .remove([filePath]);
+
+        if (storageError) {
+          console.error('Storage delete error:', storageError);
+        } else {
+          console.log('Successfully deleted from storage');
+        }
+      }
+
+      // CRITICAL: Update database FIRST before anything else
+      console.log('Updating database to remove avatar_url for user:', user.id);
+      
+      // Use select to verify the update worked
+      const { data: updateData, error: updateError } = await supabase
         .from('profiles')
         .update({ avatar_url: null })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('avatar_url')
+        .single();
 
-      if (error) throw error;
+      if (updateError) {
+        console.error('Database update error:', updateError);
+        console.error('Error details:', JSON.stringify(updateError, null, 2));
+        throw new Error(`Database update failed: ${updateError.message}`);
+      }
 
+      if (!updateData) {
+        throw new Error('No data returned from update - profile may not exist');
+      }
+
+      console.log('Database update result:', updateData);
+      console.log('avatar_url after update:', updateData.avatar_url);
+
+      // Verify it's actually null
+      if (updateData.avatar_url !== null && updateData.avatar_url !== '') {
+        console.error('ERROR: avatar_url was not set to null! Value:', updateData.avatar_url);
+        // Force update one more time
+        const { error: forceError } = await supabase
+          .from('profiles')
+          .update({ avatar_url: null })
+          .eq('id', user.id);
+        
+        if (forceError) {
+          throw new Error(`Force update also failed: ${forceError.message}`);
+        }
+      }
+
+      // Update local state
       setProfilePictureUri(null);
-      Alert.alert('Success', 'Profile picture removed');
+      
+      // Reload profile to ensure state is in sync
+      await loadProfile();
+      
+      Alert.alert('Success', 'Profile picture deleted');
     } catch (error: any) {
       console.error('Error removing image:', error);
-      Alert.alert('Error', 'Failed to remove image');
+      Alert.alert('Error', error.message || 'Failed to remove image');
     } finally {
       setUploading(false);
     }
   };
 
-  const showToastMessage = () => {
-    setShowToast(true);
-    Animated.parallel([
-      Animated.timing(toastOpacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(toastTranslateY, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(toastOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(toastTranslateY, {
-          toValue: -100,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        setShowToast(false);
-        router.back();
-      });
-    }, 2000);
-  };
 
   const saveProfile = async () => {
     setLoading(true);
@@ -392,28 +450,13 @@ export default function EditProfileScreen() {
       setLoading(false);
     } else {
       setLoading(false);
-      showToastMessage();
+      // Navigate back immediately with saved parameter
+      router.push('/(tabs)/profile?saved=true');
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      {showToast && (
-        <Animated.View
-          style={[
-            styles.toastContainer,
-            {
-              opacity: toastOpacity,
-              transform: [{ translateY: toastTranslateY }],
-            },
-          ]}
-        >
-          <View style={styles.toastContent}>
-            <Check size={20} color="#10b981" />
-            <Text style={styles.toastText}>Changes saved</Text>
-          </View>
-        </Animated.View>
-      )}
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()}>
@@ -437,7 +480,12 @@ export default function EditProfileScreen() {
             ) : (
               <>
                 {profilePictureUri ? (
-                  <Image source={{ uri: profilePictureUri }} style={styles.profilePicture} />
+                  <Image 
+                    source={{ uri: profilePictureUri }} 
+                    style={styles.profilePicture}
+                    contentFit="cover"
+                    transition={200}
+                  />
                 ) : (
                   <View style={styles.placeholderPicture}>
                     <Text style={styles.placeholderPictureText}>No Photo</Text>
@@ -767,6 +815,37 @@ export default function EditProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteConfirm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteConfirmContent}>
+            <Text style={styles.deleteConfirmTitle}>Delete Profile Picture</Text>
+            <Text style={styles.deleteConfirmMessage}>
+              Are you sure you want to delete your profile picture? This action cannot be undone.
+            </Text>
+            <View style={styles.deleteConfirmButtons}>
+              <TouchableOpacity
+                style={styles.deleteConfirmCancelButton}
+                onPress={() => setShowDeleteConfirm(false)}
+              >
+                <Text style={styles.deleteConfirmCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteConfirmDeleteButton}
+                onPress={confirmDeleteImage}
+              >
+                <Text style={styles.deleteConfirmDeleteText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -979,37 +1058,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  toastContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-  },
-  toastContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#1f2937',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#10b981',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  toastText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
   unitToggleContainer: {
     backgroundColor: '#1f2937',
     padding: 16,
@@ -1049,5 +1097,52 @@ const styles = StyleSheet.create({
   heightSeparator: {
     color: '#9ca3af',
     fontSize: 14,
+  },
+  deleteConfirmContent: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 24,
+    margin: 20,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  deleteConfirmTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  deleteConfirmMessage: {
+    color: '#9ca3af',
+    fontSize: 16,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  deleteConfirmButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  deleteConfirmCancelButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#374151',
+  },
+  deleteConfirmCancelText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteConfirmDeleteButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#ef4444',
+  },
+  deleteConfirmDeleteText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
