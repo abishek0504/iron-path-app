@@ -21,7 +21,7 @@ export default function ExerciseSelectScreen() {
   };
   const { planId, day, exerciseIndex } = useLocalSearchParams<{ planId: string; day: string; exerciseIndex?: string }>();
   const [searchQuery, setSearchQuery] = useState('');
-  const [masterExercises, setMasterExercises] = useState<string[]>([]);
+  const [masterExercises, setMasterExercises] = useState<any[]>([]);
   const [customExercises, setCustomExercises] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -34,15 +34,47 @@ export default function ExerciseSelectScreen() {
   }, []);
 
   const loadMasterExercises = async () => {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('name')
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('name, difficulty_level')
+        .order('name', { ascending: true });
 
-    if (!error && data) {
-      setMasterExercises(data.map(ex => ex.name));
-    } else {
-      console.error('Error loading master exercises:', error);
+      if (error) {
+        console.error('Error loading master exercises with difficulty:', error);
+        // Fallback: try loading just name if difficulty_level field doesn't exist
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('exercises')
+          .select('name, difficulty_level')
+          .order('name', { ascending: true });
+        
+        if (fallbackError) {
+          console.error('Error loading master exercises (fallback):', fallbackError);
+          setMasterExercises([]);
+          return;
+        }
+
+        if (fallbackData && Array.isArray(fallbackData)) {
+          setMasterExercises(fallbackData.map(ex => ({
+            name: ex.name || '',
+            difficulty: ex.difficulty_level || null
+          })));
+        } else {
+          setMasterExercises([]);
+        }
+        return;
+      }
+
+      if (data && Array.isArray(data)) {
+        setMasterExercises(data.map(ex => ({
+          name: ex.name || '',
+          difficulty: ex.difficulty_level || null
+        })));
+      } else {
+        setMasterExercises([]);
+      }
+    } catch (err) {
+      console.error('Error in loadMasterExercises:', err);
       setMasterExercises([]);
     }
   };
@@ -65,7 +97,7 @@ export default function ExerciseSelectScreen() {
   };
 
   const filteredMasterExercises = masterExercises.filter((exercise) =>
-    exercise.toLowerCase().includes(searchQuery.toLowerCase())
+    exercise?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const filteredCustomExercises = (customExercises || []).filter((exercise: any) =>
@@ -287,10 +319,46 @@ export default function ExerciseSelectScreen() {
     }
   };
 
+  const getDifficultyInfo = (difficulty: string | null | undefined) => {
+    if (!difficulty) return null;
+    
+    const difficultyLower = String(difficulty).toLowerCase().trim();
+    if (difficultyLower === 'beginner') {
+      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+    } else if (difficultyLower === 'intermediate') {
+      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+    } else if (difficultyLower === 'advanced') {
+      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+    }
+    return null;
+  };
+
+  const renderDifficultyIndicator = (difficulty: string | null | undefined) => {
+    if (!difficulty) {
+      return null;
+    }
+    
+    const difficultyInfo = getDifficultyInfo(difficulty);
+    if (!difficultyInfo) {
+      return null;
+    }
+
+    return (
+      <View style={styles.difficultyContainer}>
+        <View style={styles.difficultyBars}>
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+        </View>
+        <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
+      </View>
+    );
+  };
+
   const allExercises = [
-    ...filteredMasterExercises.map(name => ({ name, type: 'master' })),
-    ...filteredCustomExercises.map((ex: any) => ({ name: ex.name, ...ex, type: 'custom' }))
-  ].sort((a, b) => a.name.localeCompare(b.name));
+    ...filteredMasterExercises.map(ex => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, type: 'master' })),
+    ...filteredCustomExercises.map((ex: any) => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, ...ex, type: 'custom' }))
+  ].filter(ex => ex.name).sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <SafeAreaView style={styles.container}>
@@ -326,7 +394,10 @@ export default function ExerciseSelectScreen() {
         keyExtractor={(item, index) => `${item.type}-${item.name}-${index}`}
         renderItem={({ item }) => (
           <View style={styles.exerciseItem}>
-            <Text style={styles.exerciseName}>{item.name}</Text>
+            <View style={styles.exerciseInfo}>
+              <Text style={styles.exerciseName}>{item.name}</Text>
+              {renderDifficultyIndicator(item.difficulty)}
+            </View>
             {item.type === 'master' ? (
               <TouchableOpacity
                 style={styles.addButton}
@@ -422,7 +493,15 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1f2937', borderRadius: 8, padding: 16, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#374151' },
   searchInput: { flex: 1, marginLeft: 12, color: 'white', fontSize: 16 },
   exerciseItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, marginHorizontal: 24, borderWidth: 1, borderColor: '#374151' },
-  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500', flex: 1 },
+  exerciseInfo: { flex: 1, marginRight: 12 },
+  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500', marginBottom: 4 },
+  difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  difficultyBar: { borderRadius: 2 },
+  difficultyBar1: { width: 6, height: 8 },
+  difficultyBar2: { width: 6, height: 12 },
+  difficultyBar3: { width: 6, height: 16 },
+  difficultyText: { fontSize: 12, fontWeight: '600' },
   addButton: { backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
   addButtonText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
   addCustomButton: { backgroundColor: '#1f2937', borderWidth: 1, borderColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },

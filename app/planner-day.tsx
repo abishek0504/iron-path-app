@@ -32,7 +32,7 @@ export default function PlannerDayScreen() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [dragStartY, setDragStartY] = useState<number>(0);
-  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null }>>(new Map());
+  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>>(new Map());
   const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
   const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
   const dragAllowedRef = React.useRef<number | null>(null);
@@ -102,20 +102,28 @@ export default function PlannerDayScreen() {
     const exerciseNames = exercises.map((ex: any) => ex.name).filter(Boolean);
     if (exerciseNames.length === 0) return;
 
-    const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null }>();
+    const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>();
 
     // Batch query all exercises from master exercises table
-    const { data: masterExercises } = await supabase
+    const { data: masterExercises, error: masterError } = await supabase
       .from('exercises')
-      .select('name, is_timed, default_duration_sec')
+      .select('name, is_timed, default_duration_sec, difficulty_level')
       .in('name', exerciseNames);
 
+    if (masterError) {
+      console.error('Error loading master exercises:', masterError);
+    }
+
     // Batch query all user exercises
-    const { data: userExercises } = await supabase
+    const { data: userExercises, error: userError } = await supabase
       .from('user_exercises')
-      .select('name, is_timed, default_duration_sec')
+      .select('name, is_timed, default_duration_sec, difficulty_level')
       .eq('user_id', user.id)
       .in('name', exerciseNames);
+
+    if (userError) {
+      console.error('Error loading user exercises:', userError);
+    }
 
     // Create maps for quick lookup
     const masterExerciseMap = new Map(
@@ -135,18 +143,21 @@ export default function PlannerDayScreen() {
       if (userExercise) {
         detailsMap.set(exercise.name, {
           is_timed: userExercise.is_timed || false,
-          default_duration_sec: userExercise.default_duration_sec
+          default_duration_sec: userExercise.default_duration_sec,
+          difficulty: userExercise.difficulty_level || null
         });
       } else if (masterExercise) {
         detailsMap.set(exercise.name, {
           is_timed: masterExercise.is_timed || false,
-          default_duration_sec: masterExercise.default_duration_sec
+          default_duration_sec: masterExercise.default_duration_sec,
+          difficulty: masterExercise.difficulty_level || null
         });
       } else {
         // Default values if not found in either table
         detailsMap.set(exercise.name, {
           is_timed: false,
-          default_duration_sec: null
+          default_duration_sec: null,
+          difficulty: null
         });
       }
     }
@@ -491,11 +502,48 @@ Return ONLY the JSON array, no other text.`;
     return seconds % 60;
   };
 
+  const getDifficultyInfo = (difficulty: string | null | undefined) => {
+    if (!difficulty) return null;
+    
+    const difficultyLower = String(difficulty).toLowerCase().trim();
+    if (difficultyLower === 'beginner') {
+      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+    } else if (difficultyLower === 'intermediate') {
+      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+    } else if (difficultyLower === 'advanced') {
+      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+    }
+    return null;
+  };
+
+  const renderDifficultyIndicator = (difficulty: string | null | undefined) => {
+    if (!difficulty) {
+      return null;
+    }
+    
+    const difficultyInfo = getDifficultyInfo(difficulty);
+    if (!difficultyInfo) {
+      return null;
+    }
+
+    return (
+      <View style={styles.difficultyContainer}>
+        <View style={styles.difficultyBars}>
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+        </View>
+        <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
+      </View>
+    );
+  };
+
   const renderExerciseCard = (item: any, index: number, drag?: () => void, isActive?: boolean) => {
     const isDragging = draggedIndex === index;
     const detail = exerciseDetails.get(item.name);
     const isTimed = detail?.is_timed || false;
     const defaultDuration = detail?.default_duration_sec || 60;
+    const difficulty = item.difficulty || detail?.difficulty || dayData?.difficulty || null;
     
     // For timed exercises, use target_duration_sec if available, otherwise use default_duration_sec
     // Store duration in seconds, but display in MM:SS format
@@ -576,6 +624,8 @@ Return ONLY the JSON array, no other text.`;
             <X color="#ef4444" size={20} />
           </TouchableOpacity>
         </View>
+        
+        {renderDifficultyIndicator(difficulty)}
         
         <View style={styles.exerciseRow}>
           <View style={styles.exerciseField}>
@@ -965,6 +1015,13 @@ const styles = StyleSheet.create({
   exerciseNameContainer: { flex: 1 },
   exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
   exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
+  difficultyContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
+  difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  difficultyBar: { borderRadius: 2 },
+  difficultyBar1: { width: 6, height: 8 },
+  difficultyBar2: { width: 6, height: 12 },
+  difficultyBar3: { width: 6, height: 16 },
+  difficultyText: { fontSize: 14, fontWeight: '600' },
   exerciseRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   exerciseField: { flex: 1 },
   fieldLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },
