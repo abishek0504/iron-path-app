@@ -94,7 +94,7 @@ export default function PlannerDayScreen() {
     }
     // Use exerciseDetails.size and a stringified version of exercise names to detect changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exerciseDetails.size, day, plan?.id, JSON.stringify(dayData?.exercises?.map(e => e.name))]);
+  }, [exerciseDetails.size, day, plan?.id, JSON.stringify(dayData?.exercises?.map((e: any) => e.name))]);
 
   useFocusEffect(
     useCallback(() => {
@@ -103,17 +103,8 @@ export default function PlannerDayScreen() {
   );
 
   const handleBack = () => {
-    // For modal screens, try to go back, but fallback to planner tab if navigation fails
-    try {
-      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/(tabs)/planner');
-      }
-    } catch (error) {
-      // Fallback: navigate to planner tab if back navigation fails
-      router.push('/(tabs)/planner');
-    }
+    // Always navigate directly to planner tab, bypassing navigation stack
+    router.replace('/(tabs)/planner');
   };
 
   const loadPlan = async () => {
@@ -162,9 +153,10 @@ export default function PlannerDayScreen() {
     }
 
     // Batch query all user exercises
+    // Note: user_exercises table does NOT have difficulty_level, only exercises table does
     const { data: userExercises, error: userError } = await supabase
       .from('user_exercises')
-      .select('name, is_timed, default_duration_sec, difficulty_level')
+      .select('name, is_timed, default_duration_sec')
       .eq('user_id', user.id)
       .in('name', exerciseNames);
 
@@ -207,10 +199,12 @@ export default function PlannerDayScreen() {
       }
       
       if (userExercise) {
+        // For user exercises, get difficulty from master exercise if available
+        const difficulty = masterExercise?.difficulty_level || null;
         detailsMap.set(exercise.name, {
           is_timed: userExercise.is_timed || false,
           default_duration_sec: userExercise.default_duration_sec,
-          difficulty: userExercise.difficulty_level || null
+          difficulty: difficulty
         });
       } else if (masterExercise) {
         detailsMap.set(exercise.name, {
@@ -469,7 +463,8 @@ Return ONLY the JSON array, no other text.`;
         // Only update if we've moved significantly
         const cardHeight = 150; // Approximate card height
         const offset = Math.round((currentY - dragStartY) / cardHeight);
-        const newIndex = Math.max(0, Math.min(dayData.exercises.length - 1, draggedIndex + offset));
+        // Allow index to be up to exercises.length (for placing at the end)
+        const newIndex = Math.max(0, Math.min(dayData.exercises.length, draggedIndex + offset));
         
         if (newIndex !== draggedIndex && newIndex !== dragOverIndex) {
           setDragOverIndex(newIndex);
@@ -486,7 +481,8 @@ Return ONLY the JSON array, no other text.`;
         if (Math.abs(currentY - dragStartY) > 20) {
           const cardHeight = 150;
           const offset = Math.round((currentY - dragStartY) / cardHeight);
-          const newIndex = Math.max(0, Math.min(dayData.exercises.length - 1, draggedIndex + offset));
+          // Allow index to be up to exercises.length (for placing at the end)
+          const newIndex = Math.max(0, Math.min(dayData.exercises.length, draggedIndex + offset));
           
           if (newIndex !== draggedIndex && newIndex !== dragOverIndex) {
             setDragOverIndex(newIndex);
@@ -511,12 +507,19 @@ Return ONLY the JSON array, no other text.`;
   const handleWebTouchEnd = () => {
     if (Platform.OS === 'web' && draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
       const exercises = [...dayData.exercises];
+      const originalLength = exercises.length;
       const [draggedItem] = exercises.splice(draggedIndex, 1);
       
-      // When dragging downward, adjust the insertion index to account for the removed item
+      // Calculate insertion index
       let insertIndex = dragOverIndex;
       if (draggedIndex < dragOverIndex) {
-        insertIndex = dragOverIndex - 1;
+        // When dragging downward, adjust the insertion index to account for the removed item
+        // If dragOverIndex was the last position (originalLength), append to end
+        if (dragOverIndex === originalLength) {
+          insertIndex = exercises.length; // Append to end after removal
+        } else {
+          insertIndex = dragOverIndex - 1;
+        }
       }
       
       exercises.splice(insertIndex, 0, draggedItem);
@@ -670,233 +673,69 @@ Return ONLY the JSON array, no other text.`;
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
             </View>
           )}
-          {item.name === "New Exercise" ? (
-            <TouchableOpacity
-              style={styles.exerciseNameContainer}
-              onPress={() => {
-                router.push({
-                  pathname: '/exercise-select',
-                  params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
-                });
-              }}
-            >
-              <Text style={styles.exerciseNamePlaceholder}>{item.name}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TextInput
-              style={styles.exerciseName}
-              value={item.name}
-              onChangeText={(text) => {
-                updateExercise(index, 'name', text);
-                // Reload exercise details when name changes
-                if (text && text.trim()) {
-                  loadExerciseDetails([{ name: text.trim() }]);
-                }
-              }}
-              placeholder="Exercise name"
-              placeholderTextColor="#6b7280"
-              editable={!isActive}
-              onFocus={() => {
-                // Prevent drag when focusing on input
-                if (Platform.OS === 'web') {
-                  dragAllowedRef.current = null;
-                  setDraggedIndex(null);
-                }
-              }}
-            />
-          )}
+          <View style={styles.exerciseNameContainer}>
+            <Text style={styles.exerciseName}>{item.name || 'Unnamed Exercise'}</Text>
+            {renderDifficultyIndicator(difficulty)}
+          </View>
           <TouchableOpacity onPress={() => removeExercise(index)}>
             <X color="#ef4444" size={20} />
           </TouchableOpacity>
         </View>
         
-        {renderDifficultyIndicator(difficulty)}
-        
-        <View style={styles.exerciseRow}>
-          <View style={styles.exerciseField}>
-            <Text style={styles.fieldLabel}>Sets</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={item.target_sets?.toString() || ''}
-              onChangeText={(text) => {
-                if (text === '') {
-                  updateExercise(index, 'target_sets', null);
-                } else {
-                  const num = parseInt(text);
-                  if (!isNaN(num)) {
-                    updateExercise(index, 'target_sets', num);
-                  }
-                }
-              }}
-              keyboardType="numeric"
-              editable={!isActive}
-              placeholder="3"
-              placeholderTextColor="#6b7280"
-            />
+        {item.sets && Array.isArray(item.sets) && item.sets.length > 0 ? (
+          <View style={styles.setsContainer}>
+            <Text style={styles.setsTitle}>Sets</Text>
+            {item.sets.map((set: any, setIndex: number) => {
+              const isTimed = detail?.is_timed || false;
+              return (
+                <View key={setIndex} style={styles.setRow}>
+                  <Text style={styles.setNumber}>Set {set.index || setIndex + 1}:</Text>
+                  {!isTimed && set.weight !== null && set.weight !== undefined && (
+                    <Text style={styles.setValue}>{set.weight} lbs</Text>
+                  )}
+                  {!isTimed && set.reps !== null && set.reps !== undefined && (
+                    <Text style={styles.setValue}>{set.reps} reps</Text>
+                  )}
+                  {isTimed && set.duration !== null && set.duration !== undefined && (
+                    <Text style={styles.setValue}>
+                      {Math.floor(set.duration / 60)}:{(set.duration % 60).toString().padStart(2, '0')}
+                    </Text>
+                  )}
+                  {set.rest_time_sec !== null && set.rest_time_sec !== undefined && (
+                    <Text style={styles.setValue}>{set.rest_time_sec}s rest</Text>
+                  )}
+                </View>
+              );
+            })}
           </View>
-          {isTimed ? (
-            <>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Min</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={durationMinutes.has(index) ? durationMinutes.get(index) : (currentDuration !== null ? getDurationMinutes(currentDuration).toString() : '')}
-                  onChangeText={(text) => {
-                    // Allow empty string or valid number
-                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0)) {
-                      setDurationMinutes(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, text);
-                        return newMap;
-                      });
-                      // Auto-save when both fields have values or when cleared
-                      const mins = text === '' ? 0 : parseInt(text) || 0;
-                      const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
-                      const totalSeconds = mins * 60 + secs;
-                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    }
-                  }}
-                  onBlur={() => {
-                    // Ensure value is saved on blur
-                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
-                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
-                    const totalSeconds = mins * 60 + secs;
-                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    // Clear cache to show formatted value
-                    setDurationMinutes(prev => {
-                      const newMap = new Map(prev);
-                      newMap.delete(index);
-                      return newMap;
-                    });
-                  }}
-                  onFocus={() => {
-                    // Initialize with current value when focused
-                    if (!durationMinutes.has(index) && currentDuration !== null) {
-                      setDurationMinutes(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, getDurationMinutes(currentDuration).toString());
-                        return newMap;
-                      });
-                    }
-                    // Prevent drag when focusing on input
-                    if (Platform.OS === 'web') {
-                      dragAllowedRef.current = null;
-                      setDraggedIndex(null);
-                    }
-                  }}
-                  keyboardType="numeric"
-                  editable={!isActive}
-                  placeholder="0"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Sec</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={durationSeconds.has(index) ? durationSeconds.get(index) : (currentDuration !== null ? getDurationSeconds(currentDuration).toString() : '')}
-                  onChangeText={(text) => {
-                    // Allow empty string or valid number (0-59)
-                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0 && parseInt(text) < 60)) {
-                      setDurationSeconds(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, text);
-                        return newMap;
-                      });
-                      // Auto-save when both fields have values or when cleared
-                      const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
-                      const secs = text === '' ? 0 : parseInt(text) || 0;
-                      const totalSeconds = mins * 60 + secs;
-                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    }
-                  }}
-                  onBlur={() => {
-                    // Ensure value is saved on blur
-                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
-                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
-                    const totalSeconds = mins * 60 + secs;
-                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    // Clear cache to show formatted value
-                    setDurationSeconds(prev => {
-                      const newMap = new Map(prev);
-                      newMap.delete(index);
-                      return newMap;
-                    });
-                  }}
-                  onFocus={() => {
-                    // Initialize with current value when focused
-                    if (!durationSeconds.has(index) && currentDuration !== null) {
-                      setDurationSeconds(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, getDurationSeconds(currentDuration).toString());
-                        return newMap;
-                      });
-                    }
-                    // Prevent drag when focusing on input
-                    if (Platform.OS === 'web') {
-                      dragAllowedRef.current = null;
-                      setDraggedIndex(null);
-                    }
-                  }}
-                  keyboardType="numeric"
-                  editable={!isActive}
-                  placeholder="0"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-            </>
-          ) : (
-            <View style={styles.exerciseField}>
-              <Text style={styles.fieldLabel}>Reps</Text>
-              <TextInput
-                style={styles.fieldInput}
-                value={item.target_reps || ''}
-                onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
-                editable={!isActive}
-                placeholder="8-12"
-                placeholderTextColor="#6b7280"
-              />
-            </View>
-          )}
-          <View style={styles.exerciseField}>
-            <Text style={styles.fieldLabel}>Rest (sec)</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={item.rest_time_sec?.toString() || ''}
-              onChangeText={(text) => {
-                if (text === '') {
-                  updateExercise(index, 'rest_time_sec', null);
-                } else {
-                  const num = parseInt(text);
-                  if (!isNaN(num)) {
-                    updateExercise(index, 'rest_time_sec', num);
-                  }
-                }
-              }}
-              keyboardType="numeric"
-              editable={!isActive}
-              placeholder="60"
-              placeholderTextColor="#6b7280"
-            />
-          </View>
-        </View>
+        ) : (
+          <Text style={styles.noSetsText}>No sets configured</Text>
+        )}
 
-        <TextInput
-          style={styles.notesInput}
-          value={item.notes || ''}
-          onChangeText={(text) => updateExercise(index, 'notes', text)}
-          placeholder="Notes (optional)"
-          placeholderTextColor="#6b7280"
-          multiline
-          editable={!isActive}
-          onFocus={() => {
-            // Prevent drag when focusing on input
-            if (Platform.OS === 'web') {
-              dragAllowedRef.current = null;
-              setDraggedIndex(null);
-            }
-          }}
-        />
+        {item.notes && (
+          <View style={styles.notesContainer}>
+            <Text style={styles.notesLabel}>Notes:</Text>
+            <Text style={styles.notesText}>{item.notes}</Text>
+          </View>
+        )}
+
+        <View style={styles.setsButtonRow}>
+          <TouchableOpacity
+            style={styles.setsButton}
+            onPress={() => {
+              router.push({
+                pathname: '/workout-sets',
+                params: {
+                  planId: planId || '',
+                  day: day || '',
+                  exerciseIndex: index.toString(),
+                },
+              });
+            }}
+          >
+            <Text style={styles.setsButtonText}>Edit sets</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -977,7 +816,14 @@ Return ONLY the JSON array, no other text.`;
             </View>
           )}
           ListHeaderComponent={renderHeader}
-          ListFooterComponent={renderFooter}
+          ListFooterComponent={() => (
+            <View>
+              {dragOverIndex === dayData.exercises.length && draggedIndex !== null && (
+                <View style={styles.insertLine} />
+              )}
+              {renderFooter()}
+            </View>
+          )}
           contentContainerStyle={styles.listContent}
         />
       ) : DraggableFlatList ? (
@@ -1097,10 +943,10 @@ const styles = StyleSheet.create({
   insertLine: { height: 3, backgroundColor: '#3b82f6', marginVertical: 4, marginHorizontal: 0, borderRadius: 2 },
   exerciseHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 12 },
   dragHandleContainer: { padding: 8, marginLeft: -8, marginRight: 4, justifyContent: 'center', alignItems: 'center' },
-  exerciseNameContainer: { flex: 1 },
-  exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
+  exerciseNameContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
-  difficultyContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
+  difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   difficultyBar: { borderRadius: 2 },
   difficultyBar1: { width: 6, height: 8 },
@@ -1131,5 +977,17 @@ const styles = StyleSheet.create({
   modalButtonPrimary: { flex: 1, backgroundColor: '#2563eb', padding: 12, borderRadius: 8, alignItems: 'center' },
   modalButtonTextSecondary: { color: '#9ca3af', fontWeight: 'bold' },
   modalButtonTextPrimary: { color: 'white', fontWeight: 'bold' },
+  setsButtonRow: { marginTop: 12, flexDirection: 'row', justifyContent: 'flex-end' },
+  setsButton: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: '#2563eb' },
+  setsButtonText: { color: '#60a5fa', fontWeight: '600', fontSize: 14 },
+  setsContainer: { marginBottom: 12 },
+  setsTitle: { color: '#9ca3af', fontSize: 12, marginBottom: 8, fontWeight: '600' },
+  setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' },
+  setNumber: { color: 'white', fontSize: 14, fontWeight: '600' },
+  setValue: { color: '#9ca3af', fontSize: 14 },
+  noSetsText: { color: '#6b7280', fontSize: 14, fontStyle: 'italic', marginBottom: 12 },
+  notesContainer: { marginTop: 8, marginBottom: 12 },
+  notesLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4, fontWeight: '600' },
+  notesText: { color: '#9ca3af', fontSize: 14 },
 });
 

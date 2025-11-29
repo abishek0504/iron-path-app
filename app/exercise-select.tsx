@@ -194,8 +194,27 @@ export default function ExerciseSelectScreen() {
 
       if (isTimed) {
         newExercise.target_duration_sec = defaultDuration;
+        // Pre-initialize 3 sets with duration=60 (1 min, 0 sec), rest=60
+        newExercise.sets = [
+          { index: 1, duration: 60, rest_time_sec: 60 },
+          { index: 2, duration: 60, rest_time_sec: 60 },
+          { index: 3, duration: 60, rest_time_sec: 60 },
+        ];
       } else {
-        newExercise.target_reps = "8-12";
+        // Parse default_reps (could be "8-12" or a number) and use first number for sets
+        const defaultRepsStr = "8-12";
+        const defaultRepsNum = typeof defaultRepsStr === 'number' 
+          ? defaultRepsStr 
+          : (typeof defaultRepsStr === 'string' && Number.isFinite(Number(defaultRepsStr.split('-')[0])))
+          ? parseInt(defaultRepsStr.split('-')[0], 10)
+          : 8;
+        newExercise.target_reps = defaultRepsNum;
+        // Pre-initialize 3 sets with reps as number, weight=null, rest=60
+        newExercise.sets = [
+          { index: 1, weight: null, reps: defaultRepsNum, rest_time_sec: 60 },
+          { index: 2, weight: null, reps: defaultRepsNum, rest_time_sec: 60 },
+          { index: 3, weight: null, reps: defaultRepsNum, rest_time_sec: 60 },
+        ];
       }
 
       dayData.exercises = [...(dayData.exercises || []), newExercise];
@@ -278,13 +297,48 @@ export default function ExerciseSelectScreen() {
       const updatedPlan = { ...plan };
       const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
-      const newExercise = {
+      const newExercise: any = {
         name: newCustomExercise.name,
         target_sets: newCustomExercise.default_sets || 3,
-        target_reps: newCustomExercise.default_reps || "8-12",
         rest_time_sec: newCustomExercise.default_rest_sec || 60,
         notes: newCustomExercise.description || ""
       };
+
+      // Pre-initialize sets
+      if (newCustomExercise.is_timed) {
+        // Pre-initialize sets with duration=60 (1 min, 0 sec), rest=60
+        const numSets = newCustomExercise.default_sets || 3;
+        const restSec = newCustomExercise.default_rest_sec || 60;
+        newExercise.target_duration_sec = newCustomExercise.default_duration_sec || 60;
+        newExercise.sets = [];
+        for (let i = 0; i < numSets; i++) {
+          newExercise.sets.push({
+            index: i + 1,
+            duration: 60,
+            rest_time_sec: restSec,
+          });
+        }
+      } else {
+        // Parse default_reps (could be "8-12" or a number) and use first number for sets
+        const defaultRepsStr = newCustomExercise.default_reps || "8-12";
+        const defaultRepsNum = typeof defaultRepsStr === 'number' 
+          ? defaultRepsStr 
+          : (typeof defaultRepsStr === 'string' && Number.isFinite(Number(defaultRepsStr.split('-')[0])))
+          ? parseInt(defaultRepsStr.split('-')[0], 10)
+          : 8;
+        newExercise.target_reps = defaultRepsNum;
+        const numSets = newCustomExercise.default_sets || 3;
+        const restSec = newCustomExercise.default_rest_sec || 60;
+        newExercise.sets = [];
+        for (let i = 0; i < numSets; i++) {
+          newExercise.sets.push({
+            index: i + 1,
+            weight: null,
+            reps: defaultRepsNum,
+            rest_time_sec: restSec,
+          });
+        }
+      }
 
       if (exerciseIndex !== undefined) {
         const index = parseInt(exerciseIndex);
@@ -363,8 +417,38 @@ export default function ExerciseSelectScreen() {
 
       if (isTimed) {
         newExercise.target_duration_sec = exercise.default_duration_sec || 60;
+        // Pre-initialize sets with duration=60 (1 min, 0 sec), rest=60
+        const numSets = exercise.default_sets || 3;
+        const restSec = exercise.default_rest_sec || 60;
+        newExercise.sets = [];
+        for (let i = 0; i < numSets; i++) {
+          newExercise.sets.push({
+            index: i + 1,
+            duration: 60,
+            rest_time_sec: restSec,
+          });
+        }
       } else {
-        newExercise.target_reps = exercise.default_reps || "8-12";
+        // Parse default_reps (could be "8-12" or a number) and use first number for sets
+        const defaultRepsStr = exercise.default_reps || "8-12";
+        const defaultRepsNum = typeof defaultRepsStr === 'number' 
+          ? defaultRepsStr 
+          : (typeof defaultRepsStr === 'string' && Number.isFinite(Number(defaultRepsStr.split('-')[0])))
+          ? parseInt(defaultRepsStr.split('-')[0], 10)
+          : 8;
+        newExercise.target_reps = defaultRepsNum;
+        // Pre-initialize sets with reps as number, weight=null, rest
+        const numSets = exercise.default_sets || 3;
+        const restSec = exercise.default_rest_sec || 60;
+        newExercise.sets = [];
+        for (let i = 0; i < numSets; i++) {
+          newExercise.sets.push({
+            index: i + 1,
+            weight: null,
+            reps: defaultRepsNum,
+            rest_time_sec: restSec,
+          });
+        }
       }
 
       if (exerciseIndex !== undefined) {
@@ -435,7 +519,8 @@ export default function ExerciseSelectScreen() {
 
   const allExercises = [
     ...filteredMasterExercises.map(ex => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, type: 'master' })),
-    ...filteredCustomExercises.map((ex: any) => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, ...ex, type: 'custom' }))
+    // Note: user_exercises (custom) does NOT have difficulty_level, only exercises table does
+    ...filteredCustomExercises.map((ex: any) => ({ name: ex?.name || '', difficulty: null, ...ex, type: 'custom' }))
   ].filter(ex => ex.name).sort((a, b) => a.name.localeCompare(b.name));
 
   return (
@@ -473,8 +558,10 @@ export default function ExerciseSelectScreen() {
         renderItem={({ item }) => (
           <View style={styles.exerciseItem}>
             <View style={styles.exerciseInfo}>
-              <Text style={styles.exerciseName}>{item.name}</Text>
-              {renderDifficultyIndicator(item.difficulty)}
+              <View style={styles.exerciseNameContainer}>
+                <Text style={styles.exerciseName}>{item.name}</Text>
+                {renderDifficultyIndicator(item.difficulty)}
+              </View>
             </View>
             {item.type === 'master' ? (
               <TouchableOpacity
@@ -572,14 +659,15 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, marginLeft: 12, color: 'white', fontSize: 16 },
   exerciseItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, marginHorizontal: 24, borderWidth: 1, borderColor: '#374151' },
   exerciseInfo: { flex: 1, marginRight: 12 },
-  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500', marginBottom: 4 },
-  difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  exerciseNameContainer: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500' },
+  difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   difficultyBar: { borderRadius: 2 },
   difficultyBar1: { width: 6, height: 8 },
   difficultyBar2: { width: 6, height: 12 },
   difficultyBar3: { width: 6, height: 16 },
-  difficultyText: { fontSize: 12, fontWeight: '600' },
+  difficultyText: { fontSize: 14, fontWeight: '600' },
   addButton: { backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
   addButtonText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
   addCustomButton: { backgroundColor: '#1f2937', borderWidth: 1, borderColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },

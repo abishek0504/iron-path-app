@@ -172,7 +172,6 @@ export default function WorkoutActiveScreen() {
       const isTimed = detail?.is_timed || false;
       
       if (isTimed) {
-        const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
         const totalSets = exercise.target_sets || 3;
         
         // Check if maps need initialization
@@ -189,6 +188,14 @@ export default function WorkoutActiveScreen() {
           const secsMap = new Map(durationSeconds);
           for (let i = 0; i < totalSets; i++) {
             if (!minsMap.has(i) || !secsMap.has(i)) {
+              // Get duration from set if available, otherwise use target_duration_sec or default
+              const set = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[i] 
+                ? exercise.sets[i] 
+                : null;
+              const setDuration = set?.duration !== null && set?.duration !== undefined 
+                ? set.duration 
+                : null;
+              const targetDuration = setDuration || exercise.target_duration_sec || detail?.default_duration_sec || 60;
               const mins = Math.floor(targetDuration / 60);
               const secs = targetDuration % 60;
               minsMap.set(i, mins.toString());
@@ -536,6 +543,7 @@ export default function WorkoutActiveScreen() {
 
   const handleStartSet = () => {
     const exerciseIndex = progress.currentExerciseIndex;
+    const setIndex = progress.currentSetIndex;
     const exercise = exercises[exerciseIndex];
     const detail = exerciseDetails.get(exercise.name);
     const isTimed = detail?.is_timed || false;
@@ -544,9 +552,15 @@ export default function WorkoutActiveScreen() {
     console.log(`Exercise details map size: ${exerciseDetails.size}, keys:`, Array.from(exerciseDetails.keys()));
 
     if (isTimed) {
-      // Start 3-second countdown, then countdown from target duration
-      const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
-      console.log(`Starting timer for timed exercise. Target duration: ${targetDuration}`);
+      // Get duration from current set if available, otherwise use target_duration_sec or default
+      const currentSet = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
+        ? exercise.sets[setIndex] 
+        : null;
+      const setDuration = currentSet?.duration !== null && currentSet?.duration !== undefined 
+        ? currentSet.duration 
+        : null;
+      const targetDuration = setDuration || exercise.target_duration_sec || detail?.default_duration_sec || 60;
+      console.log(`Starting timer for timed exercise. Set duration: ${setDuration}, Target duration: ${targetDuration}`);
       setExerciseTimer({ 
         active: true, 
         seconds: 3, // Start with 3-second countdown
@@ -639,7 +653,6 @@ export default function WorkoutActiveScreen() {
       };
       
       // Initialize logs with target values (user can edit if different)
-      const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
       const targetRepsValue = parseTargetRepsForInit(exercise.target_reps || '8-12');
       
       const initialLogs = Array.from({ length: totalSets }, (_, i) => {
@@ -653,12 +666,19 @@ export default function WorkoutActiveScreen() {
       
       setSetLogs(initialLogs);
       
-      // Initialize duration minutes/seconds for timed exercises with target duration
+      // Initialize duration minutes/seconds for timed exercises with duration from sets
       if (isTimed) {
         const minsMap = new Map<number, string>();
         const secsMap = new Map<number, string>();
         for (let i = 0; i < totalSets; i++) {
-          // Always use target duration as default (user can edit if different)
+          // Get duration from set if available, otherwise use target_duration_sec or default
+          const set = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[i] 
+            ? exercise.sets[i] 
+            : null;
+          const setDuration = set?.duration !== null && set?.duration !== undefined 
+            ? set.duration 
+            : null;
+          const targetDuration = setDuration || exercise.target_duration_sec || detail?.default_duration_sec || 60;
           const mins = Math.floor(targetDuration / 60);
           const secs = targetDuration % 60;
           minsMap.set(i, mins.toString());
@@ -992,7 +1012,14 @@ export default function WorkoutActiveScreen() {
             const targetReps = exercise.target_reps || '8-12';
             const loggedReps = setLogs[setIndex]?.reps || '';
             const loggedWeight = setLogs[setIndex]?.weight || '';
-            const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+            // Get duration from set if available, otherwise use target_duration_sec or default
+            const set = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
+              ? exercise.sets[setIndex] 
+              : null;
+            const setDuration = set?.duration !== null && set?.duration !== undefined 
+              ? set.duration 
+              : null;
+            const targetDuration = setDuration || exercise.target_duration_sec || detail?.default_duration_sec || 60;
             
             // Get duration from minutes/seconds inputs (pre-populated with target only if not in map)
             // If map has the key (even if empty string), use that value to allow user to clear and edit
@@ -1412,7 +1439,17 @@ export default function WorkoutActiveScreen() {
             <Text style={styles.infoLabel}>Target:</Text>
             <Text style={styles.infoValue}>
               {isTimed 
-                ? formatTime(exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60)
+                ? (() => {
+                    // Get duration from current set if available, otherwise use target_duration_sec or default
+                    const currentSet = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
+                      ? exercise.sets[setIndex] 
+                      : null;
+                    const setDuration = currentSet?.duration !== null && currentSet?.duration !== undefined 
+                      ? currentSet.duration 
+                      : null;
+                    const targetDuration = setDuration || exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60;
+                    return formatTime(targetDuration);
+                  })()
                 : `${exercise.target_reps || '8-12'} reps`}
             </Text>
           </View>
