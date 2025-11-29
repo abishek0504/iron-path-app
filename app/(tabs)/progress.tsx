@@ -67,7 +67,7 @@ export default function ProgressScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [workoutData, setWorkoutData] = useState<WorkoutData[]>([]);
-  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean }>>(new Map());
+  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; difficulty_level: string | null }>>(new Map());
   const [planData, setPlanData] = useState<Map<number, any>>(new Map()); // Store plan data to get target values
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutData | null>(null);
@@ -252,15 +252,16 @@ export default function ProgressScreen() {
     const exerciseNames = [...new Set(logs.map(log => log.exercise_name).filter(Boolean))];
     if (exerciseNames.length === 0) return;
 
-    const detailsMap = new Map<string, { is_timed: boolean }>();
+    const detailsMap = new Map<string, { is_timed: boolean; difficulty_level: string | null }>();
 
     // Batch query all exercises from master exercises table
+    // Note: difficulty_level only exists in exercises table, NOT in user_exercises
     const { data: masterExercises } = await supabase
       .from('exercises')
-      .select('name, is_timed')
+      .select('name, is_timed, difficulty_level')
       .in('name', exerciseNames);
 
-    // Batch query all user exercises
+    // Batch query all user exercises (for is_timed and default_duration_sec)
     const { data: userExercises } = await supabase
       .from('user_exercises')
       .select('name, is_timed')
@@ -275,23 +276,47 @@ export default function ProgressScreen() {
       (userExercises || []).map((ex: any) => [ex.name, ex])
     );
 
-    // Merge results: user exercises take precedence over master exercises
+    // Merge results: user exercises take precedence for is_timed, but difficulty_level comes from master exercises only
     for (const exerciseName of exerciseNames) {
-      const userExercise = userExerciseMap.get(exerciseName);
-      const masterExercise = masterExerciseMap.get(exerciseName);
+      // Try exact match first
+      let userExercise = userExerciseMap.get(exerciseName);
+      let masterExercise = masterExerciseMap.get(exerciseName);
+      
+      // If not found, try case-insensitive match
+      if (!userExercise && !masterExercise) {
+        for (const [name, ex] of userExerciseMap.entries()) {
+          if (name.toLowerCase() === exerciseName.toLowerCase()) {
+            userExercise = ex;
+            break;
+          }
+        }
+        if (!masterExercise) {
+          for (const [name, ex] of masterExerciseMap.entries()) {
+            if (name.toLowerCase() === exerciseName.toLowerCase()) {
+              masterExercise = ex;
+              break;
+            }
+          }
+        }
+      }
       
       if (userExercise) {
+        // User exercises don't have difficulty_level, get it from master exercises
+        const difficulty = masterExercise?.difficulty_level || null;
         detailsMap.set(exerciseName, {
-          is_timed: userExercise.is_timed || false
+          is_timed: userExercise.is_timed || false,
+          difficulty_level: difficulty
         });
       } else if (masterExercise) {
         detailsMap.set(exerciseName, {
-          is_timed: masterExercise.is_timed || false
+          is_timed: masterExercise.is_timed || false,
+          difficulty_level: masterExercise.difficulty_level || null
         });
       } else {
         // Default values if not found in either table
         detailsMap.set(exerciseName, {
-          is_timed: false
+          is_timed: false,
+          difficulty_level: null
         });
       }
     }
@@ -388,13 +413,13 @@ export default function ProgressScreen() {
       await loadExerciseDetails(filteredLogs);
       
       // Get exercise details for aggregation (will be available after loadExerciseDetails)
-      const detailsMap = new Map<string, { is_timed: boolean }>();
+      const detailsMap = new Map<string, { is_timed: boolean; difficulty_level: string | null }>();
       const exerciseNames = [...new Set(filteredLogs.map(log => log.exercise_name).filter(Boolean))];
       
       if (exerciseNames.length > 0) {
         const { data: masterExercises } = await supabase
           .from('exercises')
-          .select('name, is_timed')
+          .select('name, is_timed, difficulty_level')
           .in('name', exerciseNames);
 
         const { data: userExercises } = await supabase
@@ -415,11 +440,22 @@ export default function ProgressScreen() {
           const masterExercise = masterExerciseMap.get(exerciseName);
           
           if (userExercise) {
-            detailsMap.set(exerciseName, { is_timed: userExercise.is_timed || false });
+            // User exercises don't have difficulty_level, get it from master exercises
+            const difficulty = masterExercise?.difficulty_level || null;
+            detailsMap.set(exerciseName, { 
+              is_timed: userExercise.is_timed || false,
+              difficulty_level: difficulty
+            });
           } else if (masterExercise) {
-            detailsMap.set(exerciseName, { is_timed: masterExercise.is_timed || false });
+            detailsMap.set(exerciseName, { 
+              is_timed: masterExercise.is_timed || false,
+              difficulty_level: masterExercise.difficulty_level || null
+            });
           } else {
-            detailsMap.set(exerciseName, { is_timed: false });
+            detailsMap.set(exerciseName, { 
+              is_timed: false,
+              difficulty_level: null
+            });
           }
         }
       }
@@ -465,7 +501,7 @@ export default function ProgressScreen() {
     }
   };
 
-  const aggregateWorkoutData = (logs: WorkoutLog[], sessions: WorkoutSession[], exerciseDetailsMap: Map<string, { is_timed: boolean }>, planExerciseOrder: Map<number, Map<string, string[]>>): WorkoutData[] => {
+  const aggregateWorkoutData = (logs: WorkoutLog[], sessions: WorkoutSession[], exerciseDetailsMap: Map<string, { is_timed: boolean; difficulty_level: string | null }>, planExerciseOrder: Map<number, Map<string, string[]>>): WorkoutData[] => {
     const dataMap = new Map<string, WorkoutData>();
 
     // Group logs by date and session
@@ -537,7 +573,7 @@ export default function ProgressScreen() {
 
       if (sessionEntry) {
         // Find or create exercise entry
-        let exerciseEntry = sessionEntry.exercises.find(e => e.name === log.exercise_name);
+        let exerciseEntry = sessionEntry.exercises.find((e: any) => e.name === log.exercise_name);
         if (!exerciseEntry) {
           exerciseEntry = {
             name: log.exercise_name,
@@ -1068,6 +1104,42 @@ export default function ProgressScreen() {
     return bodyweightExercises.some(bw => nameLower.includes(bw));
   };
 
+  const getDifficultyInfo = (difficulty: string | null | undefined) => {
+    if (!difficulty) return null;
+    
+    const difficultyLower = String(difficulty).toLowerCase().trim();
+    if (difficultyLower === 'beginner') {
+      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+    } else if (difficultyLower === 'intermediate') {
+      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+    } else if (difficultyLower === 'advanced') {
+      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+    }
+    return null;
+  };
+
+  const renderDifficultyIndicator = (difficulty: string | null | undefined) => {
+    if (!difficulty) {
+      return null;
+    }
+    
+    const difficultyInfo = getDifficultyInfo(difficulty);
+    if (!difficultyInfo) {
+      return null;
+    }
+
+    return (
+      <View style={styles.difficultyContainer}>
+        <View style={styles.difficultyBars}>
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+        </View>
+        <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
+      </View>
+    );
+  };
+
   const validateWorkoutData = (): boolean => {
     const errors = new Map<string, string>();
     
@@ -1095,14 +1167,15 @@ export default function ProgressScreen() {
             }
           } else {
             // For non-timed exercises:
-            // - Reps is always required
+            // - Reps is always required (must be > 0, not null/undefined)
             // - Weight is required UNLESS it's a bodyweight exercise (then can be 0 or null)
-            const hasReps = set.reps !== null && set.reps !== undefined && set.reps !== 0;
+            // Note: We allow 0 reps to be saved (converted from null), but validation requires > 0
+            const hasReps = set.reps !== null && set.reps !== undefined && set.reps > 0;
             const hasWeight = set.weight !== null && set.weight !== undefined && set.weight !== 0;
             
             if (!hasReps) {
               const repsErrorKey = `${sessionIdx}-${exIdx}-${setIdx}-reps`;
-              errors.set(repsErrorKey, 'Reps are required');
+              errors.set(repsErrorKey, 'Reps must be greater than 0');
             }
             
             // Weight validation: if not bodyweight (and not marked as bodyweight via checkbox), weight must be provided
@@ -1166,15 +1239,16 @@ export default function ProgressScreen() {
             
             if (set.id) {
               // Existing set - update it
-              // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises)
-              // Reps is also required, so use 0 if null
-              const isBodyweight = isBodyweightExercise(exercise.name);
-              const finalWeight = (weight !== null && weight !== undefined) ? weight : (isBodyweight ? 0 : 0);
+              // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises or as fallback)
+              // Reps is also required (NOT NULL), but validation ensures it's > 0, so we should have a valid value here
+              // If somehow we still have null/undefined after validation, use 0 as fallback (shouldn't happen)
+              const finalWeight = (weight !== null && weight !== undefined) ? weight : 0;
+              const finalReps = (reps !== null && reps !== undefined && reps > 0) ? reps : 0;
               
               updates.push({
                 id: set.id,
                 weight: finalWeight,
-                reps: reps !== null && reps !== undefined ? reps : 0,
+                reps: finalReps,
                 notes: set.notes !== null && set.notes !== undefined ? set.notes : null
               });
             } else {
@@ -1202,7 +1276,7 @@ export default function ProgressScreen() {
                 const plan = planData.get(session.session.plan_id);
                 if (plan?.week_schedule) {
                   for (const [day, dayData] of Object.entries(plan.week_schedule)) {
-                    if (dayData?.exercises?.some((ex: any) => ex.name === exercise.name)) {
+                    if (dayData && typeof dayData === 'object' && 'exercises' in dayData && Array.isArray(dayData.exercises) && dayData.exercises.some((ex: any) => ex.name === exercise.name)) {
                       dayToUse = day;
                       break;
                     }
@@ -1294,9 +1368,8 @@ export default function ProgressScreen() {
       // Create new log entries
       if (newSets.length > 0) {
         const inserts = newSets.map(newSet => {
-          // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises)
-          const isBodyweight = isBodyweightExercise(newSet.exerciseName);
-          const finalWeight = (newSet.weight !== null && newSet.weight !== undefined) ? newSet.weight : (isBodyweight ? 0 : 0);
+          // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises or as fallback)
+          const finalWeight = (newSet.weight !== null && newSet.weight !== undefined) ? newSet.weight : 0;
           
           // Convert date string (YYYY-MM-DD) to ISO string with local time at noon to avoid timezone issues
           // This ensures the date is preserved correctly regardless of timezone
@@ -1308,7 +1381,7 @@ export default function ProgressScreen() {
             user_id: user.id,
             exercise_name: newSet.exerciseName,
             weight: finalWeight,
-            reps: newSet.reps !== null && newSet.reps !== undefined ? newSet.reps : 0,
+            reps: (newSet.reps !== null && newSet.reps !== undefined && newSet.reps > 0) ? newSet.reps : 0,
             notes: newSet.notes,
             performed_at: localDate.toISOString(), // Convert to ISO but based on local date
             session_id: newSet.sessionId,
@@ -1421,7 +1494,7 @@ export default function ProgressScreen() {
     
     // Small delay to ensure modal closes, then navigate
     setTimeout(() => {
-      router.push({
+      router.replace({
         pathname: '/exercise-select',
         params: { context: 'progress' }
       });
@@ -1804,9 +1877,37 @@ export default function ProgressScreen() {
                       ? exercise.sets.filter((set: any) => !set.id || !deletedSetIds.has(set.id))
                       : exercise.sets;
                     
+                    // Get exercise metadata from plan data
+                    let exerciseRestTime: number | null = null;
+                    let exerciseNotes: string | null = null;
+                    const difficulty = exerciseDetails.get(exercise.name)?.difficulty_level || null;
+                    
+                    if (planId && day && planData.has(planId)) {
+                      const plan = planData.get(planId);
+                      const dayData = plan?.week_schedule?.[day];
+                      if (dayData?.exercises) {
+                        const exerciseData = dayData.exercises.find((ex: any) => ex.name === exercise.name);
+                        if (exerciseData) {
+                          exerciseRestTime = exerciseData.rest_time_sec || null;
+                          exerciseNotes = exerciseData.notes || null;
+                        }
+                      }
+                    }
+                    
                     return (
                       <View key={exIdx} style={styles.modalExercise}>
                         <Text style={styles.modalExerciseName}>{exercise.name}</Text>
+                        {renderDifficultyIndicator(difficulty)}
+                        {exerciseRestTime !== null && (
+                          <View style={styles.modalExerciseMeta}>
+                            <Text style={styles.modalExerciseMetaText}>Rest: {exerciseRestTime} sec</Text>
+                          </View>
+                        )}
+                        {exerciseNotes && exerciseNotes.trim() && !isEditing && (
+                          <View style={styles.modalExerciseNotes}>
+                            <Text style={styles.modalExerciseNotesText}>{exerciseNotes}</Text>
+                          </View>
+                        )}
                         {visibleSets.map((set, displayIdx) => {
                           // Find the original index in the full sets array for updates
                           const originalSetIdx = exercise.sets.findIndex((s: any) => s === set);
@@ -2665,7 +2766,57 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: 'white',
+    marginBottom: 8,
+  },
+  difficultyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  difficultyBars: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  difficultyBar: {
+    borderRadius: 2,
+  },
+  difficultyBar1: {
+    width: 6,
+    height: 8,
+  },
+  difficultyBar2: {
+    width: 6,
+    height: 12,
+  },
+  difficultyBar3: {
+    width: 6,
+    height: 16,
+  },
+  difficultyText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalExerciseMeta: {
+    marginBottom: 8,
+  },
+  modalExerciseMetaText: {
+    fontSize: 14,
+    color: '#9ca3af',
+  },
+  modalExerciseNotes: {
     marginBottom: 12,
+    padding: 8,
+    backgroundColor: '#111827',
+    borderRadius: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3b82f6',
+  },
+  modalExerciseNotesText: {
+    fontSize: 13,
+    color: '#d1d5db',
+    fontStyle: 'italic',
   },
   modalSet: {
     marginBottom: 10,
@@ -2738,6 +2889,13 @@ const styles = StyleSheet.create({
     borderColor: '#374151',
     fontSize: 15,
   },
+  modalSetInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalSetInputHalf: {
+    flex: 1,
+  },
   modalSetInputError: {
     borderColor: '#ef4444',
     borderWidth: 1,
@@ -2790,16 +2948,6 @@ const styles = StyleSheet.create({
     minHeight: 60,
     textAlignVertical: 'top',
     marginTop: 0,
-  },
-  modalSetInputError: {
-    borderColor: '#ef4444',
-    borderWidth: 1,
-  },
-  modalSetErrorText: {
-    color: '#ef4444',
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: '500',
   },
   modalNotes: {
     fontSize: 13,

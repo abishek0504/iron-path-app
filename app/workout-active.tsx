@@ -57,13 +57,10 @@ export default function WorkoutActiveScreen() {
 
   const safeBack = () => {
     try {
-      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/(tabs)/home');
-      }
+      // Use replace to prevent navigation stacking
+      router.replace('/(tabs)/home');
     } catch (error) {
-      router.push('/(tabs)/home');
+      router.replace('/(tabs)/home');
     }
   };
   
@@ -641,19 +638,12 @@ export default function WorkoutActiveScreen() {
       const detail = exerciseDetails.get(exercise.name);
       const isTimed = detail?.is_timed || false;
       
-      // Parse target reps to get initial value (use min from range if range)
-      const parseTargetRepsForInit = (target: string): string => {
-        if (!target) return '';
-        if (target.includes('-')) {
-          const [min] = target.split('-').map(n => parseInt(n.trim()));
-          return min ? min.toString() : '';
-        }
-        const num = parseInt(target);
-        return isNaN(num) ? '' : num.toString();
-      };
-      
       // Initialize logs with target values (user can edit if different)
-      const targetRepsValue = parseTargetRepsForInit(exercise.target_reps || '8-12');
+      // target_reps is now always numeric
+      const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+      const targetRepsValue = typeof exercise.target_reps === 'number' 
+        ? exercise.target_reps.toString() 
+        : (typeof exercise.target_reps === 'string' ? (exercise.target_reps.includes('-') ? exercise.target_reps.split('-')[0].trim() : exercise.target_reps) : '10');
       
       const initialLogs = Array.from({ length: totalSets }, (_, i) => {
         return {
@@ -796,23 +786,11 @@ export default function WorkoutActiveScreen() {
       const detail = exerciseDetails.get(exercise.name);
       const isTimed = detail?.is_timed || false;
 
-      // Parse target reps to get a numeric value for comparison
-      // For ranges like "8-12", we'll store the minimum as scheduled_reps
-      const parseTargetReps = (target: string): number | null => {
-        if (!target) return null;
-        if (target.includes('-')) {
-          const [min] = target.split('-').map(n => parseInt(n.trim()));
-          return min || null;
-        }
-        const parsed = parseInt(target);
-        return isNaN(parsed) ? null : parsed;
-      };
-      
       // For timed exercises: scheduled_reps contains target duration (in seconds)
-      // For rep exercises: scheduled_reps contains target reps (minimum of range like "8-12")
+      // For rep exercises: scheduled_reps contains target reps (now always numeric)
       const scheduledReps = isTimed 
         ? (exercise.target_duration_sec || detail?.default_duration_sec || 60)
-        : parseTargetReps(exercise.target_reps || '8-12');
+        : (typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || null : null));
       
       // For scheduled_weight: We don't store target weight in plans, so this is always 0
       // The actual weight logged by the user is stored in the weight column
@@ -832,7 +810,7 @@ export default function WorkoutActiveScreen() {
           // For timed exercises, use duration in reps field; for others, use weight/reps
           // Timed exercises are bodyweight, so weight = 0 (required by NOT NULL constraint)
           const weight = isTimed ? 0 : (set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? 0));
-          const reps = isTimed ? (set.duration !== null && set.duration !== undefined ? parseFloat(set.duration.toString()) : (scheduledDuration ?? 0)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? 0));
+          const reps = isTimed ? (set.duration !== null && set.duration !== undefined ? parseFloat(set.duration.toString()) : (scheduledReps ?? 0)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? 0));
           
           console.log(`Saving set ${index + 1} for ${exercise.name}: weight=${weight}, reps=${reps}, duration=${set.duration}, isTimed=${isTimed}`);
           
@@ -1009,7 +987,7 @@ export default function WorkoutActiveScreen() {
           <Text style={styles.loggingSubtitle}>Log your results and compare to target</Text>
 
           {Array.from({ length: totalSets }, (_, setIndex) => {
-            const targetReps = exercise.target_reps || '8-12';
+            const targetReps = typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10);
             const loggedReps = setLogs[setIndex]?.reps || '';
             const loggedWeight = setLogs[setIndex]?.weight || '';
             // Get duration from set if available, otherwise use target_duration_sec or default
@@ -1031,19 +1009,13 @@ export default function WorkoutActiveScreen() {
             const secs = currentSecs ? (parseInt(currentSecs) || 0) : 0;
             const actualDuration = mins * 60 + secs;
             
-            // Parse target reps (handle ranges like "8-12")
-            const parseTargetReps = (target: string): { min: number; max: number } => {
-              if (target.includes('-')) {
-                const [min, max] = target.split('-').map(n => parseInt(n.trim()));
-                return { min: min || 8, max: max || 12 };
-              }
-              const num = parseInt(target);
-              return { min: num || 8, max: num || 12 };
-            };
-            
-            const targetRepsRange = parseTargetReps(targetReps);
+            // target_reps is now always numeric (no ranges)
+            const targetRepsNum = typeof exercise.target_reps === 'number' 
+              ? exercise.target_reps 
+              : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10);
             const actualReps = loggedReps ? parseInt(loggedReps) : null;
-            const repsMatch = actualReps !== null && !isNaN(actualReps) && actualReps >= targetRepsRange.min && actualReps <= targetRepsRange.max;
+            // Met: within 10% tolerance (90% to 110%)
+            const repsMatch = actualReps !== null && !isNaN(actualReps) && actualReps >= targetRepsNum * 0.9 && actualReps <= targetRepsNum * 1.1;
             // Duration match: within 10% tolerance (90% to 110%)
             const durationMatch = actualDuration > 0 && actualDuration >= targetDuration * 0.9 && actualDuration <= targetDuration * 1.1;
 
@@ -1200,7 +1172,7 @@ export default function WorkoutActiveScreen() {
                             <View style={styles.comparisonBadge}>
                               {repsMatch ? (
                                 <Check color="#10b981" size={16} />
-                              ) : actualReps > targetRepsRange.max ? (
+                              ) : actualReps > targetRepsNum * 1.1 ? (
                                 <TrendingUp color="#3b82f6" size={16} />
                               ) : (
                                 <TrendingDown color="#ef4444" size={16} />
@@ -1208,10 +1180,10 @@ export default function WorkoutActiveScreen() {
                               <Text style={[
                                 styles.comparisonText,
                                 repsMatch ? styles.comparisonTextGood : 
-                                actualReps > targetRepsRange.max ? styles.comparisonTextBetter : 
+                                actualReps > targetRepsNum * 1.1 ? styles.comparisonTextBetter : 
                                 styles.comparisonTextBad
                               ]}>
-                                {repsMatch ? 'Met' : actualReps > targetRepsRange.max ? 'Above' : 'Below'}
+                                {repsMatch ? 'Met' : actualReps > targetRepsNum * 1.1 ? 'Above' : 'Below'}
                               </Text>
                             </View>
                           )}
@@ -1439,18 +1411,8 @@ export default function WorkoutActiveScreen() {
             <Text style={styles.infoLabel}>Target:</Text>
             <Text style={styles.infoValue}>
               {isTimed 
-                ? (() => {
-                    // Get duration from current set if available, otherwise use target_duration_sec or default
-                    const currentSet = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
-                      ? exercise.sets[setIndex] 
-                      : null;
-                    const setDuration = currentSet?.duration !== null && currentSet?.duration !== undefined 
-                      ? currentSet.duration 
-                      : null;
-                    const targetDuration = setDuration || exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60;
-                    return formatTime(targetDuration);
-                  })()
-                : `${exercise.target_reps || '8-12'} reps`}
+                ? formatTime(exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60)
+                : `${typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10)} reps`}
             </Text>
           </View>
           {!isTimed && (

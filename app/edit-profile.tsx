@@ -26,13 +26,10 @@ export default function EditProfileScreen() {
 
   const safeBack = () => {
     try {
-      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/(tabs)/profile');
-      }
+      // Use replace to prevent navigation stacking
+      router.replace('/(tabs)/profile');
     } catch (error) {
-      router.push('/(tabs)/profile');
+      router.replace('/(tabs)/profile');
     }
   };
   const [loading, setLoading] = useState(false);
@@ -462,8 +459,8 @@ export default function EditProfileScreen() {
       setLoading(false);
     } else {
       setLoading(false);
-      // Navigate back immediately with saved parameter
-      router.push('/(tabs)/profile?saved=true');
+      // Navigate back immediately with saved parameter using replace to prevent stacking
+      router.replace('/(tabs)/profile?saved=true');
     }
   };
 
