@@ -264,6 +264,12 @@ export default function ExerciseSelectScreen() {
         throw createError;
       }
 
+      // Defensive check: ensure newCustomExercise is not null/undefined
+      // .single() should return a single object, but check for safety
+      if (!newCustomExercise) {
+        throw new Error('Failed to create exercise: no data returned');
+      }
+
       // Add to workout plan
       const { data: plan, error: planError } = await supabase
         .from('workout_plans')

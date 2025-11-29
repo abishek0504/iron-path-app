@@ -92,9 +92,10 @@ export default function PlannerDayScreen() {
     } else {
       console.log('Migration: No exercises need migration');
     }
-    // Use exerciseDetails.size and a stringified version of exercise names to detect changes
+    // Use exerciseDetails.size and exercise count/length to detect changes
+    // Avoid JSON.stringify in dependency array as it creates new objects on every render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exerciseDetails.size, day, plan?.id, JSON.stringify(dayData?.exercises?.map(e => e.name))]);
+  }, [exerciseDetails.size, day, plan?.id, dayData?.exercises?.length]);
 
   useFocusEffect(
     useCallback(() => {
@@ -162,9 +163,10 @@ export default function PlannerDayScreen() {
     }
 
     // Batch query all user exercises
+    // Note: user_exercises table does NOT have difficulty_level column (only exercises table has it)
     const { data: userExercises, error: userError } = await supabase
       .from('user_exercises')
-      .select('name, is_timed, default_duration_sec, difficulty_level')
+      .select('name, is_timed, default_duration_sec')
       .eq('user_id', user.id)
       .in('name', exerciseNames);
 
@@ -207,10 +209,12 @@ export default function PlannerDayScreen() {
       }
       
       if (userExercise) {
+        // User exercises don't have difficulty_level, so get it from master exercises if available
+        const difficulty = masterExercise?.difficulty_level || null;
         detailsMap.set(exercise.name, {
           is_timed: userExercise.is_timed || false,
           default_duration_sec: userExercise.default_duration_sec,
-          difficulty: userExercise.difficulty_level || null
+          difficulty: difficulty
         });
       } else if (masterExercise) {
         detailsMap.set(exercise.name, {
