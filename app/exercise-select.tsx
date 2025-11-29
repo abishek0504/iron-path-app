@@ -8,6 +8,7 @@ import { supabase } from '../src/lib/supabase';
 
 export default function ExerciseSelectScreen() {
   const router = useRouter();
+  const { planId, day, exerciseIndex, context } = useLocalSearchParams<{ planId?: string; day?: string; exerciseIndex?: string; context?: string }>();
 
   const safeBack = async (selectedExerciseName?: string) => {
     try {
@@ -45,7 +46,6 @@ export default function ExerciseSelectScreen() {
       }
     }
   };
-  const { planId, day, exerciseIndex, context } = useLocalSearchParams<{ planId?: string; day?: string; exerciseIndex?: string; context?: string }>();
   const [searchQuery, setSearchQuery] = useState('');
   const [masterExercises, setMasterExercises] = useState<any[]>([]);
   const [customExercises, setCustomExercises] = useState<any[]>([]);
@@ -71,7 +71,7 @@ export default function ExerciseSelectScreen() {
         // Fallback: try loading just name if difficulty_level field doesn't exist
         const { data: fallbackData, error: fallbackError } = await supabase
           .from('exercises')
-          .select('name, difficulty_level')
+          .select('name')
           .order('name', { ascending: true });
         
         if (fallbackError) {
@@ -83,7 +83,7 @@ export default function ExerciseSelectScreen() {
         if (fallbackData && Array.isArray(fallbackData)) {
           setMasterExercises(fallbackData.map(ex => ({
             name: ex.name || '',
-            difficulty: ex.difficulty_level || null
+            difficulty: null // Fallback query only selects name, so difficulty_level is not available
           })));
         } else {
           setMasterExercises([]);

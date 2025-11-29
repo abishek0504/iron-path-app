@@ -181,7 +181,11 @@ export default function ProgressScreen() {
           id: null,
           weight: null,
           reps: null,
-          notes: null
+          duration: null,
+          notes: null,
+          scheduled_reps: null,
+          scheduled_weight: null,
+          scheduled_duration: null
         });
         
         // Update both editingWorkout and ensure selectedWorkout is set
@@ -218,7 +222,11 @@ export default function ProgressScreen() {
           id: null,
           weight: null,
           reps: null,
-          notes: null
+          duration: null,
+          notes: null,
+          scheduled_reps: null,
+          scheduled_weight: null,
+          scheduled_duration: null
         });
         setEditingWorkout(updated);
         setIsEditing(true);
@@ -663,13 +671,13 @@ export default function ProgressScreen() {
     }
 
     // Add days of the month
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month, day);
+    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+      const date = new Date(year, month, dayNum);
       // Use local date instead of UTC
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const dateKey = `${year}-${month}-${day}`;
+      const dateYear = date.getFullYear();
+      const dateMonth = String(date.getMonth() + 1).padStart(2, '0');
+      const dateDay = String(date.getDate()).padStart(2, '0');
+      const dateKey = `${dateYear}-${dateMonth}-${dateDay}`;
       const workout = workoutData.find(w => w.date === dateKey);
 
       days.push({
