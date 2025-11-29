@@ -104,17 +104,29 @@ export default function PlannerDayScreen() {
   );
 
   const handleBack = () => {
-    // For modal screens, try to go back, but fallback to planner tab if navigation fails
+    // Use replace to prevent navigation stacking
     try {
-      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/(tabs)/planner');
-      }
+      router.replace('/(tabs)/planner');
     } catch (error) {
-      // Fallback: navigate to planner tab if back navigation fails
-      router.push('/(tabs)/planner');
+      router.replace('/(tabs)/planner');
     }
+  };
+
+  // Migrate rep ranges to single numeric values
+  const migrateRepRange = (value: string | number | null | undefined): number | null => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      // Parse range like "8-12" -> 8 (minimum)
+      if (value.includes('-')) {
+        const [min] = value.split('-').map(n => parseInt(n.trim()));
+        return isNaN(min) ? null : min;
+      }
+      // Parse single number
+      const parsed = parseInt(value);
+      return isNaN(parsed) ? null : parsed;
+    }
+    return null;
   };
 
   const loadPlan = async () => {
@@ -134,7 +146,38 @@ export default function PlannerDayScreen() {
       setPlan(data);
       if (day && data.plan_data?.week_schedule?.[day]) {
         const loadedDayData = data.plan_data.week_schedule[day];
-        setDayData(loadedDayData);
+        
+        // Migrate rep ranges to numeric values
+        let needsMigration = false;
+        const migratedExercises = (loadedDayData.exercises || []).map((ex: any) => {
+          if (ex.target_reps && typeof ex.target_reps === 'string') {
+            needsMigration = true;
+            return { ...ex, target_reps: migrateRepRange(ex.target_reps) };
+          }
+          return ex;
+        });
+        
+        if (needsMigration) {
+          const migratedDayData = { ...loadedDayData, exercises: migratedExercises };
+          setDayData(migratedDayData);
+          
+          // Save migrated data back to database
+          const updatedPlan = { ...data };
+          updatedPlan.plan_data.week_schedule[day] = migratedDayData;
+          setPlan(updatedPlan);
+          
+          // Save to database
+          const { error: saveError } = await supabase
+            .from('workout_plans')
+            .update({ plan_data: updatedPlan.plan_data })
+            .eq('id', parseInt(planId));
+          
+          if (saveError) {
+            console.error('Error saving migrated plan:', saveError);
+          }
+        } else {
+          setDayData(loadedDayData);
+        }
         
         // Load exercise details
         await loadExerciseDetails(loadedDayData.exercises || []);
@@ -357,7 +400,7 @@ The response must be STRICTLY valid JSON array in this exact format:
   {
     "name": "Exercise Name",
     "target_sets": 3,
-    "target_reps": "8-12",
+    "target_reps": 10,
     "rest_time_sec": 90,
     "notes": "Form tips"
   }
@@ -538,7 +581,7 @@ Return ONLY the JSON array, no other text.`;
   };
 
   const addManualExercise = () => {
-    router.push({
+    router.replace({
       pathname: '/exercise-select',
       params: { planId: planId || '', day: day || '' }
     });
@@ -678,7 +721,7 @@ Return ONLY the JSON array, no other text.`;
             <TouchableOpacity
               style={styles.exerciseNameContainer}
               onPress={() => {
-                router.push({
+                router.replace({
                   pathname: '/exercise-select',
                   params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
                 });
@@ -854,10 +897,20 @@ Return ONLY the JSON array, no other text.`;
               <Text style={styles.fieldLabel}>Reps</Text>
               <TextInput
                 style={styles.fieldInput}
-                value={item.target_reps || ''}
-                onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
+                value={typeof item.target_reps === 'number' ? item.target_reps.toString() : (item.target_reps || '')}
+                onChangeText={(text) => {
+                  if (text === '') {
+                    updateExercise(index, 'target_reps', null);
+                  } else {
+                    const num = parseInt(text);
+                    if (!isNaN(num) && num > 0) {
+                      updateExercise(index, 'target_reps', num);
+                    }
+                  }
+                }}
+                keyboardType="numeric"
                 editable={!isActive}
-                placeholder="8-12"
+                placeholder="10"
                 placeholderTextColor="#6b7280"
               />
             </View>

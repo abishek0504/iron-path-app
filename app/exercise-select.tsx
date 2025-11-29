@@ -16,33 +16,26 @@ export default function ExerciseSelectScreen() {
         // Store in AsyncStorage for reliable passing back
         await AsyncStorage.setItem('progress_selected_exercise', selectedExerciseName);
         
-        // Navigate back to progress tab
-        if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-          router.back();
-        } else {
-          router.push({
-            pathname: '/(tabs)/progress',
-            params: { selectedExercise: selectedExerciseName }
-          });
-        }
+        // Navigate back to progress tab using replace to prevent stacking
+        router.replace({
+          pathname: '/(tabs)/progress',
+          params: { selectedExercise: selectedExerciseName }
+        });
         return;
       }
-      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/(tabs)/planner');
-      }
+      // For planner context, use replace to prevent stacking
+      router.replace('/(tabs)/planner');
     } catch (error) {
       if (context === 'progress') {
         if (selectedExerciseName) {
           await AsyncStorage.setItem('progress_selected_exercise', selectedExerciseName);
         }
-        router.push({
+        router.replace({
           pathname: '/(tabs)/progress',
           params: selectedExerciseName ? { selectedExercise: selectedExerciseName } : {}
         });
       } else {
-        router.push('/(tabs)/planner');
+        router.replace('/(tabs)/planner');
       }
     }
   };
@@ -195,7 +188,7 @@ export default function ExerciseSelectScreen() {
       if (isTimed) {
         newExercise.target_duration_sec = defaultDuration;
       } else {
-        newExercise.target_reps = "8-12";
+        newExercise.target_reps = 10;
       }
 
       dayData.exercises = [...(dayData.exercises || []), newExercise];
@@ -253,7 +246,7 @@ export default function ExerciseSelectScreen() {
             is_timed: false,
             default_duration_sec: null,
             default_sets: 3,
-            default_reps: "8-12",
+            default_reps: "10",
             default_rest_sec: 60
           }
         ])
@@ -287,7 +280,7 @@ export default function ExerciseSelectScreen() {
       const newExercise = {
         name: newCustomExercise.name,
         target_sets: newCustomExercise.default_sets || 3,
-        target_reps: newCustomExercise.default_reps || "8-12",
+        target_reps: typeof newCustomExercise.default_reps === 'number' ? newCustomExercise.default_reps : (parseInt(newCustomExercise.default_reps || '10') || 10),
         rest_time_sec: newCustomExercise.default_rest_sec || 60,
         notes: newCustomExercise.description || ""
       };
@@ -370,7 +363,7 @@ export default function ExerciseSelectScreen() {
       if (isTimed) {
         newExercise.target_duration_sec = exercise.default_duration_sec || 60;
       } else {
-        newExercise.target_reps = exercise.default_reps || "8-12";
+        newExercise.target_reps = typeof exercise.default_reps === 'number' ? exercise.default_reps : (parseInt(exercise.default_reps || '10') || 10);
       }
 
       if (exerciseIndex !== undefined) {

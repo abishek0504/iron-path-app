@@ -1494,7 +1494,7 @@ export default function ProgressScreen() {
     
     // Small delay to ensure modal closes, then navigate
     setTimeout(() => {
-      router.push({
+      router.replace({
         pathname: '/exercise-select',
         params: { context: 'progress' }
       });

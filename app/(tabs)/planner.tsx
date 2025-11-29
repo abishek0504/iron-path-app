@@ -155,7 +155,7 @@ The response must be STRICTLY valid JSON in this exact format:
         {
           "name": "Bench Press",
           "target_sets": 3,
-          "target_reps": "8-12",
+          "target_reps": 10,
           "rest_time_sec": 90,
           "notes": "Keep elbows tucked and squeeze scapula at top"
         }
