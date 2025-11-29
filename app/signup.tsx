@@ -12,6 +12,18 @@ export default function SignupScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const router = useRouter();
 
+  const safeBack = () => {
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/');
+      }
+    } catch (error) {
+      router.push('/');
+    }
+  };
+
   const validatePasswords = (): boolean => {
     if (password !== confirmPassword) {
       setErrorMessage("Passwords do not match.");
@@ -125,7 +137,7 @@ export default function SignupScreen() {
         {loading ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>Create Account</Text>}
       </TouchableOpacity>
       
-      <TouchableOpacity style={styles.buttonSecondary} onPress={() => router.back()}>
+      <TouchableOpacity style={styles.buttonSecondary} onPress={safeBack}>
         <Text style={styles.buttonTextSecondary}>Back to Login</Text>
       </TouchableOpacity>
     </ScrollView>

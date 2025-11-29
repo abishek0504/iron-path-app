@@ -32,6 +32,9 @@ export default function PlannerDayScreen() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [dragStartY, setDragStartY] = useState<number>(0);
+  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>>(new Map());
+  const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
+  const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -47,12 +50,71 @@ export default function PlannerDayScreen() {
     };
   }, []);
 
+  // Migrate timed exercises that have target_reps instead of target_duration_sec
+  useEffect(() => {
+    if (!day || !plan || !dayData?.exercises || exerciseDetails.size === 0) {
+      console.log('Migration useEffect: Missing dependencies', { day, hasPlan: !!plan, hasExercises: !!dayData?.exercises, detailsSize: exerciseDetails.size });
+      return;
+    }
+    
+    console.log('Migration useEffect: Running migration check');
+    let needsMigration = false;
+    const updatedExercises = dayData.exercises.map((ex: any, index: number) => {
+      if (!ex.name) return ex;
+      const detail = exerciseDetails.get(ex.name);
+      const isTimed = detail?.is_timed || false;
+      
+      console.log(`Migration check - Exercise: ${ex.name}, isTimed: ${isTimed}, has target_reps: ${!!ex.target_reps}, has target_duration_sec: ${!!ex.target_duration_sec}`);
+      
+      if (isTimed && ex.target_reps && !ex.target_duration_sec) {
+        needsMigration = true;
+        console.log(`Migrating ${ex.name} from target_reps to target_duration_sec`);
+        return {
+          ...ex,
+          target_reps: null,
+          target_duration_sec: detail?.default_duration_sec || 60
+        };
+      }
+      return ex;
+    });
+    
+    if (needsMigration) {
+      console.log('Migration: Updating exercises');
+      const updatedDayData = {
+        ...dayData,
+        exercises: updatedExercises
+      };
+      setDayData(updatedDayData);
+      const updatedPlan = { ...plan };
+      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      setPlan(updatedPlan);
+      savePlan(updatedDayData, true, false);
+    } else {
+      console.log('Migration: No exercises need migration');
+    }
+    // Use exerciseDetails.size and a stringified version of exercise names to detect changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exerciseDetails.size, day, plan?.id, JSON.stringify(dayData?.exercises?.map(e => e.name))]);
+
   useFocusEffect(
     useCallback(() => {
       loadPlan();
     }, [planId])
   );
 
+  const handleBack = () => {
+    // For modal screens, try to go back, but fallback to planner tab if navigation fails
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/(tabs)/planner');
+      }
+    } catch (error) {
+      // Fallback: navigate to planner tab if back navigation fails
+      router.push('/(tabs)/planner');
+    }
+  };
 
   const loadPlan = async () => {
     if (!planId) return;
@@ -66,14 +128,110 @@ export default function PlannerDayScreen() {
     if (error) {
       console.error('Error loading plan:', error);
       Alert.alert("Error", "Failed to load workout plan.");
-      router.back();
+      handleBack();
     } else if (data) {
       setPlan(data);
       if (day && data.plan_data?.week_schedule?.[day]) {
         const loadedDayData = data.plan_data.week_schedule[day];
         setDayData(loadedDayData);
+        
+        // Load exercise details
+        await loadExerciseDetails(loadedDayData.exercises || []);
       }
     }
+  };
+
+  const loadExerciseDetails = async (exercises: any[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !exercises.length) return;
+
+    const exerciseNames = exercises.map((ex: any) => ex.name).filter(Boolean);
+    if (exerciseNames.length === 0) return;
+
+    const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>();
+
+    // Batch query all exercises from master exercises table
+    // Note: exercises table doesn't have default_duration_sec, only user_exercises does
+    const { data: masterExercises, error: masterError } = await supabase
+      .from('exercises')
+      .select('name, is_timed, difficulty_level')
+      .in('name', exerciseNames);
+
+    if (masterError) {
+      console.error('Error loading master exercises:', masterError);
+    }
+
+    // Batch query all user exercises
+    const { data: userExercises, error: userError } = await supabase
+      .from('user_exercises')
+      .select('name, is_timed, default_duration_sec, difficulty_level')
+      .eq('user_id', user.id)
+      .in('name', exerciseNames);
+
+    if (userError) {
+      console.error('Error loading user exercises:', userError);
+    }
+
+    // Create maps for quick lookup
+    const masterExerciseMap = new Map(
+      (masterExercises || []).map((ex: any) => [ex.name, ex])
+    );
+    const userExerciseMap = new Map(
+      (userExercises || []).map((ex: any) => [ex.name, ex])
+    );
+
+    // Merge results: user exercises take precedence over master exercises
+    for (const exercise of exercises) {
+      if (!exercise.name) continue;
+      
+      // Try exact match first
+      let userExercise = userExerciseMap.get(exercise.name);
+      let masterExercise = masterExerciseMap.get(exercise.name);
+      
+      // If not found, try case-insensitive match
+      if (!userExercise && !masterExercise) {
+        for (const [name, ex] of userExerciseMap.entries()) {
+          if (name.toLowerCase() === exercise.name.toLowerCase()) {
+            userExercise = ex;
+            break;
+          }
+        }
+        if (!masterExercise) {
+          for (const [name, ex] of masterExerciseMap.entries()) {
+            if (name.toLowerCase() === exercise.name.toLowerCase()) {
+              masterExercise = ex;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (userExercise) {
+        detailsMap.set(exercise.name, {
+          is_timed: userExercise.is_timed || false,
+          default_duration_sec: userExercise.default_duration_sec,
+          difficulty: userExercise.difficulty_level || null
+        });
+      } else if (masterExercise) {
+        detailsMap.set(exercise.name, {
+          is_timed: masterExercise.is_timed || false,
+          default_duration_sec: null, // Master exercises table doesn't have default_duration_sec, use null (will default to 60 in code)
+          difficulty: masterExercise.difficulty_level || null
+        });
+      } else {
+        // Default values if not found in either table
+        detailsMap.set(exercise.name, {
+          is_timed: false,
+          default_duration_sec: null,
+          difficulty: null
+        });
+      }
+    }
+
+    setExerciseDetails(detailsMap);
+    
+    // Debug: Log exercise details
+    console.log('Exercise details loaded:', Array.from(detailsMap.entries()));
   };
 
   const loadUserProfile = async () => {
@@ -226,6 +384,8 @@ Return ONLY the JSON array, no other text.`;
       };
 
       await savePlan(updatedDayData, true);
+      // Reload exercise details after adding new exercises
+      await loadExerciseDetails(updatedExercises);
       setHasGenerated(true);
       Alert.alert("Success", `Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
     } catch (error: any) {
@@ -403,8 +563,70 @@ Return ONLY the JSON array, no other text.`;
     }
   };
 
+  const getDurationMinutes = (seconds: number | null | undefined): number => {
+    if (!seconds && seconds !== 0) return 0;
+    return Math.floor(seconds / 60);
+  };
+
+  const getDurationSeconds = (seconds: number | null | undefined): number => {
+    if (!seconds && seconds !== 0) return 0;
+    return seconds % 60;
+  };
+
+  const getDifficultyInfo = (difficulty: string | null | undefined) => {
+    if (!difficulty) return null;
+    
+    const difficultyLower = String(difficulty).toLowerCase().trim();
+    if (difficultyLower === 'beginner') {
+      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+    } else if (difficultyLower === 'intermediate') {
+      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+    } else if (difficultyLower === 'advanced') {
+      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+    }
+    return null;
+  };
+
+  const renderDifficultyIndicator = (difficulty: string | null | undefined) => {
+    if (!difficulty) {
+      return null;
+    }
+    
+    const difficultyInfo = getDifficultyInfo(difficulty);
+    if (!difficultyInfo) {
+      return null;
+    }
+
+    return (
+      <View style={styles.difficultyContainer}>
+        <View style={styles.difficultyBars}>
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+        </View>
+        <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
+      </View>
+    );
+  };
+
   const renderExerciseCard = (item: any, index: number, drag?: () => void, isActive?: boolean) => {
     const isDragging = draggedIndex === index;
+    const detail = exerciseDetails.get(item.name);
+    const isTimed = detail?.is_timed || false;
+    const defaultDuration = detail?.default_duration_sec || 60;
+    const difficulty = item.difficulty || detail?.difficulty || dayData?.difficulty || null;
+    
+    // Debug: Log exercise rendering
+    if (item.name && exerciseDetails.size > 0) {
+      console.log(`Rendering exercise: ${item.name}, isTimed: ${isTimed}, detail:`, detail);
+    }
+    
+    // For timed exercises, use target_duration_sec if available, otherwise use default_duration_sec
+    // Store duration in seconds, but display in MM:SS format
+    // If exercise is timed but has target_reps (not yet migrated), still show duration fields with defaultDuration
+    const currentDuration = item.target_duration_sec !== undefined 
+      ? item.target_duration_sec 
+      : (isTimed ? defaultDuration : null);
     
     return (
       <View
@@ -432,15 +654,9 @@ Return ONLY the JSON array, no other text.`;
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
             </TouchableOpacity>
           ) : Platform.OS === 'web' ? (
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onMouseDown={(e: any) => {
-                e.stopPropagation();
-                e.preventDefault();
-                dragAllowedRef.current = index;
-                handleWebTouchStart(index, e);
-              }}
-              onTouchStart={(e: any) => {
+            <View
+              onStartShouldSetResponder={() => true}
+              onResponderGrant={(e: any) => {
                 e.stopPropagation();
                 dragAllowedRef.current = index;
                 handleWebTouchStart(index, e);
@@ -448,7 +664,7 @@ Return ONLY the JSON array, no other text.`;
               style={styles.dragHandleContainer}
             >
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
-            </TouchableOpacity>
+            </View>
           ) : (
             <View style={styles.dragHandleContainer}>
               <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
@@ -470,7 +686,13 @@ Return ONLY the JSON array, no other text.`;
             <TextInput
               style={styles.exerciseName}
               value={item.name}
-              onChangeText={(text) => updateExercise(index, 'name', text)}
+              onChangeText={(text) => {
+                updateExercise(index, 'name', text);
+                // Reload exercise details when name changes
+                if (text && text.trim()) {
+                  loadExerciseDetails([{ name: text.trim() }]);
+                }
+              }}
               placeholder="Exercise name"
               placeholderTextColor="#6b7280"
               editable={!isActive}
@@ -487,6 +709,8 @@ Return ONLY the JSON array, no other text.`;
             <X color="#ef4444" size={20} />
           </TouchableOpacity>
         </View>
+        
+        {renderDifficultyIndicator(difficulty)}
         
         <View style={styles.exerciseRow}>
           <View style={styles.exerciseField}>
@@ -510,17 +734,130 @@ Return ONLY the JSON array, no other text.`;
               placeholderTextColor="#6b7280"
             />
           </View>
-          <View style={styles.exerciseField}>
-            <Text style={styles.fieldLabel}>Reps</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={item.target_reps || ''}
-              onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
-              editable={!isActive}
-              placeholder="8-12"
-              placeholderTextColor="#6b7280"
-            />
-          </View>
+          {isTimed ? (
+            <>
+              <View style={styles.exerciseField}>
+                <Text style={styles.fieldLabel}>Min</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={durationMinutes.has(index) ? durationMinutes.get(index) : (currentDuration !== null ? getDurationMinutes(currentDuration).toString() : '')}
+                  onChangeText={(text) => {
+                    // Allow empty string or valid number
+                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0)) {
+                      setDurationMinutes(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, text);
+                        return newMap;
+                      });
+                      // Auto-save when both fields have values or when cleared
+                      const mins = text === '' ? 0 : parseInt(text) || 0;
+                      const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
+                      const totalSeconds = mins * 60 + secs;
+                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Ensure value is saved on blur
+                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
+                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
+                    const totalSeconds = mins * 60 + secs;
+                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    // Clear cache to show formatted value
+                    setDurationMinutes(prev => {
+                      const newMap = new Map(prev);
+                      newMap.delete(index);
+                      return newMap;
+                    });
+                  }}
+                  onFocus={() => {
+                    // Initialize with current value when focused
+                    if (!durationMinutes.has(index) && currentDuration !== null) {
+                      setDurationMinutes(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, getDurationMinutes(currentDuration).toString());
+                        return newMap;
+                      });
+                    }
+                    // Prevent drag when focusing on input
+                    if (Platform.OS === 'web') {
+                      dragAllowedRef.current = null;
+                      setDraggedIndex(null);
+                    }
+                  }}
+                  keyboardType="numeric"
+                  editable={!isActive}
+                  placeholder="0"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+              <View style={styles.exerciseField}>
+                <Text style={styles.fieldLabel}>Sec</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={durationSeconds.has(index) ? durationSeconds.get(index) : (currentDuration !== null ? getDurationSeconds(currentDuration).toString() : '')}
+                  onChangeText={(text) => {
+                    // Allow empty string or valid number (0-59)
+                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0 && parseInt(text) < 60)) {
+                      setDurationSeconds(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, text);
+                        return newMap;
+                      });
+                      // Auto-save when both fields have values or when cleared
+                      const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
+                      const secs = text === '' ? 0 : parseInt(text) || 0;
+                      const totalSeconds = mins * 60 + secs;
+                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Ensure value is saved on blur
+                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
+                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
+                    const totalSeconds = mins * 60 + secs;
+                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
+                    // Clear cache to show formatted value
+                    setDurationSeconds(prev => {
+                      const newMap = new Map(prev);
+                      newMap.delete(index);
+                      return newMap;
+                    });
+                  }}
+                  onFocus={() => {
+                    // Initialize with current value when focused
+                    if (!durationSeconds.has(index) && currentDuration !== null) {
+                      setDurationSeconds(prev => {
+                        const newMap = new Map(prev);
+                        newMap.set(index, getDurationSeconds(currentDuration).toString());
+                        return newMap;
+                      });
+                    }
+                    // Prevent drag when focusing on input
+                    if (Platform.OS === 'web') {
+                      dragAllowedRef.current = null;
+                      setDraggedIndex(null);
+                    }
+                  }}
+                  keyboardType="numeric"
+                  editable={!isActive}
+                  placeholder="0"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+            </>
+          ) : (
+            <View style={styles.exerciseField}>
+              <Text style={styles.fieldLabel}>Reps</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={item.target_reps || ''}
+                onChangeText={(text) => updateExercise(index, 'target_reps', text || null)}
+                editable={!isActive}
+                placeholder="8-12"
+                placeholderTextColor="#6b7280"
+              />
+            </View>
+          )}
           <View style={styles.exerciseField}>
             <Text style={styles.fieldLabel}>Rest (sec)</Text>
             <TextInput
@@ -567,7 +904,7 @@ Return ONLY the JSON array, no other text.`;
   const renderHeader = () => (
     <View style={styles.headerSection}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => handleBack()} style={styles.backButton}>
           <ArrowLeft color="#9ca3af" size={24} />
         </TouchableOpacity>
         <Text style={styles.title}>{day}</Text>
@@ -616,7 +953,7 @@ Return ONLY the JSON array, no other text.`;
         )}
         <TouchableOpacity
           style={styles.buttonDone}
-          onPress={() => router.back()}
+          onPress={() => handleBack()}
         >
           <Text style={styles.buttonTextDone}>Done</Text>
         </TouchableOpacity>
@@ -763,6 +1100,13 @@ const styles = StyleSheet.create({
   exerciseNameContainer: { flex: 1 },
   exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flex: 1 },
   exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
+  difficultyContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
+  difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  difficultyBar: { borderRadius: 2 },
+  difficultyBar1: { width: 6, height: 8 },
+  difficultyBar2: { width: 6, height: 12 },
+  difficultyBar3: { width: 6, height: 16 },
+  difficultyText: { fontSize: 14, fontWeight: '600' },
   exerciseRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   exerciseField: { flex: 1 },
   fieldLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },

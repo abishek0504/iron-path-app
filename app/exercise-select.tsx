@@ -3,13 +3,51 @@ import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Alert, M
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Search, X, Plus } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../src/lib/supabase';
 
 export default function ExerciseSelectScreen() {
   const router = useRouter();
-  const { planId, day, exerciseIndex } = useLocalSearchParams<{ planId: string; day: string; exerciseIndex?: string }>();
+
+  const safeBack = async (selectedExerciseName?: string) => {
+    try {
+      if (context === 'progress' && selectedExerciseName) {
+        // Store in AsyncStorage for reliable passing back
+        await AsyncStorage.setItem('progress_selected_exercise', selectedExerciseName);
+        
+        // Navigate back to progress tab
+        if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+          router.back();
+        } else {
+          router.push({
+            pathname: '/(tabs)/progress',
+            params: { selectedExercise: selectedExerciseName }
+          });
+        }
+        return;
+      }
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/(tabs)/planner');
+      }
+    } catch (error) {
+      if (context === 'progress') {
+        if (selectedExerciseName) {
+          await AsyncStorage.setItem('progress_selected_exercise', selectedExerciseName);
+        }
+        router.push({
+          pathname: '/(tabs)/progress',
+          params: selectedExerciseName ? { selectedExercise: selectedExerciseName } : {}
+        });
+      } else {
+        router.push('/(tabs)/planner');
+      }
+    }
+  };
+  const { planId, day, exerciseIndex, context } = useLocalSearchParams<{ planId?: string; day?: string; exerciseIndex?: string; context?: string }>();
   const [searchQuery, setSearchQuery] = useState('');
-  const [masterExercises, setMasterExercises] = useState<string[]>([]);
+  const [masterExercises, setMasterExercises] = useState<any[]>([]);
   const [customExercises, setCustomExercises] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -22,15 +60,47 @@ export default function ExerciseSelectScreen() {
   }, []);
 
   const loadMasterExercises = async () => {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('name')
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('name, difficulty_level')
+        .order('name', { ascending: true });
 
-    if (!error && data) {
-      setMasterExercises(data.map(ex => ex.name));
-    } else {
-      console.error('Error loading master exercises:', error);
+      if (error) {
+        console.error('Error loading master exercises with difficulty:', error);
+        // Fallback: try loading just name if difficulty_level field doesn't exist
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('exercises')
+          .select('name, difficulty_level')
+          .order('name', { ascending: true });
+        
+        if (fallbackError) {
+          console.error('Error loading master exercises (fallback):', fallbackError);
+          setMasterExercises([]);
+          return;
+        }
+
+        if (fallbackData && Array.isArray(fallbackData)) {
+          setMasterExercises(fallbackData.map(ex => ({
+            name: ex.name || '',
+            difficulty: ex.difficulty_level || null
+          })));
+        } else {
+          setMasterExercises([]);
+        }
+        return;
+      }
+
+      if (data && Array.isArray(data)) {
+        setMasterExercises(data.map(ex => ({
+          name: ex.name || '',
+          difficulty: ex.difficulty_level || null
+        })));
+      } else {
+        setMasterExercises([]);
+      }
+    } catch (err) {
+      console.error('Error in loadMasterExercises:', err);
       setMasterExercises([]);
     }
   };
@@ -53,7 +123,7 @@ export default function ExerciseSelectScreen() {
   };
 
   const filteredMasterExercises = masterExercises.filter((exercise) =>
-    exercise.toLowerCase().includes(searchQuery.toLowerCase())
+    exercise?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const filteredCustomExercises = (customExercises || []).filter((exercise: any) =>
@@ -61,6 +131,11 @@ export default function ExerciseSelectScreen() {
   );
 
   const handleAddExercise = async (exerciseName: string) => {
+    if (context === 'progress') {
+      safeBack(exerciseName);
+      return;
+    }
+
     if (!planId || !day) {
       Alert.alert("Error", "Missing plan or day information.");
       return;
@@ -69,6 +144,32 @@ export default function ExerciseSelectScreen() {
     setLoading(true);
 
     try {
+      // Check if exercise is timed
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Check user exercises first, then master exercises
+      const { data: userExercise } = await supabase
+        .from('user_exercises')
+        .select('is_timed, default_duration_sec')
+        .eq('user_id', user.id)
+        .eq('name', exerciseName)
+        .maybeSingle();
+
+      // Note: exercises table doesn't have default_duration_sec, only user_exercises does
+      const { data: masterExercise } = await supabase
+        .from('exercises')
+        .select('is_timed')
+        .eq('name', exerciseName)
+        .maybeSingle();
+
+      const exerciseDetail = userExercise || masterExercise;
+      const isTimed = exerciseDetail?.is_timed || false;
+      // user_exercises has default_duration_sec, but exercises table doesn't - use 60 as default
+      const defaultDuration = (userExercise?.default_duration_sec) || 60;
+
       // Load current plan
       const { data: plan, error: planError } = await supabase
         .from('workout_plans')
@@ -83,14 +184,19 @@ export default function ExerciseSelectScreen() {
       const updatedPlan = { ...plan };
       const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
-      // Add new exercise
-      const newExercise = {
+      // Add new exercise - use target_duration_sec for timed exercises, target_reps for others
+      const newExercise: any = {
         name: exerciseName,
         target_sets: 3,
-        target_reps: "8-12",
         rest_time_sec: 60,
         notes: ""
       };
+
+      if (isTimed) {
+        newExercise.target_duration_sec = defaultDuration;
+      } else {
+        newExercise.target_reps = "8-12";
+      }
 
       dayData.exercises = [...(dayData.exercises || []), newExercise];
       updatedPlan.plan_data.week_schedule[day] = dayData;
@@ -106,7 +212,7 @@ export default function ExerciseSelectScreen() {
       }
 
       Alert.alert("Success", "Exercise added!");
-      router.back();
+      safeBack();
     } catch (error: any) {
       console.error('Error adding exercise:', error);
       Alert.alert("Error", error.message || "Failed to add exercise.");
@@ -203,8 +309,13 @@ export default function ExerciseSelectScreen() {
       setShowCreateModal(false);
       setNewExerciseName('');
       setNewExerciseDescription('');
-      Alert.alert("Success", "Custom exercise created and added!");
-      router.back();
+      
+      if (context === 'progress') {
+        safeBack(newCustomExercise.name);
+      } else {
+        Alert.alert("Success", "Custom exercise created and added!");
+        safeBack();
+      }
     } catch (error: any) {
       console.error('Error creating custom exercise:', error);
       Alert.alert("Error", error.message || "Failed to create custom exercise.");
@@ -214,6 +325,11 @@ export default function ExerciseSelectScreen() {
   };
 
   const handleAddCustomExercise = async (exercise: any) => {
+    if (context === 'progress') {
+      safeBack(exercise.name);
+      return;
+    }
+
     if (!planId || !day) {
       Alert.alert("Error", "Missing plan or day information.");
       return;
@@ -236,14 +352,20 @@ export default function ExerciseSelectScreen() {
       const updatedPlan = { ...plan };
       const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
-      // Add custom exercise
-      const newExercise = {
+      // Add custom exercise - use target_duration_sec for timed exercises, target_reps for others
+      const isTimed = exercise.is_timed || false;
+      const newExercise: any = {
         name: exercise.name,
         target_sets: exercise.default_sets || 3,
-        target_reps: exercise.default_reps || "8-12",
         rest_time_sec: exercise.default_rest_sec || 60,
         notes: exercise.description || ""
       };
+
+      if (isTimed) {
+        newExercise.target_duration_sec = exercise.default_duration_sec || 60;
+      } else {
+        newExercise.target_reps = exercise.default_reps || "8-12";
+      }
 
       if (exerciseIndex !== undefined) {
         // Replace existing exercise
@@ -266,7 +388,7 @@ export default function ExerciseSelectScreen() {
       }
 
       Alert.alert("Success", "Custom exercise added!");
-      router.back();
+      safeBack();
     } catch (error: any) {
       console.error('Error adding custom exercise:', error);
       Alert.alert("Error", error.message || "Failed to add exercise.");
@@ -275,16 +397,52 @@ export default function ExerciseSelectScreen() {
     }
   };
 
+  const getDifficultyInfo = (difficulty: string | null | undefined) => {
+    if (!difficulty) return null;
+    
+    const difficultyLower = String(difficulty).toLowerCase().trim();
+    if (difficultyLower === 'beginner') {
+      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+    } else if (difficultyLower === 'intermediate') {
+      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+    } else if (difficultyLower === 'advanced') {
+      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+    }
+    return null;
+  };
+
+  const renderDifficultyIndicator = (difficulty: string | null | undefined) => {
+    if (!difficulty) {
+      return null;
+    }
+    
+    const difficultyInfo = getDifficultyInfo(difficulty);
+    if (!difficultyInfo) {
+      return null;
+    }
+
+    return (
+      <View style={styles.difficultyContainer}>
+        <View style={styles.difficultyBars}>
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+        </View>
+        <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
+      </View>
+    );
+  };
+
   const allExercises = [
-    ...filteredMasterExercises.map(name => ({ name, type: 'master' })),
-    ...filteredCustomExercises.map((ex: any) => ({ name: ex.name, ...ex, type: 'custom' }))
-  ].sort((a, b) => a.name.localeCompare(b.name));
+    ...filteredMasterExercises.map(ex => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, type: 'master' })),
+    ...filteredCustomExercises.map((ex: any) => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, ...ex, type: 'custom' }))
+  ].filter(ex => ex.name).sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Select Exercise</Text>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => safeBack()}>
           <X color="#9ca3af" size={24} />
         </TouchableOpacity>
       </View>
@@ -314,7 +472,10 @@ export default function ExerciseSelectScreen() {
         keyExtractor={(item, index) => `${item.type}-${item.name}-${index}`}
         renderItem={({ item }) => (
           <View style={styles.exerciseItem}>
-            <Text style={styles.exerciseName}>{item.name}</Text>
+            <View style={styles.exerciseInfo}>
+              <Text style={styles.exerciseName}>{item.name}</Text>
+              {renderDifficultyIndicator(item.difficulty)}
+            </View>
             {item.type === 'master' ? (
               <TouchableOpacity
                 style={styles.addButton}
@@ -410,7 +571,15 @@ const styles = StyleSheet.create({
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1f2937', borderRadius: 8, padding: 16, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#374151' },
   searchInput: { flex: 1, marginLeft: 12, color: 'white', fontSize: 16 },
   exerciseItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, marginHorizontal: 24, borderWidth: 1, borderColor: '#374151' },
-  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500', flex: 1 },
+  exerciseInfo: { flex: 1, marginRight: 12 },
+  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500', marginBottom: 4 },
+  difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  difficultyBar: { borderRadius: 2 },
+  difficultyBar1: { width: 6, height: 8 },
+  difficultyBar2: { width: 6, height: 12 },
+  difficultyBar3: { width: 6, height: 16 },
+  difficultyText: { fontSize: 12, fontWeight: '600' },
   addButton: { backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
   addButtonText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
   addCustomButton: { backgroundColor: '#1f2937', borderWidth: 1, borderColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },

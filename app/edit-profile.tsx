@@ -23,6 +23,18 @@ const cmToFtIn = (cm: number): { feet: number; inches: number } => {
 
 export default function EditProfileScreen() {
   const router = useRouter();
+
+  const safeBack = () => {
+    try {
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/(tabs)/profile');
+      }
+    } catch (error) {
+      router.push('/(tabs)/profile');
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [profile, setProfile] = useState<any>(null);
@@ -117,7 +129,7 @@ export default function EditProfileScreen() {
     if (error) {
       console.error('Error loading profile:', error);
       Alert.alert('Error', 'Failed to load profile');
-      router.back();
+      safeBack();
       return;
     }
 
@@ -459,7 +471,7 @@ export default function EditProfileScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={safeBack}>
             <Text style={styles.cancelButton}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Profile</Text>
