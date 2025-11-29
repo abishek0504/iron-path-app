@@ -1026,8 +1026,11 @@ export default function ProgressScreen() {
               secsMap.set(key, (set.duration % 60).toString());
             }
           } else {
-            // Initialize bodyweight flag based on current weight value
-            if (isBodyweight || set.weight === 0 || set.weight === null) {
+            // Initialize bodyweight flag only if:
+            // 1. Exercise is inherently bodyweight (push-ups, pull-ups, etc.)
+            // 2. OR set already exists (has id) and weight is 0
+            // Don't auto-check for new sets (no id) unless exercise is inherently bodyweight
+            if (isBodyweight || (set.id && (set.weight === 0 || set.weight === null))) {
               bwFlagsMap.set(key, true);
             }
           }
@@ -1829,7 +1832,7 @@ export default function ProgressScreen() {
                                   {!isTimed && (
                                     <>
                                       <View style={styles.modalSetInputGroup}>
-                                        <View style={styles.modalSetInputRow}>
+                                        <View style={styles.modalSetInputLabelRow}>
                                           <Text style={styles.modalSetInputLabel}>Weight (lbs)</Text>
                                           <View style={styles.bodyweightCheckboxContainer}>
                                             <Text style={styles.bodyweightCheckboxLabel}>Bodyweight</Text>
@@ -1854,9 +1857,9 @@ export default function ProgressScreen() {
                                             >
                                               <View style={[
                                                 styles.checkbox,
-                                                (bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) && styles.checkboxChecked
+                                                bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) && styles.checkboxChecked
                                               ]}>
-                                                {(bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) && (
+                                                {bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) && (
                                                   <Text style={styles.checkboxCheckmark}>✓</Text>
                                                 )}
                                               </View>
@@ -1866,7 +1869,7 @@ export default function ProgressScreen() {
                                         <TextInput
                                           style={[
                                             styles.modalSetInput,
-                                            ((bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) && styles.modalSetInputDisabled),
+                                            bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) && styles.modalSetInputDisabled,
                                             !set.id && validationErrors.has(`${idx}-${exIdx}-${originalSetIdx}-weight`) && styles.modalSetInputError
                                           ]}
                                           value={set.weight?.toString() || ''}
@@ -1883,9 +1886,9 @@ export default function ProgressScreen() {
                                             updateSetValue(idx, exIdx, originalSetIdx, 'weight', value);
                                           }}
                                           keyboardType="numeric"
-                                          placeholder={(bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) ? "BW" : "0"}
+                                          placeholder={bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) ? "BW" : "0"}
                                           placeholderTextColor="#6b7280"
-                                          editable={!(bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null)}
+                                          editable={!bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`)}
                                         />
                                         {(() => {
                                           if (set.id) return null;
@@ -1894,7 +1897,10 @@ export default function ProgressScreen() {
                                         })()}
                                       </View>
                                       <View style={styles.modalSetInputGroup}>
-                                        <Text style={styles.modalSetInputLabel}>Reps</Text>
+                                        <View style={styles.modalSetInputLabelRow}>
+                                          <Text style={styles.modalSetInputLabel}>Reps</Text>
+                                          <View style={styles.modalSetInputLabelSpacer} />
+                                        </View>
                                         <TextInput
                                           style={[
                                             styles.modalSetInput,
@@ -2712,6 +2718,16 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginBottom: 6,
     fontWeight: '500',
+  },
+  modalSetInputLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+    minHeight: 20,
+  },
+  modalSetInputLabelSpacer: {
+    width: 1,
   },
   modalSetInput: {
     backgroundColor: '#111827',
