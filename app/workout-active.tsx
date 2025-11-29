@@ -310,9 +310,10 @@ export default function WorkoutActiveScreen() {
       
       if (exerciseNames.length > 0) {
         // Batch query all exercises from master exercises table
+        // Note: exercises table doesn't have default_duration_sec, only user_exercises does
         const { data: masterExercises } = await supabase
           .from('exercises')
-          .select('name, is_timed, default_duration_sec, description, equipment_needed')
+          .select('name, is_timed, description, equipment_needed')
           .in('name', exerciseNames);
 
         // Batch query all user exercises
@@ -332,8 +333,27 @@ export default function WorkoutActiveScreen() {
 
         // Merge results: user exercises take precedence over master exercises
         for (const exercise of dayData.exercises) {
-          const userExercise = userExerciseMap.get(exercise.name);
-          const masterExercise = masterExerciseMap.get(exercise.name);
+          // Try exact match first
+          let userExercise = userExerciseMap.get(exercise.name);
+          let masterExercise = masterExerciseMap.get(exercise.name);
+          
+          // If not found, try case-insensitive match
+          if (!userExercise && !masterExercise) {
+            for (const [name, ex] of userExerciseMap.entries()) {
+              if (name.toLowerCase() === exercise.name.toLowerCase()) {
+                userExercise = ex;
+                break;
+              }
+            }
+            if (!masterExercise) {
+              for (const [name, ex] of masterExerciseMap.entries()) {
+                if (name.toLowerCase() === exercise.name.toLowerCase()) {
+                  masterExercise = ex;
+                  break;
+                }
+              }
+            }
+          }
           
           if (userExercise) {
             detailsMap.set(exercise.name, {
@@ -345,7 +365,7 @@ export default function WorkoutActiveScreen() {
           } else if (masterExercise) {
             detailsMap.set(exercise.name, {
               is_timed: masterExercise.is_timed || false,
-              default_duration_sec: masterExercise.default_duration_sec,
+              default_duration_sec: null, // Master exercises table doesn't have default_duration_sec, use null (will default to 60 in code)
               description: masterExercise.description,
               equipment_needed: masterExercise.equipment_needed || []
             });
@@ -361,6 +381,7 @@ export default function WorkoutActiveScreen() {
         }
       }
       setExerciseDetails(detailsMap);
+      console.log('Workout-active: Exercise details loaded:', Array.from(detailsMap.entries()));
 
       // Check for existing active workout session
       const { data: existingSession, error: sessionQueryError } = await supabase
@@ -519,9 +540,13 @@ export default function WorkoutActiveScreen() {
     const detail = exerciseDetails.get(exercise.name);
     const isTimed = detail?.is_timed || false;
 
+    console.log(`handleStartSet - Exercise: ${exercise.name}, isTimed: ${isTimed}, detail:`, detail);
+    console.log(`Exercise details map size: ${exerciseDetails.size}, keys:`, Array.from(exerciseDetails.keys()));
+
     if (isTimed) {
       // Start 3-second countdown, then countdown from target duration
       const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
+      console.log(`Starting timer for timed exercise. Target duration: ${targetDuration}`);
       setExerciseTimer({ 
         active: true, 
         seconds: 3, // Start with 3-second countdown
@@ -669,7 +694,7 @@ export default function WorkoutActiveScreen() {
     const isTimed = detail?.is_timed || false;
     const totalSets = exercise.target_sets || 3;
 
-    // Update progress with logged data
+    // Update progress with logged data - ensure all sets are marked as completed
     const updatedProgress = { ...progress };
     for (let i = 0; i < totalSets; i++) {
       const logData = setLogs[i] || {};
@@ -679,11 +704,17 @@ export default function WorkoutActiveScreen() {
         const secs = durationSeconds.has(i) ? (parseInt(durationSeconds.get(i) || '0') || 0) : 0;
         const totalSeconds = mins * 60 + secs;
         updatedProgress.exercises[completedExerciseIndex].sets[i].duration = totalSeconds;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].completed = true; // Ensure set is marked as completed
       } else {
-        updatedProgress.exercises[completedExerciseIndex].sets[i].reps = parseInt(logData.reps) || 0;
-        updatedProgress.exercises[completedExerciseIndex].sets[i].weight = parseFloat(logData.weight) || null;
+        const reps = parseInt(logData.reps) || 0;
+        const weight = parseFloat(logData.weight) || null;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].reps = reps;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].weight = weight;
+        updatedProgress.exercises[completedExerciseIndex].sets[i].completed = true; // Ensure set is marked as completed
       }
     }
+    
+    console.log(`Updated progress for exercise ${exercise.name}:`, updatedProgress.exercises[completedExerciseIndex].sets.map((s, i) => `Set ${i + 1}: completed=${s.completed}, duration=${s.duration}, reps=${s.reps}, weight=${s.weight}`));
 
     updatedProgress.exercises[completedExerciseIndex].completed = true;
     
@@ -757,12 +788,20 @@ export default function WorkoutActiveScreen() {
         return isNaN(parsed) ? null : parsed;
       };
       
-      const scheduledReps = isTimed ? null : parseTargetReps(exercise.target_reps || '8-12');
-      // For scheduled_weight: 0 for bodyweight exercises and timed exercises
-      // Weighted exercises will have weight logged by user, scheduled_weight is 0 to indicate "not bodyweight"
-      const scheduledWeight = 0; // Always 0 since weight column is NOT NULL
-      const scheduledDuration = isTimed ? (exercise.target_duration_sec || detail?.default_duration_sec || null) : null;
+      // For timed exercises: scheduled_reps contains target duration (in seconds)
+      // For rep exercises: scheduled_reps contains target reps (minimum of range like "8-12")
+      const scheduledReps = isTimed 
+        ? (exercise.target_duration_sec || detail?.default_duration_sec || 60)
+        : parseTargetReps(exercise.target_reps || '8-12');
+      
+      // For scheduled_weight: We don't store target weight in plans, so this is always 0
+      // The actual weight logged by the user is stored in the weight column
+      const scheduledWeight = 0; // Always 0 since we don't have target weight in plans
 
+      // Use session day if available, otherwise use param day
+      const dayToSave = workoutSession?.day || day;
+      console.log(`Saving logs - Using day: ${dayToSave} (session day: ${workoutSession?.day}, param day: ${day})`);
+      
       const dbLogs = sets
         .filter(s => s.completed)
         .map((set, index) => {
@@ -775,11 +814,13 @@ export default function WorkoutActiveScreen() {
           const weight = isTimed ? 0 : (set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? 0));
           const reps = isTimed ? (set.duration !== null && set.duration !== undefined ? parseFloat(set.duration.toString()) : (scheduledDuration ?? 0)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? 0));
           
+          console.log(`Saving set ${index + 1} for ${exercise.name}: weight=${weight}, reps=${reps}, duration=${set.duration}, isTimed=${isTimed}`);
+          
           return {
             user_id: user.id,
             exercise_name: exercise.name,
             plan_id: parseInt(planId),
-            day: day,
+            day: dayToSave, // Use session day if available
             session_id: workoutSession?.id || null,
             // For timed exercises, duration is stored in reps field, weight is 0
             weight: weight,
@@ -790,6 +831,8 @@ export default function WorkoutActiveScreen() {
             performed_at: new Date().toISOString()
           };
         });
+      
+      console.log(`Saving ${dbLogs.length} sets for exercise ${exercise.name}`);
 
       if (dbLogs.length > 0) {
         const { error: insertError } = await supabase.from('workout_logs').insert(dbLogs);
@@ -994,7 +1037,7 @@ export default function WorkoutActiveScreen() {
                       <>
                         <View style={styles.targetItem}>
                           <Text style={styles.targetLabel}>Reps:</Text>
-                          <Text style={styles.targetValue}>{targetReps}</Text>
+                          <Text style={styles.targetValue}>{targetReps || 'N/A'}</Text>
                         </View>
                         <View style={styles.targetItem}>
                           <Text style={styles.targetLabel}>Weight:</Text>
@@ -1208,6 +1251,10 @@ export default function WorkoutActiveScreen() {
   const restTime = exercise.rest_time_sec || 60;
   const isBodyweight = isBodyweightExercise(exercise.name, detail);
   
+  // Debug: Log exercise details for current exercise
+  console.log(`Current exercise: ${exercise.name}, isTimed: ${isTimed}, detail:`, detail);
+  console.log(`Exercise details map has ${exerciseDetails.size} entries`);
+  
   // Check if all exercises are completed
   const allExercisesComplete = progress.exercises.every(ex => ex.completed);
 
@@ -1365,7 +1412,7 @@ export default function WorkoutActiveScreen() {
             <Text style={styles.infoLabel}>Target:</Text>
             <Text style={styles.infoValue}>
               {isTimed 
-                ? `${formatTime(exercise.target_duration_sec || detail?.default_duration_sec || 60)}` 
+                ? formatTime(exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60)
                 : `${exercise.target_reps || '8-12'} reps`}
             </Text>
           </View>
@@ -1388,7 +1435,7 @@ export default function WorkoutActiveScreen() {
           </View>
         )}
 
-        {detail?.description && (
+        {detail && detail.description && detail.description.trim() && (
           <View style={styles.instructionsSection}>
             <Text style={styles.instructionsTitle}>Instructions:</Text>
             <Text style={styles.instructionsText}>{detail.description}</Text>
@@ -1400,7 +1447,7 @@ export default function WorkoutActiveScreen() {
           <View style={styles.exerciseTimerContainer}>
             <Clock color="#10b981" size={32} />
             <Text style={styles.exerciseTimerText}>
-              {exerciseTimer.countdown ? exerciseTimer.seconds : formatTime(exerciseTimer.seconds)}
+              {exerciseTimer.countdown ? exerciseTimer.seconds.toString() : formatTime(exerciseTimer.seconds)}
             </Text>
             {exerciseTimer.countdown && (
               <Text style={styles.countdownLabel}>Get ready...</Text>

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, Modal, ActivityIndicator, RefreshControl, TextInput, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
 
 type ViewMode = 'week' | 'month' | 'timeline';
@@ -17,6 +18,8 @@ interface WorkoutLog {
   plan_id: number | null;
   day: string | null;
   notes: string | null;
+  scheduled_reps: number | null;
+  scheduled_weight: number | null;
 }
 
 interface WorkoutSession {
@@ -40,6 +43,9 @@ interface WorkoutData {
         reps: number | null;
         duration: number | null; // Duration in seconds for timed exercises
         notes: string | null;
+        scheduled_reps: number | null; // For timed exercises: target duration (in seconds), for rep exercises: target reps
+        scheduled_weight: number | null; // Target weight (always 0, we don't store target weight)
+        scheduled_duration: number | null; // For timed exercises, this is the same as scheduled_reps (for convenience)
       }>;
     }>;
     duration: number | null;
@@ -55,11 +61,14 @@ interface DayWorkout {
 }
 
 export default function ProgressScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ selectedExercise?: string }>();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [workoutData, setWorkoutData] = useState<WorkoutData[]>([]);
   const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean }>>(new Map());
+  const [planData, setPlanData] = useState<Map<number, any>>(new Map()); // Store plan data to get target values
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutData | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<WorkoutData | null>(null);
@@ -70,6 +79,9 @@ export default function ProgressScreen() {
   const [deleteConfirmType, setDeleteConfirmType] = useState<'set' | 'workout'>('set');
   const [deleteConfirmData, setDeleteConfirmData] = useState<{sessionIdx?: number; exerciseIdx?: number; setIdx?: number; setId?: number | null; sessionId?: number | null} | null>(null);
   const [unsavedChangesVisible, setUnsavedChangesVisible] = useState(false);
+  const [durationMinutes, setDurationMinutes] = useState<Map<string, string>>(new Map()); // Key: "sessionIdx-exIdx-setIdx"
+  const [durationSeconds, setDurationSeconds] = useState<Map<string, string>>(new Map()); // Key: "sessionIdx-exIdx-setIdx"
+  const [bodyweightFlags, setBodyweightFlags] = useState<Map<string, boolean>>(new Map()); // Key: "sessionIdx-exIdx-setIdx"
   
   // Week view state
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => {
@@ -90,6 +102,140 @@ export default function ProgressScreen() {
       loadWorkoutData();
     }, [])
   );
+
+  // Handle returning from exercise-select
+  useFocusEffect(
+    useCallback(() => {
+      const checkForSelectedExercise = async () => {
+        // Check AsyncStorage first (more reliable than params from Modal)
+        const selectedExercise = await AsyncStorage.getItem('progress_selected_exercise');
+        if (selectedExercise) {
+          await AsyncStorage.removeItem('progress_selected_exercise');
+          handleExerciseSelected(selectedExercise);
+          return;
+        }
+        
+        // Fallback to params
+        if (params.selectedExercise) {
+          handleExerciseSelected(params.selectedExercise);
+        }
+      };
+      
+      checkForSelectedExercise();
+    }, [params.selectedExercise])
+  );
+
+  const handleExerciseSelected = async (exerciseName: string) => {
+    // Avoid re-processing the same exercise
+    if (lastProcessedExerciseRef.current === exerciseName) {
+      router.setParams({ selectedExercise: undefined });
+      return;
+    }
+    
+    lastProcessedExerciseRef.current = exerciseName;
+    
+    // Restore state from AsyncStorage
+    try {
+      const storedEditing = await AsyncStorage.getItem('progress_editing_workout');
+      const storedSelected = await AsyncStorage.getItem('progress_selected_workout');
+      const wasEditing = await AsyncStorage.getItem('progress_was_editing');
+      
+      let workoutToEdit: WorkoutData | null = null;
+      let workoutToSelect: WorkoutData | null = null;
+      
+      if (storedEditing) {
+        workoutToEdit = JSON.parse(storedEditing);
+        await AsyncStorage.removeItem('progress_editing_workout');
+      }
+      if (storedSelected) {
+        workoutToSelect = JSON.parse(storedSelected);
+        await AsyncStorage.removeItem('progress_selected_workout');
+      }
+      if (wasEditing) {
+        await AsyncStorage.removeItem('progress_was_editing');
+      }
+      
+      // Restore selectedWorkout first (needed for modal to show correct workout)
+      if (workoutToSelect) {
+        setSelectedWorkout(workoutToSelect);
+      }
+      
+      // Determine which workout to edit
+      const workoutToUpdate = workoutToEdit || workoutToSelect;
+      
+      if (workoutToUpdate && workoutToUpdate.sessions.length > 0) {
+        const updated = JSON.parse(JSON.stringify(workoutToUpdate));
+        const firstSession = updated.sessions[0];
+        
+        // Check if exercise already exists
+        let exerciseEntry = firstSession.exercises.find((e: any) => e.name === exerciseName.trim());
+        if (!exerciseEntry) {
+          exerciseEntry = {
+            name: exerciseName.trim(),
+            sets: []
+          };
+          firstSession.exercises.push(exerciseEntry);
+        }
+        // Add an empty set to the exercise
+        exerciseEntry.sets.push({
+          id: null,
+          weight: null,
+          reps: null,
+          notes: null
+        });
+        
+        // Update both editingWorkout and ensure selectedWorkout is set
+        setEditingWorkout(updated);
+        if (!workoutToSelect && workoutToEdit) {
+          // If we only had editingWorkout, use it as selectedWorkout too
+          setSelectedWorkout(workoutToEdit);
+        }
+        
+        // Set editing mode
+        setIsEditing(true);
+        
+        // Reopen modal after a short delay to ensure state is set
+        setTimeout(() => {
+          setModalVisible(true);
+        }, 200);
+      }
+    } catch (e) {
+      console.error('Error restoring workout state:', e);
+      // Fallback: try with current state
+      if (editingWorkout && editingWorkout.sessions.length > 0) {
+        const updated = JSON.parse(JSON.stringify(editingWorkout));
+        const firstSession = updated.sessions[0];
+        
+        let exerciseEntry = firstSession.exercises.find((e: any) => e.name === exerciseName.trim());
+        if (!exerciseEntry) {
+          exerciseEntry = {
+            name: exerciseName.trim(),
+            sets: []
+          };
+          firstSession.exercises.push(exerciseEntry);
+        }
+        exerciseEntry.sets.push({
+          id: null,
+          weight: null,
+          reps: null,
+          notes: null
+        });
+        setEditingWorkout(updated);
+        setIsEditing(true);
+        setTimeout(() => {
+          setModalVisible(true);
+        }, 200);
+      }
+    }
+    
+    // Clear the param
+    router.setParams({ selectedExercise: undefined });
+    
+    // Reset the ref after a delay to allow processing again if needed
+    setTimeout(() => {
+      lastProcessedExerciseRef.current = null;
+    }, 1000);
+  };
 
   const loadExerciseDetails = async (logs: WorkoutLog[]) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -270,9 +416,10 @@ export default function ProgressScreen() {
         }
       }
 
-      // Fetch workout plans to get exercise order
+      // Fetch workout plans to get exercise order and target values
       const planIds = [...new Set((completedSessions || []).map(s => s.plan_id).filter(Boolean))];
       const planExerciseOrder = new Map<number, Map<string, string[]>>();
+      const planDataMap = new Map<number, any>();
       
       if (planIds.length > 0) {
         const { data: plans } = await supabase
@@ -282,6 +429,7 @@ export default function ProgressScreen() {
         
         if (plans) {
           plans.forEach((plan: any) => {
+            planDataMap.set(plan.id, plan.plan_data);
             const dayOrderMap = new Map<string, string[]>();
             if (plan.plan_data?.week_schedule) {
               Object.keys(plan.plan_data.week_schedule).forEach((day: string) => {
@@ -295,6 +443,8 @@ export default function ProgressScreen() {
           });
         }
       }
+      
+      setPlanData(planDataMap);
 
       // Aggregate data by date (only completed sessions and standalone logs)
       const aggregated = aggregateWorkoutData(filteredLogs, completedSessions || [], detailsMap, planExerciseOrder);
@@ -313,7 +463,12 @@ export default function ProgressScreen() {
     // Group logs by date and session
     logs.forEach(log => {
       const date = new Date(log.performed_at);
-      const dateKey = date.toISOString().split('T')[0];
+      // Use local date instead of UTC to avoid timezone issues
+      // If workout was done Friday evening local time but Saturday UTC, it should show as Friday
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const dateKey = `${year}-${month}-${day}`;
 
       if (!dataMap.has(dateKey)) {
         dataMap.set(dateKey, {
@@ -394,7 +549,10 @@ export default function ProgressScreen() {
             weight: isTimed ? null : log.weight,
             reps: isTimed ? null : log.reps,
             duration: isTimed ? log.reps : null, // For timed exercises, reps field stores duration
-            notes: log.notes
+            notes: log.notes,
+            scheduled_reps: log.scheduled_reps, // For timed exercises: target duration (in seconds), for rep exercises: target reps
+            scheduled_weight: log.scheduled_weight, // Always 0 (we don't store target weight in plans)
+            scheduled_duration: isTimed ? log.scheduled_reps : null // For timed exercises, scheduled_reps IS the target duration
           });
 
           // Calculate volume (only if both weight and reps are present, and not timed)
@@ -507,7 +665,11 @@ export default function ProgressScreen() {
     // Add days of the month
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(year, month, day);
-      const dateKey = date.toISOString().split('T')[0];
+      // Use local date instead of UTC
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const dateKey = `${year}-${month}-${day}`;
       const workout = workoutData.find(w => w.date === dateKey);
 
       days.push({
@@ -566,7 +728,11 @@ export default function ProgressScreen() {
           contentContainerStyle={styles.weekScrollContent}
         >
           {weekDays.map((day, index) => {
-            const dateKey = day.toISOString().split('T')[0];
+            // Use local date instead of UTC
+            const year = day.getFullYear();
+            const month = String(day.getMonth() + 1).padStart(2, '0');
+            const dayNum = String(day.getDate()).padStart(2, '0');
+            const dateKey = `${year}-${month}-${dayNum}`;
             const workout = workoutData.find(w => w.date === dateKey);
             const hasWorkout = !!workout && workout.sessions.length > 0;
             const today = isToday(day);
@@ -669,7 +835,12 @@ export default function ProgressScreen() {
               </View>
             ))}
             {days.map((dayWorkout, index) => {
-              const dateKey = dayWorkout.date.toISOString().split('T')[0];
+              // Use local date instead of UTC
+              const date = dayWorkout.date;
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const dayNum = String(date.getDate()).padStart(2, '0');
+              const dateKey = `${year}-${month}-${dayNum}`;
               const isCurrentMonth = dayWorkout.date.getMonth() === currentMonth.getMonth();
               const hasWorkout = dayWorkout.workoutCount > 0;
               const workout = workoutData.find(w => w.date === dateKey);
@@ -820,11 +991,45 @@ export default function ProgressScreen() {
   };
 
   const handleEdit = () => {
-    if (selectedWorkout) {
-      setEditingWorkout(JSON.parse(JSON.stringify(selectedWorkout))); // Deep copy
-      setDeletedSetIds(new Set()); // Reset deleted sets tracking
-      setIsEditing(true);
-    }
+    if (!selectedWorkout) return;
+    const workoutCopy = JSON.parse(JSON.stringify(selectedWorkout));
+    setEditingWorkout(workoutCopy);
+    setDeletedSetIds(new Set());
+    setValidationErrors(new Map());
+    setIsEditing(true);
+    
+    // Initialize duration minutes/seconds maps for timed exercises
+    const minsMap = new Map<string, string>();
+    const secsMap = new Map<string, string>();
+    
+    const bwFlagsMap = new Map<string, boolean>();
+    
+    workoutCopy.sessions.forEach((session: any, sessionIdx: number) => {
+      session.exercises.forEach((exercise: any, exIdx: number) => {
+        const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
+        const isBodyweight = isBodyweightExercise(exercise.name);
+        
+        exercise.sets.forEach((set: any, setIdx: number) => {
+          const key = `${sessionIdx}-${exIdx}-${setIdx}`;
+          
+          if (isTimed) {
+            if (set.duration !== null && set.duration !== undefined) {
+              minsMap.set(key, Math.floor(set.duration / 60).toString());
+              secsMap.set(key, (set.duration % 60).toString());
+            }
+          } else {
+            // Initialize bodyweight flag based on current weight value
+            if (isBodyweight || set.weight === 0 || set.weight === null) {
+              bwFlagsMap.set(key, true);
+            }
+          }
+        });
+      });
+    });
+    
+    setDurationMinutes(minsMap);
+    setDurationSeconds(secsMap);
+    setBodyweightFlags(bwFlagsMap);
   };
 
   const handleCancelEdit = () => {
@@ -835,8 +1040,87 @@ export default function ProgressScreen() {
     }
   };
 
+  // Helper to check if exercise is bodyweight (no weight needed, can be 0)
+  const isBodyweightExercise = (exerciseName: string): boolean => {
+    // Check if exercise is timed (timed exercises are bodyweight)
+    const isTimed = exerciseDetails.get(exerciseName)?.is_timed || false;
+    if (isTimed) return true;
+    
+    // Common bodyweight exercises (can be expanded)
+    const bodyweightExercises = [
+      'push-up', 'pushup', 'pull-up', 'pullup', 'chin-up', 'chinup',
+      'dip', 'sit-up', 'situp', 'crunch', 'plank', 'burpee', 'jumping jack',
+      'mountain climber', 'lunge', 'squat', 'jump squat', 'pistol squat'
+    ];
+    
+    const nameLower = exerciseName.toLowerCase();
+    return bodyweightExercises.some(bw => nameLower.includes(bw));
+  };
+
+  const validateWorkoutData = (): boolean => {
+    const errors = new Map<string, string>();
+    
+    if (!editingWorkout) {
+      return false;
+    }
+
+    editingWorkout.sessions.forEach((session, sessionIdx) => {
+      session.exercises.forEach((exercise, exIdx) => {
+        const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
+        const isBodyweight = isBodyweightExercise(exercise.name);
+        
+        exercise.sets.forEach((set, setIdx) => {
+          // Skip sets that are marked for deletion
+          if (set.id && deletedSetIds.has(set.id)) {
+            return;
+          }
+          
+          // Validate both new and existing sets
+          if (isTimed) {
+            // For timed exercises, duration is required
+            if (set.duration === null || set.duration === undefined || set.duration === 0) {
+              const errorKey = `${sessionIdx}-${exIdx}-${setIdx}-duration`;
+              errors.set(errorKey, 'Duration cannot be blank');
+            }
+          } else {
+            // For non-timed exercises:
+            // - Reps is always required
+            // - Weight is required UNLESS it's a bodyweight exercise (then can be 0 or null)
+            const hasReps = set.reps !== null && set.reps !== undefined && set.reps !== 0;
+            const hasWeight = set.weight !== null && set.weight !== undefined && set.weight !== 0;
+            
+            if (!hasReps) {
+              const repsErrorKey = `${sessionIdx}-${exIdx}-${setIdx}-reps`;
+              errors.set(repsErrorKey, 'Reps are required');
+            }
+            
+            // Weight validation: if not bodyweight (and not marked as bodyweight via checkbox), weight must be provided
+            const bodyweightKey = `${sessionIdx}-${exIdx}-${setIdx}`;
+            const isMarkedBodyweight = bodyweightFlags.get(bodyweightKey) || false;
+            if (!isBodyweight && !isMarkedBodyweight && !hasWeight) {
+              const weightErrorKey = `${sessionIdx}-${exIdx}-${setIdx}-weight`;
+              errors.set(weightErrorKey, 'Weight is required or check Bodyweight');
+            }
+          }
+        });
+      });
+    });
+
+    setValidationErrors(errors);
+    return errors.size === 0;
+  };
+
   const handleSaveEdit = async () => {
-    if (!editingWorkout) return;
+    if (!editingWorkout) {
+      Alert.alert("Error", "No workout data to save.");
+      return;
+    }
+
+    // Validate before saving
+    if (!validateWorkoutData()) {
+      Alert.alert("Validation Error", "Please fill in all required fields. Empty sets cannot be saved.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -845,6 +1129,11 @@ export default function ProgressScreen() {
         Alert.alert("Error", "You must be logged in to save changes.");
         setSaving(false);
         return;
+      }
+
+      // Ensure selectedWorkout is set (use editingWorkout if not available)
+      if (!selectedWorkout && editingWorkout) {
+        setSelectedWorkout(editingWorkout);
       }
 
       // Collect all sets that need to be updated and new sets that need to be created
@@ -866,28 +1155,63 @@ export default function ProgressScreen() {
             
             if (set.id) {
               // Existing set - update it
+              // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises)
+              // Reps is also required, so use 0 if null
+              const isBodyweight = isBodyweightExercise(exercise.name);
+              const finalWeight = (weight !== null && weight !== undefined) ? weight : (isBodyweight ? 0 : 0);
+              
               updates.push({
                 id: set.id,
-                weight: weight,
-                reps: reps,
-                notes: set.notes
+                weight: finalWeight,
+                reps: reps !== null && reps !== undefined ? reps : 0,
+                notes: set.notes !== null && set.notes !== undefined ? set.notes : null
               });
             } else {
-              // New set - create it
-              // Only create if it has valid data (weight or reps, or duration for timed)
-              if ((!isTimed && (set.weight !== null || set.reps !== null)) || (isTimed && set.duration !== null)) {
-                newSets.push({
-                  sessionIdx,
-                  exerciseName: exercise.name,
-                  weight: weight,
-                  reps: reps,
-                  notes: set.notes,
-                  sessionId: session.session.id,
-                  planId: session.session.plan_id,
-                  day: session.session.day,
-                  performedAt: selectedWorkout.date // Use the workout date
-                });
+              // New set - only create if it has valid data (validation already passed)
+              // Use the workout date from selectedWorkout or editingWorkout, ensuring it's a date string (YYYY-MM-DD)
+              // If not available, use today's date in local timezone
+              let workoutDateStr: string;
+              if (selectedWorkout?.date) {
+                workoutDateStr = selectedWorkout.date;
+              } else if (editingWorkout?.date) {
+                workoutDateStr = editingWorkout.date;
+              } else {
+                // Use local date, not UTC
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = String(today.getMonth() + 1).padStart(2, '0');
+                const day = String(today.getDate()).padStart(2, '0');
+                workoutDateStr = `${year}-${month}-${day}`;
               }
+              
+              // Get day from session, or try to get from plan data if session day is missing
+              let dayToUse = session.session.day;
+              if (!dayToUse && session.session.plan_id && planData.has(session.session.plan_id)) {
+                // Try to find the day from the plan data based on exercise name
+                const plan = planData.get(session.session.plan_id);
+                if (plan?.week_schedule) {
+                  for (const [day, dayData] of Object.entries(plan.week_schedule)) {
+                    if (dayData?.exercises?.some((ex: any) => ex.name === exercise.name)) {
+                      dayToUse = day;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              console.log(`Saving new set for ${exercise.name}: using day ${dayToUse} (session day: ${session.session.day})`);
+              
+              newSets.push({
+                sessionIdx,
+                exerciseName: exercise.name,
+                weight: weight,
+                reps: reps,
+                notes: set.notes || null,
+                sessionId: session.session.id,
+                planId: session.session.plan_id,
+                day: dayToUse,
+                performedAt: workoutDateStr
+              });
             }
           });
         });
@@ -895,73 +1219,114 @@ export default function ProgressScreen() {
 
       // Delete sets that were marked for deletion
       if (deletedSetIds.size > 0) {
+        console.log(`Deleting ${deletedSetIds.size} sets:`, Array.from(deletedSetIds));
         for (const setId of deletedSetIds) {
-          const { error } = await supabase
+          const { error, data } = await supabase
             .from('workout_logs')
             .delete()
             .eq('id', setId)
-            .eq('user_id', user.id);
+            .eq('user_id', user.id)
+            .select();
 
           if (error) {
             console.error('Error deleting set:', error);
-            Alert.alert("Error", `Failed to delete set: ${error.message}`);
+            console.error('Set ID:', setId);
+            Alert.alert("Error", `Failed to delete set: ${error.message || JSON.stringify(error)}`);
             setSaving(false);
             return;
           }
+          console.log(`Successfully deleted set ${setId}`, data);
         }
+        console.log('All sets deleted successfully');
       }
 
       // Update existing log entries
       for (const update of updates) {
-        const { error } = await supabase
+        const updateData: any = {};
+        
+        // Weight is required (NOT NULL) - use stored value or 0 (already handled in updates array)
+        updateData.weight = update.weight;
+        
+        // Reps is required (NOT NULL) - use stored value or 0 (already handled in updates array)
+        updateData.reps = update.reps;
+        
+        // Notes is optional - only include if it has a value
+        if (update.notes !== null && update.notes !== undefined && update.notes !== '') {
+          updateData.notes = update.notes;
+        } else {
+          // Explicitly set to null if empty string
+          updateData.notes = null;
+        }
+        
+        // Note: We do NOT update the day field - it should remain as it was originally saved
+        // This ensures that Friday's workout stays as Friday even if the session day is wrong
+
+        const { error, data } = await supabase
           .from('workout_logs')
-          .update({
-            weight: update.weight,
-            reps: update.reps,
-            notes: update.notes
-          })
+          .update(updateData)
           .eq('id', update.id)
-          .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .select();
 
         if (error) {
           console.error('Error updating log:', error);
-          Alert.alert("Error", `Failed to update set: ${error.message}`);
+          console.error('Error details:', JSON.stringify(error, null, 2));
+          console.error('Update data:', updateData);
+          console.error('Update ID:', update.id);
+          Alert.alert("Error", `Failed to update set: ${error.message || error.details || JSON.stringify(error)}`);
           setSaving(false);
           return;
         }
+        console.log(`Successfully updated log ${update.id}`);
       }
 
       // Create new log entries
       if (newSets.length > 0) {
-        const workoutDate = new Date(selectedWorkout.date);
-        const inserts = newSets.map(newSet => ({
-          user_id: user.id,
-          exercise_name: newSet.exerciseName,
-          weight: newSet.weight,
-          reps: newSet.reps,
-          notes: newSet.notes,
-          performed_at: workoutDate.toISOString(),
-          session_id: newSet.sessionId,
-          plan_id: newSet.planId,
-          day: newSet.day
-        }));
+        const inserts = newSets.map(newSet => {
+          // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises)
+          const isBodyweight = isBodyweightExercise(newSet.exerciseName);
+          const finalWeight = (newSet.weight !== null && newSet.weight !== undefined) ? newSet.weight : (isBodyweight ? 0 : 0);
+          
+          // Convert date string (YYYY-MM-DD) to ISO string with local time at noon to avoid timezone issues
+          // This ensures the date is preserved correctly regardless of timezone
+          const dateStr = newSet.performedAt; // Should be in format YYYY-MM-DD
+          const [year, month, day] = dateStr.split('-').map(Number);
+          const localDate = new Date(year, month - 1, day, 12, 0, 0); // Noon local time
+          
+          return {
+            user_id: user.id,
+            exercise_name: newSet.exerciseName,
+            weight: finalWeight,
+            reps: newSet.reps !== null && newSet.reps !== undefined ? newSet.reps : 0,
+            notes: newSet.notes,
+            performed_at: localDate.toISOString(), // Convert to ISO but based on local date
+            session_id: newSet.sessionId,
+            plan_id: newSet.planId,
+            day: newSet.day
+          };
+        });
 
-        const { error: insertError } = await supabase
+        console.log(`Creating ${inserts.length} new log entries`);
+        const { error: insertError, data: insertedData } = await supabase
           .from('workout_logs')
-          .insert(inserts);
+          .insert(inserts)
+          .select();
 
         if (insertError) {
           console.error('Error creating new logs:', insertError);
-          Alert.alert("Error", `Failed to create new sets: ${insertError.message}`);
+          console.error('Insert data:', inserts);
+          Alert.alert("Error", `Failed to create new sets: ${insertError.message || JSON.stringify(insertError)}`);
           setSaving(false);
           return;
         }
+        console.log(`Successfully created ${insertedData?.length || 0} new log entries`);
       }
 
       // Reload data and exit edit mode
       await loadWorkoutData();
       setIsEditing(false);
       setDeletedSetIds(new Set()); // Clear deleted sets tracking
+      setValidationErrors(new Map()); // Clear validation errors
       setSelectedWorkout(editingWorkout);
       Alert.alert("Success", "Workout updated successfully!");
     } catch (error: any) {
@@ -984,6 +1349,30 @@ export default function ProgressScreen() {
       set[field] = value;
     }
 
+    // Clear validation errors for this field when user types
+    const errorKey = `${sessionIdx}-${exerciseIdx}-${setIdx}-${field}`;
+    const newErrors = new Map(validationErrors);
+    newErrors.delete(errorKey);
+    
+    // Also clear related field errors if validation passes
+    if (field === 'weight' || field === 'reps') {
+      const otherField = field === 'weight' ? 'reps' : 'weight';
+      const otherErrorKey = `${sessionIdx}-${exerciseIdx}-${setIdx}-${otherField}`;
+      const isTimed = exerciseDetails.get(updated.sessions[sessionIdx].exercises[exerciseIdx].name)?.is_timed || false;
+      
+      if (!isTimed) {
+        const hasWeight = set.weight !== null && set.weight !== undefined && set.weight !== 0;
+        const hasReps = set.reps !== null && set.reps !== undefined && set.reps !== 0;
+        
+        if (hasWeight || hasReps) {
+          newErrors.delete(errorKey);
+          newErrors.delete(otherErrorKey);
+        }
+      }
+    }
+    
+    setValidationErrors(newErrors);
+
     // Recalculate total volume for the session
     let totalVolume = 0;
     updated.sessions[sessionIdx].exercises.forEach((ex: any) => {
@@ -998,49 +1387,36 @@ export default function ProgressScreen() {
     setEditingWorkout(updated);
   };
 
-  const [showAddExerciseModal, setShowAddExerciseModal] = useState(false);
-  const [newExerciseName, setNewExerciseName] = useState('');
   const [deletedSetIds, setDeletedSetIds] = useState<Set<number>>(new Set());
+  const lastProcessedExerciseRef = useRef<string | null>(null);
+  const wasEditingRef = useRef(false);
+  const [validationErrors, setValidationErrors] = useState<Map<string, string>>(new Map());
 
-  const handleAddExercise = () => {
+  const handleAddExercise = async () => {
     if (!editingWorkout || editingWorkout.sessions.length === 0) return;
-    setNewExerciseName('');
-    setShowAddExerciseModal(true);
-  };
-
-  const confirmAddExercise = () => {
-    if (!newExerciseName || !newExerciseName.trim()) {
-      Alert.alert("Error", "Please enter an exercise name.");
-      return;
+    
+    // Store that we were editing before navigating
+    wasEditingRef.current = isEditing;
+    
+    // Store the current editing state in AsyncStorage so we can restore it
+    await AsyncStorage.setItem('progress_editing_workout', JSON.stringify(editingWorkout));
+    if (selectedWorkout) {
+      await AsyncStorage.setItem('progress_selected_workout', JSON.stringify(selectedWorkout));
     }
-
-    if (!editingWorkout || editingWorkout.sessions.length === 0) return;
-
-    const updated = JSON.parse(JSON.stringify(editingWorkout));
-    // Add to the first session (or create a new exercise in the first session)
-    if (updated.sessions.length > 0) {
-      const firstSession = updated.sessions[0];
-      // Check if exercise already exists
-      let exerciseEntry = firstSession.exercises.find((e: any) => e.name === newExerciseName.trim());
-      if (!exerciseEntry) {
-        exerciseEntry = {
-          name: newExerciseName.trim(),
-          sets: []
-        };
-        firstSession.exercises.push(exerciseEntry);
-      }
-      // Add an empty set to the exercise
-      exerciseEntry.sets.push({
-        id: null, // New set, no ID yet
-        weight: null,
-        reps: null,
-        notes: null
+    await AsyncStorage.setItem('progress_was_editing', isEditing ? 'true' : 'false');
+    
+    // Close modal first to allow navigation
+    setModalVisible(false);
+    
+    // Small delay to ensure modal closes, then navigate
+    setTimeout(() => {
+      router.push({
+        pathname: '/exercise-select',
+        params: { context: 'progress' }
       });
-      setEditingWorkout(updated);
-      setShowAddExerciseModal(false);
-      setNewExerciseName('');
-    }
+    }, 300);
   };
+
 
   const handleDeleteSet = async (sessionIdx: number, exerciseIdx: number, setIdx: number, setId: number | null) => {
     if (!setId) return;
@@ -1389,19 +1765,50 @@ export default function ProgressScreen() {
 
                   {session.exercises.map((exercise, exIdx) => {
                     const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
+                    // Get target values from plan data
+                    const planId = session.session.plan_id;
+                    const day = session.session.day;
+                    let targetReps: string | null = null;
+                    let targetDuration: number | null = null;
+                    let targetWeight: number | null = null;
+                    
+                    if (planId && day && planData.has(planId)) {
+                      const plan = planData.get(planId);
+                      const dayData = plan?.week_schedule?.[day];
+                      if (dayData?.exercises) {
+                        const exerciseData = dayData.exercises.find((ex: any) => ex.name === exercise.name);
+                        if (exerciseData) {
+                          if (isTimed) {
+                            targetDuration = exerciseData.target_duration_sec || null;
+                          } else {
+                            targetReps = exerciseData.target_reps || null;
+                            // Note: target_weight is not stored in plan, so we'll show "BW" or actual weight
+                          }
+                        }
+                      }
+                    }
+                    
+                    // Filter out deleted sets for display
+                    const visibleSets = isEditing 
+                      ? exercise.sets.filter((set: any) => !set.id || !deletedSetIds.has(set.id))
+                      : exercise.sets;
+                    
                     return (
                       <View key={exIdx} style={styles.modalExercise}>
                         <Text style={styles.modalExerciseName}>{exercise.name}</Text>
-                        {exercise.sets.map((set, setIdx) => (
-                          <View key={setIdx} style={styles.modalSet}>
+                        {visibleSets.map((set, displayIdx) => {
+                          // Find the original index in the full sets array for updates
+                          const originalSetIdx = exercise.sets.findIndex((s: any) => s === set);
+                          return (
+                            <View key={set.id || displayIdx} style={styles.modalSet}>
                             {isEditing ? (
                               <View style={styles.modalSetEdit}>
                                 <View style={styles.modalSetEditHeader}>
-                                  <Text style={styles.modalSetLabel}>Set {setIdx + 1}</Text>
+                                  <Text style={styles.modalSetLabel}>Set {displayIdx + 1}</Text>
                                   {set.id && (
                                     <TouchableOpacity 
                                       onPress={() => {
-                                        handleDeleteSet(idx, exIdx, setIdx, set.id);
+                                        handleDeleteSet(idx, exIdx, originalSetIdx, set.id);
                                       }}
                                       style={styles.modalDeleteSetButton}
                                       activeOpacity={0.7}
@@ -1414,40 +1821,155 @@ export default function ProgressScreen() {
                                   {!isTimed && (
                                     <>
                                       <View style={styles.modalSetInputGroup}>
-                                        <Text style={styles.modalSetInputLabel}>Weight (lbs)</Text>
+                                        <View style={styles.modalSetInputRow}>
+                                          <Text style={styles.modalSetInputLabel}>Weight (lbs)</Text>
+                                          <View style={styles.bodyweightCheckboxContainer}>
+                                            <Text style={styles.bodyweightCheckboxLabel}>Bodyweight</Text>
+                                            <TouchableOpacity
+                                              style={styles.bodyweightCheckbox}
+                                              onPress={() => {
+                                                const key = `${idx}-${exIdx}-${originalSetIdx}`;
+                                                const isChecked = bodyweightFlags.get(key) || false;
+                                                setBodyweightFlags(prev => {
+                                                  const newMap = new Map(prev);
+                                                  newMap.set(key, !isChecked);
+                                                  return newMap;
+                                                });
+                                                // Set weight to 0 if checked, clear if unchecked
+                                                if (!isChecked) {
+                                                  updateSetValue(idx, exIdx, originalSetIdx, 'weight', '0');
+                                                } else {
+                                                  updateSetValue(idx, exIdx, originalSetIdx, 'weight', '');
+                                                }
+                                              }}
+                                              activeOpacity={0.7}
+                                            >
+                                              <View style={[
+                                                styles.checkbox,
+                                                (bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) && styles.checkboxChecked
+                                              ]}>
+                                                {(bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) && (
+                                                  <Text style={styles.checkboxCheckmark}>✓</Text>
+                                                )}
+                                              </View>
+                                            </TouchableOpacity>
+                                          </View>
+                                        </View>
                                         <TextInput
-                                          style={styles.modalSetInput}
+                                          style={[
+                                            styles.modalSetInput,
+                                            ((bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) && styles.modalSetInputDisabled),
+                                            !set.id && validationErrors.has(`${idx}-${exIdx}-${originalSetIdx}-weight`) && styles.modalSetInputError
+                                          ]}
                                           value={set.weight?.toString() || ''}
-                                          onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'weight', value)}
+                                          onChangeText={(value) => {
+                                            // If user types a value, uncheck bodyweight
+                                            if (value && value !== '0') {
+                                              const key = `${idx}-${exIdx}-${originalSetIdx}`;
+                                              setBodyweightFlags(prev => {
+                                                const newMap = new Map(prev);
+                                                newMap.set(key, false);
+                                                return newMap;
+                                              });
+                                            }
+                                            updateSetValue(idx, exIdx, originalSetIdx, 'weight', value);
+                                          }}
                                           keyboardType="numeric"
-                                          placeholder="BW"
+                                          placeholder={(bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null) ? "BW" : "0"}
                                           placeholderTextColor="#6b7280"
+                                          editable={!(bodyweightFlags.get(`${idx}-${exIdx}-${originalSetIdx}`) || set.weight === 0 || set.weight === null)}
                                         />
+                                        {(() => {
+                                          if (set.id) return null;
+                                          const errorMsg = validationErrors.get(`${idx}-${exIdx}-${originalSetIdx}-weight`);
+                                          return errorMsg ? <Text style={styles.modalSetErrorText}>{errorMsg}</Text> : null;
+                                        })()}
                                       </View>
                                       <View style={styles.modalSetInputGroup}>
                                         <Text style={styles.modalSetInputLabel}>Reps</Text>
                                         <TextInput
-                                          style={styles.modalSetInput}
+                                          style={[
+                                            styles.modalSetInput,
+                                            !set.id && validationErrors.has(`${idx}-${exIdx}-${originalSetIdx}-reps`) && styles.modalSetInputError
+                                          ]}
                                           value={set.reps?.toString() || ''}
-                                          onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'reps', value)}
+                                          onChangeText={(value) => updateSetValue(idx, exIdx, originalSetIdx, 'reps', value)}
                                           keyboardType="numeric"
                                           placeholder="0"
                                           placeholderTextColor="#6b7280"
                                         />
+                                        {(() => {
+                                          if (set.id) return null;
+                                          const errorMsg = validationErrors.get(`${idx}-${exIdx}-${originalSetIdx}-reps`);
+                                          return errorMsg ? <Text style={styles.modalSetErrorText}>{errorMsg}</Text> : null;
+                                        })()}
                                       </View>
                                     </>
                                   )}
                                   {isTimed && (
                                     <View style={styles.modalSetInputGroup}>
-                                      <Text style={styles.modalSetInputLabel}>Duration (seconds)</Text>
-                                      <TextInput
-                                        style={styles.modalSetInput}
-                                        value={set.duration?.toString() || ''}
-                                        onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'duration', value)}
-                                        keyboardType="numeric"
-                                        placeholder="60"
-                                        placeholderTextColor="#6b7280"
-                                      />
+                                      <Text style={styles.modalSetInputLabel}>Duration</Text>
+                                      <View style={styles.modalSetInputRow}>
+                                        <View style={styles.modalSetInputHalf}>
+                                          <Text style={styles.modalSetInputLabel}>Min</Text>
+                                          <TextInput
+                                            style={[
+                                              styles.modalSetInput,
+                                              !set.id && validationErrors.has(`${idx}-${exIdx}-${originalSetIdx}-duration`) && styles.modalSetInputError
+                                            ]}
+                                            value={durationMinutes.get(`${idx}-${exIdx}-${originalSetIdx}`) ?? (set.duration ? Math.floor(set.duration / 60).toString() : '')}
+                                            onChangeText={(text) => {
+                                              if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0)) {
+                                                setDurationMinutes(prev => {
+                                                  const newMap = new Map(prev);
+                                                  newMap.set(`${idx}-${exIdx}-${originalSetIdx}`, text);
+                                                  return newMap;
+                                                });
+                                                const mins = text === '' ? 0 : parseInt(text) || 0;
+                                                const secsKey = `${idx}-${exIdx}-${originalSetIdx}`;
+                                                const secs = durationSeconds.has(secsKey) ? (parseInt(durationSeconds.get(secsKey) || '0') || 0) : (set.duration ? set.duration % 60 : 0);
+                                                const totalSeconds = mins * 60 + secs;
+                                                updateSetValue(idx, exIdx, originalSetIdx, 'duration', totalSeconds.toString());
+                                              }
+                                            }}
+                                            keyboardType="numeric"
+                                            placeholder="0"
+                                            placeholderTextColor="#6b7280"
+                                          />
+                                        </View>
+                                        <View style={styles.modalSetInputHalf}>
+                                          <Text style={styles.modalSetInputLabel}>Sec</Text>
+                                          <TextInput
+                                            style={[
+                                              styles.modalSetInput,
+                                              !set.id && validationErrors.has(`${idx}-${exIdx}-${originalSetIdx}-duration`) && styles.modalSetInputError
+                                            ]}
+                                            value={durationSeconds.get(`${idx}-${exIdx}-${originalSetIdx}`) ?? (set.duration ? (set.duration % 60).toString() : '')}
+                                            onChangeText={(text) => {
+                                              if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0 && parseInt(text) < 60)) {
+                                                setDurationSeconds(prev => {
+                                                  const newMap = new Map(prev);
+                                                  newMap.set(`${idx}-${exIdx}-${originalSetIdx}`, text);
+                                                  return newMap;
+                                                });
+                                                const secs = text === '' ? 0 : parseInt(text) || 0;
+                                                const minsKey = `${idx}-${exIdx}-${originalSetIdx}`;
+                                                const mins = durationMinutes.has(minsKey) ? (parseInt(durationMinutes.get(minsKey) || '0') || 0) : (set.duration ? Math.floor(set.duration / 60) : 0);
+                                                const totalSeconds = mins * 60 + secs;
+                                                updateSetValue(idx, exIdx, originalSetIdx, 'duration', totalSeconds.toString());
+                                              }
+                                            }}
+                                            keyboardType="numeric"
+                                            placeholder="0"
+                                            placeholderTextColor="#6b7280"
+                                          />
+                                        </View>
+                                      </View>
+                                      {(() => {
+                                        if (set.id) return null;
+                                        const errorMsg = validationErrors.get(`${idx}-${exIdx}-${originalSetIdx}-duration`);
+                                        return errorMsg ? <Text style={styles.modalSetErrorText}>{errorMsg}</Text> : null;
+                                      })()}
                                     </View>
                                   )}
                                 </View>
@@ -1456,7 +1978,7 @@ export default function ProgressScreen() {
                                   <TextInput
                                     style={[styles.modalSetInput, styles.modalSetNotesInput]}
                                     value={set.notes || ''}
-                                    onChangeText={(value) => updateSetValue(idx, exIdx, setIdx, 'notes', value)}
+                                    onChangeText={(value) => updateSetValue(idx, exIdx, originalSetIdx, 'notes', value)}
                                     placeholder="Optional notes..."
                                     placeholderTextColor="#6b7280"
                                     multiline
@@ -1468,9 +1990,9 @@ export default function ProgressScreen() {
                                 <View style={styles.modalSetContent}>
                                   <Text style={styles.modalSetText}>
                                     {isTimed ? (
-                                      `Set ${setIdx + 1}: ${formatDuration(set.duration)}`
+                                      `Set ${displayIdx + 1}: ${formatDuration(set.duration)}${targetDuration ? ` / Target: ${formatDuration(targetDuration)}` : ''}`
                                     ) : (
-                                      `Set ${setIdx + 1}: ${set.weight ? `${set.weight}lbs` : 'BW'} × ${set.reps || 'N/A'} reps`
+                                      `Set ${displayIdx + 1}: ${set.weight ? `${set.weight}lbs` : 'BW'} × ${set.reps || 'N/A'} reps${targetReps ? ` / Target: ${targetReps}` : ''}`
                                     )}
                                   </Text>
                                   {set.notes && (
@@ -1480,7 +2002,8 @@ export default function ProgressScreen() {
                               </View>
                             )}
                           </View>
-                        ))}
+                          );
+                        })}
                       </View>
                     );
                   })}
@@ -1503,40 +2026,6 @@ export default function ProgressScreen() {
             )}
           </View>
           
-          {/* Add Exercise Modal */}
-          {showAddExerciseModal && (
-            <View style={styles.addExerciseModalOverlay}>
-              <View style={styles.addExerciseModalContent}>
-                <Text style={styles.addExerciseModalTitle}>Add Exercise</Text>
-                <TextInput
-                  style={styles.addExerciseModalInput}
-                  placeholder="Enter exercise name"
-                  placeholderTextColor="#6b7280"
-                  value={newExerciseName}
-                  onChangeText={setNewExerciseName}
-                  autoCapitalize="words"
-                  autoFocus
-                />
-                <View style={styles.addExerciseModalButtons}>
-                  <TouchableOpacity
-                    style={[styles.addExerciseModalButton, styles.addExerciseModalButtonCancel]}
-                    onPress={() => {
-                      setShowAddExerciseModal(false);
-                      setNewExerciseName('');
-                    }}
-                  >
-                    <Text style={styles.addExerciseModalButtonCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.addExerciseModalButton, styles.addExerciseModalButtonAdd]}
-                    onPress={confirmAddExercise}
-                  >
-                    <Text style={styles.addExerciseModalButtonAddText}>Add</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
 
           {/* Unsaved Changes Confirmation Overlay - Rendered inside workout detail modal */}
           {unsavedChangesVisible && (
@@ -2225,10 +2714,68 @@ const styles = StyleSheet.create({
     borderColor: '#374151',
     fontSize: 15,
   },
+  modalSetInputError: {
+    borderColor: '#ef4444',
+    borderWidth: 1,
+  },
+  modalSetErrorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  bodyweightCheckboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bodyweightCheckboxLabel: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  bodyweightCheckbox: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: '#6b7280',
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkboxCheckmark: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  modalSetInputDisabled: {
+    backgroundColor: '#1f2937',
+    opacity: 0.5,
+  },
   modalSetNotesInput: {
     minHeight: 60,
     textAlignVertical: 'top',
     marginTop: 0,
+  },
+  modalSetInputError: {
+    borderColor: '#ef4444',
+    borderWidth: 1,
+  },
+  modalSetErrorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
   },
   modalNotes: {
     fontSize: 13,
@@ -2339,72 +2886,6 @@ const styles = StyleSheet.create({
     color: '#3b82f6',
     fontSize: 16,
     fontWeight: '600',
-  },
-  // Add Exercise Modal
-  addExerciseModalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    zIndex: 1001,
-  },
-  addExerciseModalContent: {
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  addExerciseModalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 16,
-  },
-  addExerciseModalInput: {
-    backgroundColor: '#111827',
-    color: 'white',
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#374151',
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  addExerciseModalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'flex-end',
-  },
-  addExerciseModalButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    minWidth: 100,
-    alignItems: 'center',
-  },
-  addExerciseModalButtonCancel: {
-    backgroundColor: '#374151',
-  },
-  addExerciseModalButtonAdd: {
-    backgroundColor: '#3b82f6',
-  },
-  addExerciseModalButtonCancelText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  addExerciseModalButtonAddText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
   },
 });
 

@@ -50,6 +50,52 @@ export default function PlannerDayScreen() {
     };
   }, []);
 
+  // Migrate timed exercises that have target_reps instead of target_duration_sec
+  useEffect(() => {
+    if (!day || !plan || !dayData?.exercises || exerciseDetails.size === 0) {
+      console.log('Migration useEffect: Missing dependencies', { day, hasPlan: !!plan, hasExercises: !!dayData?.exercises, detailsSize: exerciseDetails.size });
+      return;
+    }
+    
+    console.log('Migration useEffect: Running migration check');
+    let needsMigration = false;
+    const updatedExercises = dayData.exercises.map((ex: any, index: number) => {
+      if (!ex.name) return ex;
+      const detail = exerciseDetails.get(ex.name);
+      const isTimed = detail?.is_timed || false;
+      
+      console.log(`Migration check - Exercise: ${ex.name}, isTimed: ${isTimed}, has target_reps: ${!!ex.target_reps}, has target_duration_sec: ${!!ex.target_duration_sec}`);
+      
+      if (isTimed && ex.target_reps && !ex.target_duration_sec) {
+        needsMigration = true;
+        console.log(`Migrating ${ex.name} from target_reps to target_duration_sec`);
+        return {
+          ...ex,
+          target_reps: null,
+          target_duration_sec: detail?.default_duration_sec || 60
+        };
+      }
+      return ex;
+    });
+    
+    if (needsMigration) {
+      console.log('Migration: Updating exercises');
+      const updatedDayData = {
+        ...dayData,
+        exercises: updatedExercises
+      };
+      setDayData(updatedDayData);
+      const updatedPlan = { ...plan };
+      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      setPlan(updatedPlan);
+      savePlan(updatedDayData, true, false);
+    } else {
+      console.log('Migration: No exercises need migration');
+    }
+    // Use exerciseDetails.size and a stringified version of exercise names to detect changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exerciseDetails.size, day, plan?.id, JSON.stringify(dayData?.exercises?.map(e => e.name))]);
+
   useFocusEffect(
     useCallback(() => {
       loadPlan();
@@ -105,9 +151,10 @@ export default function PlannerDayScreen() {
     const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>();
 
     // Batch query all exercises from master exercises table
+    // Note: exercises table doesn't have default_duration_sec, only user_exercises does
     const { data: masterExercises, error: masterError } = await supabase
       .from('exercises')
-      .select('name, is_timed, default_duration_sec, difficulty_level')
+      .select('name, is_timed, difficulty_level')
       .in('name', exerciseNames);
 
     if (masterError) {
@@ -137,8 +184,27 @@ export default function PlannerDayScreen() {
     for (const exercise of exercises) {
       if (!exercise.name) continue;
       
-      const userExercise = userExerciseMap.get(exercise.name);
-      const masterExercise = masterExerciseMap.get(exercise.name);
+      // Try exact match first
+      let userExercise = userExerciseMap.get(exercise.name);
+      let masterExercise = masterExerciseMap.get(exercise.name);
+      
+      // If not found, try case-insensitive match
+      if (!userExercise && !masterExercise) {
+        for (const [name, ex] of userExerciseMap.entries()) {
+          if (name.toLowerCase() === exercise.name.toLowerCase()) {
+            userExercise = ex;
+            break;
+          }
+        }
+        if (!masterExercise) {
+          for (const [name, ex] of masterExerciseMap.entries()) {
+            if (name.toLowerCase() === exercise.name.toLowerCase()) {
+              masterExercise = ex;
+              break;
+            }
+          }
+        }
+      }
       
       if (userExercise) {
         detailsMap.set(exercise.name, {
@@ -149,7 +215,7 @@ export default function PlannerDayScreen() {
       } else if (masterExercise) {
         detailsMap.set(exercise.name, {
           is_timed: masterExercise.is_timed || false,
-          default_duration_sec: masterExercise.default_duration_sec,
+          default_duration_sec: null, // Master exercises table doesn't have default_duration_sec, use null (will default to 60 in code)
           difficulty: masterExercise.difficulty_level || null
         });
       } else {
@@ -163,6 +229,9 @@ export default function PlannerDayScreen() {
     }
 
     setExerciseDetails(detailsMap);
+    
+    // Debug: Log exercise details
+    console.log('Exercise details loaded:', Array.from(detailsMap.entries()));
   };
 
   const loadUserProfile = async () => {
@@ -315,6 +384,8 @@ Return ONLY the JSON array, no other text.`;
       };
 
       await savePlan(updatedDayData, true);
+      // Reload exercise details after adding new exercises
+      await loadExerciseDetails(updatedExercises);
       setHasGenerated(true);
       Alert.alert("Success", `Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
     } catch (error: any) {
@@ -545,9 +616,17 @@ Return ONLY the JSON array, no other text.`;
     const defaultDuration = detail?.default_duration_sec || 60;
     const difficulty = item.difficulty || detail?.difficulty || dayData?.difficulty || null;
     
+    // Debug: Log exercise rendering
+    if (item.name && exerciseDetails.size > 0) {
+      console.log(`Rendering exercise: ${item.name}, isTimed: ${isTimed}, detail:`, detail);
+    }
+    
     // For timed exercises, use target_duration_sec if available, otherwise use default_duration_sec
     // Store duration in seconds, but display in MM:SS format
-    const currentDuration = item.target_duration_sec !== undefined ? item.target_duration_sec : (isTimed ? defaultDuration : null);
+    // If exercise is timed but has target_reps (not yet migrated), still show duration fields with defaultDuration
+    const currentDuration = item.target_duration_sec !== undefined 
+      ? item.target_duration_sec 
+      : (isTimed ? defaultDuration : null);
     
     return (
       <View
@@ -607,7 +686,13 @@ Return ONLY the JSON array, no other text.`;
             <TextInput
               style={styles.exerciseName}
               value={item.name}
-              onChangeText={(text) => updateExercise(index, 'name', text)}
+              onChangeText={(text) => {
+                updateExercise(index, 'name', text);
+                // Reload exercise details when name changes
+                if (text && text.trim()) {
+                  loadExerciseDetails([{ name: text.trim() }]);
+                }
+              }}
               placeholder="Exercise name"
               placeholderTextColor="#6b7280"
               editable={!isActive}

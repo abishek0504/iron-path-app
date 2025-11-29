@@ -3,23 +3,49 @@ import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Alert, M
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Search, X, Plus } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../src/lib/supabase';
 
 export default function ExerciseSelectScreen() {
   const router = useRouter();
 
-  const safeBack = () => {
+  const safeBack = async (selectedExerciseName?: string) => {
     try {
+      if (context === 'progress' && selectedExerciseName) {
+        // Store in AsyncStorage for reliable passing back
+        await AsyncStorage.setItem('progress_selected_exercise', selectedExerciseName);
+        
+        // Navigate back to progress tab
+        if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+          router.back();
+        } else {
+          router.push({
+            pathname: '/(tabs)/progress',
+            params: { selectedExercise: selectedExerciseName }
+          });
+        }
+        return;
+      }
       if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
         router.back();
       } else {
         router.push('/(tabs)/planner');
       }
     } catch (error) {
-      router.push('/(tabs)/planner');
+      if (context === 'progress') {
+        if (selectedExerciseName) {
+          await AsyncStorage.setItem('progress_selected_exercise', selectedExerciseName);
+        }
+        router.push({
+          pathname: '/(tabs)/progress',
+          params: selectedExerciseName ? { selectedExercise: selectedExerciseName } : {}
+        });
+      } else {
+        router.push('/(tabs)/planner');
+      }
     }
   };
-  const { planId, day, exerciseIndex } = useLocalSearchParams<{ planId: string; day: string; exerciseIndex?: string }>();
+  const { planId, day, exerciseIndex, context } = useLocalSearchParams<{ planId?: string; day?: string; exerciseIndex?: string; context?: string }>();
   const [searchQuery, setSearchQuery] = useState('');
   const [masterExercises, setMasterExercises] = useState<any[]>([]);
   const [customExercises, setCustomExercises] = useState<any[]>([]);
@@ -105,6 +131,11 @@ export default function ExerciseSelectScreen() {
   );
 
   const handleAddExercise = async (exerciseName: string) => {
+    if (context === 'progress') {
+      safeBack(exerciseName);
+      return;
+    }
+
     if (!planId || !day) {
       Alert.alert("Error", "Missing plan or day information.");
       return;
@@ -113,6 +144,32 @@ export default function ExerciseSelectScreen() {
     setLoading(true);
 
     try {
+      // Check if exercise is timed
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Check user exercises first, then master exercises
+      const { data: userExercise } = await supabase
+        .from('user_exercises')
+        .select('is_timed, default_duration_sec')
+        .eq('user_id', user.id)
+        .eq('name', exerciseName)
+        .maybeSingle();
+
+      // Note: exercises table doesn't have default_duration_sec, only user_exercises does
+      const { data: masterExercise } = await supabase
+        .from('exercises')
+        .select('is_timed')
+        .eq('name', exerciseName)
+        .maybeSingle();
+
+      const exerciseDetail = userExercise || masterExercise;
+      const isTimed = exerciseDetail?.is_timed || false;
+      // user_exercises has default_duration_sec, but exercises table doesn't - use 60 as default
+      const defaultDuration = (userExercise?.default_duration_sec) || 60;
+
       // Load current plan
       const { data: plan, error: planError } = await supabase
         .from('workout_plans')
@@ -127,14 +184,19 @@ export default function ExerciseSelectScreen() {
       const updatedPlan = { ...plan };
       const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
-      // Add new exercise
-      const newExercise = {
+      // Add new exercise - use target_duration_sec for timed exercises, target_reps for others
+      const newExercise: any = {
         name: exerciseName,
         target_sets: 3,
-        target_reps: "8-12",
         rest_time_sec: 60,
         notes: ""
       };
+
+      if (isTimed) {
+        newExercise.target_duration_sec = defaultDuration;
+      } else {
+        newExercise.target_reps = "8-12";
+      }
 
       dayData.exercises = [...(dayData.exercises || []), newExercise];
       updatedPlan.plan_data.week_schedule[day] = dayData;
@@ -247,8 +309,13 @@ export default function ExerciseSelectScreen() {
       setShowCreateModal(false);
       setNewExerciseName('');
       setNewExerciseDescription('');
-      Alert.alert("Success", "Custom exercise created and added!");
-      safeBack();
+      
+      if (context === 'progress') {
+        safeBack(newCustomExercise.name);
+      } else {
+        Alert.alert("Success", "Custom exercise created and added!");
+        safeBack();
+      }
     } catch (error: any) {
       console.error('Error creating custom exercise:', error);
       Alert.alert("Error", error.message || "Failed to create custom exercise.");
@@ -258,6 +325,11 @@ export default function ExerciseSelectScreen() {
   };
 
   const handleAddCustomExercise = async (exercise: any) => {
+    if (context === 'progress') {
+      safeBack(exercise.name);
+      return;
+    }
+
     if (!planId || !day) {
       Alert.alert("Error", "Missing plan or day information.");
       return;
@@ -280,14 +352,20 @@ export default function ExerciseSelectScreen() {
       const updatedPlan = { ...plan };
       const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
 
-      // Add custom exercise
-      const newExercise = {
+      // Add custom exercise - use target_duration_sec for timed exercises, target_reps for others
+      const isTimed = exercise.is_timed || false;
+      const newExercise: any = {
         name: exercise.name,
         target_sets: exercise.default_sets || 3,
-        target_reps: exercise.default_reps || "8-12",
         rest_time_sec: exercise.default_rest_sec || 60,
         notes: exercise.description || ""
       };
+
+      if (isTimed) {
+        newExercise.target_duration_sec = exercise.default_duration_sec || 60;
+      } else {
+        newExercise.target_reps = exercise.default_reps || "8-12";
+      }
 
       if (exerciseIndex !== undefined) {
         // Replace existing exercise
@@ -364,7 +442,7 @@ export default function ExerciseSelectScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Select Exercise</Text>
-        <TouchableOpacity onPress={safeBack}>
+        <TouchableOpacity onPress={() => safeBack()}>
           <X color="#9ca3af" size={24} />
         </TouchableOpacity>
       </View>
