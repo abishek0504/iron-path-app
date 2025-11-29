@@ -537,7 +537,7 @@ export default function ProgressScreen() {
 
       if (sessionEntry) {
         // Find or create exercise entry
-        let exerciseEntry = sessionEntry.exercises.find(e => e.name === log.exercise_name);
+        let exerciseEntry = sessionEntry.exercises.find((e: any) => e.name === log.exercise_name);
         if (!exerciseEntry) {
           exerciseEntry = {
             name: log.exercise_name,
@@ -1166,10 +1166,9 @@ export default function ProgressScreen() {
             
             if (set.id) {
               // Existing set - update it
-              // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises)
+              // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises or as fallback)
               // Reps is also required, so use 0 if null
-              const isBodyweight = isBodyweightExercise(exercise.name);
-              const finalWeight = (weight !== null && weight !== undefined) ? weight : (isBodyweight ? 0 : 0);
+              const finalWeight = (weight !== null && weight !== undefined) ? weight : 0;
               
               updates.push({
                 id: set.id,
@@ -1202,7 +1201,7 @@ export default function ProgressScreen() {
                 const plan = planData.get(session.session.plan_id);
                 if (plan?.week_schedule) {
                   for (const [day, dayData] of Object.entries(plan.week_schedule)) {
-                    if (dayData?.exercises?.some((ex: any) => ex.name === exercise.name)) {
+                    if (dayData && typeof dayData === 'object' && 'exercises' in dayData && Array.isArray(dayData.exercises) && dayData.exercises.some((ex: any) => ex.name === exercise.name)) {
                       dayToUse = day;
                       break;
                     }
@@ -1294,9 +1293,8 @@ export default function ProgressScreen() {
       // Create new log entries
       if (newSets.length > 0) {
         const inserts = newSets.map(newSet => {
-          // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises)
-          const isBodyweight = isBodyweightExercise(newSet.exerciseName);
-          const finalWeight = (newSet.weight !== null && newSet.weight !== undefined) ? newSet.weight : (isBodyweight ? 0 : 0);
+          // Weight is required (NOT NULL), so use 0 if null (for bodyweight exercises or as fallback)
+          const finalWeight = (newSet.weight !== null && newSet.weight !== undefined) ? newSet.weight : 0;
           
           // Convert date string (YYYY-MM-DD) to ISO string with local time at noon to avoid timezone issues
           // This ensures the date is preserved correctly regardless of timezone
@@ -2738,6 +2736,13 @@ const styles = StyleSheet.create({
     borderColor: '#374151',
     fontSize: 15,
   },
+  modalSetInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalSetInputHalf: {
+    flex: 1,
+  },
   modalSetInputError: {
     borderColor: '#ef4444',
     borderWidth: 1,
@@ -2790,16 +2795,6 @@ const styles = StyleSheet.create({
     minHeight: 60,
     textAlignVertical: 'top',
     marginTop: 0,
-  },
-  modalSetInputError: {
-    borderColor: '#ef4444',
-    borderWidth: 1,
-  },
-  modalSetErrorText: {
-    color: '#ef4444',
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: '500',
   },
   modalNotes: {
     fontSize: 13,
