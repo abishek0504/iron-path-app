@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { X, Plus, ArrowLeft, ChevronUp, ChevronDown, GripVertical } from 'lucide-react-native';
+import { X, Plus, ArrowLeft, ChevronUp, ChevronDown, GripVertical, Edit2 } from 'lucide-react-native';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -53,22 +53,17 @@ export default function PlannerDayScreen() {
   // Migrate timed exercises that have target_reps instead of target_duration_sec
   useEffect(() => {
     if (!day || !plan || !dayData?.exercises || exerciseDetails.size === 0) {
-      console.log('Migration useEffect: Missing dependencies', { day, hasPlan: !!plan, hasExercises: !!dayData?.exercises, detailsSize: exerciseDetails.size });
       return;
     }
     
-    console.log('Migration useEffect: Running migration check');
     let needsMigration = false;
     const updatedExercises = dayData.exercises.map((ex: any, index: number) => {
       if (!ex.name) return ex;
       const detail = exerciseDetails.get(ex.name);
       const isTimed = detail?.is_timed || false;
       
-      console.log(`Migration check - Exercise: ${ex.name}, isTimed: ${isTimed}, has target_reps: ${!!ex.target_reps}, has target_duration_sec: ${!!ex.target_duration_sec}`);
-      
       if (isTimed && ex.target_reps && !ex.target_duration_sec) {
         needsMigration = true;
-        console.log(`Migrating ${ex.name} from target_reps to target_duration_sec`);
         return {
           ...ex,
           target_reps: null,
@@ -79,7 +74,6 @@ export default function PlannerDayScreen() {
     });
     
     if (needsMigration) {
-      console.log('Migration: Updating exercises');
       const updatedDayData = {
         ...dayData,
         exercises: updatedExercises
@@ -89,8 +83,6 @@ export default function PlannerDayScreen() {
       updatedPlan.plan_data.week_schedule[day] = updatedDayData;
       setPlan(updatedPlan);
       savePlan(updatedDayData, true, false);
-    } else {
-      console.log('Migration: No exercises need migration');
     }
     // Use exerciseDetails.size and exercise count/length to detect changes
     // Avoid JSON.stringify in dependency array as it creates new objects on every render
@@ -276,9 +268,6 @@ export default function PlannerDayScreen() {
     }
 
     setExerciseDetails(detailsMap);
-    
-    // Debug: Log exercise details
-    console.log('Exercise details loaded:', Array.from(detailsMap.entries()));
   };
 
   const loadUserProfile = async () => {
@@ -672,14 +661,11 @@ Return ONLY the JSON array, no other text.`;
     const defaultDuration = detail?.default_duration_sec || 60;
     const difficulty = item.difficulty || detail?.difficulty || dayData?.difficulty || null;
     
-    // Debug: Log exercise rendering
-    if (item.name && exerciseDetails.size > 0) {
-      console.log(`Rendering exercise: ${item.name}, isTimed: ${isTimed}, detail:`, detail);
-    }
+    // Check if exercise has sets with different values per set
+    const hasSets = Array.isArray(item.sets) && item.sets.length > 0;
+    const numSets = item.target_sets || (hasSets ? item.sets.length : 0);
     
     // For timed exercises, use target_duration_sec if available, otherwise use default_duration_sec
-    // Store duration in seconds, but display in MM:SS format
-    // If exercise is timed but has target_reps (not yet migrated), still show duration fields with defaultDuration
     const currentDuration = item.target_duration_sec !== undefined 
       ? item.target_duration_sec 
       : (isTimed ? defaultDuration : null);
@@ -739,230 +725,90 @@ Return ONLY the JSON array, no other text.`;
               <Text style={styles.exerciseNamePlaceholder}>{item.name}</Text>
             </TouchableOpacity>
           ) : (
-            <TextInput
-              style={styles.exerciseName}
-              value={item.name}
-              onChangeText={(text) => {
-                updateExercise(index, 'name', text);
-                // Reload exercise details when name changes
-                if (text && text.trim()) {
-                  loadExerciseDetails([{ name: text.trim() }]);
-                }
-              }}
-              placeholder="Exercise name"
-              placeholderTextColor="#6b7280"
-              editable={!isActive}
-              onFocus={() => {
-                // Prevent drag when focusing on input
-                if (Platform.OS === 'web') {
-                  dragAllowedRef.current = null;
-                  setDraggedIndex(null);
-                }
-              }}
-            />
-          )}
-          <TouchableOpacity onPress={() => removeExercise(index)}>
-            <X color="#ef4444" size={20} />
-          </TouchableOpacity>
-        </View>
-        
-        {renderDifficultyIndicator(difficulty)}
-        
-        <View style={styles.exerciseRow}>
-          <View style={styles.exerciseField}>
-            <Text style={styles.fieldLabel}>Sets</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={item.target_sets?.toString() || ''}
-              onChangeText={(text) => {
-                if (text === '') {
-                  updateExercise(index, 'target_sets', null);
-                } else {
-                  const num = parseInt(text);
-                  if (!isNaN(num)) {
-                    updateExercise(index, 'target_sets', num);
-                  }
-                }
-              }}
-              keyboardType="numeric"
-              editable={!isActive}
-              placeholder="3"
-              placeholderTextColor="#6b7280"
-            />
-          </View>
-          {isTimed ? (
-            <>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Min</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={durationMinutes.has(index) ? durationMinutes.get(index) : (currentDuration !== null ? getDurationMinutes(currentDuration).toString() : '')}
-                  onChangeText={(text) => {
-                    // Allow empty string or valid number
-                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0)) {
-                      setDurationMinutes(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, text);
-                        return newMap;
-                      });
-                      // Auto-save when both fields have values or when cleared
-                      const mins = text === '' ? 0 : parseInt(text) || 0;
-                      const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
-                      const totalSeconds = mins * 60 + secs;
-                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    }
-                  }}
-                  onBlur={() => {
-                    // Ensure value is saved on blur
-                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
-                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
-                    const totalSeconds = mins * 60 + secs;
-                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    // Clear cache to show formatted value
-                    setDurationMinutes(prev => {
-                      const newMap = new Map(prev);
-                      newMap.delete(index);
-                      return newMap;
-                    });
-                  }}
-                  onFocus={() => {
-                    // Initialize with current value when focused
-                    if (!durationMinutes.has(index) && currentDuration !== null) {
-                      setDurationMinutes(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, getDurationMinutes(currentDuration).toString());
-                        return newMap;
-                      });
-                    }
-                    // Prevent drag when focusing on input
-                    if (Platform.OS === 'web') {
-                      dragAllowedRef.current = null;
-                      setDraggedIndex(null);
-                    }
-                  }}
-                  keyboardType="numeric"
-                  editable={!isActive}
-                  placeholder="0"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-              <View style={styles.exerciseField}>
-                <Text style={styles.fieldLabel}>Sec</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={durationSeconds.has(index) ? durationSeconds.get(index) : (currentDuration !== null ? getDurationSeconds(currentDuration).toString() : '')}
-                  onChangeText={(text) => {
-                    // Allow empty string or valid number (0-59)
-                    if (text === '' || (!isNaN(parseInt(text)) && parseInt(text) >= 0 && parseInt(text) < 60)) {
-                      setDurationSeconds(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, text);
-                        return newMap;
-                      });
-                      // Auto-save when both fields have values or when cleared
-                      const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
-                      const secs = text === '' ? 0 : parseInt(text) || 0;
-                      const totalSeconds = mins * 60 + secs;
-                      updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    }
-                  }}
-                  onBlur={() => {
-                    // Ensure value is saved on blur
-                    const mins = durationMinutes.has(index) ? (parseInt(durationMinutes.get(index) || '0') || 0) : getDurationMinutes(currentDuration);
-                    const secs = durationSeconds.has(index) ? (parseInt(durationSeconds.get(index) || '0') || 0) : getDurationSeconds(currentDuration);
-                    const totalSeconds = mins * 60 + secs;
-                    updateExercise(index, 'target_duration_sec', totalSeconds > 0 ? totalSeconds : null);
-                    // Clear cache to show formatted value
-                    setDurationSeconds(prev => {
-                      const newMap = new Map(prev);
-                      newMap.delete(index);
-                      return newMap;
-                    });
-                  }}
-                  onFocus={() => {
-                    // Initialize with current value when focused
-                    if (!durationSeconds.has(index) && currentDuration !== null) {
-                      setDurationSeconds(prev => {
-                        const newMap = new Map(prev);
-                        newMap.set(index, getDurationSeconds(currentDuration).toString());
-                        return newMap;
-                      });
-                    }
-                    // Prevent drag when focusing on input
-                    if (Platform.OS === 'web') {
-                      dragAllowedRef.current = null;
-                      setDraggedIndex(null);
-                    }
-                  }}
-                  keyboardType="numeric"
-                  editable={!isActive}
-                  placeholder="0"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-            </>
-          ) : (
-            <View style={styles.exerciseField}>
-              <Text style={styles.fieldLabel}>Reps</Text>
-              <TextInput
-                style={styles.fieldInput}
-                value={typeof item.target_reps === 'number' ? item.target_reps.toString() : (item.target_reps || '')}
-                onChangeText={(text) => {
-                  if (text === '') {
-                    updateExercise(index, 'target_reps', null);
-                  } else {
-                    const num = parseInt(text);
-                    if (!isNaN(num) && num > 0) {
-                      updateExercise(index, 'target_reps', num);
-                    }
-                  }
-                }}
-                keyboardType="numeric"
-                editable={!isActive}
-                placeholder="10"
-                placeholderTextColor="#6b7280"
-              />
+            <View style={styles.exerciseNameContainer}>
+              <Text style={styles.exerciseName}>{item.name}</Text>
+              {renderDifficultyIndicator(difficulty)}
             </View>
           )}
-          <View style={styles.exerciseField}>
-            <Text style={styles.fieldLabel}>Rest (sec)</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={item.rest_time_sec?.toString() || ''}
-              onChangeText={(text) => {
-                if (text === '') {
-                  updateExercise(index, 'rest_time_sec', null);
-                } else {
-                  const num = parseInt(text);
-                  if (!isNaN(num)) {
-                    updateExercise(index, 'rest_time_sec', num);
-                  }
-                }
+          <View style={styles.exerciseHeaderActions}>
+            <TouchableOpacity
+              onPress={() => {
+                router.replace({
+                  pathname: '/workout-sets',
+                  params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
+                });
               }}
-              keyboardType="numeric"
-              editable={!isActive}
-              placeholder="60"
-              placeholderTextColor="#6b7280"
-            />
+              style={styles.editButton}
+            >
+              <Edit2 color="#3b82f6" size={18} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => removeExercise(index)}>
+              <X color="#ef4444" size={20} />
+            </TouchableOpacity>
           </View>
         </View>
+        
+        {!hasSets && (
+          <View style={styles.exerciseRow}>
+            <View style={styles.exerciseField}>
+              <Text style={styles.fieldLabel}>Sets</Text>
+              <Text style={styles.fieldValue}>{numSets}</Text>
+            </View>
+            {isTimed ? (
+              <View style={styles.exerciseField}>
+                <Text style={styles.fieldLabel}>Duration</Text>
+                <Text style={styles.fieldValue}>
+                  {currentDuration !== null 
+                    ? `${getDurationMinutes(currentDuration)}:${getDurationSeconds(currentDuration).toString().padStart(2, '0')}`
+                    : '—'}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.exerciseField}>
+                <Text style={styles.fieldLabel}>Reps</Text>
+                <Text style={styles.fieldValue}>
+                  {typeof item.target_reps === 'number' ? item.target_reps : (item.target_reps || '—')}
+                </Text>
+              </View>
+            )}
+            <View style={styles.exerciseField}>
+              <Text style={styles.fieldLabel}>Rest (sec)</Text>
+              <Text style={styles.fieldValue}>{item.rest_time_sec || '—'}</Text>
+            </View>
+          </View>
+        )}
 
-        <TextInput
-          style={styles.notesInput}
-          value={item.notes || ''}
-          onChangeText={(text) => updateExercise(index, 'notes', text)}
-          placeholder="Notes (optional)"
-          placeholderTextColor="#6b7280"
-          multiline
-          editable={!isActive}
-          onFocus={() => {
-            // Prevent drag when focusing on input
-            if (Platform.OS === 'web') {
-              dragAllowedRef.current = null;
-              setDraggedIndex(null);
-            }
-          }}
-        />
+        {hasSets && (
+          <View style={styles.setsContainer}>
+            <Text style={styles.setsTitle}>Sets Configuration</Text>
+            {item.sets.map((set: any, setIdx: number) => (
+              <View key={setIdx} style={styles.setRow}>
+                <Text style={styles.setNumber}>Set {set.index || setIdx + 1}:</Text>
+                {isTimed ? (
+                  <Text style={styles.setValue}>
+                    {set.duration !== null && set.duration !== undefined
+                      ? `${getDurationMinutes(set.duration)}:${getDurationSeconds(set.duration).toString().padStart(2, '0')}`
+                      : '—'}
+                  </Text>
+                ) : (
+                  <Text style={styles.setValue}>
+                    {set.reps !== null && set.reps !== undefined ? `${set.reps} reps` : '—'}
+                  </Text>
+                )}
+                <Text style={styles.setValue}>
+                  {set.rest_time_sec !== null && set.rest_time_sec !== undefined ? `${set.rest_time_sec}s rest` : '—'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {item.notes && (
+          <View style={styles.notesContainer}>
+            <Text style={styles.notesLabel}>Notes</Text>
+            <Text style={styles.notesText}>{item.notes}</Text>
+          </View>
+        )}
       </View>
     );
   };
@@ -1171,8 +1017,10 @@ const styles = StyleSheet.create({
   exerciseHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 12 },
   dragHandleContainer: { padding: 8, marginLeft: -8, marginRight: 4, justifyContent: 'center', alignItems: 'center' },
   exerciseNameContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-  exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flexShrink: 1 },
   exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
+  exerciseHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  editButton: { padding: 4 },
   difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   difficultyBar: { borderRadius: 2 },
@@ -1183,6 +1031,7 @@ const styles = StyleSheet.create({
   exerciseRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   exerciseField: { flex: 1 },
   fieldLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },
+  fieldValue: { color: 'white', fontSize: 16, fontWeight: '600' },
   fieldInput: { backgroundColor: '#111827', color: 'white', padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#374151' },
   notesInput: { backgroundColor: '#111827', color: 'white', padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#374151', minHeight: 60 },
   emptyText: { color: '#9ca3af', textAlign: 'center', marginVertical: 24 },

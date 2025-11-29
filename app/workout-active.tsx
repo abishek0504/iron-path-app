@@ -385,7 +385,6 @@ export default function WorkoutActiveScreen() {
         }
       }
       setExerciseDetails(detailsMap);
-      console.log('Workout-active: Exercise details loaded:', Array.from(detailsMap.entries()));
 
       // Check for existing active workout session
       const { data: existingSession, error: sessionQueryError } = await supabase
@@ -545,9 +544,6 @@ export default function WorkoutActiveScreen() {
     const detail = exerciseDetails.get(exercise.name);
     const isTimed = detail?.is_timed || false;
 
-    console.log(`handleStartSet - Exercise: ${exercise.name}, isTimed: ${isTimed}, detail:`, detail);
-    console.log(`Exercise details map size: ${exerciseDetails.size}, keys:`, Array.from(exerciseDetails.keys()));
-
     if (isTimed) {
       // Get duration from current set if available, otherwise use target_duration_sec or default
       const currentSet = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
@@ -557,7 +553,6 @@ export default function WorkoutActiveScreen() {
         ? currentSet.duration 
         : null;
       const targetDuration = setDuration || exercise.target_duration_sec || detail?.default_duration_sec || 60;
-      console.log(`Starting timer for timed exercise. Set duration: ${setDuration}, Target duration: ${targetDuration}`);
       setExerciseTimer({ 
         active: true, 
         seconds: 3, // Start with 3-second countdown
@@ -639,16 +634,29 @@ export default function WorkoutActiveScreen() {
       const isTimed = detail?.is_timed || false;
       
       // Initialize logs with target values (user can edit if different)
-      // target_reps is now always numeric
-      const targetDuration = exercise.target_duration_sec || detail?.default_duration_sec || 60;
-      const targetRepsValue = typeof exercise.target_reps === 'number' 
-        ? exercise.target_reps.toString() 
-        : (typeof exercise.target_reps === 'string' ? (exercise.target_reps.includes('-') ? exercise.target_reps.split('-')[0].trim() : exercise.target_reps) : '10');
-      
       const initialLogs = Array.from({ length: totalSets }, (_, i) => {
+        // Get per-set configuration if available
+        const set = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[i] 
+          ? exercise.sets[i] 
+          : null;
+        
+        // For rep exercises: use per-set reps if available, otherwise exercise-level target_reps
+        const setReps = set?.reps !== null && set?.reps !== undefined ? set.reps : null;
+        const targetRepsValue = setReps !== null 
+          ? setReps.toString()
+          : (typeof exercise.target_reps === 'number' 
+              ? exercise.target_reps.toString() 
+              : (typeof exercise.target_reps === 'string' 
+                  ? (exercise.target_reps.includes('-') ? exercise.target_reps.split('-')[0].trim() : exercise.target_reps) 
+                  : '10'));
+        
+        // Get target weight from set configuration if available, otherwise use last logged weight
+        const setWeight = set?.weight !== null && set?.weight !== undefined ? set.weight : null;
+        const targetWeight = setWeight !== null ? setWeight : (lastWeight || 0);
+        const isBodyweight = isBodyweightExercise(exercise.name, detail);
         return {
           reps: isTimed ? '' : targetRepsValue,
-          weight: lastWeight ? lastWeight.toString() : '',
+          weight: isBodyweight ? '0' : (targetWeight > 0 ? targetWeight.toString() : ''),
           duration: '',
           notes: ''
         };
@@ -688,8 +696,14 @@ export default function WorkoutActiveScreen() {
         updatedProgress.currentSetIndex = nextSetIndex;
         await saveProgress(updatedProgress);
         
-        // Start rest timer
-        const restTime = exercise.rest_time_sec || 60;
+        // Start rest timer - use per-set rest time if available, otherwise exercise-level rest time
+        const currentSet = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
+          ? exercise.sets[setIndex] 
+          : null;
+        const setRestTime = currentSet?.rest_time_sec !== null && currentSet?.rest_time_sec !== undefined 
+          ? currentSet.rest_time_sec 
+          : null;
+        const restTime = setRestTime || exercise.rest_time_sec || 60;
         setRestTimer({ active: true, seconds: restTime });
         setExerciseTimer(null);
       }
@@ -723,8 +737,6 @@ export default function WorkoutActiveScreen() {
         updatedProgress.exercises[completedExerciseIndex].sets[i].completed = true; // Ensure set is marked as completed
       }
     }
-    
-    console.log(`Updated progress for exercise ${exercise.name}:`, updatedProgress.exercises[completedExerciseIndex].sets.map((s, i) => `Set ${i + 1}: completed=${s.completed}, duration=${s.duration}, reps=${s.reps}, weight=${s.weight}`));
 
     updatedProgress.exercises[completedExerciseIndex].completed = true;
     
@@ -786,19 +798,8 @@ export default function WorkoutActiveScreen() {
       const detail = exerciseDetails.get(exercise.name);
       const isTimed = detail?.is_timed || false;
 
-      // For timed exercises: scheduled_reps contains target duration (in seconds)
-      // For rep exercises: scheduled_reps contains target reps (now always numeric)
-      const scheduledReps = isTimed 
-        ? (exercise.target_duration_sec || detail?.default_duration_sec || 60)
-        : (typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || null : null));
-      
-      // For scheduled_weight: We don't store target weight in plans, so this is always 0
-      // The actual weight logged by the user is stored in the weight column
-      const scheduledWeight = 0; // Always 0 since we don't have target weight in plans
-
       // Use session day if available, otherwise use param day
       const dayToSave = workoutSession?.day || day;
-      console.log(`Saving logs - Using day: ${dayToSave} (session day: ${workoutSession?.day}, param day: ${day})`);
       
       const dbLogs = sets
         .filter(s => s.completed)
@@ -807,12 +808,39 @@ export default function WorkoutActiveScreen() {
           const notesParts = [];
           if (logData.notes) notesParts.push(logData.notes);
           
+          // Get target values from set configuration if available, otherwise use exercise-level defaults
+          const setConfig = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[index] 
+            ? exercise.sets[index] 
+            : null;
+          
+          // For timed exercises: scheduled_reps contains target duration (in seconds)
+          // For rep exercises: scheduled_reps contains target reps (now always numeric)
+          const scheduledReps = isTimed 
+            ? (setConfig?.duration !== null && setConfig?.duration !== undefined 
+                ? setConfig.duration 
+                : (exercise.target_duration_sec || detail?.default_duration_sec || 60))
+            : (setConfig?.reps !== null && setConfig?.reps !== undefined
+                ? setConfig.reps
+                : (typeof exercise.target_reps === 'number' 
+                    ? exercise.target_reps 
+                    : (typeof exercise.target_reps === 'string' 
+                        ? parseInt(exercise.target_reps) || null 
+                        : null)));
+          
+          // For scheduled_weight: Use weight from set configuration if available, otherwise 0
+          // For timed exercises, weight is always 0 (bodyweight)
+          const scheduledWeight = isTimed 
+            ? 0 
+            : (setConfig?.weight !== null && setConfig?.weight !== undefined 
+                ? setConfig.weight 
+                : 0);
+          
           // For timed exercises, use duration in reps field; for others, use weight/reps
           // Timed exercises are bodyweight, so weight = 0 (required by NOT NULL constraint)
           const weight = isTimed ? 0 : (set.weight ? parseFloat(set.weight.toString()) : (scheduledWeight ?? 0));
-          const reps = isTimed ? (set.duration !== null && set.duration !== undefined ? parseFloat(set.duration.toString()) : (scheduledReps ?? 0)) : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? 0));
-          
-          console.log(`Saving set ${index + 1} for ${exercise.name}: weight=${weight}, reps=${reps}, duration=${set.duration}, isTimed=${isTimed}`);
+            const reps = isTimed 
+            ? (set.duration !== null && set.duration !== undefined ? parseFloat(set.duration.toString()) : (scheduledReps ?? 0)) 
+            : (set.reps ? parseFloat(set.reps.toString()) : (scheduledReps ?? 0));
           
           return {
             user_id: user.id,
@@ -829,8 +857,6 @@ export default function WorkoutActiveScreen() {
             performed_at: new Date().toISOString()
           };
         });
-      
-      console.log(`Saving ${dbLogs.length} sets for exercise ${exercise.name}`);
 
       if (dbLogs.length > 0) {
         const { error: insertError } = await supabase.from('workout_logs').insert(dbLogs);
@@ -854,8 +880,16 @@ export default function WorkoutActiveScreen() {
 
   const handleStartRestTimer = () => {
     const exerciseIndex = progress.currentExerciseIndex;
+    const setIndex = progress.currentSetIndex;
     const exercise = exercises[exerciseIndex];
-    const restTime = exercise.rest_time_sec || 60;
+    // Use per-set rest time if available, otherwise exercise-level rest time
+    const currentSet = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
+      ? exercise.sets[setIndex] 
+      : null;
+    const setRestTime = currentSet?.rest_time_sec !== null && currentSet?.rest_time_sec !== undefined 
+      ? currentSet.rest_time_sec 
+      : null;
+    const restTime = setRestTime || exercise.rest_time_sec || 60;
     setRestTimer({ active: true, seconds: restTime });
   };
 
@@ -987,17 +1021,32 @@ export default function WorkoutActiveScreen() {
           <Text style={styles.loggingSubtitle}>Log your results and compare to target</Text>
 
           {Array.from({ length: totalSets }, (_, setIndex) => {
-            const targetReps = typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10);
-            const loggedReps = setLogs[setIndex]?.reps || '';
-            const loggedWeight = setLogs[setIndex]?.weight || '';
-            // Get duration from set if available, otherwise use target_duration_sec or default
+            // Get per-set configuration if available
             const set = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
               ? exercise.sets[setIndex] 
               : null;
+            
+            // For rep exercises: use per-set reps if available, otherwise exercise-level target_reps
+            const setReps = set?.reps !== null && set?.reps !== undefined ? set.reps : null;
+            const targetReps = setReps !== null 
+              ? setReps 
+              : (typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10));
+            
+            const loggedReps = setLogs[setIndex]?.reps || '';
+            const loggedWeight = setLogs[setIndex]?.weight || '';
+            
+            // For timed exercises: get duration from set if available, otherwise use target_duration_sec or default
             const setDuration = set?.duration !== null && set?.duration !== undefined 
               ? set.duration 
               : null;
             const targetDuration = setDuration || exercise.target_duration_sec || detail?.default_duration_sec || 60;
+            // Get target weight from set configuration if available, otherwise use the initial weight from setLogs (which was pre-populated with last logged weight or set weight)
+            // We need to get the last logged weight again to calculate target weight correctly
+            const setWeight = set?.weight !== null && set?.weight !== undefined ? set.weight : null;
+            // If set has weight, use it; otherwise, the initial weight in setLogs was set from lastWeight during initialization
+            // So we can use the initial value from setLogs as the target (before user edits)
+            const initialWeight = setLogs[setIndex]?.weight ? parseFloat(setLogs[setIndex].weight) : null;
+            const targetWeight = setWeight !== null ? setWeight : (initialWeight !== null && initialWeight > 0 ? initialWeight : null);
             
             // Get duration from minutes/seconds inputs (pre-populated with target only if not in map)
             // If map has the key (even if empty string), use that value to allow user to clear and edit
@@ -1009,15 +1058,19 @@ export default function WorkoutActiveScreen() {
             const secs = currentSecs ? (parseInt(currentSecs) || 0) : 0;
             const actualDuration = mins * 60 + secs;
             
-            // target_reps is now always numeric (no ranges)
-            const targetRepsNum = typeof exercise.target_reps === 'number' 
-              ? exercise.target_reps 
-              : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10);
+            // Use per-set reps if available, otherwise exercise-level target_reps (now always numeric, no ranges)
+            const targetRepsNum = setReps !== null 
+              ? setReps 
+              : (typeof exercise.target_reps === 'number' 
+                  ? exercise.target_reps 
+                  : (typeof exercise.target_reps === 'string' 
+                      ? parseInt(exercise.target_reps) || 10 
+                      : 10));
             const actualReps = loggedReps ? parseInt(loggedReps) : null;
-            // Met: within 10% tolerance (90% to 110%)
-            const repsMatch = actualReps !== null && !isNaN(actualReps) && actualReps >= targetRepsNum * 0.9 && actualReps <= targetRepsNum * 1.1;
-            // Duration match: within 10% tolerance (90% to 110%)
-            const durationMatch = actualDuration > 0 && actualDuration >= targetDuration * 0.9 && actualDuration <= targetDuration * 1.1;
+            // Met: exact match
+            const repsMatch = actualReps !== null && !isNaN(actualReps) && actualReps === targetRepsNum;
+            // Duration match: exact match
+            const durationMatch = actualDuration > 0 && actualDuration === targetDuration;
 
             return (
               <View key={setIndex} style={styles.setLogCard}>
@@ -1028,7 +1081,7 @@ export default function WorkoutActiveScreen() {
                   <Text style={styles.targetSectionTitle}>Scheduled</Text>
                   <View style={styles.targetRow}>
                     {isTimed ? (
-                      <View style={styles.targetItem}>
+                      <View style={styles.targetItemFull}>
                         <Text style={styles.targetLabel}>Duration:</Text>
                         <Text style={styles.targetValue}>{formatTime(targetDuration)}</Text>
                       </View>
@@ -1041,7 +1094,7 @@ export default function WorkoutActiveScreen() {
                         <View style={styles.targetItem}>
                           <Text style={styles.targetLabel}>Weight:</Text>
                           <Text style={styles.targetValue}>
-                            {isBodyweight ? 'Bodyweight' : 'Weighted'}
+                            {isBodyweight ? 'Bodyweight' : (targetWeight !== null && targetWeight > 0 ? `${targetWeight} lbs` : 'N/A')}
                           </Text>
                         </View>
                       </>
@@ -1057,13 +1110,10 @@ export default function WorkoutActiveScreen() {
                       <Text style={styles.logLabel}>Duration</Text>
                       <View style={styles.logInputRow}>
                         <View style={styles.logInputHalf}>
-                          <Text style={styles.logLabel}>Min</Text>
+                          <Text style={styles.logSubLabel}>Min</Text>
                           <View style={styles.inputWithComparison}>
                             <TextInput
-                              style={[
-                                styles.logInput,
-                                styles.logInputFlex
-                              ]}
+                              style={styles.logInput}
                               value={currentMins}
                               onChangeText={(text) => {
                                 // Allow empty string or valid number
@@ -1082,13 +1132,10 @@ export default function WorkoutActiveScreen() {
                           </View>
                         </View>
                         <View style={styles.logInputHalf}>
-                          <Text style={styles.logLabel}>Sec</Text>
+                          <Text style={styles.logSubLabel}>Sec</Text>
                           <View style={styles.inputWithComparison}>
                             <TextInput
-                              style={[
-                                styles.logInput,
-                                styles.logInputFlex
-                              ]}
+                              style={styles.logInput}
                               value={currentSecs}
                               onChangeText={(text) => {
                                 // Allow empty string or valid number (0-59)
@@ -1108,7 +1155,7 @@ export default function WorkoutActiveScreen() {
                               <View style={styles.comparisonBadge}>
                                 {durationMatch ? (
                                   <Check color="#10b981" size={16} />
-                                ) : actualDuration > targetDuration * 1.1 ? (
+                                ) : actualDuration > targetDuration ? (
                                   <TrendingUp color="#3b82f6" size={16} />
                                 ) : (
                                   <TrendingDown color="#ef4444" size={16} />
@@ -1116,10 +1163,10 @@ export default function WorkoutActiveScreen() {
                                 <Text style={[
                                   styles.comparisonText,
                                   durationMatch ? styles.comparisonTextGood :
-                                  actualDuration > targetDuration * 1.1 ? styles.comparisonTextBetter :
+                                  actualDuration > targetDuration ? styles.comparisonTextBetter :
                                   styles.comparisonTextBad
                                 ]}>
-                                  {durationMatch ? 'Met' : actualDuration > targetDuration * 1.1 ? 'Above' : 'Below'}
+                                  {durationMatch ? 'Met' : actualDuration > targetDuration ? 'Above' : 'Below'}
                                 </Text>
                               </View>
                             )}
@@ -1154,10 +1201,7 @@ export default function WorkoutActiveScreen() {
                         <Text style={styles.logLabel}>Reps</Text>
                         <View style={styles.inputWithComparison}>
                           <TextInput
-                            style={[
-                              styles.logInput,
-                              styles.logInputFlex
-                            ]}
+                            style={styles.logInput}
                             value={loggedReps}
                             onChangeText={(text) => {
                               const newLogs = [...setLogs];
@@ -1172,7 +1216,7 @@ export default function WorkoutActiveScreen() {
                             <View style={styles.comparisonBadge}>
                               {repsMatch ? (
                                 <Check color="#10b981" size={16} />
-                              ) : actualReps > targetRepsNum * 1.1 ? (
+                              ) : actualReps > targetRepsNum ? (
                                 <TrendingUp color="#3b82f6" size={16} />
                               ) : (
                                 <TrendingDown color="#ef4444" size={16} />
@@ -1180,10 +1224,10 @@ export default function WorkoutActiveScreen() {
                               <Text style={[
                                 styles.comparisonText,
                                 repsMatch ? styles.comparisonTextGood : 
-                                actualReps > targetRepsNum * 1.1 ? styles.comparisonTextBetter : 
+                                actualReps > targetRepsNum ? styles.comparisonTextBetter : 
                                 styles.comparisonTextBad
                               ]}>
-                                {repsMatch ? 'Met' : actualReps > targetRepsNum * 1.1 ? 'Above' : 'Below'}
+                                {repsMatch ? 'Met' : actualReps > targetRepsNum ? 'Above' : 'Below'}
                               </Text>
                             </View>
                           )}
@@ -1247,12 +1291,15 @@ export default function WorkoutActiveScreen() {
   const isSetComplete = currentSet?.completed || false;
   const isTimed = detail?.is_timed || false;
   const allSetsComplete = exerciseProgress?.sets.every(s => s.completed) || false;
-  const restTime = exercise.rest_time_sec || 60;
+  // Use per-set rest time if available, otherwise exercise-level rest time
+  const setConfig = exercise.sets && Array.isArray(exercise.sets) && exercise.sets[setIndex] 
+    ? exercise.sets[setIndex] 
+    : null;
+  const setRestTime = setConfig?.rest_time_sec !== null && setConfig?.rest_time_sec !== undefined 
+    ? setConfig.rest_time_sec 
+    : null;
+  const restTime = setRestTime || exercise.rest_time_sec || 60;
   const isBodyweight = isBodyweightExercise(exercise.name, detail);
-  
-  // Debug: Log exercise details for current exercise
-  console.log(`Current exercise: ${exercise.name}, isTimed: ${isTimed}, detail:`, detail);
-  console.log(`Exercise details map has ${exerciseDetails.size} entries`);
   
   // Check if all exercises are completed
   const allExercisesComplete = progress.exercises.every(ex => ex.completed);
@@ -1267,12 +1314,7 @@ export default function WorkoutActiveScreen() {
             <Pressable 
               onPress={(e) => {
                 e?.stopPropagation?.();
-                console.log('X button pressed - completion screen');
                 safeBack();
-              }}
-              onPressIn={(e) => {
-                e?.stopPropagation?.();
-                console.log('X button press started - completion');
               }}
               hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
               style={({ pressed }) => [
@@ -1411,14 +1453,44 @@ export default function WorkoutActiveScreen() {
             <Text style={styles.infoLabel}>Target:</Text>
             <Text style={styles.infoValue}>
               {isTimed 
-                ? formatTime(exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60)
-                : `${typeof exercise.target_reps === 'number' ? exercise.target_reps : (typeof exercise.target_reps === 'string' ? parseInt(exercise.target_reps) || 10 : 10)} reps`}
+                ? (() => {
+                    const setDuration = setConfig?.duration !== null && setConfig?.duration !== undefined 
+                      ? setConfig.duration 
+                      : null;
+                    const targetDuration = setDuration || exercise.target_duration_sec || (detail ? detail.default_duration_sec : null) || 60;
+                    return formatTime(targetDuration);
+                  })()
+                : (() => {
+                    const setReps = setConfig?.reps !== null && setConfig?.reps !== undefined 
+                      ? setConfig.reps 
+                      : null;
+                    const targetReps = setReps !== null 
+                      ? setReps 
+                      : (typeof exercise.target_reps === 'number' 
+                          ? exercise.target_reps 
+                          : (typeof exercise.target_reps === 'string' 
+                              ? parseInt(exercise.target_reps) || 10 
+                              : 10));
+                    return `${targetReps} reps`;
+                  })()}
             </Text>
           </View>
           {!isTimed && (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Weight:</Text>
-              <Text style={styles.infoValue}>{isBodyweight ? 'Bodyweight' : 'Weighted'}</Text>
+              <Text style={styles.infoValue}>
+                {isBodyweight 
+                  ? 'Bodyweight' 
+                  : (() => {
+                      const setWeight = setConfig?.weight !== null && setConfig?.weight !== undefined 
+                        ? setConfig.weight 
+                        : null;
+                      if (setWeight !== null && setWeight > 0) {
+                        return `${setWeight} lbs`;
+                      }
+                      return 'N/A';
+                    })()}
+              </Text>
             </View>
           )}
           <View style={styles.infoRow}>
@@ -1797,16 +1869,26 @@ const styles = StyleSheet.create({
   },
   targetRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 24,
+    flexWrap: 'wrap',
   },
   targetItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    minWidth: 100,
+  },
+  targetItemFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
   },
   targetLabel: {
     color: '#9ca3af',
     fontSize: 14,
+    fontWeight: '500',
+    minWidth: 60,
   },
   targetValue: {
     color: '#3b82f6',
@@ -1814,28 +1896,40 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   loggedSection: {
-    marginTop: 8,
+    marginTop: 16,
   },
   loggedSectionTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: '#9ca3af',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   logInputGroup: {
     marginBottom: 0,
+    marginTop: 16,
   },
   logInputRow: {
     flexDirection: 'row',
     gap: 12,
+    alignItems: 'flex-start',
   },
   logInputHalf: {
     flex: 1,
+    minHeight: 88,
   },
   logLabel: {
     color: '#9ca3af',
     fontSize: 14,
+    fontWeight: '500',
     marginBottom: 8,
+    minHeight: 20,
+  },
+  logSubLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 8,
+    minHeight: 16,
   },
   logInput: {
     backgroundColor: '#111827',
@@ -1845,6 +1939,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#374151',
     fontSize: 16,
+    minHeight: 44,
   },
   logInputFlex: {
     flex: 1,
@@ -1860,17 +1955,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
   },
   comparisonBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#111827',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#374151',
+    minHeight: 32,
+    justifyContent: 'center',
   },
   comparisonText: {
     fontSize: 12,

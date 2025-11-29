@@ -47,17 +47,16 @@ export default function WorkoutSetsScreen() {
 
   const handleBack = () => {
     try {
-      if (
-        router.canGoBack &&
-        typeof router.canGoBack === 'function' &&
-        router.canGoBack()
-      ) {
-        router.back();
-      } else {
-        router.push('/(tabs)/planner');
-      }
+      // Use replace to prevent navigation stacking
+      router.replace({
+        pathname: '/planner-day',
+        params: {
+          planId: planId || '',
+          day: day || '',
+        },
+      });
     } catch {
-      router.push('/(tabs)/planner');
+      router.replace('/(tabs)/planner');
     }
   };
 
@@ -746,11 +745,13 @@ const styles = StyleSheet.create({
   },
   setField: {
     flex: 1,
+    minHeight: 80,
   },
   fieldLabel: {
     color: '#9ca3af',
     fontSize: 12,
     marginBottom: 4,
+    minHeight: 16,
   },
   bodyweightCheckboxContainer: {
     flexDirection: 'row',
@@ -794,6 +795,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#374151',
+    minHeight: 40,
   },
   fieldInputDisabled: {
     backgroundColor: '#1f2937',
@@ -845,6 +847,7 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontSize: 12,
     marginBottom: 4,
+    minHeight: 16,
   },
 });
 

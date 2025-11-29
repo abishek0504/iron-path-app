@@ -1093,15 +1093,33 @@ export default function ProgressScreen() {
     const isTimed = exerciseDetails.get(exerciseName)?.is_timed || false;
     if (isTimed) return true;
     
-    // Common bodyweight exercises (can be expanded)
-    const bodyweightExercises = [
-      'push-up', 'pushup', 'pull-up', 'pullup', 'chin-up', 'chinup',
-      'dip', 'sit-up', 'situp', 'crunch', 'plank', 'burpee', 'jumping jack',
-      'mountain climber', 'lunge', 'squat', 'jump squat', 'pistol squat'
+    // Common bodyweight exercises (matches workout-active.tsx list)
+    const BODYWEIGHT_EXERCISES = [
+      'Pull Up', 'Pull-Up', 'Pullup', 'Chin Up', 'Chin-Up',
+      'Push Up', 'Push-Up', 'Pushup',
+      'Dip', 'Dips',
+      'Sit Up', 'Sit-Up', 'Situp',
+      'Crunch', 'Crunches',
+      'Plank', 'Planks',
+      'Burpee', 'Burpees',
+      'Mountain Climber', 'Mountain Climbers',
+      'Bodyweight Squat', 'Air Squat',
+      'Lunge', 'Lunges', // Can be bodyweight
+      'Jumping Jack', 'Jumping Jacks',
+      'Pistol Squat',
+      'Handstand Push Up', 'Handstand Push-Up',
+      'Muscle Up', 'Muscle-Up'
     ];
     
-    const nameLower = exerciseName.toLowerCase();
-    return bodyweightExercises.some(bw => nameLower.includes(bw));
+    // Check if exercise name matches common bodyweight exercises
+    const nameMatch = BODYWEIGHT_EXERCISES.some(bw => 
+      exerciseName.toLowerCase().includes(bw.toLowerCase())
+    );
+    
+    // Note: exerciseDetails doesn't include equipment_needed in progress.tsx
+    // The name-based matching should be sufficient for identifying bodyweight exercises
+    
+    return nameMatch;
   };
 
   const getDifficultyInfo = (difficulty: string | null | undefined) => {
@@ -1222,7 +1240,7 @@ export default function ProgressScreen() {
 
       // Collect all sets that need to be updated and new sets that need to be created
       const updates: Array<{ id: number; weight: number | null; reps: number | null; notes: string | null }> = [];
-      const newSets: Array<{ sessionIdx: number; exerciseName: string; weight: number | null; reps: number | null; notes: string | null; sessionId: number | null; planId: number | null; day: string | null; performedAt: string }> = [];
+      const newSets: Array<{ sessionIdx: number; exerciseName: string; weight: number | null; reps: number | null; notes: string | null; sessionId: number | null; planId: number | null; day: string | null; performedAt: string; scheduledReps: number | null; scheduledWeight: number | null }> = [];
 
       editingWorkout.sessions.forEach((session, sessionIdx) => {
         session.exercises.forEach(exercise => {
@@ -1284,7 +1302,39 @@ export default function ProgressScreen() {
                 }
               }
               
-              console.log(`Saving new set for ${exercise.name}: using day ${dayToUse} (session day: ${session.session.day})`);
+              // Get scheduled values from plan data if available
+              let scheduledReps: number | null = null;
+              let scheduledWeight: number | null = null;
+              
+              if (session.session.plan_id && dayToUse && planData.has(session.session.plan_id)) {
+                const plan = planData.get(session.session.plan_id);
+                const dayData = plan?.week_schedule?.[dayToUse];
+                if (dayData?.exercises) {
+                  const exerciseData = dayData.exercises.find((ex: any) => ex.name === exercise.name);
+                  if (exerciseData) {
+                    if (isTimed) {
+                      // For timed exercises, scheduled_reps contains target duration
+                      scheduledReps = exerciseData.target_duration_sec || null;
+                      scheduledWeight = 0; // Timed exercises are bodyweight
+                    } else {
+                      // For rep exercises, scheduled_reps contains target reps
+                      scheduledReps = typeof exerciseData.target_reps === 'number' 
+                        ? exerciseData.target_reps 
+                        : (typeof exerciseData.target_reps === 'string' 
+                            ? parseInt(exerciseData.target_reps) || null 
+                            : null);
+                      // Get scheduled weight from set configuration if available
+                      const setIndex = exercise.sets.indexOf(set);
+                      const setConfig = exerciseData.sets && Array.isArray(exerciseData.sets) && exerciseData.sets[setIndex]
+                        ? exerciseData.sets[setIndex]
+                        : null;
+                      scheduledWeight = setConfig?.weight !== null && setConfig?.weight !== undefined
+                        ? setConfig.weight
+                        : 0;
+                    }
+                  }
+                }
+              }
               
               newSets.push({
                 sessionIdx,
@@ -1295,7 +1345,9 @@ export default function ProgressScreen() {
                 sessionId: session.session.id,
                 planId: session.session.plan_id,
                 day: dayToUse,
-                performedAt: workoutDateStr
+                performedAt: workoutDateStr,
+                scheduledReps,
+                scheduledWeight
               });
             }
           });
@@ -1304,25 +1356,20 @@ export default function ProgressScreen() {
 
       // Delete sets that were marked for deletion
       if (deletedSetIds.size > 0) {
-        console.log(`Deleting ${deletedSetIds.size} sets:`, Array.from(deletedSetIds));
         for (const setId of deletedSetIds) {
-          const { error, data } = await supabase
+          const { error } = await supabase
             .from('workout_logs')
             .delete()
             .eq('id', setId)
-            .eq('user_id', user.id)
-            .select();
+            .eq('user_id', user.id);
 
           if (error) {
             console.error('Error deleting set:', error);
-            console.error('Set ID:', setId);
             Alert.alert("Error", `Failed to delete set: ${error.message || JSON.stringify(error)}`);
             setSaving(false);
             return;
           }
-          console.log(`Successfully deleted set ${setId}`, data);
         }
-        console.log('All sets deleted successfully');
       }
 
       // Update existing log entries
@@ -1355,14 +1402,10 @@ export default function ProgressScreen() {
 
         if (error) {
           console.error('Error updating log:', error);
-          console.error('Error details:', JSON.stringify(error, null, 2));
-          console.error('Update data:', updateData);
-          console.error('Update ID:', update.id);
           Alert.alert("Error", `Failed to update set: ${error.message || error.details || JSON.stringify(error)}`);
           setSaving(false);
           return;
         }
-        console.log(`Successfully updated log ${update.id}`);
       }
 
       // Create new log entries
@@ -1386,24 +1429,22 @@ export default function ProgressScreen() {
             performed_at: localDate.toISOString(), // Convert to ISO but based on local date
             session_id: newSet.sessionId,
             plan_id: newSet.planId,
-            day: newSet.day
+            day: newSet.day,
+            scheduled_reps: newSet.scheduledReps,
+            scheduled_weight: newSet.scheduledWeight
           };
         });
 
-        console.log(`Creating ${inserts.length} new log entries`);
-        const { error: insertError, data: insertedData } = await supabase
+        const { error: insertError } = await supabase
           .from('workout_logs')
-          .insert(inserts)
-          .select();
+          .insert(inserts);
 
         if (insertError) {
           console.error('Error creating new logs:', insertError);
-          console.error('Insert data:', inserts);
           Alert.alert("Error", `Failed to create new sets: ${insertError.message || JSON.stringify(insertError)}`);
           setSaving(false);
           return;
         }
-        console.log(`Successfully created ${insertedData?.length || 0} new log entries`);
       }
 
       // Reload data and exit edit mode

@@ -23,8 +23,16 @@ export default function ExerciseSelectScreen() {
         });
         return;
       }
-      // For planner context, use replace to prevent stacking
-      router.replace('/(tabs)/planner');
+      // For planner context, if planId and day are present, navigate to planner-day screen
+      if (planId && day) {
+        router.replace({
+          pathname: '/planner-day',
+          params: { planId: planId, day: day }
+        });
+      } else {
+        // Otherwise, navigate to planner tab
+        router.replace('/(tabs)/planner');
+      }
     } catch (error) {
       if (context === 'progress') {
         if (selectedExerciseName) {
@@ -33,6 +41,11 @@ export default function ExerciseSelectScreen() {
         router.replace({
           pathname: '/(tabs)/progress',
           params: selectedExerciseName ? { selectedExercise: selectedExerciseName } : {}
+        });
+      } else if (planId && day) {
+        router.replace({
+          pathname: '/planner-day',
+          params: { planId: planId, day: day }
         });
       } else {
         router.replace('/(tabs)/planner');
@@ -195,6 +208,12 @@ export default function ExerciseSelectScreen() {
         ];
       } else {
         newExercise.target_reps = 10;
+        // Pre-initialize 3 sets with reps=10, rest=60
+        newExercise.sets = [
+          { index: 1, reps: 10, rest_time_sec: 60 },
+          { index: 2, reps: 10, rest_time_sec: 60 },
+          { index: 3, reps: 10, rest_time_sec: 60 },
+        ];
       }
 
       dayData.exercises = [...(dayData.exercises || []), newExercise];
@@ -416,7 +435,19 @@ export default function ExerciseSelectScreen() {
           });
         }
       } else {
-        newExercise.target_reps = typeof exercise.default_reps === 'number' ? exercise.default_reps : (parseInt(exercise.default_reps || '10') || 10);
+        const defaultReps = typeof exercise.default_reps === 'number' ? exercise.default_reps : (parseInt(exercise.default_reps || '10') || 10);
+        newExercise.target_reps = defaultReps;
+        // Pre-initialize sets with reps and rest
+        const numSets = exercise.default_sets || 3;
+        const restSec = exercise.default_rest_sec || 60;
+        newExercise.sets = [];
+        for (let i = 0; i < numSets; i++) {
+          newExercise.sets.push({
+            index: i + 1,
+            reps: defaultReps,
+            rest_time_sec: restSec,
+          });
+        }
       }
 
       if (exerciseIndex !== undefined) {
