@@ -8,7 +8,14 @@ import { supabase } from '../src/lib/supabase';
 
 export default function ExerciseSelectScreen() {
   const router = useRouter();
-  const { planId, day, exerciseIndex, context } = useLocalSearchParams<{ planId?: string; day?: string; exerciseIndex?: string; context?: string }>();
+  const { planId, day, exerciseIndex, context, weekStart, date } = useLocalSearchParams<{ 
+    planId?: string; 
+    day?: string; 
+    exerciseIndex?: string; 
+    context?: string;
+    weekStart?: string;
+    date?: string;
+  }>();
 
   const safeBack = async (selectedExerciseName?: string) => {
     try {
@@ -25,9 +32,12 @@ export default function ExerciseSelectScreen() {
       }
       // For planner context, if planId and day are present, navigate to planner-day screen
       if (planId && day) {
+        const params: any = { planId: planId, day: day };
+        if (weekStart) params.weekStart = weekStart;
+        if (date) params.date = date;
         router.replace({
           pathname: '/planner-day',
-          params: { planId: planId, day: day }
+          params
         });
       } else {
         // Otherwise, navigate to planner tab
@@ -43,9 +53,12 @@ export default function ExerciseSelectScreen() {
           params: selectedExerciseName ? { selectedExercise: selectedExerciseName } : {}
         });
       } else if (planId && day) {
+        const params: any = { planId: planId, day: day };
+        if (weekStart) params.weekStart = weekStart;
+        if (date) params.date = date;
         router.replace({
           pathname: '/planner-day',
-          params: { planId: planId, day: day }
+          params
         });
       } else {
         router.replace('/(tabs)/planner');
@@ -188,7 +201,29 @@ export default function ExerciseSelectScreen() {
       }
 
       const updatedPlan = { ...plan };
-      const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
+      
+      // Initialize plan_data structure if needed
+      if (!updatedPlan.plan_data) {
+        updatedPlan.plan_data = { weeks: {} };
+      }
+      if (!updatedPlan.plan_data.weeks) {
+        updatedPlan.plan_data.weeks = {};
+      }
+      
+      // Use week-specific structure if weekStart is provided
+      let dayData: any;
+      if (weekStart) {
+        if (!updatedPlan.plan_data.weeks[weekStart]) {
+          updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
+        }
+        dayData = updatedPlan.plan_data.weeks[weekStart].week_schedule[day] || { exercises: [] };
+      } else {
+        // Fallback to old structure for backward compatibility
+        if (!updatedPlan.plan_data.week_schedule) {
+          updatedPlan.plan_data.week_schedule = {};
+        }
+        dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
+      }
 
       // Add new exercise - use target_duration_sec for timed exercises, target_reps for others
       const newExercise: any = {
@@ -216,8 +251,24 @@ export default function ExerciseSelectScreen() {
         ];
       }
 
-      dayData.exercises = [...(dayData.exercises || []), newExercise];
-      updatedPlan.plan_data.week_schedule[day] = dayData;
+      // Handle adding or replacing exercise
+      if (exerciseIndex !== undefined) {
+        const index = parseInt(exerciseIndex);
+        if (!isNaN(index) && dayData.exercises && index >= 0 && index < dayData.exercises.length) {
+          dayData.exercises[index] = newExercise;
+        } else {
+          dayData.exercises = [...(dayData.exercises || []), newExercise];
+        }
+      } else {
+        dayData.exercises = [...(dayData.exercises || []), newExercise];
+      }
+      
+      // Save to the correct location
+      if (weekStart) {
+        updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = dayData;
+      } else {
+        updatedPlan.plan_data.week_schedule[day] = dayData;
+      }
 
       // Save plan
       const { error: updateError } = await supabase
@@ -300,7 +351,29 @@ export default function ExerciseSelectScreen() {
       }
 
       const updatedPlan = { ...plan };
-      const dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
+      
+      // Initialize plan_data structure if needed
+      if (!updatedPlan.plan_data) {
+        updatedPlan.plan_data = { weeks: {} };
+      }
+      if (!updatedPlan.plan_data.weeks) {
+        updatedPlan.plan_data.weeks = {};
+      }
+      
+      // Use week-specific structure if weekStart is provided
+      let dayData: any;
+      if (weekStart) {
+        if (!updatedPlan.plan_data.weeks[weekStart]) {
+          updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
+        }
+        dayData = updatedPlan.plan_data.weeks[weekStart].week_schedule[day] || { exercises: [] };
+      } else {
+        // Fallback to old structure for backward compatibility
+        if (!updatedPlan.plan_data.week_schedule) {
+          updatedPlan.plan_data.week_schedule = {};
+        }
+        dayData = updatedPlan.plan_data.week_schedule[day] || { exercises: [] };
+      }
 
       const newExercise: any = {
         name: newCustomExercise.name,
@@ -348,11 +421,21 @@ export default function ExerciseSelectScreen() {
 
       if (exerciseIndex !== undefined) {
         const index = parseInt(exerciseIndex);
-        dayData.exercises[index] = newExercise;
+        if (!isNaN(index) && dayData.exercises && index >= 0 && index < dayData.exercises.length) {
+          dayData.exercises[index] = newExercise;
+        } else {
+          dayData.exercises = [...(dayData.exercises || []), newExercise];
+        }
       } else {
         dayData.exercises = [...(dayData.exercises || []), newExercise];
       }
-      updatedPlan.plan_data.week_schedule[day] = dayData;
+      
+      // Save to the correct location
+      if (weekStart) {
+        updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = dayData;
+      } else {
+        updatedPlan.plan_data.week_schedule[day] = dayData;
+      }
 
       const { error: updateError } = await supabase
         .from('workout_plans')

@@ -68,6 +68,12 @@ export default function HomeScreen() {
         
         // Check for active workout session
         if (currentDay) {
+          // Query by date range to ensure we get sessions from the current week only
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const tomorrow = new Date(today);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          
           const { data: activeSession, error: activeSessionError } = await supabase
             .from('workout_sessions')
             .select('id')
@@ -75,6 +81,8 @@ export default function HomeScreen() {
             .eq('plan_id', planData.id)
             .eq('day', currentDay)
             .eq('status', 'active')
+            .gte('started_at', today.toISOString())
+            .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
           // Check for completed workout session
@@ -85,6 +93,8 @@ export default function HomeScreen() {
             .eq('plan_id', planData.id)
             .eq('day', currentDay)
             .eq('status', 'completed')
+            .gte('started_at', today.toISOString())
+            .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
           // Only set based on data existence, ignore acceptable errors
@@ -134,6 +144,12 @@ export default function HomeScreen() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
+          // Query by date range to ensure we get sessions from the current week only
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const tomorrow = new Date(today);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          
           const { data: activeSession } = await supabase
             .from('workout_sessions')
             .select('id')
@@ -141,6 +157,8 @@ export default function HomeScreen() {
             .eq('plan_id', activePlan.id)
             .eq('day', currentDay)
             .eq('status', 'active')
+            .gte('started_at', today.toISOString())
+            .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
           const { data: completedSession } = await supabase
@@ -150,6 +168,8 @@ export default function HomeScreen() {
             .eq('plan_id', activePlan.id)
             .eq('day', currentDay)
             .eq('status', 'completed')
+            .gte('started_at', today.toISOString())
+            .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
           setHasActiveWorkout(!!activeSession);
@@ -162,9 +182,32 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (activePlan && currentDay) {
-      const schedule = activePlan.plan_data?.week_schedule;
-      if (schedule && schedule[currentDay]) {
-        setTodayData(schedule[currentDay]);
+      // Get current week start date
+      const today = new Date();
+      const day = today.getDay();
+      const diff = today.getDate() - day;
+      const weekStart = new Date(today);
+      weekStart.setDate(diff);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      // Format week key (YYYY-MM-DD)
+      const year = weekStart.getFullYear();
+      const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+      const dayNum = String(weekStart.getDate()).padStart(2, '0');
+      const weekKey = `${year}-${month}-${dayNum}`;
+      
+      // Check for week-specific data first
+      let dayData = null;
+      if (activePlan.plan_data?.weeks?.[weekKey]?.week_schedule?.[currentDay]) {
+        dayData = activePlan.plan_data.weeks[weekKey].week_schedule[currentDay];
+      } 
+      // Fallback to template week_schedule for backward compatibility
+      else if (activePlan.plan_data?.week_schedule?.[currentDay]) {
+        dayData = activePlan.plan_data.week_schedule[currentDay];
+      }
+      
+      if (dayData) {
+        setTodayData(dayData);
       } else {
         setTodayData({ exercises: [] });
       }

@@ -1,14 +1,25 @@
 import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, ActivityIndicator, Platform, Switch } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, Upload, X } from 'lucide-react-native';
+import { Camera, Upload, X, Check } from 'lucide-react-native';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
+
+const DAYS_OF_WEEK = [
+  { label: 'Monday', short: 'Mon' },
+  { label: 'Tuesday', short: 'Tue' },
+  { label: 'Wednesday', short: 'Wed' },
+  { label: 'Thursday', short: 'Thu' },
+  { label: 'Friday', short: 'Fri' },
+  { label: 'Saturday', short: 'Sat' },
+  { label: 'Sunday', short: 'Sun' },
+];
 
 const lbsToKg = (lbs: number): number => lbs * 0.453592;
 const kgToLbs = (kg: number): number => kg / 0.453592;
@@ -44,12 +55,20 @@ export default function EditProfileScreen() {
   const [height, setHeight] = useState('');
   const [heightFeet, setHeightFeet] = useState('');
   const [heightInches, setHeightInches] = useState('');
+  const [heightCm, setHeightCm] = useState('');
   const [goal, setGoal] = useState('');
+  const [daysPerWeek, setDaysPerWeek] = useState<number | null>(null);
+  const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
   const [profilePictureUri, setProfilePictureUri] = useState<string | null>(null);
   const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
 
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
+  const [showAgePicker, setShowAgePicker] = useState(false);
+  const [showWeightPicker, setShowWeightPicker] = useState(false);
+  const [showGoalWeightPicker, setShowGoalWeightPicker] = useState(false);
+  const [showHeightPicker, setShowHeightPicker] = useState(false);
+  const [showDaysPicker, setShowDaysPicker] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -95,8 +114,10 @@ export default function EditProfileScreen() {
           setHeightFeet(feet.toString());
           setHeightInches(inches.toString());
           setHeight('');
+          setHeightCm('');
         } else {
-          setHeight(heightInCm.toFixed(1));
+          setHeightCm(heightInCm.toFixed(1));
+          setHeight('');
           setHeightFeet('');
           setHeightInches('');
         }
@@ -185,8 +206,10 @@ export default function EditProfileScreen() {
           setHeightFeet(feet.toString());
           setHeightInches(inches.toString());
           setHeight('');
+          setHeightCm('');
         } else {
-          setHeight(heightInCm.toFixed(1));
+          setHeightCm(heightInCm.toFixed(1));
+          setHeight('');
           setHeightFeet('');
           setHeightInches('');
         }
@@ -194,9 +217,12 @@ export default function EditProfileScreen() {
         setHeightFeet('');
         setHeightInches('');
         setHeight('');
+        setHeightCm('');
       }
       
       setGoal(data.goal || '');
+      setDaysPerWeek(data.days_per_week || null);
+      setSelectedDays(data.workout_days && Array.isArray(data.workout_days) ? new Set(data.workout_days) : new Set());
       setProfilePictureUri(data.avatar_url || null);
     }
   };
@@ -439,8 +465,21 @@ export default function EditProfileScreen() {
       if (!isNaN(feet) && !isNaN(inches)) {
         heightCm = ftInToCm(feet, inches);
       }
-    } else if (height) {
-      heightCm = parseFloat(height);
+    } else if (heightCm) {
+      heightCm = parseFloat(heightCm);
+    }
+
+    // Determine days_per_week and workout_days
+    let finalDaysPerWeek = daysPerWeek;
+    let workoutDays: string[] | null = null;
+    
+    if (selectedDays.size > 0) {
+      // If specific days are selected, use that count and store the days
+      finalDaysPerWeek = selectedDays.size;
+      workoutDays = Array.from(selectedDays);
+    } else if (daysPerWeek) {
+      // If only number of days is set, clear workout_days
+      workoutDays = null;
     }
 
     const updateData: any = {
@@ -451,6 +490,8 @@ export default function EditProfileScreen() {
       goal_weight: goalWeightKg,
       height: heightCm,
       goal: goal || null,
+      days_per_week: finalDaysPerWeek,
+      workout_days: workoutDays,
       use_imperial: useImperial,
     };
 
@@ -565,11 +606,13 @@ export default function EditProfileScreen() {
                         const { feet, inches } = cmToFtIn(heightInCm);
                         setHeightFeet(feet.toString());
                         setHeightInches(inches.toString());
+                        setHeightCm('');
                         setHeight('');
                       } else {
-                        setHeight(heightInCm.toFixed(1));
+                        setHeightCm(heightInCm.toFixed(1));
                         setHeightFeet('');
                         setHeightInches('');
+                        setHeight('');
                       }
                     }
                   } else {
@@ -599,16 +642,18 @@ export default function EditProfileScreen() {
                       const inches = parseInt(heightInches, 10);
                       if (!isNaN(feet) && !isNaN(inches)) {
                         const cm = ftInToCm(feet, inches);
-                        setHeight(cm.toFixed(1));
+                        setHeightCm(cm.toFixed(1));
                         setHeightFeet('');
                         setHeightInches('');
+                        setHeight('');
                       }
                     } else if (!useImperial && newUseImperial) {
-                      const cm = parseFloat(height);
+                      const cm = parseFloat(heightCm);
                       if (!isNaN(cm)) {
                         const { feet, inches } = cmToFtIn(cm);
                         setHeightFeet(feet.toString());
                         setHeightInches(inches.toString());
+                        setHeightCm('');
                         setHeight('');
                       }
                     }
@@ -634,101 +679,94 @@ export default function EditProfileScreen() {
             />
           </View>
 
-          <View style={styles.row}>
-            <View style={[styles.inputGroup, styles.halfWidth]}>
-              <Text style={styles.label}>Age</Text>
-              <TextInput
-                style={styles.input}
-                value={age}
-                onChangeText={setAge}
-                keyboardType="number-pad"
-                placeholder="25"
-                placeholderTextColor="#666"
-              />
-            </View>
-
-            <View style={[styles.inputGroup, styles.halfWidth]}>
-              <Text style={styles.label}>Gender</Text>
-              <TouchableOpacity 
-                style={styles.input}
-                onPress={() => setShowGenderPicker(true)}
-              >
-                <Text style={[styles.inputText, !gender && styles.placeholderText]}>
-                  {gender || 'Select'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.row}>
-            <View style={[styles.inputGroup, styles.halfWidth]}>
-              <Text style={styles.label}>Current Weight {useImperial ? '(lbs)' : '(kg)'}</Text>
-              <TextInput
-                style={styles.input}
-                value={currentWeight}
-                onChangeText={setCurrentWeight}
-                keyboardType="numeric"
-                placeholder={useImperial ? "150" : "68"}
-                placeholderTextColor="#666"
-              />
-            </View>
-
-            <View style={[styles.inputGroup, styles.halfWidth]}>
-              <Text style={styles.label}>Goal Weight {useImperial ? '(lbs)' : '(kg)'}</Text>
-              <TextInput
-                style={styles.input}
-                value={goalWeight}
-                onChangeText={setGoalWeight}
-                keyboardType="numeric"
-                placeholder={useImperial ? "140" : "64"}
-                placeholderTextColor="#666"
-              />
-            </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Age</Text>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowAgePicker(true)}
+            >
+              <Text style={[styles.pickerButtonText, !age && styles.pickerButtonPlaceholder]}>
+                {age || 'Select age'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Height {useImperial ? '(ft/in)' : '(cm)'}</Text>
-            {useImperial ? (
-              <View style={styles.heightRow}>
-                <TextInput
-                  style={[styles.input, styles.heightInput]}
-                  value={heightFeet}
-                  onChangeText={setHeightFeet}
-                  keyboardType="number-pad"
-                  placeholder="5"
-                  placeholderTextColor="#666"
-                />
-                <Text style={styles.heightSeparator}>ft</Text>
-                <TextInput
-                  style={[styles.input, styles.heightInput]}
-                  value={heightInches}
-                  onChangeText={setHeightInches}
-                  keyboardType="number-pad"
-                  placeholder="10"
-                  placeholderTextColor="#666"
-                />
-                <Text style={styles.heightSeparator}>in</Text>
-              </View>
-            ) : (
-              <TextInput
-                style={styles.input}
-                value={height}
-                onChangeText={setHeight}
-                keyboardType="numeric"
-                placeholder="175"
-                placeholderTextColor="#666"
-              />
-            )}
+            <Text style={styles.label}>Gender</Text>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowGenderPicker(true)}
+            >
+              <Text style={[styles.pickerButtonText, !gender && styles.pickerButtonPlaceholder]}>
+                {gender || 'Select gender'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Current Weight ({useImperial ? 'lbs' : 'kg'})</Text>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowWeightPicker(true)}
+            >
+              <Text style={[styles.pickerButtonText, !currentWeight && styles.pickerButtonPlaceholder]}>
+                {currentWeight ? `${currentWeight} ${useImperial ? 'lbs' : 'kg'}` : `Select weight (${useImperial ? 'lbs' : 'kg'})`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Goal Weight ({useImperial ? 'lbs' : 'kg'})</Text>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowGoalWeightPicker(true)}
+            >
+              <Text style={[styles.pickerButtonText, !goalWeight && styles.pickerButtonPlaceholder]}>
+                {goalWeight ? `${goalWeight} ${useImperial ? 'lbs' : 'kg'}` : `Select goal weight (${useImperial ? 'lbs' : 'kg'})`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Height</Text>
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowHeightPicker(true)}
+            >
+              <Text style={[styles.pickerButtonText, (!heightCm && !heightFeet) && styles.pickerButtonPlaceholder]}>
+                {useImperial 
+                  ? (heightFeet || heightInches ? `${heightFeet || 0}' ${heightInches || 0}"` : "Select height (ft'in\")")
+                  : (heightCm ? `${heightCm} cm` : 'Select height (cm)')
+                }
+              </Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Primary Goal</Text>
             <TouchableOpacity 
-              style={styles.input}
+              style={styles.pickerButton}
               onPress={() => setShowGoalPicker(true)}
             >
-              <Text style={[styles.inputText, !goal && styles.placeholderText]}>
-                {goal || 'Select'}
+              <Text style={[styles.pickerButtonText, !goal && styles.pickerButtonPlaceholder]}>
+                {goal || 'Select goal'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Workout Days</Text>
+            <TouchableOpacity 
+              style={styles.pickerButton}
+              onPress={() => setShowDaysPicker(true)}
+            >
+              <Text style={[styles.pickerButtonText, selectedDays.size === 0 && !daysPerWeek && styles.pickerButtonPlaceholder]}>
+                {selectedDays.size > 0 
+                  ? `${selectedDays.size} day${selectedDays.size > 1 ? 's' : ''} selected`
+                  : daysPerWeek 
+                    ? `${daysPerWeek} day${daysPerWeek > 1 ? 's' : ''} per week`
+                    : 'Select workout days'
+                }
               </Text>
             </TouchableOpacity>
           </View>
@@ -745,6 +783,42 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
       </ScrollView>
 
+      {/* Age Picker Modal */}
+      <Modal
+        visible={showAgePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowAgePicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAgePicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Age</Text>
+              <TouchableOpacity
+                onPress={() => setShowAgePicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <Picker
+              selectedValue={age}
+              onValueChange={(itemValue) => setAge(itemValue)}
+              style={styles.nativePicker}
+              itemStyle={{ color: '#ffffff' }}
+            >
+              {Array.from({ length: 150 }, (_, i) => i + 1).map((ageValue) => (
+                <Picker.Item key={ageValue} label={ageValue.toString()} value={ageValue.toString()} color="#ffffff" />
+              ))}
+            </Picker>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Gender Picker Modal */}
       <Modal
         visible={showGenderPicker}
@@ -752,23 +826,243 @@ export default function EditProfileScreen() {
         animationType="slide"
         onRequestClose={() => setShowGenderPicker(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Gender</Text>
-            {GENDERS.map((g) => (
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowGenderPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Gender</Text>
               <TouchableOpacity
-                key={g}
-                style={styles.modalOption}
-                onPress={() => { setGender(g); setShowGenderPicker(false); }}
+                onPress={() => setShowGenderPicker(false)}
+                style={styles.pickerDoneButton}
               >
-                <Text style={styles.modalOptionText}>{g}</Text>
+                <Text style={styles.pickerDoneText}>Done</Text>
               </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.modalCancelButton} onPress={() => setShowGenderPicker(false)}>
-              <Text style={styles.modalCancelText}>Cancel</Text>
-            </TouchableOpacity>
+            </View>
+            <Picker
+              selectedValue={gender}
+              onValueChange={(itemValue) => setGender(itemValue)}
+              style={styles.nativePicker}
+              itemStyle={{ color: '#ffffff' }}
+            >
+              {GENDERS.map((genderOption) => (
+                <Picker.Item key={genderOption} label={genderOption} value={genderOption} color="#ffffff" />
+              ))}
+            </Picker>
           </View>
-        </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Weight Picker Modal */}
+      <Modal
+        visible={showWeightPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowWeightPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowWeightPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Weight</Text>
+              <TouchableOpacity
+                onPress={() => setShowWeightPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.nativePickerRow}>
+              <Picker
+                selectedValue={currentWeight}
+                onValueChange={(itemValue) => setCurrentWeight(itemValue)}
+                style={[styles.nativePicker, { flex: 1 }]}
+                itemStyle={{ color: '#ffffff' }}
+              >
+                {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
+                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
+                ))}
+              </Picker>
+              <View style={styles.pickerUnitLabel}>
+                <Text style={styles.pickerUnitText}>{useImperial ? 'lbs' : 'kg'}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Goal Weight Picker Modal */}
+      <Modal
+        visible={showGoalWeightPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowGoalWeightPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowGoalWeightPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Goal Weight</Text>
+              <TouchableOpacity
+                onPress={() => setShowGoalWeightPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.nativePickerRow}>
+              <Picker
+                selectedValue={goalWeight}
+                onValueChange={(itemValue) => setGoalWeight(itemValue)}
+                style={[styles.nativePicker, { flex: 1 }]}
+                itemStyle={{ color: '#ffffff' }}
+              >
+                {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
+                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
+                ))}
+              </Picker>
+              <View style={styles.pickerUnitLabel}>
+                <Text style={styles.pickerUnitText}>{useImperial ? 'lbs' : 'kg'}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Height Picker Modal */}
+      <Modal
+        visible={showHeightPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowHeightPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowHeightPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Height</Text>
+              <TouchableOpacity
+                onPress={() => setShowHeightPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            {useImperial ? (
+              <View style={styles.nativePickerRow}>
+                <Picker
+                  selectedValue={heightFeet}
+                  onValueChange={(itemValue) => setHeightFeet(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: 9 }, (_, i) => i).map((feetValue) => (
+                    <Picker.Item key={feetValue} label={feetValue.toString()} value={feetValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+                <View style={styles.pickerUnitLabel}>
+                  <Text style={styles.pickerUnitText}>ft</Text>
+                </View>
+                <Picker
+                  selectedValue={heightInches}
+                  onValueChange={(itemValue) => setHeightInches(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: 12 }, (_, i) => i).map((inchesValue) => (
+                    <Picker.Item key={inchesValue} label={inchesValue.toString()} value={inchesValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+                <View style={styles.pickerUnitLabel}>
+                  <Text style={styles.pickerUnitText}>in</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.nativePickerRow}>
+                <Picker
+                  selectedValue={heightCm}
+                  onValueChange={(itemValue) => setHeightCm(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: 301 }, (_, i) => i).map((cmValue) => (
+                    <Picker.Item key={cmValue} label={cmValue.toString()} value={cmValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+                <View style={styles.pickerUnitLabel}>
+                  <Text style={styles.pickerUnitText}>cm</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Days Picker Modal */}
+      <Modal
+        visible={showDaysPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDaysPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDaysPicker(false)}
+        >
+          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Workout Days</Text>
+              <TouchableOpacity
+                onPress={() => setShowDaysPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.daysPickerScroll}>
+              {DAYS_OF_WEEK.map((day) => {
+                const isSelected = selectedDays.has(day.label);
+                return (
+                  <TouchableOpacity
+                    key={day.label}
+                    style={[styles.dayOptionCard, isSelected && styles.dayOptionCardSelected]}
+                    onPress={() => {
+                      const newSelectedDays = new Set(selectedDays);
+                      if (newSelectedDays.has(day.label)) {
+                        newSelectedDays.delete(day.label);
+                      } else {
+                        newSelectedDays.add(day.label);
+                      }
+                      setSelectedDays(newSelectedDays);
+                      if (newSelectedDays.size > 0) {
+                        setDaysPerWeek(newSelectedDays.size);
+                      }
+                    }}
+                  >
+                    <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                      {isSelected && <Check size={16} color="#09090b" />}
+                    </View>
+                    <Text style={[styles.dayOptionText, isSelected && styles.dayOptionTextSelected]}>
+                      {day.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* Goal Picker Modal */}
@@ -1194,5 +1488,110 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.3,
+  },
+  pickerButton: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  pickerButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+  },
+  pickerButtonPlaceholder: {
+    color: '#71717a', // zinc-500
+  },
+  nativePickerModal: {
+    backgroundColor: '#18181b', // zinc-900
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '50%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+  },
+  nativePicker: {
+    height: 216,
+    backgroundColor: '#18181b', // zinc-900
+  },
+  nativePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181b', // zinc-900
+  },
+  pickerUnitLabel: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerUnitText: {
+    fontSize: 18,
+    color: '#71717a', // zinc-500
+    fontWeight: '400',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a', // zinc-800
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  pickerDoneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  pickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#a3e635', // lime-400
+  },
+  daysPickerScroll: {
+    maxHeight: 400,
+  },
+  dayOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    marginBottom: 12,
+  },
+  dayOptionCardSelected: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#71717a', // zinc-500
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  checkboxSelected: {
+    borderColor: '#a3e635', // lime-400
+    backgroundColor: '#a3e635', // lime-400
+  },
+  dayOptionText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  dayOptionTextSelected: {
+    color: '#09090b', // zinc-950
   },
 });

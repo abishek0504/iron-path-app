@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { LoginSkeleton } from '../src/components/skeletons/LoginSkeleton';
 
@@ -22,6 +22,17 @@ export default function LoginScreen() {
       setIsCheckingSession(false);
     });
   }, []);
+
+  // Also check on focus (e.g., when swiping back to this screen)
+  useFocusEffect(
+    useCallback(() => {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          router.replace('/(tabs)');
+        }
+      });
+    }, [router])
+  );
 
   const signIn = async () => {
     setErrorMessage('');

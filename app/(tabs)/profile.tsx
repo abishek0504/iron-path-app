@@ -230,14 +230,22 @@ export default function ProfileScreen() {
               <AnimatedReanimated.View entering={FadeIn.duration(300).delay(200)}>
                 <View style={styles.infoCard}>
                   <Text style={styles.infoLabel}>Name</Text>
-                  <Text style={styles.infoValue}>{profile.full_name || 'Not set'}</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.full_name && typeof profile.full_name === 'string' 
+                      ? profile.full_name 
+                      : 'Not set'}
+                  </Text>
                 </View>
               </AnimatedReanimated.View>
 
               <AnimatedReanimated.View entering={FadeIn.duration(300).delay(250)}>
                 <View style={styles.infoCard}>
                   <Text style={styles.infoLabel}>Age</Text>
-                  <Text style={styles.infoValue}>{profile.age ? `${profile.age} years` : 'Not set'}</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.age != null && typeof profile.age === 'number' 
+                      ? `${profile.age} years` 
+                      : 'Not set'}
+                  </Text>
                 </View>
               </AnimatedReanimated.View>
 
@@ -245,7 +253,7 @@ export default function ProfileScreen() {
                 <View style={styles.infoCard}>
                   <Text style={styles.infoLabel}>Current Weight</Text>
                   <Text style={styles.infoValue}>
-                    {profile.current_weight 
+                    {profile.current_weight != null && typeof profile.current_weight === 'number'
                       ? useImperial 
                         ? `${kgToLbs(profile.current_weight).toFixed(1)} lbs`
                         : `${profile.current_weight.toFixed(1)} kg`
@@ -258,7 +266,7 @@ export default function ProfileScreen() {
                 <View style={styles.infoCard}>
                   <Text style={styles.infoLabel}>Goal Weight</Text>
                   <Text style={styles.infoValue}>
-                    {profile.goal_weight 
+                    {profile.goal_weight != null && typeof profile.goal_weight === 'number'
                       ? useImperial 
                         ? `${kgToLbs(profile.goal_weight).toFixed(1)} lbs`
                         : `${profile.goal_weight.toFixed(1)} kg`
@@ -267,7 +275,7 @@ export default function ProfileScreen() {
                 </View>
               </AnimatedReanimated.View>
 
-              {profile.height && (
+              {profile.height != null && typeof profile.height === 'number' && (
                 <AnimatedReanimated.View entering={FadeIn.duration(300).delay(400)}>
                   <View style={styles.infoCard}>
                     <Text style={styles.infoLabel}>Height</Text>
@@ -283,25 +291,25 @@ export default function ProfileScreen() {
                 </AnimatedReanimated.View>
               )}
 
-              {profile.gender && (
+              {profile.gender && typeof profile.gender === 'string' && (
                 <AnimatedReanimated.View entering={FadeIn.duration(300).delay(450)}>
                   <View style={styles.infoCard}>
                     <Text style={styles.infoLabel}>Gender</Text>
-                    <Text style={styles.infoValue}>{profile.gender}</Text>
+                    <Text style={styles.infoValue}>{String(profile.gender)}</Text>
                   </View>
                 </AnimatedReanimated.View>
               )}
 
-              {profile.goal && (
+              {profile.goal && typeof profile.goal === 'string' && (
                 <AnimatedReanimated.View entering={FadeIn.duration(300).delay(500)}>
                   <View style={styles.infoCard}>
                     <Text style={styles.infoLabel}>Primary Goal</Text>
-                    <Text style={styles.infoValue}>{profile.goal}</Text>
+                    <Text style={styles.infoValue}>{String(profile.goal)}</Text>
                   </View>
                 </AnimatedReanimated.View>
               )}
 
-              {profile.days_per_week && (
+              {profile.days_per_week != null && typeof profile.days_per_week === 'number' && (
                 <AnimatedReanimated.View entering={FadeIn.duration(300).delay(550)}>
                   <View style={styles.infoCard}>
                     <Text style={styles.infoLabel}>Workout Days per Week</Text>

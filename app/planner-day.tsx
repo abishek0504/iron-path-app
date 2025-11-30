@@ -20,7 +20,12 @@ try {
 
 export default function PlannerDayScreen() {
   const router = useRouter();
-  const { day, planId } = useLocalSearchParams<{ day: string; planId: string }>();
+  const { day, planId, date, weekStart } = useLocalSearchParams<{ 
+    day: string; 
+    planId: string; 
+    date?: string;
+    weekStart?: string;
+  }>();
   const [plan, setPlan] = useState<any>(null);
   const [dayData, setDayData] = useState<any>({ exercises: [] });
   const [generating, setGenerating] = useState(false);
@@ -74,15 +79,36 @@ export default function PlannerDayScreen() {
     });
     
     if (needsMigration) {
-      const updatedDayData = {
-        ...dayData,
-        exercises: updatedExercises
-      };
-      setDayData(updatedDayData);
-      const updatedPlan = { ...plan };
-      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
-      setPlan(updatedPlan);
-      savePlan(updatedDayData, true, false);
+        const updatedDayData = {
+          ...dayData,
+          exercises: updatedExercises
+        };
+        setDayData(updatedDayData);
+        const updatedPlan = { ...plan };
+        
+        // Initialize plan_data structure if needed
+        if (!updatedPlan.plan_data) {
+          updatedPlan.plan_data = { week_schedule: {}, weeks: {} };
+        }
+        if (!updatedPlan.plan_data.weeks) {
+          updatedPlan.plan_data.weeks = {};
+        }
+        
+        // Save to week-specific location if weekStart is provided
+        if (weekStart) {
+          if (!updatedPlan.plan_data.weeks[weekStart]) {
+            updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
+          }
+          updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = updatedDayData;
+        } else {
+          if (!updatedPlan.plan_data.week_schedule) {
+            updatedPlan.plan_data.week_schedule = {};
+          }
+          updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+        }
+        
+        setPlan(updatedPlan);
+        savePlan(updatedDayData, true, false);
     }
     // Use exerciseDetails.size and exercise count/length to detect changes
     // Avoid JSON.stringify in dependency array as it creates new objects on every render
@@ -136,43 +162,57 @@ export default function PlannerDayScreen() {
       handleBack();
     } else if (data) {
       setPlan(data);
-      if (day && data.plan_data?.week_schedule?.[day]) {
-        const loadedDayData = data.plan_data.week_schedule[day];
+      if (day) {
+        let loadedDayData: any = null;
         
-        // Migrate rep ranges to numeric values
-        let needsMigration = false;
-        const migratedExercises = (loadedDayData.exercises || []).map((ex: any) => {
-          if (ex.target_reps && typeof ex.target_reps === 'string') {
-            needsMigration = true;
-            return { ...ex, target_reps: migrateRepRange(ex.target_reps) };
-          }
-          return ex;
-        });
-        
-        if (needsMigration) {
-          const migratedDayData = { ...loadedDayData, exercises: migratedExercises };
-          setDayData(migratedDayData);
-          
-          // Save migrated data back to database
-          const updatedPlan = { ...data };
-          updatedPlan.plan_data.week_schedule[day] = migratedDayData;
-          setPlan(updatedPlan);
-          
-          // Save to database
-          const { error: saveError } = await supabase
-            .from('workout_plans')
-            .update({ plan_data: updatedPlan.plan_data })
-            .eq('id', parseInt(planId));
-          
-          if (saveError) {
-            console.error('Error saving migrated plan:', saveError);
-          }
-        } else {
-          setDayData(loadedDayData);
+        // Only use week-specific data (no template fallback)
+        if (weekStart && data.plan_data?.weeks?.[weekStart]?.week_schedule?.[day]) {
+          loadedDayData = data.plan_data.weeks[weekStart].week_schedule[day];
         }
         
-        // Load exercise details
-        await loadExerciseDetails(loadedDayData.exercises || []);
+        if (loadedDayData) {
+          // Migrate rep ranges to numeric values
+          let needsMigration = false;
+          const migratedExercises = (loadedDayData.exercises || []).map((ex: any) => {
+            if (ex.target_reps && typeof ex.target_reps === 'string') {
+              needsMigration = true;
+              return { ...ex, target_reps: migrateRepRange(ex.target_reps) };
+            }
+            return ex;
+          });
+          
+          if (needsMigration) {
+            const migratedDayData = { ...loadedDayData, exercises: migratedExercises };
+            setDayData(migratedDayData);
+            
+            // Save migrated data back to database
+            const updatedPlan = { ...data };
+            if (weekStart && updatedPlan.plan_data.weeks?.[weekStart]) {
+              updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = migratedDayData;
+            } else {
+              updatedPlan.plan_data.week_schedule[day] = migratedDayData;
+            }
+            setPlan(updatedPlan);
+            
+            // Save to database
+            const { error: saveError } = await supabase
+              .from('workout_plans')
+              .update({ plan_data: updatedPlan.plan_data })
+              .eq('id', parseInt(planId));
+            
+            if (saveError) {
+              console.error('Error saving migrated plan:', saveError);
+            }
+          } else {
+            setDayData(loadedDayData);
+          }
+          
+          // Load exercise details
+          await loadExerciseDetails(loadedDayData.exercises || []);
+        } else {
+          // No data found, use empty exercises
+          setDayData({ exercises: [] });
+        }
       }
     }
   };
@@ -307,7 +347,28 @@ export default function PlannerDayScreen() {
     if (!skipStateUpdate) {
       setDayData(updatedDayData);
       const updatedPlan = { ...plan };
-      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      
+      // Initialize plan_data structure if needed
+      if (!updatedPlan.plan_data) {
+        updatedPlan.plan_data = { week_schedule: {}, weeks: {} };
+      }
+      if (!updatedPlan.plan_data.weeks) {
+        updatedPlan.plan_data.weeks = {};
+      }
+      
+      // Save to week-specific location if weekStart is provided, otherwise save to template
+      if (weekStart) {
+        if (!updatedPlan.plan_data.weeks[weekStart]) {
+          updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
+        }
+        updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = updatedDayData;
+      } else {
+        if (!updatedPlan.plan_data.week_schedule) {
+          updatedPlan.plan_data.week_schedule = {};
+        }
+        updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      }
+      
       setPlan(updatedPlan);
     }
 
@@ -319,7 +380,28 @@ export default function PlannerDayScreen() {
     // Debounce database save - only save after user stops typing for 1 second
     const performSave = async () => {
       const updatedPlan = { ...plan };
-      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      
+      // Initialize plan_data structure if needed
+      if (!updatedPlan.plan_data) {
+        updatedPlan.plan_data = { weeks: {} };
+      }
+      if (!updatedPlan.plan_data.weeks) {
+        updatedPlan.plan_data.weeks = {};
+      }
+      
+      // Save to week-specific location if weekStart is provided
+      if (weekStart) {
+        if (!updatedPlan.plan_data.weeks[weekStart]) {
+          updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
+        }
+        updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = updatedDayData;
+      } else {
+        // Fallback: if no weekStart, save to template (shouldn't happen in new structure)
+        if (!updatedPlan.plan_data.week_schedule) {
+          updatedPlan.plan_data.week_schedule = {};
+        }
+        updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      }
       
       const { error } = await supabase
         .from('workout_plans')
@@ -587,9 +669,15 @@ Return ONLY the JSON array, no other text.`;
   };
 
   const addManualExercise = () => {
+    const dateString = date ? date : (day ? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}` : '');
     router.replace({
       pathname: '/exercise-select',
-      params: { planId: planId || '', day: day || '' }
+      params: { 
+        planId: planId || '', 
+        day: day || '',
+        weekStart: weekStart || '',
+        date: dateString
+      }
     });
   };
 
@@ -711,9 +799,16 @@ Return ONLY the JSON array, no other text.`;
             <TouchableOpacity
               style={styles.exerciseNameContainer}
               onPress={() => {
+                const dateString = date ? date : (day ? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}` : '');
                 router.replace({
                   pathname: '/exercise-select',
-                  params: { planId: planId || '', day: day || '', exerciseIndex: (index ?? 0).toString() }
+                  params: { 
+                    planId: planId || '', 
+                    day: day || '', 
+                    exerciseIndex: (index ?? 0).toString(),
+                    weekStart: weekStart || '',
+                    date: dateString
+                  }
                 });
               }}
             >
@@ -905,7 +1000,8 @@ Return ONLY the JSON array, no other text.`;
             return `exercise-${nameKey}-${index}`;
           }}
           activationDistance={0}
-          simultaneousHandlers={[]}
+          dragItemOverflow={false}
+          containerStyle={{ flex: 1 }}
           renderItem={({ item, index, drag, isActive }: any) => {
             // Store the drag function in a ref so we can call it only from the grip handle
             const dragRef = React.useRef(drag);

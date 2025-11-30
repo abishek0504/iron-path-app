@@ -82,6 +82,7 @@ export default function OnboardingScreen() {
   // Personal info
   const [age, setAge] = useState<string>('');
   const [weight, setWeight] = useState<string>('');
+  const [goalWeight, setGoalWeight] = useState<string>('');
   const [heightFeet, setHeightFeet] = useState<string>('');
   const [heightInches, setHeightInches] = useState<string>('');
   const [heightCm, setHeightCm] = useState<string>('');
@@ -92,6 +93,7 @@ export default function OnboardingScreen() {
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showAgePicker, setShowAgePicker] = useState(false);
   const [showWeightPicker, setShowWeightPicker] = useState(false);
+  const [showGoalWeightPicker, setShowGoalWeightPicker] = useState(false);
   const [showHeightPicker, setShowHeightPicker] = useState(false);
   
 
@@ -170,6 +172,16 @@ export default function OnboardingScreen() {
         weightInKg = lbsToKg(parseFloat(weight) || 0) || null;
       }
 
+      // Convert goal weight to kg if imperial
+      let goalWeightInKg: number | null = null;
+      if (goalWeight) {
+        if (useMetric) {
+          goalWeightInKg = parseFloat(goalWeight) || null;
+        } else {
+          goalWeightInKg = lbsToKg(parseFloat(goalWeight) || 0) || null;
+        }
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -178,10 +190,12 @@ export default function OnboardingScreen() {
           workout_days: workoutDays,
           equipment_access: workoutLocation === 'Custom' ? [] : [workoutLocation],
           age: age ? parseInt(age) : null,
-          weight_kg: weightInKg,
-          height_cm: heightInCm,
+          current_weight: weightInKg,
+          goal_weight: goalWeightInKg,
+          height: heightInCm,
           gender: gender,
-          use_metric: useMetric,
+          experience_level: experienceLevel || null,
+          use_imperial: !useMetric,
         })
         .eq('id', user.id);
 
@@ -344,6 +358,18 @@ export default function OnboardingScreen() {
               >
                 <Text style={[styles.pickerButtonText, !weight && styles.pickerButtonPlaceholder]}>
                   {weight ? `${weight} ${useMetric ? 'kg' : 'lbs'}` : `Select weight (${useMetric ? 'kg' : 'lbs'})`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Goal Weight ({useMetric ? 'kg' : 'lbs'})</Text>
+              <TouchableOpacity
+                style={styles.pickerButton}
+                onPress={() => setShowGoalWeightPicker(true)}
+              >
+                <Text style={[styles.pickerButtonText, !goalWeight && styles.pickerButtonPlaceholder]}>
+                  {goalWeight ? `${goalWeight} ${useMetric ? 'kg' : 'lbs'}` : `Select goal weight (${useMetric ? 'kg' : 'lbs'})`}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -587,9 +613,10 @@ export default function OnboardingScreen() {
               selectedValue={gender}
               onValueChange={(itemValue) => setGender(itemValue)}
               style={styles.nativePicker}
+              itemStyle={{ color: '#ffffff' }}
             >
               {GENDERS.map((genderOption) => (
-                <Picker.Item key={genderOption} label={genderOption} value={genderOption} />
+                <Picker.Item key={genderOption} label={genderOption} value={genderOption} color="#ffffff" />
               ))}
             </Picker>
           </View>
@@ -622,9 +649,10 @@ export default function OnboardingScreen() {
               selectedValue={age}
               onValueChange={(itemValue) => setAge(itemValue)}
               style={styles.nativePicker}
+              itemStyle={{ color: '#ffffff' }}
             >
               {Array.from({ length: 150 }, (_, i) => i + 1).map((ageValue) => (
-                <Picker.Item key={ageValue} label={ageValue.toString()} value={ageValue.toString()} />
+                <Picker.Item key={ageValue} label={ageValue.toString()} value={ageValue.toString()} color="#ffffff" />
               ))}
             </Picker>
           </View>
@@ -658,9 +686,51 @@ export default function OnboardingScreen() {
                 selectedValue={weight}
                 onValueChange={(itemValue) => setWeight(itemValue)}
                 style={[styles.nativePicker, { flex: 1 }]}
+                itemStyle={{ color: '#ffffff' }}
               >
                 {Array.from({ length: useMetric ? 301 : 601 }, (_, i) => i).map((weightValue) => (
-                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} />
+                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
+                ))}
+              </Picker>
+              <View style={styles.pickerUnitLabel}>
+                <Text style={styles.pickerUnitText}>{useMetric ? 'kg' : 'lbs'}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Goal Weight Picker Modal */}
+      <Modal
+        visible={showGoalWeightPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowGoalWeightPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowGoalWeightPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Goal Weight</Text>
+              <TouchableOpacity
+                onPress={() => setShowGoalWeightPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.nativePickerRow}>
+              <Picker
+                selectedValue={goalWeight}
+                onValueChange={(itemValue) => setGoalWeight(itemValue)}
+                style={[styles.nativePicker, { flex: 1 }]}
+                itemStyle={{ color: '#ffffff' }}
+              >
+                {Array.from({ length: useMetric ? 301 : 601 }, (_, i) => i).map((weightValue) => (
+                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
                 ))}
               </Picker>
               <View style={styles.pickerUnitLabel}>
@@ -699,9 +769,10 @@ export default function OnboardingScreen() {
                   selectedValue={heightCm}
                   onValueChange={(itemValue) => setHeightCm(itemValue)}
                   style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
                 >
                   {Array.from({ length: 301 }, (_, i) => i).map((cmValue) => (
-                    <Picker.Item key={cmValue} label={cmValue.toString()} value={cmValue.toString()} />
+                    <Picker.Item key={cmValue} label={cmValue.toString()} value={cmValue.toString()} color="#ffffff" />
                   ))}
                 </Picker>
                 <View style={styles.pickerUnitLabel}>
@@ -714,9 +785,10 @@ export default function OnboardingScreen() {
                   selectedValue={heightFeet}
                   onValueChange={(itemValue) => setHeightFeet(itemValue)}
                   style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
                 >
                   {Array.from({ length: 9 }, (_, i) => i).map((feetValue) => (
-                    <Picker.Item key={feetValue} label={feetValue.toString()} value={feetValue.toString()} />
+                    <Picker.Item key={feetValue} label={feetValue.toString()} value={feetValue.toString()} color="#ffffff" />
                   ))}
                 </Picker>
                 <View style={styles.pickerUnitLabel}>
@@ -726,9 +798,10 @@ export default function OnboardingScreen() {
                   selectedValue={heightInches}
                   onValueChange={(itemValue) => setHeightInches(itemValue)}
                   style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
                 >
                   {Array.from({ length: 12 }, (_, i) => i).map((inchesValue) => (
-                    <Picker.Item key={inchesValue} label={inchesValue.toString()} value={inchesValue.toString()} />
+                    <Picker.Item key={inchesValue} label={inchesValue.toString()} value={inchesValue.toString()} color="#ffffff" />
                   ))}
                 </Picker>
                 <View style={styles.pickerUnitLabel}>
