@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
@@ -258,67 +259,73 @@ Include all 7 days (Monday through Sunday). Days with no workout should have an 
       {isLoadingPlan ? (
         <PlannerSkeleton />
       ) : !activePlan ? (
-        <ScrollView contentContainerStyle={styles.contentContainer}>
-          <Text style={styles.title}>Workout Planner</Text>
-          <Text style={styles.subtitle}>Create or generate your personalized weekly workout plan</Text>
+        <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={styles.contentContainer}>
+            <Text style={styles.title}>Workout Planner</Text>
+            <Text style={styles.subtitle}>Create or generate your personalized weekly workout plan</Text>
 
-          <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={[styles.buttonPrimary, styles.buttonHalf, loading && styles.buttonDisabled]}
-              onPress={createEmptyPlan}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.buttonText}>Create Workout Plan</Text>
-              )}
-            </TouchableOpacity>
-
-            <View style={styles.buttonHalf}>
-              <Text style={styles.helperText}>Don't know where to start?</Text>
-              <Text style={styles.helperText}>Let us help!</Text>
+            <View style={styles.buttonRow}>
               <TouchableOpacity
-                style={[styles.buttonSecondary, styles.buttonHalf, generating && styles.buttonDisabled]}
-                onPress={generateWorkoutPlan}
-                disabled={generating}
+                style={[styles.buttonPrimary, styles.buttonHalf, loading && styles.buttonDisabled]}
+                onPress={createEmptyPlan}
+                disabled={loading}
               >
-                {generating ? (
-                  <ActivityIndicator color="#60a5fa" />
+                {loading ? (
+                  <ActivityIndicator color="white" />
                 ) : (
-                  <Text style={styles.buttonTextSecondary}>Generate</Text>
+                  <Text style={styles.buttonText}>Create Workout Plan</Text>
                 )}
               </TouchableOpacity>
+
+              <View style={styles.buttonHalf}>
+                <Text style={styles.helperText}>Don't know where to start?</Text>
+                <Text style={styles.helperText}>Let us help!</Text>
+                <TouchableOpacity
+                  style={[styles.buttonSecondary, styles.buttonHalf, generating && styles.buttonDisabled]}
+                  onPress={generateWorkoutPlan}
+                  disabled={generating}
+                >
+                  {generating ? (
+                    <ActivityIndicator color="#60a5fa" />
+                  ) : (
+                    <Text style={styles.buttonTextSecondary}>Generate</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </Animated.View>
       ) : (
-        <FlatList
-          data={DAYS_OF_WEEK}
-          keyExtractor={(item) => item}
-          contentContainerStyle={styles.listContainer}
-          ListHeaderComponent={
-            <View style={styles.header}>
-              <Text style={styles.title}>Weekly Plan</Text>
-              <Text style={styles.subtitle}>Tap a day to edit</Text>
-            </View>
-          }
-          renderItem={({ item: dayName }) => {
-            const dayData = getDayData(dayName);
-            const exerciseCount = dayData.exercises?.length || 0;
-            return (
-              <TouchableOpacity
-                style={styles.dayCard}
-                onPress={() => handleDayPress(dayName)}
-              >
-                <Text style={styles.dayName}>{dayName}</Text>
-                <Text style={styles.dayFocus}>
-                  {exerciseCount > 0 ? `${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}` : "Rest"}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
+        <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+          <FlatList
+            data={DAYS_OF_WEEK}
+            keyExtractor={(item) => item}
+            contentContainerStyle={styles.listContainer}
+            ListHeaderComponent={
+              <View style={styles.header}>
+                <Text style={styles.title}>Weekly Plan</Text>
+                <Text style={styles.subtitle}>Tap a day to edit</Text>
+              </View>
+            }
+            renderItem={({ item: dayName, index }) => {
+              const dayData = getDayData(dayName);
+              const exerciseCount = dayData.exercises?.length || 0;
+              return (
+                <Animated.View entering={FadeIn.duration(400).delay(index * 50)}>
+                  <TouchableOpacity
+                    style={styles.dayCard}
+                    onPress={() => handleDayPress(dayName)}
+                  >
+                    <Text style={styles.dayName}>{dayName}</Text>
+                    <Text style={styles.dayFocus}>
+                      {exerciseCount > 0 ? `${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}` : "Rest"}
+                    </Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              );
+            }}
+          />
+        </Animated.View>
       )}
     </SafeAreaView>
   );

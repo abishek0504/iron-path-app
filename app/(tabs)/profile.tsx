@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Animated, Platform } from 'react-native';
+import AnimatedReanimated, { FadeIn } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -192,107 +193,133 @@ export default function ProfileScreen() {
           </View>
         </Animated.View>
       )}
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Profile</Text>
-          <TouchableOpacity 
-            style={styles.editButton}
-            onPress={() => router.push('/edit-profile')}
-          >
-            <Edit size={20} color="#a3e635" />
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.profilePictureContainer}>
-          {profile.avatar_url ? (
-            <Image 
-              source={{ uri: profile.avatar_url }} 
-              style={styles.profilePicture}
-              contentFit="cover"
-              transition={200}
-            />
-          ) : (
-            <View style={styles.placeholderPicture}>
-              <Text style={styles.placeholderText}>No Photo</Text>
+      <AnimatedReanimated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(50)}>
+            <View style={styles.header}>
+              <Text style={styles.title}>Profile</Text>
+              <TouchableOpacity 
+                style={styles.editButton}
+                onPress={() => router.push('/edit-profile')}
+              >
+                <Edit size={20} color="#a3e635" />
+                <Text style={styles.editButtonText}>Edit</Text>
+              </TouchableOpacity>
             </View>
-          )}
-        </View>
+          </AnimatedReanimated.View>
 
-        <View style={styles.infoSection}>
-          <View style={styles.infoCard}>
-            <Text style={styles.infoLabel}>Name</Text>
-            <Text style={styles.infoValue}>{profile.full_name || 'Not set'}</Text>
-          </View>
-
-          <View style={styles.infoCard}>
-            <Text style={styles.infoLabel}>Age</Text>
-            <Text style={styles.infoValue}>{profile.age ? `${profile.age} years` : 'Not set'}</Text>
-          </View>
-
-          <View style={styles.infoCard}>
-            <Text style={styles.infoLabel}>Current Weight</Text>
-            <Text style={styles.infoValue}>
-              {profile.current_weight 
-                ? useImperial 
-                  ? `${kgToLbs(profile.current_weight).toFixed(1)} lbs`
-                  : `${profile.current_weight.toFixed(1)} kg`
-                : 'Not set'}
-            </Text>
-          </View>
-
-          <View style={styles.infoCard}>
-            <Text style={styles.infoLabel}>Goal Weight</Text>
-            <Text style={styles.infoValue}>
-              {profile.goal_weight 
-                ? useImperial 
-                  ? `${kgToLbs(profile.goal_weight).toFixed(1)} lbs`
-                  : `${profile.goal_weight.toFixed(1)} kg`
-                : 'Not set'}
-            </Text>
-          </View>
-
-          {profile.height && (
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Height</Text>
-              <Text style={styles.infoValue}>
-                {useImperial 
-                  ? (() => {
-                      const { feet, inches } = cmToFtIn(profile.height);
-                      return `${feet}'${inches}"`;
-                    })()
-                  : `${profile.height.toFixed(1)} cm`}
-              </Text>
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(100)}>
+            <View style={styles.profilePictureContainer}>
+              {profile.avatar_url ? (
+                <Image 
+                  source={{ uri: profile.avatar_url }} 
+                  style={styles.profilePicture}
+                  contentFit="cover"
+                  transition={200}
+                />
+              ) : (
+                <View style={styles.placeholderPicture}>
+                  <Text style={styles.placeholderText}>No Photo</Text>
+                </View>
+              )}
             </View>
-          )}
+          </AnimatedReanimated.View>
 
-          {profile.gender && (
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Gender</Text>
-              <Text style={styles.infoValue}>{profile.gender}</Text>
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(150)}>
+            <View style={styles.infoSection}>
+              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(200)}>
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoLabel}>Name</Text>
+                  <Text style={styles.infoValue}>{profile.full_name || 'Not set'}</Text>
+                </View>
+              </AnimatedReanimated.View>
+
+              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(250)}>
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoLabel}>Age</Text>
+                  <Text style={styles.infoValue}>{profile.age ? `${profile.age} years` : 'Not set'}</Text>
+                </View>
+              </AnimatedReanimated.View>
+
+              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(300)}>
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoLabel}>Current Weight</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.current_weight 
+                      ? useImperial 
+                        ? `${kgToLbs(profile.current_weight).toFixed(1)} lbs`
+                        : `${profile.current_weight.toFixed(1)} kg`
+                      : 'Not set'}
+                  </Text>
+                </View>
+              </AnimatedReanimated.View>
+
+              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(350)}>
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoLabel}>Goal Weight</Text>
+                  <Text style={styles.infoValue}>
+                    {profile.goal_weight 
+                      ? useImperial 
+                        ? `${kgToLbs(profile.goal_weight).toFixed(1)} lbs`
+                        : `${profile.goal_weight.toFixed(1)} kg`
+                      : 'Not set'}
+                  </Text>
+                </View>
+              </AnimatedReanimated.View>
+
+              {profile.height && (
+                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(400)}>
+                  <View style={styles.infoCard}>
+                    <Text style={styles.infoLabel}>Height</Text>
+                    <Text style={styles.infoValue}>
+                      {useImperial 
+                        ? (() => {
+                            const { feet, inches } = cmToFtIn(profile.height);
+                            return `${feet}'${inches}"`;
+                          })()
+                        : `${profile.height.toFixed(1)} cm`}
+                    </Text>
+                  </View>
+                </AnimatedReanimated.View>
+              )}
+
+              {profile.gender && (
+                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(450)}>
+                  <View style={styles.infoCard}>
+                    <Text style={styles.infoLabel}>Gender</Text>
+                    <Text style={styles.infoValue}>{profile.gender}</Text>
+                  </View>
+                </AnimatedReanimated.View>
+              )}
+
+              {profile.goal && (
+                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(500)}>
+                  <View style={styles.infoCard}>
+                    <Text style={styles.infoLabel}>Primary Goal</Text>
+                    <Text style={styles.infoValue}>{profile.goal}</Text>
+                  </View>
+                </AnimatedReanimated.View>
+              )}
+
+              {profile.days_per_week && (
+                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(550)}>
+                  <View style={styles.infoCard}>
+                    <Text style={styles.infoLabel}>Workout Days per Week</Text>
+                    <Text style={styles.infoValue}>{profile.days_per_week} days</Text>
+                  </View>
+                </AnimatedReanimated.View>
+              )}
             </View>
-          )}
+          </AnimatedReanimated.View>
 
-          {profile.goal && (
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Primary Goal</Text>
-              <Text style={styles.infoValue}>{profile.goal}</Text>
-            </View>
-          )}
-
-          {profile.days_per_week && (
-            <View style={styles.infoCard}>
-              <Text style={styles.infoLabel}>Workout Days per Week</Text>
-              <Text style={styles.infoValue}>{profile.days_per_week} days</Text>
-            </View>
-          )}
-        </View>
-
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-          <LogOut size={20} color="#ef4444" />
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(600)}>
+            <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+              <LogOut size={20} color="#ef4444" />
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </TouchableOpacity>
+          </AnimatedReanimated.View>
+        </ScrollView>
+      </AnimatedReanimated.View>
     </SafeAreaView>
   );
 }

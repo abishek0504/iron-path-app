@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, Modal, ActivityIndicator, RefreshControl, TextInput, Alert, Platform } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus } from 'lucide-react-native';
@@ -68,6 +69,49 @@ export default function ProgressScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
+  
+  // Animation for the sliding indicator
+  const indicatorPosition = useSharedValue(0);
+  const indicatorWidth = useSharedValue(0);
+  
+  // Store button positions
+  const [buttonLayouts, setButtonLayouts] = useState<{
+    week: { x: number; width: number } | null;
+    month: { x: number; width: number } | null;
+    timeline: { x: number; width: number } | null;
+  }>({
+    week: null,
+    month: null,
+    timeline: null,
+  });
+  
+  // Update indicator position when view mode changes
+  useEffect(() => {
+    const layout = buttonLayouts[viewMode];
+    if (layout) {
+      indicatorPosition.value = withTiming(layout.x, {
+        duration: 300,
+      });
+      indicatorWidth.value = withTiming(layout.width, {
+        duration: 300,
+      });
+    }
+  }, [viewMode, buttonLayouts, indicatorPosition, indicatorWidth]);
+  
+  // Handle button layout
+  const handleButtonLayout = (mode: ViewMode) => (event: any) => {
+    const { x, width } = event.nativeEvent.layout;
+    setButtonLayouts(prev => ({
+      ...prev,
+      [mode]: { x, width },
+    }));
+  };
+  
+  // Animated style for the indicator
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorPosition.value }],
+    width: indicatorWidth.value,
+  }));
   const [workoutData, setWorkoutData] = useState<WorkoutData[]>([]);
   const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; difficulty_level: string | null }>>(new Map());
   const [planData, setPlanData] = useState<Map<number, any>>(new Map()); // Store plan data to get target values
@@ -900,6 +944,21 @@ export default function ProgressScreen() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.monthStats}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>
+              {workoutData.reduce((sum, w) => sum + w.sessions.length, 0)}
+            </Text>
+            <Text style={styles.statLabel}>Workouts</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>
+              {Math.round(workoutData.reduce((sum, w) => sum + w.sessions.reduce((s, ses) => s + ses.totalVolume, 0), 0))}
+            </Text>
+            <Text style={styles.statLabel}>Total Volume</Text>
+          </View>
+        </View>
+
         <ScrollView 
           style={styles.calendarScroll}
           contentContainerStyle={styles.calendarScrollContent}
@@ -955,21 +1014,6 @@ export default function ProgressScreen() {
             })}
           </View>
         </ScrollView>
-
-        <View style={styles.monthStats}>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>
-              {workoutData.reduce((sum, w) => sum + w.sessions.length, 0)}
-            </Text>
-            <Text style={styles.statLabel}>Workouts</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>
-              {Math.round(workoutData.reduce((sum, w) => sum + w.sessions.reduce((s, ses) => s + ses.totalVolume, 0), 0))}
-            </Text>
-            <Text style={styles.statLabel}>Total Volume</Text>
-          </View>
-        </View>
       </View>
     );
   };
@@ -2293,23 +2337,27 @@ export default function ProgressScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Progress</Text>
         <View style={styles.viewModeSelector}>
+          <Animated.View style={[styles.viewModeIndicator, indicatorStyle]} />
           <TouchableOpacity
-            style={[styles.viewModeButton, viewMode === 'week' && styles.viewModeButtonActive]}
+            style={styles.viewModeButton}
             onPress={() => setViewMode('week')}
+            onLayout={handleButtonLayout('week')}
             activeOpacity={0.7}
           >
             <Text style={[styles.viewModeText, viewMode === 'week' && styles.viewModeTextActive]}>Week</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.viewModeButton, viewMode === 'month' && styles.viewModeButtonActive]}
+            style={styles.viewModeButton}
             onPress={() => setViewMode('month')}
+            onLayout={handleButtonLayout('month')}
             activeOpacity={0.7}
           >
             <Text style={[styles.viewModeText, viewMode === 'month' && styles.viewModeTextActive]}>Month</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.viewModeButton, viewMode === 'timeline' && styles.viewModeButtonActive]}
+            style={styles.viewModeButton}
             onPress={() => setViewMode('timeline')}
+            onLayout={handleButtonLayout('timeline')}
             activeOpacity={0.7}
           >
             <Text style={[styles.viewModeText, viewMode === 'timeline' && styles.viewModeTextActive]}>Timeline</Text>
@@ -2320,11 +2368,11 @@ export default function ProgressScreen() {
       {loading && !refreshing ? (
         <ProgressSkeleton />
       ) : (
-        <View style={styles.content}>
+        <Animated.View entering={FadeIn.duration(400)} style={styles.content}>
           {viewMode === 'week' && renderWeekView()}
           {viewMode === 'month' && renderMonthView()}
           {viewMode === 'timeline' && renderTimelineView()}
-        </View>
+        </Animated.View>
       )}
 
       {renderWorkoutDetail()}
@@ -2356,6 +2404,19 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 4,
     gap: 4,
+    position: 'relative',
+  },
+  viewModeIndicator: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    backgroundColor: '#a3e635', // lime-400
+    borderRadius: 16,
+    shadowColor: '#a3e635', // lime-400
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   viewModeButton: {
     flex: 1,
@@ -2365,14 +2426,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 40,
-  },
-  viewModeButtonActive: {
-    backgroundColor: '#a3e635', // lime-400
-    shadowColor: '#a3e635', // lime-400
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    zIndex: 1,
   },
   viewModeText: {
     color: '#a1a1aa', // zinc-400
@@ -2541,8 +2595,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#27272a', // zinc-800
   },
   monthTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: '700',
     color: 'white',
   },
   calendarScroll: {
@@ -2572,14 +2626,15 @@ const styles = StyleSheet.create({
   calendarCell: {
     width: '14.28%',
     aspectRatio: 1,
-    padding: 6,
+    padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#27272a', // zinc-800
     backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
-    borderRadius: 6,
-    margin: 1,
+    borderRadius: 8,
+    margin: 2,
+    minHeight: 50,
   },
   calendarCellOtherMonth: {
     opacity: 0.25,
@@ -2590,9 +2645,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   calendarDayText: {
-    fontSize: 15,
+    fontSize: 16,
     color: 'white',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   calendarDayTextOtherMonth: {
     color: '#6b7280',
@@ -2612,9 +2667,10 @@ const styles = StyleSheet.create({
   monthStats: {
     flexDirection: 'row',
     padding: 16,
+    paddingTop: 12,
     gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#374151',
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a', // zinc-800
   },
   statCard: {
     flex: 1,

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Pressable } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
@@ -1402,7 +1403,8 @@ export default function WorkoutActiveScreen() {
         </View>
       </Modal>
 
-      <View style={styles.header}>
+      <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+        <View style={styles.header}>
         <Text style={styles.headerTitle}>{day} Workout</Text>
         <View style={{ position: 'relative' }}>
           <Pressable 
@@ -1612,6 +1614,7 @@ export default function WorkoutActiveScreen() {
           </View>
         )}
       </View>
+      </Animated.View>
     </SafeAreaView>
   );
 }

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Switch } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Switch, Modal, FlatList, Platform } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Check } from 'lucide-react-native';
@@ -86,6 +87,13 @@ export default function OnboardingScreen() {
   const [heightCm, setHeightCm] = useState<string>('');
   const [gender, setGender] = useState<string>('');
   const [useMetric, setUseMetric] = useState<boolean>(false);
+  
+  // Picker modals
+  const [showGenderPicker, setShowGenderPicker] = useState(false);
+  const [showAgePicker, setShowAgePicker] = useState(false);
+  const [showWeightPicker, setShowWeightPicker] = useState(false);
+  const [showHeightPicker, setShowHeightPicker] = useState(false);
+  
 
   const progress = ((currentStep + 1) / TOTAL_STEPS) * 100;
 
@@ -307,10 +315,10 @@ export default function OnboardingScreen() {
             <View style={styles.unitToggleContainer}>
               <Text style={styles.unitLabel}>Metric</Text>
               <Switch
-                value={useMetric}
-                onValueChange={setUseMetric}
+                value={!useMetric}
+                onValueChange={(value) => setUseMetric(!value)}
                 trackColor={{ false: '#27272a', true: '#a3e635' }}
-                thumbColor={useMetric ? '#ffffff' : '#a1a1aa'}
+                thumbColor={!useMetric ? '#ffffff' : '#a1a1aa'}
                 ios_backgroundColor="#27272a"
               />
               <Text style={styles.unitLabel}>Imperial</Text>
@@ -318,93 +326,53 @@ export default function OnboardingScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Age</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your age"
-                placeholderTextColor="#71717a"
-                value={age}
-                onChangeText={setAge}
-                keyboardType="number-pad"
-              />
+              <TouchableOpacity
+                style={styles.pickerButton}
+                onPress={() => setShowAgePicker(true)}
+              >
+                <Text style={[styles.pickerButtonText, !age && styles.pickerButtonPlaceholder]}>
+                  {age || 'Select age'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Weight ({useMetric ? 'kg' : 'lbs'})</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={`Enter weight in ${useMetric ? 'kg' : 'lbs'}`}
-                placeholderTextColor="#71717a"
-                value={weight}
-                onChangeText={setWeight}
-                keyboardType="decimal-pad"
-              />
+              <TouchableOpacity
+                style={styles.pickerButton}
+                onPress={() => setShowWeightPicker(true)}
+              >
+                <Text style={[styles.pickerButtonText, !weight && styles.pickerButtonPlaceholder]}>
+                  {weight ? `${weight} ${useMetric ? 'kg' : 'lbs'}` : `Select weight (${useMetric ? 'kg' : 'lbs'})`}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Height</Text>
-              {useMetric ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter height in cm"
-                  placeholderTextColor="#71717a"
-                  value={heightCm}
-                  onChangeText={setHeightCm}
-                  keyboardType="decimal-pad"
-                />
-              ) : (
-                <View style={styles.heightInputRow}>
-                  <TextInput
-                    style={[styles.input, styles.heightInputHalf]}
-                    placeholder="Feet"
-                    placeholderTextColor="#71717a"
-                    value={heightFeet}
-                    onChangeText={setHeightFeet}
-                    keyboardType="number-pad"
-                  />
-                  <TextInput
-                    style={[styles.input, styles.heightInputHalf]}
-                    placeholder="Inches"
-                    placeholderTextColor="#71717a"
-                    value={heightInches}
-                    onChangeText={setHeightInches}
-                    keyboardType="number-pad"
-                  />
-                </View>
-              )}
+              <TouchableOpacity
+                style={styles.pickerButton}
+                onPress={() => setShowHeightPicker(true)}
+              >
+                <Text style={[styles.pickerButtonText, (!heightCm && !heightFeet) && styles.pickerButtonPlaceholder]}>
+                  {useMetric 
+                    ? (heightCm ? `${heightCm} cm` : 'Select height (cm)')
+                    : (heightFeet || heightInches ? `${heightFeet || 0}' ${heightInches || 0}"` : "Select height (ft'in\")")
+                  }
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Gender</Text>
-              <View style={styles.optionsContainer}>
-                {GENDERS.map((genderOption) => {
-                  const isSelected = gender === genderOption;
-                  return (
-                    <TouchableOpacity
-                      key={genderOption}
-                      style={[
-                        styles.optionCard,
-                        isSelected && styles.optionCardSelected
-                      ]}
-                      onPress={() => setGender(genderOption)}
-                    >
-                      <View style={[
-                        styles.checkbox,
-                        isSelected && styles.checkboxSelected
-                      ]}>
-                        {isSelected && <Check size={16} color="#09090b" />}
-                      </View>
-                      <View style={styles.optionContent}>
-                        <Text style={[
-                          styles.optionText,
-                          isSelected && styles.optionTextSelected
-                        ]}>
-                          {genderOption}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              <TouchableOpacity
+                style={styles.pickerButton}
+                onPress={() => setShowGenderPicker(true)}
+              >
+                <Text style={[styles.pickerButtonText, !gender && styles.pickerButtonPlaceholder]}>
+                  {gender || 'Select gender'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         ) : currentStep === 5 ? (
@@ -592,6 +560,185 @@ export default function OnboardingScreen() {
           </Text>
         )}
       </TouchableOpacity>
+
+      {/* Gender Picker Modal */}
+      <Modal
+        visible={showGenderPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowGenderPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowGenderPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Gender</Text>
+              <TouchableOpacity
+                onPress={() => setShowGenderPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <Picker
+              selectedValue={gender}
+              onValueChange={(itemValue) => setGender(itemValue)}
+              style={styles.nativePicker}
+            >
+              {GENDERS.map((genderOption) => (
+                <Picker.Item key={genderOption} label={genderOption} value={genderOption} />
+              ))}
+            </Picker>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Age Picker Modal */}
+      <Modal
+        visible={showAgePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowAgePicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAgePicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Age</Text>
+              <TouchableOpacity
+                onPress={() => setShowAgePicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <Picker
+              selectedValue={age}
+              onValueChange={(itemValue) => setAge(itemValue)}
+              style={styles.nativePicker}
+            >
+              {Array.from({ length: 150 }, (_, i) => i + 1).map((ageValue) => (
+                <Picker.Item key={ageValue} label={ageValue.toString()} value={ageValue.toString()} />
+              ))}
+            </Picker>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Weight Picker Modal */}
+      <Modal
+        visible={showWeightPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowWeightPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowWeightPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Weight</Text>
+              <TouchableOpacity
+                onPress={() => setShowWeightPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.nativePickerRow}>
+              <Picker
+                selectedValue={weight}
+                onValueChange={(itemValue) => setWeight(itemValue)}
+                style={[styles.nativePicker, { flex: 1 }]}
+              >
+                {Array.from({ length: useMetric ? 301 : 601 }, (_, i) => i).map((weightValue) => (
+                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} />
+                ))}
+              </Picker>
+              <View style={styles.pickerUnitLabel}>
+                <Text style={styles.pickerUnitText}>{useMetric ? 'kg' : 'lbs'}</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Height Picker Modal */}
+      <Modal
+        visible={showHeightPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowHeightPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowHeightPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Height</Text>
+              <TouchableOpacity
+                onPress={() => setShowHeightPicker(false)}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            {useMetric ? (
+              <View style={styles.nativePickerRow}>
+                <Picker
+                  selectedValue={heightCm}
+                  onValueChange={(itemValue) => setHeightCm(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                >
+                  {Array.from({ length: 301 }, (_, i) => i).map((cmValue) => (
+                    <Picker.Item key={cmValue} label={cmValue.toString()} value={cmValue.toString()} />
+                  ))}
+                </Picker>
+                <View style={styles.pickerUnitLabel}>
+                  <Text style={styles.pickerUnitText}>cm</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.nativePickerRow}>
+                <Picker
+                  selectedValue={heightFeet}
+                  onValueChange={(itemValue) => setHeightFeet(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                >
+                  {Array.from({ length: 9 }, (_, i) => i).map((feetValue) => (
+                    <Picker.Item key={feetValue} label={feetValue.toString()} value={feetValue.toString()} />
+                  ))}
+                </Picker>
+                <View style={styles.pickerUnitLabel}>
+                  <Text style={styles.pickerUnitText}>ft</Text>
+                </View>
+                <Picker
+                  selectedValue={heightInches}
+                  onValueChange={(itemValue) => setHeightInches(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                >
+                  {Array.from({ length: 12 }, (_, i) => i).map((inchesValue) => (
+                    <Picker.Item key={inchesValue} label={inchesValue.toString()} value={inchesValue.toString()} />
+                  ))}
+                </Picker>
+                <View style={styles.pickerUnitLabel}>
+                  <Text style={styles.pickerUnitText}>in</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -770,5 +917,113 @@ const styles = StyleSheet.create({
   },
   heightInputHalf: {
     flex: 1,
+  },
+  pickerButton: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  pickerButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+  },
+  pickerButtonPlaceholder: {
+    color: '#71717a', // zinc-500
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerModal: {
+    backgroundColor: '#18181b', // zinc-900
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '70%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+  },
+  nativePickerModal: {
+    backgroundColor: '#18181b', // zinc-900
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '50%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+  },
+  nativePicker: {
+    height: 216,
+    backgroundColor: '#18181b', // zinc-900
+  },
+  nativePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181b', // zinc-900
+  },
+  pickerUnitLabel: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerUnitText: {
+    fontSize: 18,
+    color: '#71717a', // zinc-500
+    fontWeight: '400',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a', // zinc-800
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  pickerDoneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  pickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#a3e635', // lime-400
+  },
+  pickerScrollView: {
+    maxHeight: 400,
+  },
+  pickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a', // zinc-800
+  },
+  pickerNumberOption: {
+    paddingVertical: 12,
+  },
+  pickerOptionSelected: {
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+  },
+  pickerOptionText: {
+    fontSize: 18,
+    color: '#ffffff',
+  },
+  pickerOptionTextSelected: {
+    color: '#a3e635', // lime-400
+    fontWeight: '600',
+  },
+  pickerSelectedValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#a3e635', // lime-400
   },
 });

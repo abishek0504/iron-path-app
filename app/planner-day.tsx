@@ -470,13 +470,21 @@ Return ONLY the JSON array, no other text.`;
 
   const handleDragEnd = ({ data }: { data: any[] }) => {
     // Only allow drag end if drag was started from grip handle
-    if (dragAllowedRef.current !== null) {
+    if (dragAllowedRef.current !== null && plan && day) {
+      // Update state immediately and synchronously
       const updatedDayData = {
         ...dayData,
         exercises: data
       };
-      // Immediate save for drag action
-      savePlan(updatedDayData, true);
+      
+      // Update state synchronously before any async operations
+      setDayData(updatedDayData);
+      const updatedPlan = { ...plan };
+      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+      setPlan(updatedPlan);
+      
+      // Save to database (async, but state is already updated)
+      savePlan(updatedDayData, true, true); // skipStateUpdate since we already updated
     }
     dragAllowedRef.current = null;
   };
@@ -681,32 +689,19 @@ Return ONLY the JSON array, no other text.`;
           onMoveShouldSetResponder={Platform.OS === 'web' ? () => false : () => false}
         >
         <View style={styles.exerciseHeader}>
-          {Platform.OS !== 'web' && drag ? (
+          {drag ? (
             <TouchableOpacity
-              activeOpacity={0.7}
-              onLongPress={() => {
+              activeOpacity={1}
+              onPressIn={() => {
                 dragAllowedRef.current = index;
                 drag();
               }}
-              delayLongPress={400}
               disabled={isActive}
               style={styles.dragHandleContainer}
               hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
               <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
             </TouchableOpacity>
-          ) : Platform.OS === 'web' ? (
-            <View
-              onStartShouldSetResponder={() => true}
-              onResponderGrant={(e: any) => {
-                e.stopPropagation();
-                dragAllowedRef.current = index;
-                handleWebTouchStart(index, e);
-              }}
-              style={styles.dragHandleContainer}
-            >
-              <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
-            </View>
           ) : (
             <View style={styles.dragHandleContainer}>
               <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
@@ -718,7 +713,7 @@ Return ONLY the JSON array, no other text.`;
               onPress={() => {
                 router.replace({
                   pathname: '/exercise-select',
-                  params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
+                  params: { planId: planId || '', day: day || '', exerciseIndex: (index ?? 0).toString() }
                 });
               }}
             >
@@ -735,7 +730,7 @@ Return ONLY the JSON array, no other text.`;
               onPress={() => {
                 router.replace({
                   pathname: '/workout-sets',
-                  params: { planId: planId || '', day: day || '', exerciseIndex: index.toString() }
+                  params: { planId: planId || '', day: day || '', exerciseIndex: (index ?? 0).toString() }
                 });
               }}
               style={styles.editButton}
@@ -904,21 +899,17 @@ Return ONLY the JSON array, no other text.`;
         <DraggableFlatList
           data={dayData.exercises || []}
           onDragEnd={handleDragEnd}
-          keyExtractor={(item: any, index: number) => `exercise-${index}`}
-          activationDistance={10000}
+          keyExtractor={(item: any, index: number) => {
+            // Use a stable key that includes both name and index to handle reordering
+            const nameKey = item.name || `new-${index}`;
+            return `exercise-${nameKey}-${index}`;
+          }}
+          activationDistance={0}
           simultaneousHandlers={[]}
           renderItem={({ item, index, drag, isActive }: any) => {
             // Store the drag function in a ref so we can call it only from the grip handle
             const dragRef = React.useRef(drag);
             dragRef.current = drag;
-            
-            // Create a no-op drag function that only works if explicitly allowed
-            const conditionalDrag = () => {
-              // Only allow drag if it was explicitly initiated from the grip handle
-              if (dragAllowedRef.current === index) {
-                dragRef.current();
-              }
-            };
             
             return (
               <ScaleDecorator>
@@ -929,7 +920,7 @@ Return ONLY the JSON array, no other text.`;
                   <View 
                     style={{ pointerEvents: isActive ? 'none' : 'auto' }}
                   >
-                    {renderExerciseCard(item, index, conditionalDrag, isActive)}
+                    {renderExerciseCard(item, index, drag, isActive)}
                   </View>
                 </View>
               </ScaleDecorator>
