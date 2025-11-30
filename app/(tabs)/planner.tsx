@@ -17,21 +17,7 @@ export default function PlannerScreen() {
   const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
 
-  useEffect(() => {
-    loadActivePlan();
-    loadUserProfile();
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      // Only refresh if we've already loaded initially
-      if (hasInitiallyLoaded) {
-        loadActivePlan();
-      }
-    }, [hasInitiallyLoaded])
-  );
-
-  const loadActivePlan = async () => {
+  const loadActivePlan = useCallback(async () => {
     // Only show loading on initial load
     if (!hasInitiallyLoaded) {
       setIsLoadingPlan(true);
@@ -59,7 +45,7 @@ export default function PlannerScreen() {
     
     setIsLoadingPlan(false);
     setHasInitiallyLoaded(true);
-  };
+  }, [hasInitiallyLoaded]);
 
   const loadUserProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -77,6 +63,20 @@ export default function PlannerScreen() {
       setUserProfile(data);
     }
   };
+
+  useEffect(() => {
+    loadActivePlan();
+    loadUserProfile();
+  }, [loadActivePlan]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Only refresh if we've already loaded initially
+      if (hasInitiallyLoaded) {
+        loadActivePlan();
+      }
+    }, [hasInitiallyLoaded, loadActivePlan])
+  );
 
   const createEmptyPlan = async () => {
     const { data: { user } } = await supabase.auth.getUser();

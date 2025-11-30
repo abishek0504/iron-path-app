@@ -1182,9 +1182,9 @@ export default function ProgressScreen() {
     return (
       <View style={styles.difficultyContainer}>
         <View style={styles.difficultyBars}>
-          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
-          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
-          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#27272a' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#27272a' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#27272a' }]} />
         </View>
         <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
       </View>
@@ -2480,7 +2480,7 @@ const styles = StyleSheet.create({
     color: '#a3e635', // lime-400
   },
   todayBadge: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#a3e635', // lime-400
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 24, // rounded-3xl
@@ -2607,7 +2607,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#a3e635', // lime-400
   },
   monthStats: {
     flexDirection: 'row',
@@ -3004,8 +3004,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   checkboxChecked: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
+    backgroundColor: '#a3e635', // lime-400
+    borderColor: '#a3e635', // lime-400
   },
   checkboxCheckmark: {
     color: 'white',
@@ -3093,7 +3093,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   deleteConfirmButtonCancel: {
-    backgroundColor: '#374151',
+    backgroundColor: 'rgba(39, 39, 42, 0.8)', // zinc-800/80
   },
   deleteConfirmButtonDelete: {
     backgroundColor: '#ef4444',
