@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Switch, Animated, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Animated, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Edit, LogOut, Check } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
+import { ProfileSkeleton } from '../../src/components/skeletons/ProfileSkeleton';
 
 const kgToLbs = (kg: number): number => kg / 0.453592;
 const cmToFtIn = (cm: number): { feet: number; inches: number } => {
@@ -19,6 +20,7 @@ export default function ProfileScreen() {
   const params = useLocalSearchParams();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
   const [showToast, setShowToast] = useState(false);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -59,12 +61,37 @@ export default function ProfileScreen() {
     }, 2000);
   }, [toastOpacity, toastTranslateY]);
 
+  useEffect(() => {
+    // Only load on initial mount
+    if (!hasInitiallyLoaded) {
+      loadProfile();
+    }
+  }, [hasInitiallyLoaded]);
+
   useFocusEffect(
     useCallback(() => {
-      loadProfile();
+      // Only refresh data on focus if we've already loaded, don't show loading
+      if (hasInitiallyLoaded && profile) {
+        const refresh = async () => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
+          if (!error && data) {
+            setProfile(data);
+            setUseImperial(data.use_imperial !== null && data.use_imperial !== undefined ? data.use_imperial : true);
+          }
+        };
+        refresh();
+      }
       // Reset the flag when the screen loses focus (user navigates away)
       hasShownToastForParam.current = false;
-    }, [])
+    }, [hasInitiallyLoaded, profile])
   );
 
   useEffect(() => {
@@ -84,6 +111,7 @@ export default function ProfileScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setLoading(false);
+      setHasInitiallyLoaded(true);
       return;
     }
 
@@ -94,13 +122,37 @@ export default function ProfileScreen() {
       .single();
 
     if (error) {
-      console.error('Error loading profile:', error);
+      // Check if it's a "not found" error (PGRST116) - profile might not exist yet
+      if (error.code === 'PGRST116') {
+        console.log('Profile not found, creating default profile...');
+        // Profile doesn't exist yet, create a default one
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert([{
+            id: user.id,
+            use_imperial: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }])
+          .select()
+          .single();
+        
+        if (!createError && newProfile) {
+          setProfile(newProfile);
+          setUseImperial(true);
+        } else {
+          console.error('Error creating profile:', createError);
+        }
+      } else {
+        console.error('Error loading profile:', error);
+      }
     } else if (data) {
       setProfile(data);
       // Load unit preference from database, default to true (imperial) if not set
       setUseImperial(data.use_imperial !== null && data.use_imperial !== undefined ? data.use_imperial : true);
     }
     setLoading(false);
+    setHasInitiallyLoaded(true);
   };
 
   const handleSignOut = async () => {
@@ -109,18 +161,12 @@ export default function ProfileScreen() {
   };
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-        </View>
-      </SafeAreaView>
-    );
+    return <ProfileSkeleton />;
   }
 
   if (!profile) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <Text style={styles.errorText}>Failed to load profile</Text>
         </View>
@@ -129,7 +175,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       {showToast && (
         <Animated.View
           style={[
@@ -141,7 +187,7 @@ export default function ProfileScreen() {
           ]}
         >
           <View style={styles.toastContent}>
-            <Check size={20} color="#10b981" />
+            <Check size={20} color="#a3e635" />
             <Text style={styles.toastText}>Changes saved</Text>
           </View>
         </Animated.View>
@@ -153,7 +199,7 @@ export default function ProfileScreen() {
             style={styles.editButton}
             onPress={() => router.push('/edit-profile')}
           >
-            <Edit size={20} color="#3b82f6" />
+            <Edit size={20} color="#a3e635" />
             <Text style={styles.editButtonText}>Edit</Text>
           </TouchableOpacity>
         </View>
@@ -254,13 +300,14 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
   },
   scrollView: {
     flex: 1,
   },
   contentContainer: {
     padding: 24,
+    paddingBottom: 120,
   },
   loadingContainer: {
     flex: 1,
@@ -275,82 +322,90 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '700',
     color: '#ffffff',
+    letterSpacing: -0.5,
   },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#1f2937',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
   },
   editButtonText: {
-    color: '#3b82f6',
-    fontWeight: '600',
+    color: '#a3e635', // lime-400
+    fontWeight: '700',
     fontSize: 16,
+    letterSpacing: 0.5,
   },
   profilePictureContainer: {
     alignItems: 'center',
     marginBottom: 32,
-    paddingVertical: 24,
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
+    paddingVertical: 32,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
   },
   profilePicture: {
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#374151',
+    backgroundColor: '#27272a', // zinc-800
   },
   placeholderPicture: {
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#374151',
+    backgroundColor: '#27272a', // zinc-800
     justifyContent: 'center',
     alignItems: 'center',
   },
   placeholderText: {
-    color: '#9ca3af',
+    color: '#71717a', // zinc-500
     fontSize: 16,
   },
   infoSection: {
-    gap: 12,
-    marginBottom: 24,
+    gap: 16,
+    marginBottom: 32,
   },
   infoCard: {
-    backgroundColor: '#1f2937',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    padding: 24,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   infoLabel: {
-    color: '#9ca3af',
-    fontSize: 14,
-    marginBottom: 4,
-    fontWeight: '500',
+    color: '#71717a', // zinc-500
+    fontSize: 12,
+    marginBottom: 8,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   infoValue: {
     color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
   },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#1f2937',
-    padding: 16,
-    borderRadius: 12,
+    gap: 10,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
     borderColor: '#ef4444',
     marginTop: 8,
@@ -358,7 +413,8 @@ const styles = StyleSheet.create({
   signOutText: {
     color: '#ef4444',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   toastContainer: {
     position: 'absolute',
@@ -373,13 +429,13 @@ const styles = StyleSheet.create({
   toastContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#1f2937',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 12,
+    gap: 10,
+    backgroundColor: 'rgba(24, 24, 27, 0.95)', // zinc-900/95
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
-    borderColor: '#10b981',
+    borderColor: '#a3e635', // lime-400
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -389,6 +445,7 @@ const styles = StyleSheet.create({
   toastText: {
     color: '#ffffff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });

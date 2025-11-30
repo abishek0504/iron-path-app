@@ -623,11 +623,11 @@ Return ONLY the JSON array, no other text.`;
     
     const difficultyLower = String(difficulty).toLowerCase().trim();
     if (difficultyLower === 'beginner') {
-      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+      return { label: 'Easy', color: '#a3e635', activeBars: 1 }; // lime-400
     } else if (difficultyLower === 'intermediate') {
-      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+      return { label: 'Medium', color: '#22d3ee', activeBars: 2 }; // cyan-400
     } else if (difficultyLower === 'advanced') {
-      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+      return { label: 'Hard', color: '#f87171', activeBars: 3 }; // red-400
     }
     return null;
   };
@@ -645,9 +645,9 @@ Return ONLY the JSON array, no other text.`;
     return (
       <View style={styles.difficultyContainer}>
         <View style={styles.difficultyBars}>
-          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
-          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
-          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#27272a' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#27272a' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#27272a' }]} />
         </View>
         <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
       </View>
@@ -693,7 +693,7 @@ Return ONLY the JSON array, no other text.`;
               style={styles.dragHandleContainer}
               hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
-              <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
+              <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
             </TouchableOpacity>
           ) : Platform.OS === 'web' ? (
             <View
@@ -705,11 +705,11 @@ Return ONLY the JSON array, no other text.`;
               }}
               style={styles.dragHandleContainer}
             >
-              <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
+              <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
             </View>
           ) : (
             <View style={styles.dragHandleContainer}>
-              <GripVertical color={(isActive || isDragging) ? "#3b82f6" : "#6b7280"} size={22} />
+              <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
             </View>
           )}
           {item.name === "New Exercise" ? (
@@ -740,7 +740,7 @@ Return ONLY the JSON array, no other text.`;
               }}
               style={styles.editButton}
             >
-              <Edit2 color="#3b82f6" size={18} />
+              <Edit2 color="#a3e635" size={18} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => removeExercise(index)}>
               <X color="#ef4444" size={20} />
@@ -817,7 +817,7 @@ Return ONLY the JSON array, no other text.`;
     <View style={styles.headerSection}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => handleBack()} style={styles.backButton}>
-          <ArrowLeft color="#9ca3af" size={24} />
+          <ArrowLeft color="#a1a1aa" size={24} />
         </TouchableOpacity>
         <Text style={styles.title}>{day}</Text>
         <View style={styles.headerSpacer} />
@@ -826,7 +826,7 @@ Return ONLY the JSON array, no other text.`;
       <View style={styles.exercisesHeader}>
         <Text style={styles.sectionTitle}>Exercises ({dayData.exercises?.length || 0})</Text>
         <TouchableOpacity style={styles.addButton} onPress={addManualExercise}>
-          <Plus color="#3b82f6" size={20} />
+          <Plus color="#a3e635" size={20} />
           <Text style={styles.addButtonText}>Add</Text>
         </TouchableOpacity>
       </View>
@@ -991,34 +991,34 @@ Return ONLY the JSON array, no other text.`;
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827' },
-  listContent: { padding: 24, paddingTop: 20, paddingBottom: 40 },
+  container: { flex: 1, backgroundColor: '#09090b' }, // zinc-950
+  listContent: { padding: 24, paddingTop: 20, paddingBottom: Platform.OS === 'web' ? 40 : 120 }, // Extra padding for native tab bar
   headerSection: { marginBottom: 0 },
   footerSection: { marginTop: 0 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 24 },
   backButton: { marginRight: 16 },
   headerSpacer: { width: 40 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', flex: 1 },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#a3e635', flex: 1 }, // lime-400
   exercisesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   addButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  addButtonText: { color: '#3b82f6', fontSize: 16, fontWeight: '600' },
+  addButtonText: { color: '#a3e635', fontSize: 16, fontWeight: '600' }, // lime-400
   exerciseCard: { 
-    backgroundColor: '#1f2937', 
-    padding: 16, 
-    borderRadius: 8, 
+    backgroundColor: '#18181b', // zinc-900
+    padding: 32, // p-8
+    borderRadius: 24, // rounded-3xl
     marginBottom: 12, 
     borderWidth: 1, 
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     ...(Platform.OS === 'web' ? { userSelect: 'none' as any, WebkitUserSelect: 'none' as any } : {})
   },
-  exerciseCardActive: { opacity: 0.8, transform: [{ scale: 1.03 }], borderColor: '#3b82f6' },
-  insertLine: { height: 3, backgroundColor: '#3b82f6', marginVertical: 4, marginHorizontal: 0, borderRadius: 2 },
+  exerciseCardActive: { opacity: 0.8, transform: [{ scale: 1.03 }], borderColor: '#a3e635' }, // lime-400
+  insertLine: { height: 3, backgroundColor: '#a3e635', marginVertical: 4, marginHorizontal: 0, borderRadius: 2 }, // lime-400
   exerciseHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 12 },
   dragHandleContainer: { padding: 8, marginLeft: -8, marginRight: 4, justifyContent: 'center', alignItems: 'center' },
   exerciseNameContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
   exerciseName: { color: 'white', fontSize: 18, fontWeight: 'bold', flexShrink: 1 },
-  exerciseNamePlaceholder: { color: '#3b82f6', fontSize: 18, fontWeight: 'bold' },
+  exerciseNamePlaceholder: { color: '#a3e635', fontSize: 18, fontWeight: 'bold' }, // lime-400
   exerciseHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   editButton: { padding: 4 },
   difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -1030,40 +1030,40 @@ const styles = StyleSheet.create({
   difficultyText: { fontSize: 14, fontWeight: '600' },
   exerciseRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   exerciseField: { flex: 1 },
-  fieldLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },
+  fieldLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4 }, // zinc-400
   fieldValue: { color: 'white', fontSize: 16, fontWeight: '600' },
-  fieldInput: { backgroundColor: '#111827', color: 'white', padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#374151' },
-  notesInput: { backgroundColor: '#111827', color: 'white', padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#374151', minHeight: 60 },
-  emptyText: { color: '#9ca3af', textAlign: 'center', marginVertical: 24 },
+  fieldInput: { backgroundColor: '#09090b', color: 'white', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#27272a', fontSize: 16 }, // zinc-950, rounded-3xl, zinc-800
+  notesInput: { backgroundColor: '#09090b', color: 'white', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#27272a', minHeight: 60, fontSize: 16, textAlignVertical: 'top' }, // zinc-950, rounded-3xl, zinc-800
+  emptyText: { color: '#a1a1aa', textAlign: 'center', marginVertical: 24 }, // zinc-400
   buttonContainer: { marginTop: 24, marginBottom: 40, gap: 12 },
-  buttonPrimary: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', minHeight: 52, flexDirection: 'row' },
-  buttonDisabled: { backgroundColor: '#1e40af', opacity: 0.7 },
-  buttonSecondary: { borderWidth: 1, borderColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center' },
-  buttonDone: { backgroundColor: '#374151', padding: 16, borderRadius: 8, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
-  buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-  buttonTextSecondary: { color: '#60a5fa', fontWeight: 'bold', fontSize: 16 },
+  buttonPrimary: { backgroundColor: '#a3e635', padding: 20, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 56, flexDirection: 'row' }, // lime-400, rounded-3xl
+  buttonDisabled: { backgroundColor: '#84cc16', opacity: 0.7 }, // lime-500
+  buttonSecondary: { borderWidth: 1, borderColor: '#a3e635', padding: 20, borderRadius: 24, alignItems: 'center', minHeight: 56, justifyContent: 'center' }, // lime-400, rounded-3xl
+  buttonDone: { backgroundColor: '#27272a', padding: 20, borderRadius: 24, alignItems: 'center', minHeight: 56, justifyContent: 'center' }, // zinc-800, rounded-3xl
+  buttonText: { color: '#09090b', fontWeight: 'bold', fontSize: 16 }, // zinc-950 for contrast on lime
+  buttonTextSecondary: { color: '#a3e635', fontWeight: 'bold', fontSize: 16 }, // lime-400
   buttonTextDone: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', padding: 24 },
-  modalContent: { backgroundColor: '#1f2937', borderRadius: 12, padding: 24, borderWidth: 1, borderColor: '#374151' },
+  modalContent: { backgroundColor: '#18181b', borderRadius: 24, padding: 32, borderWidth: 1, borderColor: '#27272a' }, // zinc-900, rounded-3xl, zinc-800
   modalTitle: { color: 'white', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
-  modalSubtitle: { color: '#9ca3af', fontSize: 14, marginBottom: 16 },
-  feedbackInput: { backgroundColor: '#111827', color: 'white', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#374151', minHeight: 120, textAlignVertical: 'top' },
+  modalSubtitle: { color: '#a1a1aa', fontSize: 14, marginBottom: 16 }, // zinc-400
+  feedbackInput: { backgroundColor: '#09090b', color: 'white', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#27272a', minHeight: 120, textAlignVertical: 'top', fontSize: 16 }, // zinc-950, rounded-3xl, zinc-800
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 16 },
-  modalButtonSecondary: { flex: 1, borderWidth: 1, borderColor: '#374151', padding: 12, borderRadius: 8, alignItems: 'center' },
-  modalButtonPrimary: { flex: 1, backgroundColor: '#2563eb', padding: 12, borderRadius: 8, alignItems: 'center' },
-  modalButtonTextSecondary: { color: '#9ca3af', fontWeight: 'bold' },
-  modalButtonTextPrimary: { color: 'white', fontWeight: 'bold' },
+  modalButtonSecondary: { flex: 1, borderWidth: 1, borderColor: '#27272a', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // zinc-800, rounded-3xl
+  modalButtonPrimary: { flex: 1, backgroundColor: '#a3e635', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // lime-400, rounded-3xl
+  modalButtonTextSecondary: { color: '#a1a1aa', fontWeight: 'bold' }, // zinc-400
+  modalButtonTextPrimary: { color: '#09090b', fontWeight: 'bold' }, // zinc-950 for contrast
   setsButtonRow: { marginTop: 12, flexDirection: 'row', justifyContent: 'flex-end' },
-  setsButton: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: '#2563eb' },
-  setsButtonText: { color: '#60a5fa', fontWeight: '600', fontSize: 14 },
+  setsButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: '#a3e635' }, // lime-400
+  setsButtonText: { color: '#a3e635', fontWeight: '600', fontSize: 14 }, // lime-400
   setsContainer: { marginBottom: 12 },
-  setsTitle: { color: '#9ca3af', fontSize: 12, marginBottom: 8, fontWeight: '600' },
+  setsTitle: { color: '#a1a1aa', fontSize: 12, marginBottom: 8, fontWeight: '600' }, // zinc-400
   setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' },
   setNumber: { color: 'white', fontSize: 14, fontWeight: '600' },
-  setValue: { color: '#9ca3af', fontSize: 14 },
-  noSetsText: { color: '#6b7280', fontSize: 14, fontStyle: 'italic', marginBottom: 12 },
+  setValue: { color: '#a1a1aa', fontSize: 14 }, // zinc-400
+  noSetsText: { color: '#71717a', fontSize: 14, fontStyle: 'italic', marginBottom: 12 }, // zinc-500
   notesContainer: { marginTop: 8, marginBottom: 12 },
-  notesLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4, fontWeight: '600' },
-  notesText: { color: '#9ca3af', fontSize: 14 },
+  notesLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' }, // zinc-400
+  notesText: { color: '#a1a1aa', fontSize: 14 }, // zinc-400
 });
 

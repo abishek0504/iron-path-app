@@ -36,7 +36,7 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
   },
   content: {
     flex: 1,
@@ -52,39 +52,43 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 42,
-    fontWeight: 'bold',
-    color: '#3b82f6',
+    fontWeight: '700',
+    color: '#a3e635', // lime-400
     textAlign: 'center',
     marginBottom: 12,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 18,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     textAlign: 'center',
     marginBottom: 48,
   },
   buttonPrimary: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
     marginBottom: 16,
   },
   buttonSecondary: {
     borderWidth: 1,
-    borderColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    borderColor: '#a3e635', // lime-400
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
   },
   buttonText: {
-    color: 'white',
+    color: '#09090b', // zinc-950
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '700',
     fontSize: 18,
+    letterSpacing: 0.5,
   },
   buttonTextSecondary: {
-    color: '#60a5fa',
+    color: '#a3e635', // lime-400
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '700',
     fontSize: 18,
+    letterSpacing: 0.5,
   },
 });

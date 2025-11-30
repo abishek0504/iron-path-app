@@ -206,6 +206,11 @@ export default function EditProfileScreen() {
 
     let result;
     if (source === 'camera') {
+      // Camera not available on web
+      if (Platform.OS === 'web') {
+        Alert.alert('Not Available', 'Camera is not available on web. Please use photo library instead.');
+        return;
+      }
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'We need camera permission to take a photo.');

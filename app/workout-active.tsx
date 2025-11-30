@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ActivityIndicator, ScrollView, Pressable } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { WorkoutActiveSkeleton } from '../src/components/skeletons/WorkoutActiveSkeleton';
 
 interface ExerciseDetail {
   is_timed: boolean;
@@ -58,9 +59,9 @@ export default function WorkoutActiveScreen() {
   const safeBack = () => {
     try {
       // Use replace to prevent navigation stacking
-      router.replace('/(tabs)/home');
+      router.replace('/(tabs)');
     } catch (error) {
-      router.replace('/(tabs)/home');
+      router.replace('/(tabs)');
     }
   };
   
@@ -973,14 +974,7 @@ export default function WorkoutActiveScreen() {
   }, [progress, router, workoutSession]);
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading workout...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <WorkoutActiveSkeleton />;
   }
 
   // Show logging screen if exercise is complete
@@ -1625,7 +1619,7 @@ export default function WorkoutActiveScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
   },
   loadingContainer: {
     flex: 1,
@@ -1633,40 +1627,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     marginTop: 16,
     fontSize: 16,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 24,
-    paddingTop: 60,
+    paddingTop: 48,
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#3b82f6',
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.5,
   },
   progressBar: {
     paddingHorizontal: 24,
     paddingBottom: 16,
   },
   progressText: {
-    color: '#9ca3af',
-    fontSize: 14,
+    color: '#a1a1aa', // zinc-400
+    fontSize: 12,
     marginBottom: 8,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    fontWeight: '600',
   },
   progressBarFill: {
     height: 8,
-    backgroundColor: '#1f2937',
+    backgroundColor: '#18181b', // zinc-900
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressBarInner: {
     height: '100%',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#a3e635', // lime-400
     borderRadius: 4,
   },
   exerciseContainer: {
@@ -1675,23 +1676,25 @@ const styles = StyleSheet.create({
   },
   exerciseName: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: 'white',
+    fontWeight: '700',
+    color: '#ffffff',
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   setNumber: {
     fontSize: 18,
-    color: '#3b82f6',
-    fontWeight: '600',
+    color: '#a3e635', // lime-400
+    fontWeight: '700',
     marginBottom: 24,
+    letterSpacing: 0.5,
   },
   exerciseInfo: {
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
+    padding: 24,
+    marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   infoRow: {
     flexDirection: 'row',
@@ -1699,52 +1702,61 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   infoLabel: {
-    color: '#9ca3af',
-    fontSize: 16,
+    color: '#a1a1aa', // zinc-400
+    fontSize: 14,
+    fontWeight: '500',
+    letterSpacing: 0.5,
   },
   infoValue: {
-    color: 'white',
+    color: '#ffffff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   instructionsSection: {
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
+    padding: 24,
+    marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   instructionsTitle: {
-    color: '#3b82f6',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    color: '#a3e635', // lime-400
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   instructionsText: {
-    color: '#d1d5db',
+    color: '#e4e4e7', // zinc-200
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   exerciseTimerContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 32,
-    backgroundColor: '#065f46',
-    borderRadius: 16,
-    marginBottom: 16,
+    padding: 40,
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+    borderRadius: 24, // rounded-3xl
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: 'rgba(163, 230, 53, 0.3)', // lime-400/30
   },
   exerciseTimerText: {
-    color: '#10b981',
-    fontSize: 48,
-    fontWeight: 'bold',
-    marginVertical: 16,
+    color: '#a3e635', // lime-400
+    fontSize: 56,
+    fontWeight: '700',
+    marginVertical: 20,
+    fontFamily: 'monospace',
   },
   countdownLabel: {
-    color: '#10b981',
-    fontSize: 18,
-    fontWeight: '600',
+    color: '#a3e635', // lime-400
+    fontSize: 16,
+    fontWeight: '700',
     marginBottom: 16,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   timerButtons: {
     flexDirection: 'row',
@@ -1754,72 +1766,81 @@ const styles = StyleSheet.create({
   timerControlButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 16,
   },
   timerControlButtonText: {
-    color: 'white',
+    color: '#ffffff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   completeTimerButton: {
-    backgroundColor: '#10b981',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: '#a3e635', // lime-400
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 24, // rounded-3xl
   },
   completeTimerButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: '#09090b', // zinc-950
+    fontWeight: '700',
     fontSize: 16,
+    letterSpacing: 0.5,
   },
   restTimerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    padding: 24,
-    backgroundColor: '#1e3a8a',
-    borderRadius: 16,
-    marginBottom: 16,
+    gap: 16,
+    padding: 32,
+    backgroundColor: 'rgba(6, 182, 212, 0.1)', // cyan-500/10
+    borderRadius: 24, // rounded-3xl
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: 'rgba(6, 182, 212, 0.3)', // cyan-500/30
   },
   restTimerText: {
-    color: '#60a5fa',
-    fontSize: 32,
-    fontWeight: 'bold',
+    color: '#22d3ee', // cyan-400
+    fontSize: 40,
+    fontWeight: '700',
+    fontFamily: 'monospace',
   },
   skipButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     marginLeft: 'auto',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(34, 211, 238, 0.2)', // cyan-400/20
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 211, 238, 0.4)', // cyan-400/40
   },
   skipButtonText: {
-    color: 'white',
+    color: '#22d3ee', // cyan-400
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   actionButtons: {
     marginTop: 'auto',
     paddingTop: 24,
   },
   completeSetButton: {
-    backgroundColor: '#2563eb',
-    padding: 20,
-    borderRadius: 12,
+    backgroundColor: '#a3e635', // lime-400
+    padding: 24,
+    borderRadius: 24, // rounded-3xl
     alignItems: 'center',
     justifyContent: 'center',
   },
   completeSetButtonText: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
+    color: '#09090b', // zinc-950
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   loggingScrollView: {
     flex: 1,
@@ -1830,42 +1851,45 @@ const styles = StyleSheet.create({
   },
   loggingTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#3b82f6',
+    fontWeight: '700',
+    color: '#ffffff',
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   loggingSubtitle: {
     fontSize: 16,
-    color: '#9ca3af',
-    marginBottom: 24,
+    color: '#a1a1aa', // zinc-400
+    marginBottom: 32,
   },
   setLogCard: {
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
+    padding: 24,
+    marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   setLogTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 20,
   },
   targetSection: {
-    backgroundColor: '#111827',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+    backgroundColor: '#09090b', // zinc-950
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   targetSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#9ca3af',
-    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#71717a', // zinc-500
+    marginBottom: 12,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   targetRow: {
     flexDirection: 'row',
@@ -1891,18 +1915,20 @@ const styles = StyleSheet.create({
     minWidth: 60,
   },
   targetValue: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   loggedSection: {
-    marginTop: 16,
+    marginTop: 20,
   },
   loggedSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#71717a', // zinc-500
     marginBottom: 16,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   logInputGroup: {
     marginBottom: 0,
@@ -1918,28 +1944,30 @@ const styles = StyleSheet.create({
     minHeight: 88,
   },
   logLabel: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 8,
+    fontWeight: '600',
+    marginBottom: 10,
     minHeight: 20,
+    letterSpacing: 0.5,
   },
   logSubLabel: {
-    color: '#9ca3af',
+    color: '#71717a', // zinc-500
     fontSize: 12,
-    fontWeight: '500',
-    marginBottom: 8,
+    fontWeight: '600',
+    marginBottom: 10,
     minHeight: 16,
+    letterSpacing: 0.5,
   },
   logInput: {
-    backgroundColor: '#111827',
-    color: 'white',
-    padding: 12,
-    borderRadius: 8,
+    backgroundColor: '#09090b', // zinc-950
+    color: '#ffffff',
+    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     fontSize: 16,
-    minHeight: 44,
+    minHeight: 48,
   },
   logInputFlex: {
     flex: 1,
@@ -1960,28 +1988,29 @@ const styles = StyleSheet.create({
   comparisonBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#111827',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    gap: 6,
+    backgroundColor: '#09090b', // zinc-950
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
-    minHeight: 32,
+    borderColor: '#27272a', // zinc-800
+    minHeight: 36,
     justifyContent: 'center',
   },
   comparisonText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   comparisonTextGood: {
-    color: '#10b981',
+    color: '#a3e635', // lime-400
   },
   comparisonTextBetter: {
-    color: '#3b82f6',
+    color: '#22d3ee', // cyan-400
   },
   comparisonTextBad: {
-    color: '#ef4444',
+    color: '#ef4444', // red-500
   },
   targetHint: {
     color: '#6b7280',
@@ -2000,20 +2029,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loggingButtonPrimary: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#a3e635', // lime-400
   },
   loggingButtonSecondary: {
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     borderWidth: 2,
-    borderColor: '#3b82f6',
+    borderColor: '#a3e635', // lime-400
   },
   loggingButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: '#09090b', // zinc-950
+    fontWeight: '700',
     fontSize: 18,
+    letterSpacing: 0.5,
   },
   loggingButtonTextSecondary: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
   },
   completionContainer: {
     flex: 1,
@@ -2022,61 +2052,64 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   completionTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#10b981',
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#a3e635', // lime-400
     textAlign: 'center',
     marginBottom: 16,
+    letterSpacing: -0.5,
   },
   completionSubtitle: {
     fontSize: 18,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: 40,
   },
   completeWorkoutButton: {
-    backgroundColor: '#2563eb',
-    padding: 18,
-    borderRadius: 12,
-    minWidth: 200,
+    backgroundColor: '#a3e635', // lime-400
+    padding: 20,
+    borderRadius: 24, // rounded-3xl
+    minWidth: 240,
     alignItems: 'center',
   },
   completeWorkoutButtonText: {
-    color: 'white',
+    color: '#09090b', // zinc-950
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   logInputDisabled: {
-    backgroundColor: '#374151',
-    opacity: 0.5,
+    backgroundColor: '#27272a', // zinc-800
+    opacity: 0.6,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(9, 9, 11, 0.8)', // zinc-950/80
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   modalContent: {
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
-    padding: 24,
+    backgroundColor: 'rgba(24, 24, 27, 0.95)', // zinc-900/95
+    borderRadius: 24, // rounded-3xl
+    padding: 32,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     width: '100%',
     maxWidth: 400,
   },
   modalTitle: {
-    color: 'white',
+    color: '#ffffff',
     fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontWeight: '700',
+    marginBottom: 16,
+    letterSpacing: -0.5,
   },
   modalMessage: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 16,
-    marginBottom: 24,
-    lineHeight: 22,
+    marginBottom: 32,
+    lineHeight: 24,
   },
   modalButtons: {
     flexDirection: 'row',
@@ -2084,30 +2117,32 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    padding: 14,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalButtonCancel: {
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   modalButtonConfirm: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#a3e635', // lime-400
   },
   modalButtonDanger: {
-    backgroundColor: '#dc2626',
+    backgroundColor: '#ef4444', // red-500
   },
   modalButtonText: {
-    color: 'white',
+    color: '#09090b', // zinc-950
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   modalButtonTextCancel: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });

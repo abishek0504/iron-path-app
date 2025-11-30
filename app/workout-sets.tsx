@@ -624,7 +624,7 @@ export default function WorkoutSetsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
+          <ActivityIndicator size="large" color="#a3e635" />
         </View>
       </SafeAreaView>
     );
@@ -635,7 +635,7 @@ export default function WorkoutSetsScreen() {
       <View style={styles.headerSection}>
         <View style={styles.header}>
           <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-            <ArrowLeft color="#9ca3af" size={24} />
+            <ArrowLeft color="#a1a1aa" size={24} />
           </TouchableOpacity>
           <Text
             style={styles.title}
@@ -662,7 +662,7 @@ export default function WorkoutSetsScreen() {
               style={styles.addSetButton}
               onPress={handleAddSet}
             >
-              <Plus color="#3b82f6" size={20} />
+              <Plus color="#a3e635" size={20} />
               <Text style={styles.addSetText}>Add set</Text>
             </TouchableOpacity>
 
@@ -688,7 +688,7 @@ export default function WorkoutSetsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827' },
+  container: { flex: 1, backgroundColor: '#09090b' }, // zinc-950
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -701,26 +701,26 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     flex: 1,
   },
   subtitle: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 14,
     marginTop: 4,
   },
   listContent: {
     paddingHorizontal: 24,
-    paddingBottom: 32,
+    paddingBottom: Platform.OS === 'web' ? 32 : 120, // Extra padding for native tab bar
     paddingTop: 8,
   },
   setCard: {
-    backgroundColor: '#1f2937',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#18181b', // zinc-900
+    padding: 32, // p-8
+    borderRadius: 24, // rounded-3xl
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     ...(Platform.OS === 'web'
       ? {
           userSelect: 'none' as any,
@@ -748,7 +748,7 @@ const styles = StyleSheet.create({
     minHeight: 80,
   },
   fieldLabel: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 12,
     marginBottom: 4,
     minHeight: 16,
@@ -761,7 +761,7 @@ const styles = StyleSheet.create({
   },
   bodyweightCheckboxLabel: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
   },
   bodyweightCheckbox: {
     width: 20,
@@ -773,15 +773,15 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderWidth: 2,
-    borderColor: '#6b7280',
+    borderColor: '#71717a', // zinc-500
     borderRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'transparent',
   },
   checkboxChecked: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
+    backgroundColor: '#a3e635', // lime-400
+    borderColor: '#a3e635', // lime-400
   },
   checkboxCheckmark: {
     color: 'white',
@@ -789,17 +789,18 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   fieldInput: {
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     color: 'white',
-    padding: 8,
-    borderRadius: 4,
+    padding: 16,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     minHeight: 40,
+    fontSize: 16,
   },
   fieldInputDisabled: {
-    backgroundColor: '#1f2937',
-    color: '#6b7280',
+    backgroundColor: '#18181b', // zinc-900
+    color: '#71717a', // zinc-500
     opacity: 0.6,
   },
   footerSection: {
@@ -813,26 +814,26 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   addSetText: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     fontSize: 16,
     fontWeight: '600',
   },
   saveButton: {
     marginTop: 16,
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#a3e635', // lime-400
+    padding: 20,
+    borderRadius: 24, // rounded-3xl
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
+    minHeight: 56,
     flexDirection: 'row',
   },
   saveButtonDisabled: {
-    backgroundColor: '#1e40af',
+    backgroundColor: '#84cc16', // lime-500
     opacity: 0.7,
   },
   saveButtonText: {
-    color: 'white',
+    color: '#09090b', // zinc-950 for contrast
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -844,7 +845,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   durationLabel: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 12,
     marginBottom: 4,
     minHeight: 16,

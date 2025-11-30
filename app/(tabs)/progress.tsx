@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
+import { ProgressSkeleton } from '../../src/components/skeletons/ProgressSkeleton';
 
 type ViewMode = 'week' | 'month' | 'timeline';
 
@@ -64,8 +65,9 @@ export default function ProgressScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ selectedExercise?: string }>();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [workoutData, setWorkoutData] = useState<WorkoutData[]>([]);
   const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; difficulty_level: string | null }>>(new Map());
   const [planData, setPlanData] = useState<Map<number, any>>(new Map()); // Store plan data to get target values
@@ -97,10 +99,20 @@ export default function ProgressScreen() {
   // Month view state
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
+  useEffect(() => {
+    // Only load on initial mount
+    if (!hasInitiallyLoaded) {
+      loadWorkoutData(undefined, undefined, true);
+    }
+  }, [hasInitiallyLoaded]);
+
   useFocusEffect(
     useCallback(() => {
-      loadWorkoutData();
-    }, [])
+      // Only refresh data on focus if we've already loaded, don't show loading
+      if (hasInitiallyLoaded) {
+        loadWorkoutData(undefined, undefined, false);
+      }
+    }, [hasInitiallyLoaded])
   );
 
   // Handle returning from exercise-select
@@ -324,12 +336,19 @@ export default function ProgressScreen() {
     setExerciseDetails(detailsMap);
   };
 
-  const loadWorkoutData = async (startDate?: Date, endDate?: Date) => {
-    setLoading(true);
+  const loadWorkoutData = async (startDate?: Date, endDate?: Date, showLoading: boolean = true) => {
+    // Only show loading if explicitly requested (initial load)
+    const shouldShowLoading = showLoading && !hasInitiallyLoaded;
+    if (shouldShowLoading) {
+      setLoading(true);
+    }
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setLoading(false);
+        if (shouldShowLoading) {
+          setLoading(false);
+        }
+        setHasInitiallyLoaded(true);
         return;
       }
 
@@ -370,7 +389,10 @@ export default function ProgressScreen() {
 
       if (logsError) {
         console.error('Error loading logs:', logsError);
-        setLoading(false);
+        if (shouldShowLoading) {
+          setLoading(false);
+        }
+        setHasInitiallyLoaded(true);
         return;
       }
 
@@ -496,8 +518,11 @@ export default function ProgressScreen() {
     } catch (error) {
       console.error('Error loading workout data:', error);
     } finally {
-      setLoading(false);
+      if (shouldShowLoading) {
+        setLoading(false);
+      }
       setRefreshing(false);
+      setHasInitiallyLoaded(true);
     }
   };
 
@@ -652,12 +677,17 @@ export default function ProgressScreen() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadWorkoutData();
-  }, [viewMode, currentWeekStart, currentMonth]);
+    loadWorkoutData(undefined, undefined, false).then(() => {
+      setRefreshing(false);
+    });
+  }, [viewMode, currentWeekStart, currentMonth, hasInitiallyLoaded]);
 
   useEffect(() => {
-    loadWorkoutData();
-  }, [viewMode, currentWeekStart, currentMonth]);
+    // Only reload data when view changes if we've already loaded initially
+    if (hasInitiallyLoaded) {
+      loadWorkoutData(undefined, undefined, false);
+    }
+  }, [viewMode, currentWeekStart, currentMonth, hasInitiallyLoaded]);
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -752,7 +782,7 @@ export default function ProgressScreen() {
       <View style={styles.weekContainer}>
         <View style={styles.weekHeader}>
           <TouchableOpacity onPress={() => navigateWeek('prev')} style={styles.navButton}>
-            <ChevronLeft color="#3b82f6" size={24} />
+            <ChevronLeft color="#a3e635" size={24} />
           </TouchableOpacity>
           <View style={styles.weekTitleContainer}>
             <Text style={styles.weekTitle}>
@@ -762,7 +792,7 @@ export default function ProgressScreen() {
             <Text style={styles.weekSubtitle}>{currentWeekStart.getFullYear()}</Text>
           </View>
           <TouchableOpacity onPress={() => navigateWeek('next')} style={styles.navButton}>
-            <ChevronRight color="#3b82f6" size={24} />
+            <ChevronRight color="#a3e635" size={24} />
           </TouchableOpacity>
         </View>
 
@@ -821,7 +851,7 @@ export default function ProgressScreen() {
                   <View style={styles.weekDayWorkoutInfo}>
                     <View style={styles.weekDayWorkoutStats}>
                       <View style={styles.weekDayStatItem}>
-                        <TrendingUp color="#3b82f6" size={16} />
+                        <TrendingUp color="#a3e635" size={16} />
                         <Text style={styles.weekDayStatText}>{workout.sessions.length} workout{workout.sessions.length !== 1 ? 's' : ''}</Text>
                       </View>
                       <View style={styles.weekDayStatItem}>
@@ -859,11 +889,11 @@ export default function ProgressScreen() {
       <View style={styles.monthContainer}>
         <View style={styles.monthHeader}>
           <TouchableOpacity onPress={() => navigateMonth('prev')} style={styles.navButton}>
-            <ChevronLeft color="#3b82f6" size={24} />
+            <ChevronLeft color="#a3e635" size={24} />
           </TouchableOpacity>
           <Text style={styles.monthTitle}>{monthName}</Text>
           <TouchableOpacity onPress={() => navigateMonth('next')} style={styles.navButton}>
-            <ChevronRight color="#3b82f6" size={24} />
+            <ChevronRight color="#a3e635" size={24} />
           </TouchableOpacity>
         </View>
 
@@ -958,7 +988,7 @@ export default function ProgressScreen() {
           >
             <View style={styles.timelineHeader}>
               <View style={styles.timelineDateContainer}>
-                <Calendar color="#3b82f6" size={20} />
+                <Calendar color="#a3e635" size={20} />
                 <Text style={styles.timelineDate}>{formatDate(item.date)}</Text>
               </View>
               {item.sessions[0]?.session.completed_at && (
@@ -1448,7 +1478,7 @@ export default function ProgressScreen() {
       }
 
       // Reload data and exit edit mode
-      await loadWorkoutData();
+      await loadWorkoutData(undefined, undefined, false);
       setIsEditing(false);
       setDeletedSetIds(new Set()); // Clear deleted sets tracking
       setValidationErrors(new Map()); // Clear validation errors
@@ -1651,7 +1681,7 @@ export default function ProgressScreen() {
         }
 
         // Reload data in background
-        loadWorkoutData();
+        loadWorkoutData(undefined, undefined, false);
         setDeleteConfirmVisible(false);
         setDeleteConfirmData(null);
       } catch (error: any) {
@@ -1719,7 +1749,7 @@ export default function ProgressScreen() {
       setSelectedWorkout(null);
       setDeleteConfirmVisible(false);
       setDeleteConfirmData(null);
-      await loadWorkoutData();
+      await loadWorkoutData(undefined, undefined, false);
       Alert.alert("Success", "Workout deleted successfully!");
     } catch (error: any) {
       console.error('Error deleting workout:', error);
@@ -1777,7 +1807,7 @@ export default function ProgressScreen() {
       setSelectedWorkout(null);
       setDeleteConfirmVisible(false);
       setDeleteConfirmData(null);
-      await loadWorkoutData();
+      await loadWorkoutData(undefined, undefined, false);
       Alert.alert("Success", "Workout deleted successfully!");
     } catch (error: any) {
       console.error('Error deleting workout:', error);
@@ -1826,7 +1856,7 @@ export default function ProgressScreen() {
                 {!isEditing ? (
                   <>
                     <TouchableOpacity onPress={handleEdit} style={styles.modalActionButton}>
-                      <Edit2 color="#3b82f6" size={20} />
+                      <Edit2 color="#a3e635" size={20} />
                     </TouchableOpacity>
                     {displayWorkout.sessions.length > 0 && (
                       <TouchableOpacity 
@@ -1847,9 +1877,9 @@ export default function ProgressScreen() {
                     disabled={saving}
                   >
                     {saving ? (
-                      <ActivityIndicator size="small" color="#3b82f6" />
+                      <ActivityIndicator size="small" color="#a3e635" />
                     ) : (
-                      <Save color="#3b82f6" size={20} />
+                      <Save color="#a3e635" size={20} />
                     )}
                   </TouchableOpacity>
                 )}
@@ -2175,7 +2205,7 @@ export default function ProgressScreen() {
                   onPress={handleAddExercise}
                   activeOpacity={0.7}
                 >
-                  <Plus color="#3b82f6" size={20} />
+                  <Plus color="#a3e635" size={20} />
                   <Text style={styles.modalAddExerciseText}>Add Exercise</Text>
                 </TouchableOpacity>
               </View>
@@ -2257,7 +2287,7 @@ export default function ProgressScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Progress</Text>
         <View style={styles.viewModeSelector}>
@@ -2286,9 +2316,7 @@ export default function ProgressScreen() {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-        </View>
+        <ProgressSkeleton />
       ) : (
         <View style={styles.content}>
           {viewMode === 'week' && renderWeekView()}
@@ -2305,25 +2333,25 @@ export default function ProgressScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
   },
   header: {
     padding: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-    backgroundColor: '#111827',
+    borderBottomColor: '#27272a', // zinc-800
+    backgroundColor: '#09090b', // zinc-950
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     marginBottom: 16,
   },
   viewModeSelector: {
     flexDirection: 'row',
-    backgroundColor: '#1f2937',
-    borderRadius: 10,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 20,
     padding: 4,
     gap: 4,
   },
@@ -2331,21 +2359,21 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 40,
   },
   viewModeButtonActive: {
-    backgroundColor: '#2563eb',
-    shadowColor: '#3b82f6',
+    backgroundColor: '#a3e635', // lime-400
+    shadowColor: '#a3e635', // lime-400
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 3,
   },
   viewModeText: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontWeight: '600',
     fontSize: 14,
   },
@@ -2372,7 +2400,7 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   weekTitleContainer: {
     alignItems: 'center',
@@ -2384,7 +2412,7 @@ const styles = StyleSheet.create({
   },
   weekSubtitle: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     marginTop: 2,
   },
   navButton: {
@@ -2396,6 +2424,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   weekScrollContent: {
+    paddingBottom: 120, // Extra padding to clear floating tab bar
     padding: 16,
     paddingTop: 8,
   },
@@ -2403,12 +2432,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     minHeight: 80,
   },
   weekDayCardWithWorkout: {
@@ -2432,7 +2461,7 @@ const styles = StyleSheet.create({
   weekDayName: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 4,
@@ -2446,13 +2475,13 @@ const styles = StyleSheet.create({
     color: 'white',
   },
   weekDayNumberToday: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
   },
   todayBadge: {
     backgroundColor: '#3b82f6',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 24, // rounded-3xl
   },
   todayBadgeText: {
     fontSize: 10,
@@ -2507,7 +2536,7 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   monthTitle: {
     fontSize: 20,
@@ -2534,7 +2563,7 @@ const styles = StyleSheet.create({
   calendarHeaderText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -2545,8 +2574,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#1f2937',
+    borderColor: '#27272a', // zinc-800
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     borderRadius: 6,
     margin: 1,
   },
@@ -2587,35 +2616,35 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   statValue: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     marginBottom: 6,
   },
   statLabel: {
     fontSize: 13,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontWeight: '500',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   // Timeline View
   timelineCard: {
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
     padding: 16,
     marginHorizontal: 16,
     marginVertical: 8,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -2629,7 +2658,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   timelineDateContainer: {
     flexDirection: 'row',
@@ -2645,14 +2674,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
   timelineTime: {
     fontSize: 13,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontWeight: '500',
   },
   timelineSession: {
@@ -2664,7 +2693,7 @@ const styles = StyleSheet.create({
   timelineDay: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     marginBottom: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -2674,9 +2703,9 @@ const styles = StyleSheet.create({
   },
   timelineExercise: {
     marginBottom: 12,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 16,
     borderLeftWidth: 3,
     borderLeftColor: '#3b82f6',
   },
@@ -2688,7 +2717,7 @@ const styles = StyleSheet.create({
   },
   timelineExerciseSets: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     lineHeight: 20,
   },
   timelineFooter: {
@@ -2701,7 +2730,7 @@ const styles = StyleSheet.create({
   },
   timelineDuration: {
     fontSize: 13,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontWeight: '500',
   },
   timelineVolume: {
@@ -2716,7 +2745,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '85%',
@@ -2734,7 +2763,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   modalTitle: {
     fontSize: 22,
@@ -2749,14 +2778,14 @@ const styles = StyleSheet.create({
   },
   modalActionButton: {
     padding: 8,
-    borderRadius: 8,
+    borderRadius: 16,
   },
   modalSaveButton: {
     backgroundColor: '#1e3a5f',
   },
   modalClose: {
     fontSize: 28,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontWeight: '300',
     width: 32,
     height: 32,
@@ -2771,12 +2800,12 @@ const styles = StyleSheet.create({
     marginBottom: 28,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   modalDay: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     marginBottom: 16,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -2786,20 +2815,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 20,
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 16,
   },
   modalStatText: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontWeight: '500',
   },
   modalExercise: {
     marginBottom: 16,
     padding: 16,
-    backgroundColor: '#1f2937',
-    borderRadius: 12,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
     borderLeftWidth: 4,
     borderLeftColor: '#3b82f6',
   },
@@ -2844,12 +2873,12 @@ const styles = StyleSheet.create({
   },
   modalExerciseMetaText: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
   },
   modalExerciseNotes: {
     marginBottom: 12,
     padding: 8,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     borderRadius: 6,
     borderLeftWidth: 3,
     borderLeftColor: '#3b82f6',
@@ -2879,7 +2908,7 @@ const styles = StyleSheet.create({
   },
   modalSetText: {
     fontSize: 15,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     lineHeight: 22,
   },
   modalSetEditHeader: {
@@ -2894,7 +2923,7 @@ const styles = StyleSheet.create({
   modalSetLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     marginBottom: 8,
   },
   modalSetInputs: {
@@ -2907,7 +2936,7 @@ const styles = StyleSheet.create({
   },
   modalSetInputLabel: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     marginBottom: 6,
     fontWeight: '500',
   },
@@ -2922,12 +2951,12 @@ const styles = StyleSheet.create({
     width: 1,
   },
   modalSetInput: {
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     color: 'white',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     fontSize: 15,
   },
   modalSetInputRow: {
@@ -2954,7 +2983,7 @@ const styles = StyleSheet.create({
   },
   bodyweightCheckboxLabel: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
   },
   bodyweightCheckbox: {
     width: 20,
@@ -2982,7 +3011,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalSetInputDisabled: {
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     opacity: 0.5,
   },
   modalSetNotesInput: {
@@ -3012,7 +3041,7 @@ const styles = StyleSheet.create({
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     textAlign: 'center',
   },
   // Delete Confirmation Overlay (rendered inside workout detail modal)
@@ -3029,13 +3058,13 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   deleteConfirmContent: {
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     borderRadius: 16,
     padding: 24,
     width: '100%',
     maxWidth: 400,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   deleteConfirmTitle: {
     fontSize: 22,
@@ -3045,7 +3074,7 @@ const styles = StyleSheet.create({
   },
   deleteConfirmMessage: {
     fontSize: 16,
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     lineHeight: 24,
     marginBottom: 24,
   },
@@ -3057,7 +3086,7 @@ const styles = StyleSheet.create({
   deleteConfirmButton: {
     paddingHorizontal: 20,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 16,
     minWidth: 100,
     alignItems: 'center',
   },
@@ -3082,21 +3111,21 @@ const styles = StyleSheet.create({
     padding: 20,
     borderTopWidth: 1,
     borderTopColor: '#374151',
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
   },
   modalAddExerciseButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
     borderColor: '#3b82f6',
     gap: 8,
   },
   modalAddExerciseText: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     fontSize: 16,
     fontWeight: '600',
   },

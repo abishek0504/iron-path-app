@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
+import { LoginSkeleton } from '../src/components/skeletons/LoginSkeleton';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -14,7 +15,7 @@ export default function LoginScreen() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        router.replace('/(tabs)/home');
+        router.replace('/(tabs)');
       }
       setIsCheckingSession(false);
     }).catch(() => {
@@ -33,22 +34,19 @@ export default function LoginScreen() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         setErrorMessage(error.message);
+        setLoading(false);
       } else {
-        router.replace('/(tabs)/home');
+        router.replace('/(tabs)');
+        setLoading(false);
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Network failed");
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   if (isCheckingSession) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#2563eb" />
-        <Text style={styles.text}>Loading IronPath...</Text>
-      </View>
-    );
+    return <LoginSkeleton />;
   }
 
   return (
@@ -96,6 +94,14 @@ export default function LoginScreen() {
       >
         <Text style={styles.buttonTextSecondary}>Create Account</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity 
+        style={styles.backButton} 
+        onPress={() => router.push('/')}
+        disabled={loading}
+      >
+        <Text style={styles.backButtonText}>Back to Welcome</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -103,7 +109,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
     justifyContent: 'center',
     padding: 24,
   },
@@ -112,69 +118,88 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 24,
     alignSelf: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
   },
   title: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#3b82f6',
+    fontWeight: '700',
+    color: '#ffffff',
     textAlign: 'center',
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: 40,
+    fontSize: 14,
   },
   text: {
-    color: 'white',
-    marginTop: 10,
+    color: '#ffffff',
+    marginTop: 16,
+    fontSize: 14,
   },
   input: {
-    backgroundColor: '#1f2937',
-    color: 'white',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    color: '#ffffff',
+    padding: 18,
+    borderRadius: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
+    fontSize: 16,
   },
   buttonPrimary: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
     marginBottom: 16,
   },
   buttonSecondary: {
     borderWidth: 1,
-    borderColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    borderColor: '#a3e635', // lime-400
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
   },
   buttonText: {
-    color: 'white',
+    color: '#09090b', // zinc-950
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '700',
     fontSize: 18,
+    letterSpacing: 0.5,
   },
   buttonTextSecondary: {
-    color: '#60a5fa',
+    color: '#a3e635', // lime-400
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '700',
     fontSize: 18,
+    letterSpacing: 0.5,
   },
   errorContainer: {
-    backgroundColor: 'rgba(127, 29, 29, 0.5)',
-    padding: 12,
-    borderRadius: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)', // red-500/10
+    padding: 16,
+    borderRadius: 16,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#ef4444',
   },
   errorText: {
-    color: '#fecaca',
+    color: '#fca5a5', // red-300
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  backButton: {
+    marginTop: 16,
+    padding: 12,
+    alignItems: 'center',
+  },
+  backButtonText: {
+    color: '#a1a1aa', // zinc-400
+    textAlign: 'center',
+    fontWeight: '600',
+    fontSize: 14,
   },
 });
 

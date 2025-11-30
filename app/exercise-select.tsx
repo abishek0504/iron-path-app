@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView } from 'react-native';
+import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Search, X, Plus } from 'lucide-react-native';
@@ -485,11 +485,11 @@ export default function ExerciseSelectScreen() {
     
     const difficultyLower = String(difficulty).toLowerCase().trim();
     if (difficultyLower === 'beginner') {
-      return { label: 'Easy', color: '#22c55e', activeBars: 1 };
+      return { label: 'Easy', color: '#a3e635', activeBars: 1 }; // lime-400
     } else if (difficultyLower === 'intermediate') {
-      return { label: 'Medium', color: '#f97316', activeBars: 2 };
+      return { label: 'Medium', color: '#22d3ee', activeBars: 2 }; // cyan-400
     } else if (difficultyLower === 'advanced') {
-      return { label: 'Hard', color: '#ef4444', activeBars: 3 };
+      return { label: 'Hard', color: '#f87171', activeBars: 3 }; // red-400
     }
     return null;
   };
@@ -507,9 +507,9 @@ export default function ExerciseSelectScreen() {
     return (
       <View style={styles.difficultyContainer}>
         <View style={styles.difficultyBars}>
-          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#374151' }]} />
-          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#374151' }]} />
-          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#374151' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar1, { backgroundColor: difficultyInfo.activeBars >= 1 ? difficultyInfo.color : '#27272a' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar2, { backgroundColor: difficultyInfo.activeBars >= 2 ? difficultyInfo.color : '#27272a' }]} />
+          <View style={[styles.difficultyBar, styles.difficultyBar3, { backgroundColor: difficultyInfo.activeBars >= 3 ? difficultyInfo.color : '#27272a' }]} />
         </View>
         <Text style={[styles.difficultyText, { color: difficultyInfo.color }]}>{difficultyInfo.label}</Text>
       </View>
@@ -527,16 +527,16 @@ export default function ExerciseSelectScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Select Exercise</Text>
         <TouchableOpacity onPress={() => safeBack()}>
-          <X color="#9ca3af" size={24} />
+          <X color="#a1a1aa" size={24} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.searchContainer}>
-        <Search size={20} color="#9ca3af" />
+        <Search size={20} color="#a1a1aa" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search exercises..."
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor="#a1a1aa"
           value={searchQuery}
           onChangeText={setSearchQuery}
           autoCapitalize="none"
@@ -547,7 +547,7 @@ export default function ExerciseSelectScreen() {
         style={styles.createCustomButton}
         onPress={() => setShowCreateModal(true)}
       >
-        <Plus color="#3b82f6" size={20} />
+        <Plus color="#a3e635" size={20} />
         <Text style={styles.createCustomButtonText}>Create Custom Exercise</Text>
       </TouchableOpacity>
 
@@ -599,7 +599,7 @@ export default function ExerciseSelectScreen() {
                 setNewExerciseName('');
                 setNewExerciseDescription('');
               }}>
-                <X color="#9ca3af" size={24} />
+                <X color="#a1a1aa" size={24} />
               </TouchableOpacity>
             </View>
 
@@ -610,7 +610,7 @@ export default function ExerciseSelectScreen() {
                 value={newExerciseName}
                 onChangeText={setNewExerciseName}
                 placeholder="e.g., Dave's Special Curl"
-                placeholderTextColor="#6b7280"
+                placeholderTextColor="#71717a"
               />
 
               <Text style={styles.modalLabel}>Description (Optional)</Text>
@@ -619,7 +619,7 @@ export default function ExerciseSelectScreen() {
                 value={newExerciseDescription}
                 onChangeText={setNewExerciseDescription}
                 placeholder="Exercise description or notes..."
-                placeholderTextColor="#6b7280"
+                placeholderTextColor="#71717a"
                 multiline
               />
 
@@ -651,15 +651,15 @@ export default function ExerciseSelectScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, paddingTop: 60 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6' },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1f2937', borderRadius: 8, padding: 16, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#374151' },
+  container: { flex: 1, backgroundColor: '#09090b' }, // zinc-950
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 32, paddingTop: 60 }, // p-8
+  title: { fontSize: 32, fontWeight: 'bold', color: '#a3e635' }, // lime-400
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#18181b', borderRadius: 24, padding: 20, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#27272a' }, // zinc-900, rounded-3xl, zinc-800
   searchInput: { flex: 1, marginLeft: 12, color: 'white', fontSize: 16 },
-  exerciseItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, marginHorizontal: 24, borderWidth: 1, borderColor: '#374151' },
+  exerciseItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#18181b', padding: 24, borderRadius: 24, marginBottom: 12, marginHorizontal: 24, borderWidth: 1, borderColor: '#27272a' }, // zinc-900, rounded-3xl, p-6, zinc-800
   exerciseInfo: { flex: 1, marginRight: 12 },
   exerciseNameContainer: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500' },
+  exerciseName: { color: 'white', fontSize: 18, fontWeight: '500', flex: 1 },
   difficultyContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   difficultyBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   difficultyBar: { borderRadius: 2 },
@@ -667,26 +667,26 @@ const styles = StyleSheet.create({
   difficultyBar2: { width: 6, height: 12 },
   difficultyBar3: { width: 6, height: 16 },
   difficultyText: { fontSize: 14, fontWeight: '600' },
-  addButton: { backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
-  addButtonText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
-  addCustomButton: { backgroundColor: '#1f2937', borderWidth: 1, borderColor: '#3b82f6', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
-  addCustomButtonText: { color: '#3b82f6', fontWeight: 'bold', fontSize: 14 },
-  emptyText: { color: '#9ca3af', textAlign: 'center', marginTop: 40 },
-  listContainer: { paddingBottom: 20 },
-  createCustomButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#3b82f6', gap: 8 },
-  createCustomButtonText: { color: '#3b82f6', fontSize: 16, fontWeight: 'bold' },
+  addButton: { backgroundColor: '#a3e635', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 }, // lime-400, rounded-2xl
+  addButtonText: { color: '#09090b', fontWeight: 'bold', fontSize: 14 }, // zinc-950 for contrast
+  addCustomButton: { backgroundColor: '#18181b', borderWidth: 1, borderColor: '#a3e635', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 }, // zinc-900, lime-400, rounded-2xl
+  addCustomButtonText: { color: '#a3e635', fontWeight: 'bold', fontSize: 14 }, // lime-400
+  emptyText: { color: '#a1a1aa', textAlign: 'center', marginTop: 40 }, // zinc-400
+  listContainer: { paddingBottom: Platform.OS === 'web' ? 20 : 120 }, // Extra padding for native tab bar
+  createCustomButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#18181b', padding: 20, borderRadius: 24, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#a3e635', gap: 8, minHeight: 56 }, // zinc-900, rounded-3xl, lime-400
+  createCustomButtonText: { color: '#a3e635', fontSize: 16, fontWeight: 'bold' }, // lime-400
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', padding: 24 },
-  modalContent: { backgroundColor: '#1f2937', borderRadius: 12, padding: 24, borderWidth: 1, borderColor: '#374151', maxHeight: '80%' },
+  modalContent: { backgroundColor: '#18181b', borderRadius: 24, padding: 32, borderWidth: 1, borderColor: '#27272a', maxHeight: '80%' }, // zinc-900, rounded-3xl, zinc-800
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   modalTitle: { color: 'white', fontSize: 24, fontWeight: 'bold' },
-  modalLabel: { color: '#9ca3af', fontSize: 14, marginBottom: 8, marginTop: 16 },
-  modalInput: { backgroundColor: '#111827', color: 'white', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#374151', fontSize: 16 },
+  modalLabel: { color: '#a1a1aa', fontSize: 14, marginBottom: 8, marginTop: 16 }, // zinc-400
+  modalInput: { backgroundColor: '#09090b', color: 'white', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#27272a', fontSize: 16 }, // zinc-950, rounded-3xl, zinc-800
   modalTextArea: { minHeight: 100, textAlignVertical: 'top' },
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 24 },
-  modalButtonSecondary: { flex: 1, borderWidth: 1, borderColor: '#374151', padding: 12, borderRadius: 8, alignItems: 'center' },
-  modalButtonPrimary: { flex: 1, backgroundColor: '#2563eb', padding: 12, borderRadius: 8, alignItems: 'center' },
-  modalButtonDisabled: { backgroundColor: '#1e40af', opacity: 0.5 },
-  modalButtonTextSecondary: { color: '#9ca3af', fontWeight: 'bold' },
-  modalButtonTextPrimary: { color: 'white', fontWeight: 'bold' },
+  modalButtonSecondary: { flex: 1, borderWidth: 1, borderColor: '#27272a', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // zinc-800, rounded-3xl
+  modalButtonPrimary: { flex: 1, backgroundColor: '#a3e635', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // lime-400, rounded-3xl
+  modalButtonDisabled: { backgroundColor: '#84cc16', opacity: 0.5 }, // lime-500
+  modalButtonTextSecondary: { color: '#a1a1aa', fontWeight: 'bold' }, // zinc-400
+  modalButtonTextPrimary: { color: '#09090b', fontWeight: 'bold' }, // zinc-950 for contrast
 });
 

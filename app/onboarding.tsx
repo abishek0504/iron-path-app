@@ -1,429 +1,774 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ScrollView, StyleSheet, Modal, Switch } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, TextInput, Switch } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { ArrowLeft, Check } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
-import Slider from '@react-native-community/slider';
+
+const TOTAL_STEPS = 6;
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
-const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
+
+const FITNESS_GOALS = [
+  'Lift heavier',
+  'Build muscle',
+  'Get lean and defined',
+  'Lose weight'
+];
+
+const TRAINING_ROUTINE = [
+  "I've never had a consistent routine",
+  'I struggle with consistency',
+  "I'm returning from a break",
+  'I strength train regularly'
+];
+
+const EXPERIENCE_LEVELS = [
+  'I am brand new to strength training',
+  'Less than 1 year',
+  '1–2 years',
+  '2–4 years',
+  '4+ years'
+];
+
+const WORKOUT_LOCATIONS = [
+  { label: 'Large Gym', description: 'Full fitness clubs such as Anytime, Planet Fitness, Golds, 24-Hour, Equinox.' },
+  { label: 'Small Gym', description: 'Compact public gyms with limited equipment.' },
+  { label: 'Garage Gym', description: 'Barbells, squat rack, dumbbells, etc.' },
+  { label: 'At Home', description: 'Limited equipment such as bands and dumbbells.' },
+  { label: 'Without Equipment', description: 'Workout anywhere with bodyweight-only exercises.' },
+  { label: 'Custom', description: 'Start from scratch and build your own equipment list.' }
+];
+
+const DAYS_OF_WEEK = [
+  { label: 'Monday', short: 'Mon' },
+  { label: 'Tuesday', short: 'Tue' },
+  { label: 'Wednesday', short: 'Wed' },
+  { label: 'Thursday', short: 'Thu' },
+  { label: 'Friday', short: 'Fri' },
+  { label: 'Saturday', short: 'Sat' },
+  { label: 'Sunday', short: 'Sun' },
+];
 
 const lbsToKg = (lbs: number): number => lbs * 0.453592;
 const kgToLbs = (kg: number): number => kg / 0.453592;
 
-const ftInToCm = (feet: number, inches: number): number => (feet * 30.48) + (inches * 2.54);
-const cmToFtIn = (cm: number): { feet: number; inches: number } => {
-  const totalInches = cm / 2.54;
-  const feet = Math.floor(totalInches / 12);
-  const inches = Math.round(totalInches % 12);
-  return { feet, inches };
-};
-
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { step } = useLocalSearchParams<{ step?: string }>();
+  const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [useImperial, setUseImperial] = useState(true);
   
-  const [age, setAge] = useState('');
-  const [gender, setGender] = useState('');
-  const [weight, setWeight] = useState('');
-  const [goalWeight, setGoalWeight] = useState('');
-  const [heightFeet, setHeightFeet] = useState('');
-  const [heightInches, setHeightInches] = useState('');
-  const [goal, setGoal] = useState('Strength');
-  const [days, setDays] = useState(3);
-  const [showGenderPicker, setShowGenderPicker] = useState(false);
-  const [showGoalPicker, setShowGoalPicker] = useState(false);
+  // Handle step parameter from equipment page
+  useEffect(() => {
+    if (step) {
+      const stepNum = parseInt(step, 10);
+      if (!isNaN(stepNum) && stepNum >= 0 && stepNum < TOTAL_STEPS) {
+        setCurrentStep(stepNum);
+      }
+    }
+  }, [step]);
+  
+  // Questionnaire answers
+  const [fitnessGoal, setFitnessGoal] = useState<string>('');
+  const [trainingRoutine, setTrainingRoutine] = useState<string>('');
+  const [experienceLevel, setExperienceLevel] = useState<string>('');
+  const [workoutLocation, setWorkoutLocation] = useState<string>('');
+  const [daysPerWeek, setDaysPerWeek] = useState<number>(3);
+  const [workoutScheduleMode, setWorkoutScheduleMode] = useState<'count' | 'days' | null>(null);
+  const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
+  
+  // Personal info
+  const [age, setAge] = useState<string>('');
+  const [weight, setWeight] = useState<string>('');
+  const [heightFeet, setHeightFeet] = useState<string>('');
+  const [heightInches, setHeightInches] = useState<string>('');
+  const [heightCm, setHeightCm] = useState<string>('');
+  const [gender, setGender] = useState<string>('');
+  const [useMetric, setUseMetric] = useState<boolean>(false);
 
-  const completeSetup = async () => {
-    if (!age || !gender || !weight) {
-      Alert.alert("Missing Info", "Please fill in all fields to continue.");
-      return;
-    }
-    
-    if (useImperial && (!heightFeet || !heightInches)) {
-      Alert.alert("Missing Info", "Please enter your height.");
-      return;
-    }
-    
-    if (!useImperial && !heightFeet) {
-      Alert.alert("Missing Info", "Please enter your height.");
-      return;
-    }
+  const progress = ((currentStep + 1) / TOTAL_STEPS) * 100;
 
-    const ageNum = parseInt(age, 10);
-    if (isNaN(ageNum) || ageNum < 1 || ageNum > 120) {
-      Alert.alert("Invalid Age", "Please enter a valid age.");
-      return;
-    }
-
-    const weightNum = parseFloat(weight);
-    if (isNaN(weightNum) || weightNum <= 0) {
-      Alert.alert("Invalid Weight", "Please enter a valid weight.");
-      return;
-    }
-
-    let heightCm: number;
-    if (useImperial) {
-      const feet = parseInt(heightFeet, 10);
-      const inches = parseInt(heightInches, 10);
-      if (isNaN(feet) || isNaN(inches) || feet < 0 || inches < 0 || inches >= 12) {
-        Alert.alert("Invalid Height", "Please enter a valid height.");
+  const handleNext = () => {
+    if (currentStep < TOTAL_STEPS - 1) {
+      // If they selected "Custom" for workout location, go to equipment page
+      if (currentStep === 4 && workoutLocation === 'Custom') {
+        router.push('/onboarding-equipment');
         return;
       }
-      heightCm = ftInToCm(feet, inches);
+      setCurrentStep(currentStep + 1);
     } else {
-      const cm = parseFloat(heightFeet);
-      if (isNaN(cm) || cm <= 0) {
-        Alert.alert("Invalid Height", "Please enter a valid height.");
-        return;
-      }
-      heightCm = cm;
+      handleComplete();
     }
+  };
 
-    const weightKg = useImperial ? lbsToKg(weightNum) : weightNum;
-
-    let goalWeightKg: number | null = null;
-    if (goalWeight) {
-      const goalWeightNum = parseFloat(goalWeight);
-      if (isNaN(goalWeightNum) || goalWeightNum <= 0) {
-        Alert.alert("Invalid Goal Weight", "Please enter a valid goal weight.");
-        return;
-      }
-      goalWeightKg = useImperial ? lbsToKg(goalWeightNum) : goalWeightNum;
+  const handleBack = () => {
+    if (currentStep === 5 && workoutScheduleMode !== null) {
+      // If on step 5 (days per week) and a mode is selected, go back to mode selection
+      setWorkoutScheduleMode(null);
+    } else if (currentStep > 0) {
+      setCurrentStep(currentStep - 1);
+    } else {
+      router.back();
     }
+  };
 
+  const handleSkip = () => {
+    if (currentStep < TOTAL_STEPS - 1) {
+      // Move to next question
+      setCurrentStep(currentStep + 1);
+    } else {
+      // On last step, complete the onboarding
+      handleComplete();
+    }
+  };
+
+  const handleComplete = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
 
     if (user) {
+      // Map answers to database fields
+      let goal = 'Strength';
+      if (fitnessGoal === 'Lift heavier') goal = 'Strength';
+      else if (fitnessGoal === 'Build muscle') goal = 'Hypertrophy';
+      else if (fitnessGoal === 'Get lean and defined') goal = 'Hypertrophy';
+      else if (fitnessGoal === 'Lose weight') goal = 'Weight Loss';
+
+      // Determine days_per_week based on mode
+      let finalDaysPerWeek = daysPerWeek;
+      if (workoutScheduleMode === 'days') {
+        finalDaysPerWeek = selectedDays.size;
+      }
+
+      // Store workout days if specific days were selected
+      const workoutDays = workoutScheduleMode === 'days' ? Array.from(selectedDays) : null;
+
+      // Calculate height in cm (for storage)
+      let heightInCm: number | null = null;
+      if (useMetric) {
+        heightInCm = parseFloat(heightCm) || null;
+      } else {
+        const feet = parseFloat(heightFeet) || 0;
+        const inches = parseFloat(heightInches) || 0;
+        heightInCm = feet * 30.48 + inches * 2.54;
+      }
+
+      // Convert weight to kg if imperial
+      let weightInKg: number | null = null;
+      if (useMetric) {
+        weightInKg = parseFloat(weight) || null;
+      } else {
+        weightInKg = lbsToKg(parseFloat(weight) || 0) || null;
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
-          age: ageNum,
-          gender: gender,
-          current_weight: weightKg,
-          goal_weight: goalWeightKg,
-          height: heightCm,
           goal: goal,
-          days_per_week: days,
-          use_imperial: useImperial,
+          days_per_week: finalDaysPerWeek,
+          workout_days: workoutDays,
+          equipment_access: workoutLocation === 'Custom' ? [] : [workoutLocation],
+          age: age ? parseInt(age) : null,
+          weight_kg: weightInKg,
+          height_cm: heightInCm,
+          gender: gender,
+          use_metric: useMetric,
         })
         .eq('id', user.id);
 
       if (error) {
-        Alert.alert("Error", error.message);
+        console.error('Error updating profile:', error);
       } else {
-        router.push('/onboarding-equipment');
+        router.replace('/(tabs)');
       }
     }
     setLoading(false);
   };
 
-  const displayWeight = (kg: number | null): string => {
-    if (kg === null || kg === undefined) return '';
-    return useImperial ? kgToLbs(kg).toFixed(1) : kg.toFixed(1);
+  const canProceed = () => {
+    switch (currentStep) {
+      case 0: return fitnessGoal !== '';
+      case 1: return trainingRoutine !== '';
+      case 2: return experienceLevel !== '';
+      case 3: {
+        // Personal info step
+        if (!age || !weight || !gender) return false;
+        if (useMetric) {
+          return heightCm !== '';
+        } else {
+          return heightFeet !== '' && heightInches !== '';
+        }
+      }
+      case 4: return workoutLocation !== '';
+      case 5: {
+        if (workoutScheduleMode === 'count') {
+          return daysPerWeek > 0;
+        } else if (workoutScheduleMode === 'days') {
+          return selectedDays.size > 0;
+        }
+        return false;
+      }
+      default: return false;
+    }
   };
 
-  const displayHeight = (cm: number | null): { feet: string; inches: string } | { cm: string } => {
-    if (cm === null || cm === undefined) {
-      return useImperial ? { feet: '', inches: '' } : { cm: '' };
+  const renderQuestion = () => {
+    switch (currentStep) {
+      case 0:
+        return {
+          title: "What is your top fitness goal?",
+          options: FITNESS_GOALS,
+          selected: fitnessGoal,
+          onSelect: setFitnessGoal
+        };
+      case 1:
+        return {
+          title: "Which best describes your current strength training routine?",
+          options: TRAINING_ROUTINE,
+          selected: trainingRoutine,
+          onSelect: setTrainingRoutine
+        };
+      case 2:
+        return {
+          title: "How much strength training experience do you have?",
+          options: EXPERIENCE_LEVELS,
+          selected: experienceLevel,
+          onSelect: setExperienceLevel
+        };
+      case 3:
+        return {
+          title: "Tell us about yourself",
+          isPersonalInfo: true,
+        };
+      case 4:
+        return {
+          title: "Where do you usually work out?",
+          options: WORKOUT_LOCATIONS.map(loc => loc.label),
+          descriptions: WORKOUT_LOCATIONS.map(loc => loc.description),
+          selected: workoutLocation,
+          onSelect: setWorkoutLocation
+        };
+      case 5:
+        return {
+          title: "How many days per week do you want to work out?",
+          mode: workoutScheduleMode,
+          onModeSelect: setWorkoutScheduleMode,
+          daysPerWeek: daysPerWeek,
+          onDaysPerWeekSelect: setDaysPerWeek,
+          selectedDays: selectedDays,
+          onSelectedDaysChange: setSelectedDays,
+        };
+      default:
+        return null;
     }
-    if (useImperial) {
-      const { feet, inches } = cmToFtIn(cm);
-      return { feet: feet.toString(), inches: inches.toString() };
-    }
-    return { cm: cm.toFixed(1) };
   };
+
+  const question = renderQuestion();
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Final Step</Text>
-      <Text style={styles.subtitle}>Let's calibrate your workout plan.</Text>
-
-      <View style={styles.unitToggleContainer}>
-        <Text style={styles.unitToggleLabel}>Units</Text>
-        <View style={styles.unitToggleRow}>
-          <Text style={[styles.unitToggleText, !useImperial && styles.unitToggleTextActive]}>Metric</Text>
-          <Switch
-            value={useImperial}
-            onValueChange={(value) => {
-              const newUseImperial = value;
-              
-              if (weight) {
-                const weightValue = parseFloat(weight);
-                if (useImperial && !newUseImperial) {
-                  setWeight(lbsToKg(weightValue).toFixed(1));
-                } else if (!useImperial && newUseImperial) {
-                  setWeight(kgToLbs(weightValue).toFixed(1));
-                }
-              }
-              
-              if (useImperial && !newUseImperial) {
-                const feet = parseInt(heightFeet, 10);
-                const inches = parseInt(heightInches, 10);
-                if (!isNaN(feet) && !isNaN(inches)) {
-                  const cm = ftInToCm(feet, inches);
-                  setHeightFeet(cm.toFixed(1));
-                  setHeightInches('');
-                }
-              } else if (!useImperial && newUseImperial) {
-                const cm = parseFloat(heightFeet);
-                if (!isNaN(cm)) {
-                  const { feet, inches } = cmToFtIn(cm);
-                  setHeightFeet(feet.toString());
-                  setHeightInches(inches.toString());
-                }
-              }
-              
-              setUseImperial(newUseImperial);
-            }}
-            trackColor={{ false: '#374151', true: '#3b82f6' }}
-            thumbColor="#ffffff"
-          />
-          <Text style={[styles.unitToggleText, useImperial && styles.unitToggleTextActive]}>Imperial</Text>
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={styles.halfInput}>
-          <Text style={styles.label}>Age</Text>
-          <TextInput 
-            style={styles.input}
-            value={age} 
-            onChangeText={setAge} 
-            keyboardType="number-pad" 
-            placeholder="25" 
-            placeholderTextColor="#666"
-          />
-        </View>
-        <View style={styles.halfInput}>
-           <Text style={styles.label}>Gender</Text>
-           <TouchableOpacity 
-             style={styles.input} 
-             onPress={() => setShowGenderPicker(true)}
-           >
-             <Text style={[styles.inputText, !gender && styles.placeholderText]}>
-               {gender || 'Select'}
-             </Text>
-           </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={styles.halfInput}>
-          <Text style={styles.label}>Current Weight {useImperial ? '(lbs)' : '(kg)'}</Text>
-          <TextInput 
-            style={styles.input}
-            value={weight} 
-            onChangeText={setWeight} 
-            keyboardType="numeric" 
-            placeholder={useImperial ? "150" : "68"} 
-            placeholderTextColor="#666"
-          />
-        </View>
-        <View style={styles.halfInput}>
-          <Text style={styles.label}>Goal Weight {useImperial ? '(lbs)' : '(kg)'}</Text>
-          <TextInput 
-            style={styles.input}
-            value={goalWeight} 
-            onChangeText={setGoalWeight} 
-            keyboardType="numeric" 
-            placeholder={useImperial ? "140" : "64"} 
-            placeholderTextColor="#666"
-          />
-        </View>
-      </View>
-
-      <View style={styles.row}>
-        <View style={styles.halfInput}>
-          <Text style={styles.label}>Height {useImperial ? '(ft/in)' : '(cm)'}</Text>
-          {useImperial ? (
-            <View style={styles.heightRow}>
-              <TextInput 
-                style={[styles.input, styles.heightInput]}
-                value={heightFeet} 
-                onChangeText={setHeightFeet} 
-                keyboardType="number-pad" 
-                placeholder="5" 
-                placeholderTextColor="#666"
-              />
-              <Text style={styles.heightSeparator}>ft</Text>
-              <TextInput 
-                style={[styles.input, styles.heightInput]}
-                value={heightInches} 
-                onChangeText={setHeightInches} 
-                keyboardType="number-pad" 
-                placeholder="10" 
-                placeholderTextColor="#666"
-              />
-              <Text style={styles.heightSeparator}>in</Text>
-            </View>
-          ) : (
-            <TextInput 
-              style={styles.input}
-              value={heightFeet} 
-              onChangeText={setHeightFeet} 
-              keyboardType="numeric" 
-              placeholder="175" 
-              placeholderTextColor="#666"
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+          <ArrowLeft size={24} color="#ffffff" />
+        </TouchableOpacity>
+        
+        <View style={styles.progressBarContainer}>
+          <View style={styles.progressBarBackground}>
+            <View 
+              style={[
+                styles.progressBarFill, 
+                { width: `${progress}%` }
+              ]} 
             />
-          )}
-        </View>
-      </View>
-
-      <View style={styles.sliderContainer}>
-        <Text style={styles.label}>Days per Week: {days}</Text>
-        <Slider
-          style={styles.slider}
-          minimumValue={1}
-          maximumValue={7}
-          step={1}
-          value={days}
-          onValueChange={setDays}
-          minimumTrackTintColor="#3b82f6"
-          maximumTrackTintColor="#374151"
-          thumbTintColor="#3b82f6"
-        />
-        <View style={styles.sliderLabels}>
-          <Text style={styles.sliderLabel}>1</Text>
-          <Text style={styles.sliderLabel}>2</Text>
-          <Text style={styles.sliderLabel}>3</Text>
-          <Text style={styles.sliderLabel}>4</Text>
-          <Text style={styles.sliderLabel}>5</Text>
-          <Text style={styles.sliderLabel}>6</Text>
-          <Text style={styles.sliderLabel}>7</Text>
-        </View>
-      </View>
-
-      <Text style={styles.label}>Primary Goal</Text>
-      <TouchableOpacity 
-        style={styles.input} 
-        onPress={() => setShowGoalPicker(true)}
-      >
-        <Text style={[styles.inputText, !goal && styles.placeholderText]}>
-          {goal || 'Select'}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.buttonPrimary} onPress={completeSetup} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? "Saving..." : "Finish Setup"}</Text>
-      </TouchableOpacity>
-
-      {/* Gender Picker Modal */}
-      <Modal
-        visible={showGenderPicker}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowGenderPicker(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Gender</Text>
-            {GENDERS.map((g) => (
-              <TouchableOpacity
-                key={g}
-                style={styles.genderOption}
-                onPress={() => { setGender(g); setShowGenderPicker(false); }}
-              >
-                <Text style={styles.genderOptionText}>{g}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowGenderPicker(false)}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
 
-      {/* Goal Picker Modal */}
-      <Modal
-        visible={showGoalPicker}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowGoalPicker(false)}
+        <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
+          <Text style={styles.skipText}>Skip</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Goal</Text>
-            {GOALS.map((g) => (
-              <TouchableOpacity
-                key={g}
-                style={styles.genderOption}
-                onPress={() => { setGoal(g); setShowGoalPicker(false); }}
-              >
-                <Text style={styles.genderOptionText}>{g}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowGoalPicker(false)}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+        <Text style={styles.questionTitle}>{question?.title}</Text>
+        
+        {question?.descriptions ? (
+          <Text style={styles.questionSubtitle}>
+            IronPath will compile a starter equipment list based on the location you pick.
+          </Text>
+        ) : null}
+
+        {currentStep === 3 ? (
+          // Personal info step - special rendering
+          <View style={styles.personalInfoContainer}>
+            <View style={styles.unitToggleContainer}>
+              <Text style={styles.unitLabel}>Metric</Text>
+              <Switch
+                value={useMetric}
+                onValueChange={setUseMetric}
+                trackColor={{ false: '#27272a', true: '#a3e635' }}
+                thumbColor={useMetric ? '#ffffff' : '#a1a1aa'}
+                ios_backgroundColor="#27272a"
+              />
+              <Text style={styles.unitLabel}>Imperial</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Age</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your age"
+                placeholderTextColor="#71717a"
+                value={age}
+                onChangeText={setAge}
+                keyboardType="number-pad"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Weight ({useMetric ? 'kg' : 'lbs'})</Text>
+              <TextInput
+                style={styles.input}
+                placeholder={`Enter weight in ${useMetric ? 'kg' : 'lbs'}`}
+                placeholderTextColor="#71717a"
+                value={weight}
+                onChangeText={setWeight}
+                keyboardType="decimal-pad"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Height</Text>
+              {useMetric ? (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter height in cm"
+                  placeholderTextColor="#71717a"
+                  value={heightCm}
+                  onChangeText={setHeightCm}
+                  keyboardType="decimal-pad"
+                />
+              ) : (
+                <View style={styles.heightInputRow}>
+                  <TextInput
+                    style={[styles.input, styles.heightInputHalf]}
+                    placeholder="Feet"
+                    placeholderTextColor="#71717a"
+                    value={heightFeet}
+                    onChangeText={setHeightFeet}
+                    keyboardType="number-pad"
+                  />
+                  <TextInput
+                    style={[styles.input, styles.heightInputHalf]}
+                    placeholder="Inches"
+                    placeholderTextColor="#71717a"
+                    value={heightInches}
+                    onChangeText={setHeightInches}
+                    keyboardType="number-pad"
+                  />
+                </View>
+              )}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Gender</Text>
+              <View style={styles.optionsContainer}>
+                {GENDERS.map((genderOption) => {
+                  const isSelected = gender === genderOption;
+                  return (
+                    <TouchableOpacity
+                      key={genderOption}
+                      style={[
+                        styles.optionCard,
+                        isSelected && styles.optionCardSelected
+                      ]}
+                      onPress={() => setGender(genderOption)}
+                    >
+                      <View style={[
+                        styles.checkbox,
+                        isSelected && styles.checkboxSelected
+                      ]}>
+                        {isSelected && <Check size={16} color="#09090b" />}
+                      </View>
+                      <View style={styles.optionContent}>
+                        <Text style={[
+                          styles.optionText,
+                          isSelected && styles.optionTextSelected
+                        ]}>
+                          {genderOption}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </ScrollView>
+        ) : currentStep === 5 ? (
+          // Days per week step - special rendering
+          <View style={styles.optionsContainer}>
+            {question?.mode === null ? (
+              // Show mode selection
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.optionCard,
+                    question?.mode === 'count' && styles.optionCardSelected
+                  ]}
+                  onPress={() => question?.onModeSelect?.('count')}
+                >
+                  <View style={[
+                    styles.checkbox,
+                    question?.mode === 'count' && styles.checkboxSelected
+                  ]}>
+                    {question?.mode === 'count' && <Check size={16} color="#09090b" />}
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={[
+                      styles.optionText,
+                      question?.mode === 'count' && styles.optionTextSelected
+                    ]}>
+                      Number of days
+                    </Text>
+                    <Text style={styles.optionDescription}>
+                      Choose how many days per week you want to work out
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.optionCard,
+                    question?.mode === 'days' && styles.optionCardSelected
+                  ]}
+                  onPress={() => question?.onModeSelect?.('days')}
+                >
+                  <View style={[
+                    styles.checkbox,
+                    question?.mode === 'days' && styles.checkboxSelected
+                  ]}>
+                    {question?.mode === 'days' && <Check size={16} color="#09090b" />}
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={[
+                      styles.optionText,
+                      question?.mode === 'days' && styles.optionTextSelected
+                    ]}>
+                      Specific days
+                    </Text>
+                    <Text style={styles.optionDescription}>
+                      Choose which days of the week you want to work out
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </>
+            ) : question?.mode === 'count' ? (
+              // Show number of days selection
+              DAYS_OF_WEEK.slice(0, 7).map((_, index) => {
+                const numDays = index + 1;
+                const isSelected = question?.daysPerWeek === numDays;
+                return (
+                  <TouchableOpacity
+                    key={numDays}
+                    style={[
+                      styles.optionCard,
+                      isSelected && styles.optionCardSelected
+                    ]}
+                    onPress={() => question?.onDaysPerWeekSelect?.(numDays)}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      isSelected && styles.checkboxSelected
+                    ]}>
+                      {isSelected && <Check size={16} color="#09090b" />}
+                    </View>
+                    <View style={styles.optionContent}>
+                      <Text style={[
+                        styles.optionText,
+                        isSelected && styles.optionTextSelected
+                      ]}>
+                        {numDays} {numDays === 1 ? 'Day' : 'Days'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              // Show specific days selection
+              DAYS_OF_WEEK.map((day) => {
+                const isSelected = question?.selectedDays?.has(day.label) || false;
+                return (
+                  <TouchableOpacity
+                    key={day.label}
+                    style={[
+                      styles.optionCard,
+                      isSelected && styles.optionCardSelected
+                    ]}
+                    onPress={() => {
+                      const currentDays = question?.selectedDays || new Set<string>();
+                      const newSelectedDays = new Set<string>(currentDays);
+                      if (newSelectedDays.has(day.label)) {
+                        newSelectedDays.delete(day.label);
+                      } else {
+                        newSelectedDays.add(day.label);
+                      }
+                      question?.onSelectedDaysChange?.(newSelectedDays);
+                    }}
+                  >
+                    <View style={[
+                      styles.checkbox,
+                      isSelected && styles.checkboxSelected
+                    ]}>
+                      {isSelected && <Check size={16} color="#09090b" />}
+                    </View>
+                    <View style={styles.optionContent}>
+                      <Text style={[
+                        styles.optionText,
+                        isSelected && styles.optionTextSelected
+                      ]}>
+                        {day.label}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </View>
+        ) : (
+          // Regular question rendering
+          <View style={styles.optionsContainer}>
+            {question?.options?.map((option, index) => {
+              const isSelected = question.selected === option;
+              const description = question.descriptions?.[index];
+              
+              return (
+                <TouchableOpacity
+                  key={option}
+                  style={[
+                    styles.optionCard,
+                    isSelected && styles.optionCardSelected
+                  ]}
+                  onPress={() => question?.onSelect?.(option)}
+                >
+                  <View style={[
+                    styles.checkbox,
+                    isSelected && styles.checkboxSelected
+                  ]}>
+                    {isSelected && <Check size={16} color="#09090b" />}
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={[
+                      styles.optionText,
+                      isSelected && styles.optionTextSelected
+                    ]}>
+                      {option}
+                    </Text>
+                    {description && (
+                      <Text style={styles.optionDescription}>{description}</Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+
+      <TouchableOpacity
+        style={[
+          styles.nextButton,
+          (!canProceed() || loading) && styles.nextButtonDisabled
+        ]}
+        onPress={handleNext}
+        disabled={!canProceed() || loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="#09090b" />
+        ) : (
+          <Text style={styles.nextButtonText}>
+            {currentStep === TOTAL_STEPS - 1 ? 'Complete' : 'Next'}
+          </Text>
+        )}
+      </TouchableOpacity>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#111827', padding: 24, justifyContent: 'center' },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', marginBottom: 8 },
-  subtitle: { color: '#9ca3af', marginBottom: 32 },
-  label: { color: 'white', fontWeight: 'bold', marginBottom: 8 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  halfInput: { width: '48%' },
-  input: { backgroundColor: '#1f2937', color: 'white', padding: 16, borderRadius: 8, borderWidth: 1, borderColor: '#374151', height: 56, justifyContent: 'center' },
-  inputText: { color: 'white' },
-  placeholderText: { color: '#666' },
-  heightRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heightInput: { flex: 1, minWidth: 60 },
-  heightSeparator: { color: '#9ca3af', fontSize: 14 },
-  unitToggleContainer: { 
-    backgroundColor: '#1f2937', 
-    padding: 16, 
-    borderRadius: 8, 
-    borderWidth: 1, 
-    borderColor: '#374151',
-    marginBottom: 24 
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#09090b', // zinc-950
   },
-  unitToggleLabel: { 
-    color: 'white', 
-    fontWeight: 'bold', 
-    marginBottom: 12,
-    fontSize: 16 
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
-  unitToggleRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between' 
+  backButton: {
+    padding: 8,
   },
-  unitToggleText: { 
-    color: '#9ca3af', 
-    fontSize: 16 
+  progressBarContainer: {
+    flex: 1,
+    marginHorizontal: 16,
   },
-  unitToggleTextActive: { 
-    color: '#3b82f6', 
-    fontWeight: '600' 
+  progressBarBackground: {
+    height: 2,
+    backgroundColor: '#27272a', // zinc-800
+    borderRadius: 1,
+    overflow: 'hidden',
   },
-  sliderContainer: { marginBottom: 24 },
-  slider: { width: '100%', height: 40, marginBottom: 8 },
-  sliderLabels: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    paddingHorizontal: 4 
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#ffffff', // white
+    borderRadius: 1,
   },
-  sliderLabel: { 
-    color: '#9ca3af', 
-    fontSize: 12 
+  skipButton: {
+    padding: 8,
   },
-  buttonPrimary: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, marginTop: 16 },
-  buttonText: { color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 18 },
-  
-  // Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#1f2937', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 },
-  modalTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  genderOption: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#374151' },
-  genderOptionText: { color: 'white', fontSize: 16 },
-  cancelButton: { marginTop: 20, padding: 16, backgroundColor: '#374151', borderRadius: 8 },
-  cancelButtonText: { color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 16 }
+  skipText: {
+    color: '#a3e635', // lime-400
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 120, // Space for floating button
+  },
+  questionTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+    letterSpacing: -0.5,
+  },
+  questionSubtitle: {
+    fontSize: 14,
+    color: '#a1a1aa', // zinc-400
+    marginBottom: 32,
+    lineHeight: 20,
+  },
+  optionsContainer: {
+    gap: 12,
+  },
+  optionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24, // rounded-3xl
+    padding: 24,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    position: 'relative',
+  },
+  optionCardSelected: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#71717a', // zinc-500
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  checkboxSelected: {
+    borderColor: '#a3e635', // lime-400
+    backgroundColor: '#a3e635', // lime-400
+  },
+  optionContent: {
+    flex: 1,
+  },
+  optionText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  optionTextSelected: {
+    color: '#09090b', // zinc-950
+  },
+  optionDescription: {
+    fontSize: 14,
+    color: '#a1a1aa', // zinc-400
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  nextButton: {
+    position: 'absolute',
+    bottom: 24,
+    left: 24,
+    right: 24,
+    backgroundColor: '#a3e635', // lime-400
+    borderRadius: 36, // rounded-3xl capsule shape
+    padding: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  nextButtonDisabled: {
+    opacity: 0.5,
+  },
+  nextButtonText: {
+    color: '#09090b', // zinc-950
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  personalInfoContainer: {
+    gap: 24,
+  },
+  unitToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    gap: 16,
+  },
+  unitLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  inputGroup: {
+    gap: 12,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  input: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    color: '#ffffff',
+    fontSize: 16,
+  },
+  heightInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  heightInputHalf: {
+    flex: 1,
+  },
 });

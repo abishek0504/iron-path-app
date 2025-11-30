@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { PlannerSkeleton } from '../../src/components/skeletons/PlannerSkeleton';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -13,6 +14,8 @@ export default function PlannerScreen() {
   const [generating, setGenerating] = useState(false);
   const [activePlan, setActivePlan] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(true);
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
 
   useEffect(() => {
     loadActivePlan();
@@ -21,13 +24,25 @@ export default function PlannerScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadActivePlan();
-    }, [])
+      // Only refresh if we've already loaded initially
+      if (hasInitiallyLoaded) {
+        loadActivePlan();
+      }
+    }, [hasInitiallyLoaded])
   );
 
   const loadActivePlan = async () => {
+    // Only show loading on initial load
+    if (!hasInitiallyLoaded) {
+      setIsLoadingPlan(true);
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setIsLoadingPlan(false);
+      setHasInitiallyLoaded(true);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('workout_plans')
@@ -41,6 +56,9 @@ export default function PlannerScreen() {
     } else if (data) {
       setActivePlan(data);
     }
+    
+    setIsLoadingPlan(false);
+    setHasInitiallyLoaded(true);
   };
 
   const loadUserProfile = async () => {
@@ -236,8 +254,10 @@ Include all 7 days (Monday through Sunday). Days with no workout should have an 
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {!activePlan ? (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {isLoadingPlan ? (
+        <PlannerSkeleton />
+      ) : !activePlan ? (
         <ScrollView contentContainerStyle={styles.contentContainer}>
           <Text style={styles.title}>Workout Planner</Text>
           <Text style={styles.subtitle}>Create or generate your personalized weekly workout plan</Text>
@@ -305,22 +325,46 @@ Include all 7 days (Monday through Sunday). Days with no workout should have an 
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827' },
-  contentContainer: { padding: 24, paddingTop: 60 },
-  listContainer: { padding: 24, paddingTop: 60 },
-  header: { marginBottom: 24 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', marginBottom: 8 },
-  subtitle: { color: '#9ca3af', textAlign: 'center', marginBottom: 32 },
+  container: { flex: 1, backgroundColor: '#09090b' }, // zinc-950
+  contentContainer: { padding: 24, paddingTop: 48, paddingBottom: 120 },
+  listContainer: { padding: 24, paddingTop: 48, paddingBottom: 120 },
+  header: { marginBottom: 32 },
+  title: { fontSize: 28, fontWeight: '700', color: '#ffffff', textAlign: 'center', marginBottom: 8, letterSpacing: -0.5 },
+  subtitle: { color: '#a1a1aa', textAlign: 'center', marginBottom: 32, fontSize: 14 }, // zinc-400
   buttonRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   buttonHalf: { flex: 1 },
-  helperText: { color: '#9ca3af', fontSize: 12, textAlign: 'center', marginBottom: 4 },
-  dayCard: { backgroundColor: '#1f2937', padding: 16, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
-  dayName: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
-  dayFocus: { color: '#9ca3af', fontSize: 14 },
-  buttonPrimary: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', minHeight: 52, flexDirection: 'row' },
-  buttonDisabled: { backgroundColor: '#1e40af', opacity: 0.7 },
-  buttonSecondary: { borderWidth: 1, borderColor: '#2563eb', padding: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
-  buttonText: { color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 18 },
-  buttonTextSecondary: { color: '#60a5fa', textAlign: 'center', fontWeight: 'bold', fontSize: 16 },
+  helperText: { color: '#71717a', fontSize: 11, textAlign: 'center', marginBottom: 4, letterSpacing: 0.5 }, // zinc-500
+  dayCard: { 
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    padding: 24, 
+    borderRadius: 24, // rounded-3xl
+    marginBottom: 16, 
+    borderWidth: 1, 
+    borderColor: '#27272a' // zinc-800
+  },
+  dayName: { color: '#ffffff', fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  dayFocus: { color: '#a1a1aa', fontSize: 14, letterSpacing: 0.5 }, // zinc-400
+  buttonPrimary: { 
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18, 
+    borderRadius: 24, // rounded-3xl
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    minHeight: 56, 
+    flexDirection: 'row' 
+  },
+  buttonDisabled: { backgroundColor: '#71717a', opacity: 0.6 }, // zinc-500
+  buttonSecondary: { 
+    borderWidth: 1, 
+    borderColor: '#a3e635', // lime-400
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+    padding: 18, 
+    borderRadius: 24, // rounded-3xl
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    minHeight: 56 
+  },
+  buttonText: { color: '#09090b', textAlign: 'center', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 }, // zinc-950
+  buttonTextSecondary: { color: '#a3e635', textAlign: 'center', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 }, // lime-400
 });
 
