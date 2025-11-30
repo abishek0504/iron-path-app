@@ -71,7 +71,7 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       // Only refresh data on focus if we've already loaded, don't show loading
-      if (hasInitiallyLoaded && profile) {
+      if (hasInitiallyLoaded) {
         const refresh = async () => {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
@@ -91,7 +91,7 @@ export default function ProfileScreen() {
       }
       // Reset the flag when the screen loses focus (user navigates away)
       hasShownToastForParam.current = false;
-    }, [hasInitiallyLoaded, profile])
+    }, [hasInitiallyLoaded])
   );
 
   useEffect(() => {

@@ -99,6 +99,9 @@ export default function ProgressScreen() {
   // Month view state
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
+  // Refs
+  const lastProcessedExerciseRef = useRef<string | null>(null);
+
   useEffect(() => {
     // Only load on initial mount
     if (!hasInitiallyLoaded) {
@@ -106,38 +109,7 @@ export default function ProgressScreen() {
     }
   }, [hasInitiallyLoaded]);
 
-  useFocusEffect(
-    useCallback(() => {
-      // Only refresh data on focus if we've already loaded, don't show loading
-      if (hasInitiallyLoaded) {
-        loadWorkoutData(undefined, undefined, false);
-      }
-    }, [hasInitiallyLoaded])
-  );
-
-  // Handle returning from exercise-select
-  useFocusEffect(
-    useCallback(() => {
-      const checkForSelectedExercise = async () => {
-        // Check AsyncStorage first (more reliable than params from Modal)
-        const selectedExercise = await AsyncStorage.getItem('progress_selected_exercise');
-        if (selectedExercise) {
-          await AsyncStorage.removeItem('progress_selected_exercise');
-          handleExerciseSelected(selectedExercise);
-          return;
-        }
-        
-        // Fallback to params
-        if (params.selectedExercise) {
-          handleExerciseSelected(params.selectedExercise);
-        }
-      };
-      
-      checkForSelectedExercise();
-    }, [params.selectedExercise])
-  );
-
-  const handleExerciseSelected = async (exerciseName: string) => {
+  const handleExerciseSelected = useCallback(async (exerciseName: string) => {
     // Avoid re-processing the same exercise
     if (lastProcessedExerciseRef.current === exerciseName) {
       router.setParams({ selectedExercise: undefined });
@@ -255,7 +227,38 @@ export default function ProgressScreen() {
     setTimeout(() => {
       lastProcessedExerciseRef.current = null;
     }, 1000);
-  };
+  }, [router, editingWorkout]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Only refresh data on focus if we've already loaded, don't show loading
+      if (hasInitiallyLoaded) {
+        loadWorkoutData(undefined, undefined, false);
+      }
+    }, [hasInitiallyLoaded])
+  );
+
+  // Handle returning from exercise-select
+  useFocusEffect(
+    useCallback(() => {
+      const checkForSelectedExercise = async () => {
+        // Check AsyncStorage first (more reliable than params from Modal)
+        const selectedExercise = await AsyncStorage.getItem('progress_selected_exercise');
+        if (selectedExercise) {
+          await AsyncStorage.removeItem('progress_selected_exercise');
+          handleExerciseSelected(selectedExercise);
+          return;
+        }
+        
+        // Fallback to params
+        if (params.selectedExercise) {
+          handleExerciseSelected(params.selectedExercise);
+        }
+      };
+      
+      checkForSelectedExercise();
+    }, [params.selectedExercise, handleExerciseSelected])
+  );
 
   const loadExerciseDetails = async (logs: WorkoutLog[]) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -1543,7 +1546,6 @@ export default function ProgressScreen() {
   };
 
   const [deletedSetIds, setDeletedSetIds] = useState<Set<number>>(new Set());
-  const lastProcessedExerciseRef = useRef<string | null>(null);
   const wasEditingRef = useRef(false);
   const [validationErrors, setValidationErrors] = useState<Map<string, string>>(new Map());
 

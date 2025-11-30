@@ -489,7 +489,7 @@ export default function EditProfileScreen() {
           <View style={styles.profilePictureContainer}>
             {uploading ? (
               <View style={styles.uploadingContainer}>
-                <ActivityIndicator size="large" color="#3b82f6" />
+                <ActivityIndicator size="large" color="#a3e635" />
               </View>
             ) : (
               <>
@@ -616,7 +616,7 @@ export default function EditProfileScreen() {
                   
                   setUseImperial(newUseImperial);
                 }}
-                trackColor={{ false: '#374151', true: '#3b82f6' }}
+                trackColor={{ false: '#27272a', true: '#a3e635' }}
                 thumbColor="#ffffff"
               />
               <Text style={[styles.unitToggleText, useImperial && styles.unitToggleTextActive]}>Imperial</Text>
@@ -811,7 +811,7 @@ export default function EditProfileScreen() {
               style={styles.imagePickerOption}
               onPress={() => pickImage('library')}
             >
-              <Upload size={24} color="#3b82f6" />
+              <Upload size={24} color="#a3e635" />
               <Text style={styles.imagePickerOptionText}>Choose from Library</Text>
             </TouchableOpacity>
             {Platform.OS !== 'web' && (
@@ -819,7 +819,7 @@ export default function EditProfileScreen() {
                 style={styles.imagePickerOption}
                 onPress={() => pickImage('camera')}
               >
-                <Camera size={24} color="#3b82f6" />
+                <Camera size={24} color="#a3e635" />
                 <Text style={styles.imagePickerOptionText}>Take Photo</Text>
               </TouchableOpacity>
             )}
@@ -867,31 +867,34 @@ export default function EditProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
+    backgroundColor: '#09090b', // zinc-950
   },
   scrollView: {
     flex: 1,
   },
   contentContainer: {
     padding: 24,
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 24,
+    fontWeight: '700',
     color: '#ffffff',
+    letterSpacing: -0.5,
   },
   cancelButton: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 16,
+    fontWeight: '500',
   },
   saveButton: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     fontSize: 16,
     fontWeight: '600',
   },
@@ -903,92 +906,102 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#ffffff',
-    marginBottom: 16,
+    marginBottom: 24,
+    letterSpacing: -0.3,
   },
   profilePictureSection: {
     marginBottom: 32,
-    backgroundColor: '#1f2937',
-    padding: 20,
-    borderRadius: 16,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    padding: 32, // p-8
+    borderRadius: 24, // rounded-3xl
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
     alignItems: 'center',
   },
   profilePictureContainer: {
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 24,
   },
   profilePicture: {
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#374151',
+    backgroundColor: '#27272a', // zinc-800
   },
   placeholderPicture: {
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#374151',
+    backgroundColor: '#27272a', // zinc-800
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#3f3f46', // zinc-700
   },
   placeholderPictureText: {
-    color: '#9ca3af',
-    fontSize: 16,
+    color: '#a1a1aa', // zinc-400
+    fontSize: 14,
+    fontWeight: '500',
   },
   uploadingContainer: {
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#374151',
+    backgroundColor: '#27272a', // zinc-800
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#3f3f46', // zinc-700
   },
   removeButton: {
     position: 'absolute',
     top: 0,
     right: 0,
-    backgroundColor: '#ef4444',
+    backgroundColor: '#ef4444', // red-500
     borderRadius: 20,
     width: 32,
     height: 32,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#111827',
+    borderColor: '#09090b', // zinc-950
   },
   uploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1f2937',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
-    borderColor: '#3b82f6',
+    borderColor: '#a3e635', // lime-400
   },
   uploadButtonText: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   label: {
-    color: '#ffffff',
+    color: '#a1a1aa', // zinc-400
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 12,
+    letterSpacing: 0.2,
   },
   input: {
-    backgroundColor: '#1f2937',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     color: '#ffffff',
-    padding: 16,
-    borderRadius: 8,
+    padding: 18,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
     fontSize: 16,
   },
   inputText: {
@@ -996,95 +1009,111 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   placeholderText: {
-    color: '#666',
+    color: '#71717a', // zinc-500
   },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 16,
   },
   halfWidth: {
     flex: 1,
   },
   saveButtonLarge: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 32,
+    marginBottom: 40,
+    shadowColor: '#a3e635',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   saveButtonLargeText: {
-    color: '#ffffff',
+    color: '#09090b', // zinc-950
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(9, 9, 11, 0.8)', // zinc-950/80
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#1f2937',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    backgroundColor: '#18181b', // zinc-900
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 32,
     paddingBottom: 40,
     maxHeight: '80%',
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    borderBottomWidth: 0,
   },
   modalTitle: {
     color: '#ffffff',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 24,
     textAlign: 'center',
+    letterSpacing: -0.3,
   },
   modalOption: {
-    padding: 16,
+    padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   modalOptionText: {
     color: '#ffffff',
     fontSize: 16,
+    fontWeight: '500',
   },
   imagePickerOption: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: 16,
+    padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: '#27272a', // zinc-800
   },
   imagePickerOptionText: {
     color: '#ffffff',
     fontSize: 16,
+    fontWeight: '500',
   },
   modalCancelButton: {
-    marginTop: 20,
-    padding: 16,
-    backgroundColor: '#374151',
-    borderRadius: 8,
+    marginTop: 24,
+    padding: 18,
+    backgroundColor: 'rgba(39, 39, 42, 0.8)', // zinc-800/80
+    borderRadius: 24, // rounded-3xl
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
   },
   modalCancelText: {
     color: '#ffffff',
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '600',
     fontSize: 16,
+    letterSpacing: 0.3,
   },
   unitToggleContainer: {
-    backgroundColor: '#1f2937',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    padding: 24,
+    borderRadius: 24, // rounded-3xl
     borderWidth: 1,
-    borderColor: '#374151',
-    marginBottom: 24,
+    borderColor: '#27272a', // zinc-800
+    marginBottom: 32,
   },
   unitToggleLabel: {
-    color: '#ffffff',
+    color: '#a1a1aa', // zinc-400
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16,
+    letterSpacing: 0.2,
   },
   unitToggleRow: {
     flexDirection: 'row',
@@ -1092,45 +1121,48 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   unitToggleText: {
-    color: '#9ca3af',
+    color: '#71717a', // zinc-500
     fontSize: 16,
+    fontWeight: '500',
   },
   unitToggleTextActive: {
-    color: '#3b82f6',
+    color: '#a3e635', // lime-400
     fontWeight: '600',
   },
   heightRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   heightInput: {
     flex: 1,
     minWidth: 60,
   },
   heightSeparator: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 14,
+    fontWeight: '500',
   },
   deleteConfirmContent: {
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 24,
-    margin: 20,
+    backgroundColor: '#18181b', // zinc-900
+    borderRadius: 24, // rounded-3xl
+    padding: 32,
+    margin: 24,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: '#27272a', // zinc-800
   },
   deleteConfirmTitle: {
     color: '#ffffff',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 16,
+    letterSpacing: -0.3,
   },
   deleteConfirmMessage: {
-    color: '#9ca3af',
+    color: '#a1a1aa', // zinc-400
     fontSize: 16,
-    marginBottom: 24,
-    lineHeight: 22,
+    marginBottom: 32,
+    lineHeight: 24,
   },
   deleteConfirmButtons: {
     flexDirection: 'row',
@@ -1138,25 +1170,29 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   deleteConfirmCancelButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#374151',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 24, // rounded-3xl
+    backgroundColor: 'rgba(39, 39, 42, 0.8)', // zinc-800/80
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
   },
   deleteConfirmCancelText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   deleteConfirmDeleteButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#ef4444',
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 24, // rounded-3xl
+    backgroundColor: '#ef4444', // red-500
   },
   deleteConfirmDeleteText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
 });
