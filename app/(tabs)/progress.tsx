@@ -1069,19 +1069,20 @@ export default function ProgressScreen() {
                     const firstSet = validSets[0];
                     const hasWeightAndReps = !isTimed && firstSet.weight !== null && firstSet.reps !== null;
                     const hasDuration = isTimed && firstSet.duration !== null;
+
+                    // Build a single summary string for the sets line
+                    let setsSummary = `${validSets.length} set${validSets.length !== 1 ? 's' : ''}`;
+                    if (hasWeightAndReps) {
+                      setsSummary += ` • ${firstSet.weight}lbs × ${firstSet.reps}`;
+                    }
+                    if (hasDuration) {
+                      setsSummary += ` • ${formatDuration(firstSet.duration)}`;
+                    }
                     
                     return (
                       <View key={exIdx} style={styles.timelineExercise}>
                         <Text style={styles.timelineExerciseName}>{exercise.name}</Text>
-                        <Text style={styles.timelineExerciseSets}>
-                          {validSets.length} set{validSets.length !== 1 ? 's' : ''}
-                          {hasWeightAndReps && (
-                            ` • ${firstSet.weight}lbs × ${firstSet.reps}`
-                          )}
-                          {hasDuration && (
-                            ` • ${formatDuration(firstSet.duration)}`
-                          )}
-                        </Text>
+                        <Text style={styles.timelineExerciseSets}>{setsSummary}</Text>
                       </View>
                     );
                   })}
