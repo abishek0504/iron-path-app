@@ -4,6 +4,7 @@ import Animated, { useSharedValue, useAnimatedStyle, withTiming, FadeIn } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus } from 'lucide-react-native';
+import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
 import { ProgressSkeleton } from '../../src/components/skeletons/ProgressSkeleton';
@@ -118,6 +119,7 @@ export default function ProgressScreen() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutData | null>(null);
   const [editingWorkout, setEditingWorkout] = useState<WorkoutData | null>(null);
+  const [originalWorkout, setOriginalWorkout] = useState<WorkoutData | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -828,9 +830,16 @@ export default function ProgressScreen() {
 
       days.push({
         date,
-        workoutCount: workout ? workout.sessions.length : 0,
-        totalVolume: workout ? workout.sessions.reduce((sum, s) => sum + s.totalVolume, 0) : 0,
-        exercises: workout ? workout.sessions.flatMap(s => s.exercises.map(e => e.name)) : []
+        workoutCount: workout && Array.isArray(workout.sessions) ? workout.sessions.length : 0,
+        totalVolume: workout && Array.isArray(workout.sessions) 
+          ? workout.sessions.reduce((sum, s) => sum + (typeof s.totalVolume === 'number' ? s.totalVolume : 0), 0) 
+          : 0,
+        exercises: workout && Array.isArray(workout.sessions)
+          ? workout.sessions.flatMap(s => {
+              if (!Array.isArray(s.exercises)) return [];
+              return s.exercises.map(e => (e && typeof e === 'object' && typeof e.name === 'string' ? e.name : '')).filter(Boolean);
+            })
+          : []
       });
     }
 
@@ -888,10 +897,14 @@ export default function ProgressScreen() {
             const dayNum = String(day.getDate()).padStart(2, '0');
             const dateKey = `${year}-${month}-${dayNum}`;
             const workout = workoutData.find(w => w.date === dateKey);
-            const hasWorkout = !!workout && workout.sessions.length > 0;
+            const hasWorkout = !!workout && Array.isArray(workout.sessions) && workout.sessions.length > 0;
             const today = isToday(day);
-            const totalExercises = workout ? workout.sessions.reduce((sum, s) => sum + s.exercises.length, 0) : 0;
-            const totalVolume = workout ? workout.sessions.reduce((sum, s) => sum + s.totalVolume, 0) : 0;
+            const totalExercises = workout && Array.isArray(workout.sessions) 
+              ? workout.sessions.reduce((sum, s) => sum + (Array.isArray(s.exercises) ? s.exercises.length : 0), 0) 
+              : 0;
+            const totalVolume = workout && Array.isArray(workout.sessions)
+              ? workout.sessions.reduce((sum, s) => sum + (typeof s.totalVolume === 'number' ? s.totalVolume : 0), 0)
+              : 0;
 
             return (
               <TouchableOpacity
@@ -932,12 +945,14 @@ export default function ProgressScreen() {
                     <View style={styles.weekDayWorkoutStats}>
                       <View style={styles.weekDayStatItem}>
                         <TrendingUp color="#a3e635" size={16} />
-                        <Text style={styles.weekDayStatText}>{workout.sessions.length} workout{workout.sessions.length !== 1 ? 's' : ''}</Text>
+                        <Text style={styles.weekDayStatText}>
+                          {Array.isArray(workout.sessions) ? workout.sessions.length : 0} workout{Array.isArray(workout.sessions) && workout.sessions.length !== 1 ? 's' : ''}
+                        </Text>
                       </View>
                       <View style={styles.weekDayStatItem}>
                         <Text style={styles.weekDayStatText}>{totalExercises} exercises</Text>
                       </View>
-                      {totalVolume > 0 && (
+                      {typeof totalVolume === 'number' && totalVolume > 0 && (
                         <View style={styles.weekDayStatItem}>
                           <Text style={styles.weekDayStatText}>{Math.round(totalVolume)} lbs</Text>
                         </View>
@@ -980,13 +995,16 @@ export default function ProgressScreen() {
         <View style={styles.monthStats}>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>
-              {workoutData.reduce((sum, w) => sum + w.sessions.length, 0)}
+              {workoutData.reduce((sum, w) => sum + (Array.isArray(w.sessions) ? w.sessions.length : 0), 0)}
             </Text>
             <Text style={styles.statLabel}>Workouts</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>
-              {Math.round(workoutData.reduce((sum, w) => sum + w.sessions.reduce((s, ses) => s + ses.totalVolume, 0), 0))}
+              {Math.round(workoutData.reduce((sum, w) => {
+                if (!Array.isArray(w.sessions)) return sum;
+                return sum + w.sessions.reduce((s, ses) => s + (typeof ses.totalVolume === 'number' ? ses.totalVolume : 0), 0);
+              }, 0))}
             </Text>
             <Text style={styles.statLabel}>Total Volume</Text>
           </View>
@@ -1052,11 +1070,24 @@ export default function ProgressScreen() {
   };
 
   const renderTimelineView = () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1056',message:'renderTimelineView entry',data:{workoutDataLength:workoutData.length,workoutDataSample:workoutData[0]?JSON.stringify(workoutData[0]).substring(0,200):null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     return (
       <FlatList
-        data={workoutData}
+        data={workoutData.filter((w) => w && typeof w === 'object' && typeof w.date === 'string' && Array.isArray(w.sessions))}
         keyExtractor={(item) => item.date}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1061',message:'Timeline item render',data:{date:item.date,sessionsCount:item.sessions?.length,sessionsType:typeof item.sessions,hasSessions:!!item.sessions},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
+          
+          // Top-level validation: ensure item is valid
+          if (!item || typeof item !== 'object' || typeof item.date !== 'string' || !Array.isArray(item.sessions)) {
+            return null;
+          }
+          
+          return (
           <TouchableOpacity
             style={styles.timelineCard}
             onPress={() => {
@@ -1071,7 +1102,7 @@ export default function ProgressScreen() {
                 <Calendar color="#a3e635" size={20} />
                 <Text style={styles.timelineDate}>{formatDate(item.date)}</Text>
               </View>
-              {item.sessions[0]?.session.completed_at && (
+              {item.sessions && Array.isArray(item.sessions) && item.sessions[0]?.session?.completed_at && typeof item.sessions[0].session.completed_at === 'string' && (
                 <View style={styles.timelineTimeContainer}>
                   <Clock color="#9ca3af" size={16} />
                   <Text style={styles.timelineTime}>{formatTime(item.sessions[0].session.completed_at)}</Text>
@@ -1079,16 +1110,45 @@ export default function ProgressScreen() {
               )}
             </View>
 
-            {item.sessions.map((session, idx) => (
+            {item.sessions && Array.isArray(item.sessions) && item.sessions
+              .filter((s) => {
+                // Strict validation: ensure s is a valid object with session property
+                if (!s || typeof s !== 'object' || Array.isArray(s)) return false;
+                if (!s.session || typeof s.session !== 'object' || Array.isArray(s.session)) return false;
+                // Ensure exercises is either undefined/null or a valid array
+                if (s.exercises !== undefined && s.exercises !== null && !Array.isArray(s.exercises)) return false;
+                return true;
+              })
+              .map((session, idx) => {
+              // #region agent log
+              fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1084',message:'Timeline session render entry',data:{sessionIdx:idx,hasDay:!!session.session.day,dayType:typeof session.session.day,dayValue:session.session.day,exercisesCount:session.exercises?.length,exercisesType:typeof session.exercises},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+              // #endregion
+              
+              // Additional defensive check (already filtered, but double-check for safety)
+              if (!session || typeof session !== 'object' || Array.isArray(session) || !session.session || typeof session.session !== 'object') return null;
+              
+              return (
               <View key={idx} style={styles.timelineSession}>
-                {session.session.day && (
+                {session.session.day && typeof session.session.day === 'string' && (
                   <Text style={styles.timelineDay}>{session.session.day}</Text>
                 )}
                 <View style={styles.timelineExercises}>
-                  {session.exercises.map((exercise, exIdx) => {
+                  {session.exercises && Array.isArray(session.exercises) && session.exercises
+                    .filter((ex) => ex && typeof ex === 'object' && !Array.isArray(ex) && ex.name && typeof ex.name === 'string' && ex.sets && Array.isArray(ex.sets))
+                    .map((exercise, exIdx) => {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1090',message:'Exercise render entry',data:{sessionIdx:idx,exIdx,exerciseType:typeof exercise,exerciseName:exercise?.name,exerciseNameType:typeof exercise?.name,hasSets:!!exercise?.sets,setsType:typeof exercise?.sets},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                    // #endregion
+                    
+                    // Additional defensive check (already filtered, but double-check for safety)
+                    if (!exercise || typeof exercise !== 'object' || Array.isArray(exercise)) return null;
+                    if (!exercise.name || typeof exercise.name !== 'string') return null;
+                    if (!exercise.sets || !Array.isArray(exercise.sets)) return null;
+                    
                     const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
                     // Filter out sets with no valid data
                     const validSets = exercise.sets.filter(set => {
+                      if (!set || typeof set !== 'object') return false;
                       if (isTimed) {
                         return set.duration !== null && set.duration !== undefined;
                       }
@@ -1109,29 +1169,41 @@ export default function ProgressScreen() {
                       setsSummary += ` • ${firstSet.weight}lbs × ${firstSet.reps}`;
                     }
                     if (hasDuration) {
-                      setsSummary += ` • ${formatDuration(firstSet.duration)}`;
+                      // #region agent log
+                      fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1114',message:'Before formatDuration',data:{duration:firstSet.duration,durationType:typeof firstSet.duration},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                      // #endregion
+                      const formatted = formatDuration(firstSet.duration);
+                      // #region agent log
+                      fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1116',message:'After formatDuration',data:{formatted,formattedType:typeof formatted},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                      // #endregion
+                      setsSummary += ` • ${formatted}`;
                     }
                     
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1120',message:'Before rendering exercise',data:{exerciseName:exercise.name,exerciseNameType:typeof exercise.name,setsSummary,setsSummaryType:typeof setsSummary},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                    // #endregion
                     return (
                       <View key={exIdx} style={styles.timelineExercise}>
-                        <Text style={styles.timelineExerciseName}>{exercise.name}</Text>
+                        <Text style={styles.timelineExerciseName}>{exercise.name || ''}</Text>
                         <Text style={styles.timelineExerciseSets}>{setsSummary}</Text>
                       </View>
                     );
                   })}
                 </View>
                 <View style={styles.timelineFooter}>
-                  {session.duration && (
+                  {session.duration && typeof session.duration === 'number' && (
                     <Text style={styles.timelineDuration}>{session.duration} min</Text>
                   )}
-                  {session.totalVolume > 0 && (
+                  {session.totalVolume && typeof session.totalVolume === 'number' && session.totalVolume > 0 && (
                     <Text style={styles.timelineVolume}>{Math.round(session.totalVolume)} lbs volume</Text>
                   )}
                 </View>
               </View>
-            ))}
+              );
+            })}
           </TouchableOpacity>
-        )}
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No workouts found</Text>
@@ -1145,10 +1217,17 @@ export default function ProgressScreen() {
     );
   };
 
+  const hasWorkoutChanges = () => {
+    if (!editingWorkout || !originalWorkout) return false;
+    // Compare workouts deeply
+    return JSON.stringify(editingWorkout) !== JSON.stringify(originalWorkout) || deletedSetIds.size > 0;
+  };
+
   const handleEdit = () => {
     if (!selectedWorkout) return;
     const workoutCopy = JSON.parse(JSON.stringify(selectedWorkout));
     setEditingWorkout(workoutCopy);
+    setOriginalWorkout(JSON.parse(JSON.stringify(workoutCopy))); // Deep copy for comparison
     setDeletedSetIds(new Set());
     setValidationErrors(new Map());
     setIsEditing(true);
@@ -1564,6 +1643,7 @@ export default function ProgressScreen() {
       setDeletedSetIds(new Set()); // Clear deleted sets tracking
       setValidationErrors(new Map()); // Clear validation errors
       setSelectedWorkout(editingWorkout);
+      setOriginalWorkout(JSON.parse(JSON.stringify(editingWorkout))); // Update original after save
       Alert.alert("Success", "Workout updated successfully!");
     } catch (error: any) {
       console.error('Error saving edits:', error);
@@ -1922,7 +2002,14 @@ export default function ProgressScreen() {
         transparent={true}
         onRequestClose={() => {
           if (isEditing) {
-            setUnsavedChangesVisible(true);
+            if (hasWorkoutChanges()) {
+              setUnsavedChangesVisible(true);
+            } else {
+              setIsEditing(false);
+              setEditingWorkout(null);
+              setOriginalWorkout(null);
+              setModalVisible(false);
+            }
           } else {
             setModalVisible(false);
           }
@@ -1950,23 +2037,18 @@ export default function ProgressScreen() {
                       </TouchableOpacity>
                     )}
                   </>
-                ) : (
-                  <TouchableOpacity 
-                    onPress={handleSaveEdit} 
-                    style={[styles.modalActionButton, styles.modalSaveButton]}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <ActivityIndicator size="small" color="#a3e635" />
-                    ) : (
-                      <Save color="#a3e635" size={20} />
-                    )}
-                  </TouchableOpacity>
-                )}
+                ) : null}
                 <TouchableOpacity 
                   onPress={() => {
                     if (isEditing) {
-                      setUnsavedChangesVisible(true);
+                      if (hasWorkoutChanges()) {
+                        setUnsavedChangesVisible(true);
+                      } else {
+                        setIsEditing(false);
+                        setEditingWorkout(null);
+                        setOriginalWorkout(null);
+                        setModalVisible(false);
+                      }
                     } else {
                       setModalVisible(false);
                     }
@@ -1979,7 +2061,7 @@ export default function ProgressScreen() {
               </View>
             </View>
 
-            <ScrollView style={styles.modalScroll}>
+            <ScrollView style={styles.modalScroll} contentContainerStyle={isEditing ? styles.modalScrollContentWithFloating : undefined}>
               {displayWorkout.sessions.map((session, idx) => (
                 <View key={idx} style={styles.modalSession}>
                   {session.session.day && (
@@ -2293,37 +2375,20 @@ export default function ProgressScreen() {
           </View>
           
 
-          {/* Unsaved Changes Confirmation Overlay - Rendered inside workout detail modal */}
-          {unsavedChangesVisible && (
-            <View style={styles.deleteConfirmOverlay}>
-              <View style={styles.deleteConfirmContent}>
-                <Text style={styles.deleteConfirmTitle}>Unsaved Changes</Text>
-                <Text style={styles.deleteConfirmMessage}>
-                  You have unsaved changes. Are you sure you want to close?
-                </Text>
-                <View style={styles.deleteConfirmButtons}>
-                  <TouchableOpacity
-                    style={[styles.deleteConfirmButton, styles.deleteConfirmButtonCancel]}
-                    onPress={() => {
-                      setUnsavedChangesVisible(false);
-                    }}
-                  >
-                    <Text style={styles.deleteConfirmButtonCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.deleteConfirmButton, styles.deleteConfirmButtonDelete]}
-                    onPress={() => {
-                      handleCancelEdit();
-                      setUnsavedChangesVisible(false);
-                      setModalVisible(false);
-                    }}
-                  >
-                    <Text style={styles.deleteConfirmButtonDeleteText}>Discard</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
+          <ConfirmDialog
+            visible={unsavedChangesVisible}
+            title="Discard changes?"
+            message="You have unsaved changes. Are you sure you want to discard them?"
+            confirmText="Discard"
+            cancelText="Cancel"
+            onConfirm={() => {
+              handleCancelEdit();
+              setUnsavedChangesVisible(false);
+              setModalVisible(false);
+            }}
+            onCancel={() => setUnsavedChangesVisible(false)}
+            destructive={true}
+          />
 
           {/* Delete Confirmation Overlay - Rendered inside workout detail modal */}
           {deleteConfirmVisible && (
@@ -2358,6 +2423,28 @@ export default function ProgressScreen() {
                     <Text style={styles.deleteConfirmButtonDeleteText}>Delete</Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+            </View>
+          )}
+
+          {/* Floating Save Button - Only show when editing */}
+          {isEditing && (
+            <View style={styles.modalFloatingSaveContainer}>
+              <View style={styles.modalFloatingSaveCapsule}>
+                <TouchableOpacity 
+                  onPress={handleSaveEdit} 
+                  style={[styles.modalFloatingSaveButton, (saving || !hasWorkoutChanges()) && styles.modalFloatingSaveButtonDisabled]}
+                  disabled={saving || !hasWorkoutChanges()}
+                >
+                  {saving ? (
+                    <>
+                      <ActivityIndicator size="small" color="#09090b" style={{ marginRight: 8 }} />
+                      <Text style={styles.modalFloatingSaveButtonText}>Saving...</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.modalFloatingSaveButtonText}>Save changes</Text>
+                  )}
+                </TouchableOpacity>
               </View>
             </View>
           )}
@@ -2888,6 +2975,9 @@ const styles = StyleSheet.create({
   modalScroll: {
     padding: 20,
   },
+  modalScrollContentWithFloating: {
+    paddingBottom: 100, // Extra padding when floating button is visible
+  },
   modalSession: {
     marginBottom: 28,
     paddingBottom: 20,
@@ -3220,6 +3310,48 @@ const styles = StyleSheet.create({
     color: '#a3e635', // lime-400
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalFloatingSaveContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: Platform.OS === 'web' ? 16 : 32,
+    backgroundColor: 'transparent',
+    zIndex: 1000,
+    pointerEvents: 'box-none',
+  },
+  modalFloatingSaveCapsule: {
+    backgroundColor: '#18181b', // zinc-900 - capsule background
+    borderRadius: 36, // Full capsule shape matching tab bar
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    padding: 4,
+  },
+  modalFloatingSaveButton: {
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+    flexDirection: 'row',
+  },
+  modalFloatingSaveButtonDisabled: {
+    backgroundColor: '#27272a', // zinc-800
+    opacity: 0.5,
+  },
+  modalFloatingSaveButtonText: {
+    color: '#09090b', // zinc-950 for contrast
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 

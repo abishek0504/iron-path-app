@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { ArrowLeft, Plus, X } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
+import { ConfirmDialog } from '../src/components/ConfirmDialog';
 
 type SetItem = {
   index: number;
@@ -38,18 +39,54 @@ export default function WorkoutSetsScreen() {
   const [plan, setPlan] = useState<any>(null);
   const [exerciseName, setExerciseName] = useState<string>('');
   const [sets, setSets] = useState<SetItem[]>([]);
+  const [originalSets, setOriginalSets] = useState<SetItem[]>([]);
   const [bodyweightFlags, setBodyweightFlags] = useState<Map<number, boolean>>(new Map());
   const [isTimed, setIsTimed] = useState<boolean>(false);
   const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
   const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
   const parsedExerciseIndex = Number.isFinite(Number(exerciseIndex))
     ? parseInt(exerciseIndex as string, 10)
     : NaN;
 
+  const hasChanges = () => {
+    if (sets.length !== originalSets.length) return true;
+    return sets.some((set, idx) => {
+      const original = originalSets[idx];
+      if (!original) return true;
+      return (
+        set.weight !== original.weight ||
+        set.reps !== original.reps ||
+        set.duration !== original.duration ||
+        set.rest_time_sec !== original.rest_time_sec
+      );
+    });
+  };
+
   const handleBack = () => {
+    if (hasChanges()) {
+      setShowDiscardDialog(true);
+    } else {
+      try {
+        router.replace({
+          pathname: '/planner-day',
+          params: {
+            planId: planId || '',
+            day: day || '',
+            weekStart: weekStart || '',
+            date: date || '',
+          },
+        });
+      } catch {
+        router.replace('/(tabs)/planner');
+      }
+    }
+  };
+
+  const handleDiscardConfirm = () => {
+    setShowDiscardDialog(false);
     try {
-      // Use replace to prevent navigation stacking
       router.replace({
         pathname: '/planner-day',
         params: {
@@ -253,6 +290,7 @@ export default function WorkoutSetsScreen() {
     setPlan(data);
     setExerciseName(exercise.name || 'Workout');
     setSets(initializedSets);
+    setOriginalSets(JSON.parse(JSON.stringify(initializedSets))); // Deep copy for comparison
     setLoading(false);
   };
 
@@ -506,6 +544,7 @@ export default function WorkoutSetsScreen() {
       }
 
       setPlan(updatedPlan);
+      setOriginalSets(JSON.parse(JSON.stringify(sets))); // Update original after save
       router.replace({
         pathname: '/planner-day',
         params: {
@@ -742,23 +781,39 @@ export default function WorkoutSetsScreen() {
               <Plus color="#a3e635" size={20} />
               <Text style={styles.addSetText}>Add set</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-              onPress={handleSave}
-              disabled={saving}
-            >
-              {saving ? (
-                <>
-                  <ActivityIndicator color="white" style={{ marginRight: 8 }} />
-                  <Text style={styles.saveButtonText}>Saving...</Text>
-                </>
-              ) : (
-                <Text style={styles.saveButtonText}>Save changes</Text>
-              )}
-            </TouchableOpacity>
           </View>
         }
+      />
+
+      {/* Floating Save Button */}
+      <View style={styles.floatingSaveContainer}>
+        <View style={styles.floatingSaveCapsule}>
+          <TouchableOpacity
+            style={[styles.floatingSaveButton, (saving || !hasChanges()) && styles.floatingSaveButtonDisabled]}
+            onPress={handleSave}
+            disabled={saving || !hasChanges()}
+          >
+            {saving ? (
+              <>
+                <ActivityIndicator color="#09090b" style={{ marginRight: 8 }} />
+                <Text style={styles.floatingSaveButtonText}>Saving...</Text>
+              </>
+            ) : (
+              <Text style={styles.floatingSaveButtonText}>Save changes</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ConfirmDialog
+        visible={showDiscardDialog}
+        title="Discard changes?"
+        message="You have unsaved changes. Are you sure you want to discard them?"
+        confirmText="Discard"
+        cancelText="Cancel"
+        onConfirm={handleDiscardConfirm}
+        onCancel={() => setShowDiscardDialog(false)}
+        destructive={true}
       />
     </SafeAreaView>
   );
@@ -926,6 +981,48 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
     minHeight: 16,
+  },
+  floatingSaveContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: Platform.OS === 'web' ? 16 : 32,
+    backgroundColor: 'transparent',
+    zIndex: 1000,
+    pointerEvents: 'box-none',
+  },
+  floatingSaveCapsule: {
+    backgroundColor: '#18181b', // zinc-900 - capsule background
+    borderRadius: 36, // Full capsule shape matching tab bar
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    padding: 4,
+  },
+  floatingSaveButton: {
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+    flexDirection: 'row',
+  },
+  floatingSaveButtonDisabled: {
+    backgroundColor: '#27272a', // zinc-800
+    opacity: 0.5,
+  },
+  floatingSaveButtonText: {
+    color: '#09090b', // zinc-950 for contrast
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 

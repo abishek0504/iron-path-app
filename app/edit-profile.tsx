@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, Upload, X, Check } from 'lucide-react-native';
+import { ConfirmDialog } from '../src/components/ConfirmDialog';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
@@ -35,9 +36,40 @@ const cmToFtIn = (cm: number): { feet: number; inches: number } => {
 export default function EditProfileScreen() {
   const router = useRouter();
 
+  const hasProfileChanges = () => {
+    if (!profile || !originalProfile) return false;
+    
+    // Compare all relevant fields
+    return (
+      fullName !== (originalProfile.full_name || '') ||
+      age !== (originalProfile.age?.toString() || '') ||
+      gender !== (originalProfile.gender || '') ||
+      currentWeight !== (originalProfile.current_weight ? (useImperial ? kgToLbs(originalProfile.current_weight).toFixed(1) : originalProfile.current_weight.toFixed(1)) : '') ||
+      goalWeight !== (originalProfile.goal_weight ? (useImperial ? kgToLbs(originalProfile.goal_weight).toFixed(1) : originalProfile.goal_weight.toFixed(1)) : '') ||
+      (useImperial ? (heightFeet !== (originalProfile.height ? cmToFtIn(originalProfile.height).feet.toString() : '') || heightInches !== (originalProfile.height ? cmToFtIn(originalProfile.height).inches.toString() : '')) : heightCm !== (originalProfile.height ? originalProfile.height.toFixed(1) : '')) ||
+      goal !== (originalProfile.goal || '') ||
+      daysPerWeek !== (originalProfile.days_per_week || null) ||
+      JSON.stringify(Array.from(selectedDays).sort()) !== JSON.stringify((originalProfile.selected_days || []).sort()) ||
+      useImperial !== (originalProfile.use_imperial !== false) ||
+      profilePictureUri !== (originalProfile.profile_picture_url || null)
+    );
+  };
+
   const safeBack = () => {
+    if (hasProfileChanges()) {
+      setShowDiscardDialog(true);
+    } else {
+      try {
+        router.replace('/(tabs)/profile');
+      } catch (error) {
+        router.replace('/(tabs)/profile');
+      }
+    }
+  };
+
+  const handleDiscardConfirm = () => {
+    setShowDiscardDialog(false);
     try {
-      // Use replace to prevent navigation stacking
       router.replace('/(tabs)/profile');
     } catch (error) {
       router.replace('/(tabs)/profile');
@@ -46,6 +78,7 @@ export default function EditProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [profile, setProfile] = useState<any>(null);
+  const [originalProfile, setOriginalProfile] = useState<any>(null);
 
   const [fullName, setFullName] = useState('');
   const [age, setAge] = useState('');
@@ -71,6 +104,7 @@ export default function EditProfileScreen() {
   const [showDaysPicker, setShowDaysPicker] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -153,6 +187,7 @@ export default function EditProfileScreen() {
 
     if (data) {
       setProfile(data);
+      setOriginalProfile(JSON.parse(JSON.stringify(data))); // Deep copy for comparison
       // Load unit preference from database, default to true (imperial) if not set
       const loadedUseImperial = data.use_imperial !== null && data.use_imperial !== undefined ? data.use_imperial : true;
       setUseImperial(loadedUseImperial);
@@ -505,6 +540,7 @@ export default function EditProfileScreen() {
       setLoading(false);
     } else {
       setLoading(false);
+      setOriginalProfile(JSON.parse(JSON.stringify(profile))); // Update original after save
       // Navigate back immediately with saved parameter using replace to prevent stacking
       router.replace('/(tabs)/profile?saved=true');
     }
@@ -512,17 +548,13 @@ export default function EditProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={[styles.contentContainer, { paddingBottom: 120 }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={safeBack}>
             <Text style={styles.cancelButton}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Profile</Text>
-          <TouchableOpacity onPress={saveProfile} disabled={loading}>
-            <Text style={[styles.saveButton, loading && styles.saveButtonDisabled]}>
-              {loading ? 'Saving...' : 'Save'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.headerSpacer} />
         </View>
 
         <View style={styles.profilePictureSection}>
@@ -772,16 +804,33 @@ export default function EditProfileScreen() {
           </View>
         </View>
 
-        <TouchableOpacity 
-          style={[styles.saveButtonLarge, loading && styles.saveButtonDisabled]} 
-          onPress={saveProfile}
-          disabled={loading}
-        >
-          <Text style={styles.saveButtonLargeText}>
-            {loading ? 'Saving...' : 'Save Changes'}
-          </Text>
-        </TouchableOpacity>
       </ScrollView>
+
+      {/* Floating Save Button */}
+      <View style={styles.floatingSaveContainer}>
+        <View style={styles.floatingSaveCapsule}>
+          <TouchableOpacity 
+            style={[styles.floatingSaveButton, (loading || !hasProfileChanges()) && styles.floatingSaveButtonDisabled]} 
+            onPress={saveProfile}
+            disabled={loading || !hasProfileChanges()}
+          >
+            <Text style={styles.floatingSaveButtonText}>
+              {loading ? 'Saving...' : 'Save Changes'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ConfirmDialog
+        visible={showDiscardDialog}
+        title="Discard changes?"
+        message="You have unsaved changes. Are you sure you want to discard them?"
+        confirmText="Discard"
+        cancelText="Cancel"
+        onConfirm={handleDiscardConfirm}
+        onCancel={() => setShowDiscardDialog(false)}
+        destructive={true}
+      />
 
       {/* Age Picker Modal */}
       <Modal
@@ -1186,6 +1235,9 @@ const styles = StyleSheet.create({
     color: '#a1a1aa', // zinc-400
     fontSize: 16,
     fontWeight: '500',
+  },
+  headerSpacer: {
+    width: 60, // Match cancel button width for centering
   },
   saveButton: {
     color: '#a3e635', // lime-400
@@ -1593,5 +1645,47 @@ const styles = StyleSheet.create({
   },
   dayOptionTextSelected: {
     color: '#09090b', // zinc-950
+  },
+  floatingSaveContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: Platform.OS === 'web' ? 16 : 32,
+    backgroundColor: 'transparent',
+    zIndex: 1000,
+    pointerEvents: 'box-none',
+  },
+  floatingSaveCapsule: {
+    backgroundColor: '#18181b', // zinc-900 - capsule background
+    borderRadius: 36, // Full capsule shape matching tab bar
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    padding: 4,
+  },
+  floatingSaveButton: {
+    backgroundColor: '#a3e635', // lime-400
+    padding: 18,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  floatingSaveButtonDisabled: {
+    backgroundColor: '#27272a', // zinc-800
+    opacity: 0.5,
+  },
+  floatingSaveButtonText: {
+    color: '#09090b', // zinc-950 for contrast
+    fontWeight: 'bold',
+    fontSize: 18,
+    letterSpacing: 0.5,
   },
 });
