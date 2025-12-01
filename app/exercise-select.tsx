@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Search, X, Plus } from 'lucide-react-native';
+import { Search, X, Plus, ChevronRight } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../src/lib/supabase';
 import { Toast } from '../src/components/Toast';
@@ -690,31 +690,39 @@ export default function ExerciseSelectScreen() {
         data={allExercises}
         keyExtractor={(item, index) => `${item.type}-${item.name}-${index}`}
         renderItem={({ item }) => (
-          <View style={styles.exerciseItem}>
+          <TouchableOpacity
+            style={styles.exerciseItem}
+            onPress={() => {
+              if (context === 'progress') {
+                safeBack(item.name);
+                return;
+              }
+              const dateString = date ? date : (day ? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}` : '');
+              router.replace({
+                pathname: '/exercise-detail',
+                params: {
+                  exerciseName: item.name,
+                  exerciseType: item.type,
+                  planId: planId || '',
+                  day: day || '',
+                  exerciseIndex: exerciseIndex || '',
+                  weekStart: weekStart || '',
+                  date: dateString,
+                  context: context || ''
+                }
+              });
+            }}
+            activeOpacity={0.7}
+            disabled={loading}
+          >
             <View style={styles.exerciseInfo}>
               <View style={styles.exerciseNameContainer}>
                 <Text style={styles.exerciseName}>{item.name}</Text>
                 {renderDifficultyIndicator(item.difficulty)}
               </View>
             </View>
-            {item.type === 'master' ? (
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => handleAddExercise(item.name)}
-                disabled={loading}
-              >
-                <Text style={styles.addButtonText}>Add</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.addCustomButton}
-                onPress={() => handleAddCustomExercise(item)}
-                disabled={loading}
-              >
-                <Text style={styles.addCustomButtonText}>Add Custom</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+            <ChevronRight color="#a1a1aa" size={24} />
+          </TouchableOpacity>
         )}
         ListEmptyComponent={() => (
           <Text style={styles.emptyText}>
@@ -809,10 +817,6 @@ const styles = StyleSheet.create({
   difficultyBar2: { width: 6, height: 12 },
   difficultyBar3: { width: 6, height: 16 },
   difficultyText: { fontSize: 14, fontWeight: '600' },
-  addButton: { backgroundColor: '#a3e635', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 }, // lime-400, rounded-2xl
-  addButtonText: { color: '#09090b', fontWeight: 'bold', fontSize: 14 }, // zinc-950 for contrast
-  addCustomButton: { backgroundColor: '#18181b', borderWidth: 1, borderColor: '#a3e635', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 20 }, // zinc-900, lime-400, rounded-2xl
-  addCustomButtonText: { color: '#a3e635', fontWeight: 'bold', fontSize: 14 }, // lime-400
   emptyText: { color: '#a1a1aa', textAlign: 'center', marginTop: 40 }, // zinc-400
   listContainer: { paddingBottom: Platform.OS === 'web' ? 20 : 120 }, // Extra padding for native tab bar
   createCustomButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#18181b', padding: 20, borderRadius: 24, marginHorizontal: 24, marginBottom: 16, borderWidth: 1, borderColor: '#a3e635', gap: 8, minHeight: 56 }, // zinc-900, rounded-3xl, lime-400
