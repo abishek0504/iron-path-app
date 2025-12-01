@@ -59,7 +59,7 @@ export default function PlannerScreen() {
     
     setIsLoadingPlan(false);
     setHasInitiallyLoaded(true);
-  }, [hasInitiallyLoaded]);
+  }, []);
 
   const loadUserProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -84,7 +84,7 @@ export default function PlannerScreen() {
       loadActivePlan();
       loadUserProfile();
     }
-  }, [hasInitiallyLoaded, loadActivePlan]);
+  }, [loadActivePlan]);
 
   useFocusEffect(
     useCallback(() => {

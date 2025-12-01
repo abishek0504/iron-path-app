@@ -252,7 +252,7 @@ export default function HomeScreen() {
     return () => {
       isMounted = false;
     };
-  }, [currentDay, hasInitiallyLoaded]);
+  }, [currentDay]);
 
   useFocusEffect(
     useCallback(() => {
