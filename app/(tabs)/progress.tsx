@@ -273,13 +273,13 @@ export default function ProgressScreen() {
     }, 1000);
   }, [router, editingWorkout]);
 
+  // Keep the currently viewed week/month/timeline when switching tabs.
+  // Users can refresh via pull-to-refresh or by changing the visible range.
   useFocusEffect(
     useCallback(() => {
-      // Only refresh data on focus if we've already loaded, don't show loading
-      if (hasInitiallyLoaded) {
-        loadWorkoutData(undefined, undefined, false);
-      }
-    }, [hasInitiallyLoaded])
+      // Intentionally no auto-refresh here to avoid loading a different range
+      // than the one currently selected in the UI.
+    }, [])
   );
 
   // Handle returning from exercise-select
@@ -399,27 +399,44 @@ export default function ProgressScreen() {
         return;
       }
 
-      // Determine date range based on view mode
+      // Determine date range based on view mode, with a small buffer on each side
+      // to avoid timezone edge cases when converting to ISO strings.
       let start: Date;
       let end: Date = new Date();
       end.setHours(23, 59, 59, 999);
 
       if (viewMode === 'week') {
-        start = new Date(currentWeekStart);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(currentWeekStart);
-        end.setDate(end.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
+        // Base week range
+        const baseStart = new Date(currentWeekStart);
+        baseStart.setHours(0, 0, 0, 0);
+        const baseEnd = new Date(currentWeekStart);
+        baseEnd.setDate(baseEnd.getDate() + 6);
+        baseEnd.setHours(23, 59, 59, 999);
+
+        // Apply 1‑day buffer on each side
+        start = new Date(baseStart);
+        start.setDate(start.getDate() - 1);
+        end = new Date(baseEnd);
+        end.setDate(end.getDate() + 1);
       } else if (viewMode === 'month') {
-        start = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-        start.setHours(0, 0, 0, 0);
-        end = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
-        end.setHours(23, 59, 59, 999);
+        // Base month range
+        const baseStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+        baseStart.setHours(0, 0, 0, 0);
+        const baseEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+        baseEnd.setHours(23, 59, 59, 999);
+
+        // Apply 1‑day buffer on each side
+        start = new Date(baseStart);
+        start.setDate(start.getDate() - 1);
+        end = new Date(baseEnd);
+        end.setDate(end.getDate() + 1);
       } else {
-        // Timeline: last 90 days
+        // Timeline: last 90 days, plus a 1‑day buffer
         start = new Date();
-        start.setDate(start.getDate() - 90);
+        start.setDate(start.getDate() - 91);
         start.setHours(0, 0, 0, 0);
+        end = new Date();
+        end.setHours(23, 59, 59, 999);
       }
 
       if (startDate) start = startDate;
@@ -561,6 +578,22 @@ export default function ProgressScreen() {
 
       // Aggregate data by date (only completed sessions and standalone logs)
       const aggregated = aggregateWorkoutData(filteredLogs, completedSessions || [], detailsMap, planExerciseOrder);
+
+      // Dev‑only debug readout: helps trace Progress data loading without affecting UX.
+      if (__DEV__) {
+        console.log('[Progress] Loaded data', {
+          viewMode,
+          queryStartLocal: start.toString(),
+          queryEndLocal: end.toString(),
+          queryStartISO: start.toISOString(),
+          queryEndISO: end.toISOString(),
+          totalLogs: logs ? logs.length : 0,
+          filteredLogs: filteredLogs.length,
+          completedSessions: completedSessions ? completedSessions.length : 0,
+          aggregatedDays: aggregated.length,
+        });
+      }
+
       setWorkoutData(aggregated);
     } catch (error) {
       console.error('Error loading workout data:', error);
