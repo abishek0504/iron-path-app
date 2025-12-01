@@ -1,15 +1,131 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, { 
-  FadeIn
+  FadeIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  withSequence,
+  Easing,
+  interpolate
 } from 'react-native-reanimated';
-import { Play, Dumbbell, Timer } from 'lucide-react-native';
+import Svg, { Defs, LinearGradient, Stop, Circle, G } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Play, Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
 import { HomeScreenSkeleton } from '../../src/components/skeletons/HomeScreenSkeleton';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Circular Button with Ripple Effect Component
+const CircularButton = ({ 
+  onPress, 
+  disabled, 
+  text, 
+  isCompleted 
+}: { 
+  onPress: () => void; 
+  disabled: boolean; 
+  text: string; 
+  isCompleted: boolean;
+}) => {
+  const ripple = useSharedValue(0);
+
+  useEffect(() => {
+    if (isCompleted || disabled) return;
+
+    // Single ripple animation that repeats every 5 seconds
+    const startRipple = () => {
+      ripple.value = 0;
+      ripple.value = withRepeat(
+        withSequence(
+          withTiming(1, {
+            duration: 3000,
+            easing: Easing.out(Easing.ease),
+          }),
+          withTiming(0, { duration: 0 })
+        ),
+        -1,
+        false
+      );
+    };
+
+    startRipple();
+    const interval = setInterval(startRipple, 5000); // Restart every 5 seconds
+
+    return () => {
+      clearInterval(interval);
+      ripple.value = 0;
+    };
+  }, [isCompleted, disabled, ripple]);
+
+  const rippleStyle = useAnimatedStyle(() => {
+    const scale = interpolate(ripple.value, [0, 1], [1, 1.8]);
+    const opacity = interpolate(ripple.value, [0, 0.5, 1], [0.6, 0.3, 0]);
+    return {
+      transform: [{ scale }],
+      opacity,
+    };
+  });
+
+  return (
+    <View style={styles.circularButtonContainer}>
+      {/* Ripple ring */}
+      {!isCompleted && !disabled && (
+        <Animated.View style={[styles.rippleRing, rippleStyle]}>
+          <Svg width={160} height={160} style={styles.rippleSvg}>
+            <Defs>
+              <LinearGradient id="rippleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <Stop offset="0%" stopColor="#06b6d4" stopOpacity="0.6" />
+                <Stop offset="50%" stopColor="#22d3ee" stopOpacity="0.4" />
+                <Stop offset="100%" stopColor="#a3e635" stopOpacity="0.6" />
+              </LinearGradient>
+            </Defs>
+            <Circle cx="80" cy="80" r="79" fill="none" stroke="url(#rippleGradient)" strokeWidth="2" />
+          </Svg>
+        </Animated.View>
+      )}
+      
+      {/* Main button with gradient border */}
+      <View style={styles.circularButtonWrapper}>
+        {!isCompleted && (
+          <Svg width={164} height={164} style={styles.gradientBorderSvg}>
+            <Defs>
+              <LinearGradient id="buttonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <Stop offset="0%" stopColor="#06b6d4" stopOpacity="1" />
+                <Stop offset="50%" stopColor="#22d3ee" stopOpacity="1" />
+                <Stop offset="100%" stopColor="#a3e635" stopOpacity="1" />
+              </LinearGradient>
+            </Defs>
+            <Circle cx="82" cy="82" r="80" fill="none" stroke="url(#buttonGradient)" strokeWidth="2" />
+          </Svg>
+        )}
+        <Pressable
+          style={[
+            styles.circularButton,
+            isCompleted && styles.circularButtonCompleted
+          ]}
+          onPress={onPress}
+          disabled={disabled}
+        >
+          <View style={[
+            styles.circularButtonInner,
+            isCompleted && styles.circularButtonInnerCompleted
+          ]}>
+            {!isCompleted ? (
+              <Text style={styles.circularButtonText}>{text}</Text>
+            ) : (
+              <Text style={styles.circularButtonTextCompleted}>✓</Text>
+            )}
+          </View>
+        </Pressable>
+      </View>
+    </View>
+  );
+};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -20,6 +136,8 @@ export default function HomeScreen() {
   const [isWorkoutCompleted, setIsWorkoutCompleted] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
+  const [showResetModal, setShowResetModal] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
 
   useEffect(() => {
     const dayIndex = new Date().getDay();
@@ -237,6 +355,61 @@ export default function HomeScreen() {
     });
   };
 
+  const handleResetWorkout = async () => {
+    if (!activePlan || !currentDay) return;
+
+    setIsResetting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert("Error", "You must be logged in.");
+        setIsResetting(false);
+        return;
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      // Delete any active workout sessions (even if none exist, this won't error)
+      const { error: deleteError } = await supabase
+        .from('workout_sessions')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('plan_id', activePlan.id)
+        .eq('day', currentDay)
+        .in('status', ['active', 'abandoned'])
+        .gte('started_at', today.toISOString())
+        .lt('started_at', tomorrow.toISOString());
+
+      if (deleteError && deleteError.code !== 'PGRST116') {
+        console.error('Error deleting workout session:', deleteError);
+        // Don't show error if no session exists, just continue
+      }
+
+      // Clear local progress from AsyncStorage (even if it doesn't exist)
+      try {
+        await AsyncStorage.removeItem(`workout_session_${activePlan.id}_${currentDay}`);
+      } catch (storageError) {
+        // Ignore storage errors
+        console.log('Storage clear error (non-critical):', storageError);
+      }
+
+      // Update state
+      setHasActiveWorkout(false);
+      setIsWorkoutCompleted(false);
+      setShowResetModal(false);
+      
+      Alert.alert("Success", "Workout has been reset. You can now start fresh!");
+    } catch (error: any) {
+      console.error('Error resetting workout:', error);
+      Alert.alert("Error", error.message || "Failed to reset workout.");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   const isRestDay = !todayData?.exercises || todayData.exercises.length === 0;
 
   const getGreeting = () => {
@@ -312,16 +485,26 @@ export default function HomeScreen() {
             >
               <View style={styles.workoutCardContent}>
                 <View style={styles.badgeContainer}>
-                  <View style={styles.badgePrimary}>
-                    <Text style={styles.badgePrimaryText}>
-                      Active Plan
-                    </Text>
+                  <View style={styles.badgeLeft}>
+                    <View style={styles.badgePrimary}>
+                      <Text style={styles.badgePrimaryText}>
+                        Active Plan
+                      </Text>
+                    </View>
+                    <View style={styles.badgeSecondary}>
+                      <Text style={styles.badgeSecondaryText}>
+                        {todayData?.exercises?.length || 0} Exercises
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.badgeSecondary}>
-                    <Text style={styles.badgeSecondaryText}>
-                      {todayData?.exercises?.length || 0} Exercises
-                    </Text>
-                  </View>
+                  {hasActiveWorkout && (
+                    <Pressable
+                      onPress={() => setShowResetModal(true)}
+                      style={styles.resetButton}
+                    >
+                      <RotateCcw size={20} color="#71717a" />
+                    </Pressable>
+                  )}
                 </View>
 
                 <Text style={styles.workoutTitle}>
@@ -364,33 +547,56 @@ export default function HomeScreen() {
             {/* Start Workout Button */}
             <Animated.View
               entering={FadeIn.duration(400).delay(150)}
+              style={styles.buttonContainer}
             >
-              <Pressable
-                style={[
-                  styles.startButton,
-                  isWorkoutCompleted && styles.startButtonCompleted
-                ]}
+              <CircularButton
                 onPress={handleStartWorkout}
                 disabled={isWorkoutCompleted}
-              >
-              {!isWorkoutCompleted && (
-                <Play size={20} fill="#09090b" color="#09090b" />
-              )}
-              <Text style={[
-                styles.startButtonText,
-                isWorkoutCompleted && styles.startButtonTextCompleted
-              ]}>
-                {isWorkoutCompleted 
-                  ? 'Workout Completed' 
+                text={isWorkoutCompleted 
+                  ? 'Completed' 
                   : hasActiveWorkout 
-                    ? 'Continue Workout' 
-                    : 'Start Workout'}
-              </Text>
-              </Pressable>
+                    ? 'Continue' 
+                    : 'Start'}
+                isCompleted={isWorkoutCompleted}
+              />
             </Animated.View>
           </>
         )}
       </ScrollView>
+
+      {/* Reset Workout Confirmation Modal */}
+      <Modal
+        visible={showResetModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowResetModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Reset Workout?</Text>
+            <Text style={styles.modalMessage}>
+              This will delete your current workout progress and allow you to start from the beginning. This action cannot be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={styles.modalCancelButton}
+                onPress={() => setShowResetModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalResetButton, isResetting && styles.modalResetButtonDisabled]}
+                onPress={handleResetWorkout}
+                disabled={isResetting}
+              >
+                <Text style={styles.modalResetText}>
+                  {isResetting ? 'Resetting...' : 'Reset Workout'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -532,8 +738,14 @@ const styles = StyleSheet.create({
   badgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     marginBottom: 16,
+  },
+  badgeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
   },
   badgePrimary: {
     backgroundColor: 'rgba(163, 230, 53, 0.2)', // lime-400/20
@@ -571,6 +783,16 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     lineHeight: 32,
     marginBottom: 8,
+  },
+  resetButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(39, 39, 42, 0.6)', // zinc-800/60
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#3f3f46', // zinc-700
   },
   workoutSubtitle: {
     color: '#a1a1aa', // zinc-400
@@ -612,28 +834,144 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  startButton: {
-    width: '100%',
-    height: 56,
-    borderRadius: 24, // rounded-3xl
+  buttonContainer: {
+    alignItems: 'center',
+    marginTop: 48,
+  },
+  circularButtonContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  rippleRing: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rippleSvg: {
+    position: 'absolute',
+  },
+  circularButtonWrapper: {
+    width: 164,
+    height: 164,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  gradientBorderSvg: {
+    position: 'absolute',
+  },
+  circularButton: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    shadowColor: '#a3e635',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  circularButtonCompleted: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: '#3f3f46', // zinc-700
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  circularButtonInner: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(24, 24, 27, 0.7)', // zinc-900 with 70% opacity (translucent)
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circularButtonInnerCompleted: {
+    backgroundColor: 'rgba(24, 24, 27, 0.7)', // zinc-900 with 70% opacity
+  },
+  circularButtonText: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  circularButtonTextCompleted: {
+    color: '#71717a', // zinc-500
+    fontSize: 32,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#18181b', // zinc-900
+    borderRadius: 24,
+    padding: 32,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: '#a1a1aa', // zinc-400
+    lineHeight: 24,
+    marginBottom: 32,
+    textAlign: 'center',
+  },
+  modalButtons: {
     flexDirection: 'row',
     gap: 12,
-    backgroundColor: '#a3e635', // lime-400
   },
-  startButtonCompleted: {
-    backgroundColor: 'rgba(39, 39, 42, 0.5)', // zinc-800/50
+  modalCancelButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(63, 63, 70, 0.3)', // zinc-700/30
+    borderColor: '#3f3f46', // zinc-700
+    backgroundColor: 'rgba(39, 39, 42, 0.5)', // zinc-800/50
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  startButtonText: {
-    color: '#09090b', // zinc-950
+  modalCancelText: {
+    color: '#a1a1aa', // zinc-400
     fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 0.5,
   },
-  startButtonTextCompleted: {
-    color: '#71717a', // zinc-500
+  modalResetButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#ef4444', // red-500
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalResetButtonDisabled: {
+    opacity: 0.6,
+  },
+  modalResetText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

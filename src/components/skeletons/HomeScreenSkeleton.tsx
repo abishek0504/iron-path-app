@@ -52,8 +52,17 @@ export const HomeScreenSkeleton = () => {
             </View>
           </View>
 
-          {/* Start Workout Button Skeleton */}
-          <SkeletonLoader width="100%" height={56} borderRadius={24} style={{ marginTop: 8 }} />
+          {/* Circular Button Skeleton */}
+          <View style={styles.buttonContainer}>
+            <View style={styles.circularButtonWrapper}>
+              {/* Gradient border skeleton */}
+              <SkeletonLoader width={164} height={164} borderRadius={82} style={styles.gradientBorderSkeleton} />
+              {/* Main button skeleton */}
+              <View style={styles.circularButtonSkeleton}>
+                <SkeletonLoader width={140} height={140} borderRadius={70} style={styles.circularButtonInnerSkeleton} />
+              </View>
+            </View>
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -125,6 +134,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  buttonContainer: {
+    alignItems: 'center',
+    marginTop: 48,
+  },
+  circularButtonWrapper: {
+    width: 164,
+    height: 164,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  gradientBorderSkeleton: {
+    position: 'absolute',
+  },
+  circularButtonSkeleton: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  circularButtonInnerSkeleton: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
   },
 });
 
