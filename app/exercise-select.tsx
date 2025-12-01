@@ -233,6 +233,27 @@ export default function ExerciseSelectScreen() {
         notes: ""
       };
 
+      // Check if exercise is bodyweight
+      const BODYWEIGHT_EXERCISES = [
+        'Pull Up', 'Pull-Up', 'Pullup', 'Chin Up', 'Chin-Up',
+        'Push Up', 'Push-Up', 'Pushup',
+        'Dip', 'Dips',
+        'Sit Up', 'Sit-Up', 'Situp',
+        'Crunch', 'Crunches',
+        'Plank', 'Planks',
+        'Burpee', 'Burpees',
+        'Mountain Climber', 'Mountain Climbers',
+        'Bodyweight Squat', 'Air Squat',
+        'Lunge', 'Lunges',
+        'Jumping Jack', 'Jumping Jacks',
+        'Pistol Squat',
+        'Handstand Push Up', 'Handstand Push-Up',
+        'Muscle Up', 'Muscle-Up'
+      ];
+      const isBodyweight = isTimed || BODYWEIGHT_EXERCISES.some(bw => 
+        exerciseName.toLowerCase().includes(bw.toLowerCase())
+      );
+
       if (isTimed) {
         newExercise.target_duration_sec = defaultDuration;
         // Pre-initialize 3 sets with duration=60 (1 min, 0 sec), rest=60
@@ -243,11 +264,11 @@ export default function ExerciseSelectScreen() {
         ];
       } else {
         newExercise.target_reps = 10;
-        // Pre-initialize 3 sets with reps=10, rest=60
+        // Pre-initialize 3 sets with reps=10, weight=0 for bodyweight, rest=60
         newExercise.sets = [
-          { index: 1, reps: 10, rest_time_sec: 60 },
-          { index: 2, reps: 10, rest_time_sec: 60 },
-          { index: 3, reps: 10, rest_time_sec: 60 },
+          { index: 1, reps: 10, weight: isBodyweight ? 0 : null, rest_time_sec: 60 },
+          { index: 2, reps: 10, weight: isBodyweight ? 0 : null, rest_time_sec: 60 },
+          { index: 3, reps: 10, weight: isBodyweight ? 0 : null, rest_time_sec: 60 },
         ];
       }
 
@@ -408,11 +429,33 @@ export default function ExerciseSelectScreen() {
         newExercise.target_reps = defaultRepsNum;
         const numSets = newCustomExercise.default_sets || 3;
         const restSec = newCustomExercise.default_rest_sec || 60;
+        
+        // Check if exercise is bodyweight
+        const BODYWEIGHT_EXERCISES = [
+          'Pull Up', 'Pull-Up', 'Pullup', 'Chin Up', 'Chin-Up',
+          'Push Up', 'Push-Up', 'Pushup',
+          'Dip', 'Dips',
+          'Sit Up', 'Sit-Up', 'Situp',
+          'Crunch', 'Crunches',
+          'Plank', 'Planks',
+          'Burpee', 'Burpees',
+          'Mountain Climber', 'Mountain Climbers',
+          'Bodyweight Squat', 'Air Squat',
+          'Lunge', 'Lunges',
+          'Jumping Jack', 'Jumping Jacks',
+          'Pistol Squat',
+          'Handstand Push Up', 'Handstand Push-Up',
+          'Muscle Up', 'Muscle-Up'
+        ];
+        const isBodyweight = BODYWEIGHT_EXERCISES.some(bw => 
+          newCustomExercise.name.toLowerCase().includes(bw.toLowerCase())
+        );
+        
         newExercise.sets = [];
         for (let i = 0; i < numSets; i++) {
           newExercise.sets.push({
             index: i + 1,
-            weight: null,
+            weight: isBodyweight ? 0 : null,
             reps: defaultRepsNum,
             rest_time_sec: restSec,
           });

@@ -25,10 +25,12 @@ type SetItem = {
 
 export default function WorkoutSetsScreen() {
   const router = useRouter();
-  const { planId, day, exerciseIndex } = useLocalSearchParams<{
+  const { planId, day, exerciseIndex, weekStart, date } = useLocalSearchParams<{
     planId: string;
     day: string;
     exerciseIndex: string;
+    weekStart?: string;
+    date?: string;
   }>();
 
   const [loading, setLoading] = useState(true);
@@ -53,6 +55,8 @@ export default function WorkoutSetsScreen() {
         params: {
           planId: planId || '',
           day: day || '',
+          weekStart: weekStart || '',
+          date: date || '',
         },
       });
     } catch {
@@ -151,7 +155,29 @@ export default function WorkoutSetsScreen() {
       return;
     }
 
-    const dayData = data.plan_data?.week_schedule?.[day as string];
+    // Get current week start date if weekStart not provided
+    let weekKey = weekStart;
+    if (!weekKey) {
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+      const diff = today.getDate() - dayOfWeek;
+      const weekStartDate = new Date(today);
+      weekStartDate.setDate(diff);
+      weekStartDate.setHours(0, 0, 0, 0);
+      const year = weekStartDate.getFullYear();
+      const month = String(weekStartDate.getMonth() + 1).padStart(2, '0');
+      const dayNum = String(weekStartDate.getDate()).padStart(2, '0');
+      weekKey = `${year}-${month}-${dayNum}`;
+    }
+    
+    // Check week-specific data first, then fall back to template
+    let dayData = null;
+    if (data.plan_data?.weeks?.[weekKey]?.week_schedule?.[day as string]) {
+      dayData = data.plan_data.weeks[weekKey].week_schedule[day as string];
+    } else if (data.plan_data?.week_schedule?.[day as string]) {
+      dayData = data.plan_data.week_schedule[day as string];
+    }
+    
     const exercises: any[] = dayData?.exercises || [];
 
     if (
@@ -372,8 +398,43 @@ export default function WorkoutSetsScreen() {
     setSaving(true);
 
     try {
-      const updatedPlan = { ...plan };
-      const dayData = updatedPlan.plan_data?.week_schedule?.[day as string];
+      // Deep copy to avoid mutating original
+      const updatedPlan = JSON.parse(JSON.stringify(plan));
+      
+      // Get week key
+      let weekKey = weekStart;
+      if (!weekKey) {
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        const diff = today.getDate() - dayOfWeek;
+        const weekStartDate = new Date(today);
+        weekStartDate.setDate(diff);
+        weekStartDate.setHours(0, 0, 0, 0);
+        const year = weekStartDate.getFullYear();
+        const month = String(weekStartDate.getMonth() + 1).padStart(2, '0');
+        const dayNum = String(weekStartDate.getDate()).padStart(2, '0');
+        weekKey = `${year}-${month}-${dayNum}`;
+      }
+      
+      // Ensure plan_data structure exists
+      if (!updatedPlan.plan_data) {
+        updatedPlan.plan_data = { week_schedule: {}, weeks: {} };
+      }
+      if (!updatedPlan.plan_data.weeks) {
+        updatedPlan.plan_data.weeks = {};
+      }
+      if (!updatedPlan.plan_data.week_schedule) {
+        updatedPlan.plan_data.week_schedule = {};
+      }
+      
+      // Get dayData from week-specific structure or template
+      let dayData = null;
+      if (updatedPlan.plan_data.weeks[weekKey]?.week_schedule?.[day as string]) {
+        dayData = updatedPlan.plan_data.weeks[weekKey].week_schedule[day as string];
+      } else if (updatedPlan.plan_data.week_schedule?.[day as string]) {
+        dayData = updatedPlan.plan_data.week_schedule[day as string];
+      }
+      
       if (!dayData || !Array.isArray(dayData.exercises)) {
         throw new Error('Day data is missing.');
       }
@@ -421,7 +482,19 @@ export default function WorkoutSetsScreen() {
       }
 
       dayData.exercises[parsedExerciseIndex] = updatedExercise;
-      updatedPlan.plan_data.week_schedule[day as string] = dayData;
+      
+      // Save to week-specific structure if weekKey is provided
+      if (weekKey) {
+        if (!updatedPlan.plan_data.weeks[weekKey]) {
+          updatedPlan.plan_data.weeks[weekKey] = { week_schedule: {} };
+        }
+        if (!updatedPlan.plan_data.weeks[weekKey].week_schedule) {
+          updatedPlan.plan_data.weeks[weekKey].week_schedule = {};
+        }
+        updatedPlan.plan_data.weeks[weekKey].week_schedule[day as string] = dayData;
+      } else {
+        updatedPlan.plan_data.week_schedule[day as string] = dayData;
+      }
 
       const { error } = await supabase
         .from('workout_plans')
@@ -438,6 +511,8 @@ export default function WorkoutSetsScreen() {
         params: {
           planId: planId || '',
           day: day || '',
+          weekStart: weekStart || '',
+          date: date || '',
         },
       });
     } catch (err: any) {
@@ -471,9 +546,11 @@ export default function WorkoutSetsScreen() {
                 ]}
                 keyboardType="numeric"
                 value={
-                  item.weight === null || item.weight === undefined
-                    ? ''
-                    : String(item.weight)
+                  bodyweightFlags.get(index)
+                    ? '0'
+                    : (item.weight === null || item.weight === undefined
+                        ? ''
+                        : String(item.weight))
                 }
                 onChangeText={(text) => handleChangeSetWeight(index, text)}
                 placeholder={bodyweightFlags.get(index) ? "BW" : "e.g. 50"}

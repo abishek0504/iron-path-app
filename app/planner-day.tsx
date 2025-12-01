@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, TextInput, Modal, Platform, FlatList, TouchableWithoutFeedback } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput, Modal, Platform, FlatList } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { X, Plus, ArrowLeft, ChevronUp, ChevronDown, GripVertical, Edit2 } from 'lucide-react-native';
+import { X, Plus, ArrowLeft, GripVertical, Edit2 } from 'lucide-react-native';
+import { PlannerDaySkeleton } from '../src/components/skeletons/PlannerDaySkeleton';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -18,6 +20,35 @@ try {
   console.warn('Failed to load draggable flatlist:', e);
 }
 
+const BODYWEIGHT_EXERCISES = [
+  'Pull Up', 'Pull-Up', 'Pullup', 'Chin Up', 'Chin-Up',
+  'Push Up', 'Push-Up', 'Pushup',
+  'Dip', 'Dips',
+  'Sit Up', 'Sit-Up', 'Situp',
+  'Crunch', 'Crunches',
+  'Plank', 'Planks',
+  'Burpee', 'Burpees',
+  'Mountain Climber', 'Mountain Climbers',
+  'Bodyweight Squat', 'Air Squat',
+  'Lunge', 'Lunges',
+  'Jumping Jack', 'Jumping Jacks',
+  'Pistol Squat',
+  'Handstand Push Up', 'Handstand Push-Up',
+  'Muscle Up', 'Muscle-Up'
+];
+
+const isBodyweightExercise = (exerciseName: string, detail: { is_timed?: boolean } | undefined): boolean => {
+  // Timed exercises are always bodyweight
+  if (detail?.is_timed) return true;
+  
+  // Check if exercise name matches common bodyweight exercises
+  const nameMatch = BODYWEIGHT_EXERCISES.some(bw => 
+    exerciseName.toLowerCase().includes(bw.toLowerCase())
+  );
+  
+  return nameMatch;
+};
+
 export default function PlannerDayScreen() {
   const router = useRouter();
   const { day, planId, date, weekStart } = useLocalSearchParams<{ 
@@ -28,6 +59,7 @@ export default function PlannerDayScreen() {
   }>();
   const [plan, setPlan] = useState<any>(null);
   const [dayData, setDayData] = useState<any>({ exercises: [] });
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [generating, setGenerating] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -148,7 +180,12 @@ export default function PlannerDayScreen() {
   };
 
   const loadPlan = async () => {
-    if (!planId) return;
+    if (!planId) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
 
     const { data, error } = await supabase
       .from('workout_plans')
@@ -158,6 +195,7 @@ export default function PlannerDayScreen() {
 
     if (error) {
       console.error('Error loading plan:', error);
+      setIsLoading(false);
       Alert.alert("Error", "Failed to load workout plan.");
       handleBack();
     } else if (data) {
@@ -214,6 +252,9 @@ export default function PlannerDayScreen() {
           setDayData({ exercises: [] });
         }
       }
+      setIsLoading(false);
+    } else {
+      setIsLoading(false);
     }
   };
 
@@ -249,12 +290,18 @@ export default function PlannerDayScreen() {
       console.error('Error loading user exercises:', userError);
     }
 
-    // Create maps for quick lookup
+    // Create maps for quick lookup (both exact and lowercase for case-insensitive matching)
     const masterExerciseMap = new Map(
       (masterExercises || []).map((ex: any) => [ex.name, ex])
     );
+    const masterExerciseMapLower = new Map(
+      (masterExercises || []).map((ex: any) => [ex.name.toLowerCase(), ex])
+    );
     const userExerciseMap = new Map(
       (userExercises || []).map((ex: any) => [ex.name, ex])
+    );
+    const userExerciseMapLower = new Map(
+      (userExercises || []).map((ex: any) => [ex.name.toLowerCase(), ex])
     );
 
     // Merge results: user exercises take precedence over master exercises
@@ -265,22 +312,11 @@ export default function PlannerDayScreen() {
       let userExercise = userExerciseMap.get(exercise.name);
       let masterExercise = masterExerciseMap.get(exercise.name);
       
-      // If not found, try case-insensitive match
+      // If not found, try case-insensitive match using pre-built lowercase maps
       if (!userExercise && !masterExercise) {
-        for (const [name, ex] of userExerciseMap.entries()) {
-          if (name.toLowerCase() === exercise.name.toLowerCase()) {
-            userExercise = ex;
-            break;
-          }
-        }
-        if (!masterExercise) {
-          for (const [name, ex] of masterExerciseMap.entries()) {
-            if (name.toLowerCase() === exercise.name.toLowerCase()) {
-              masterExercise = ex;
-              break;
-            }
-          }
-        }
+        const exerciseNameLower = exercise.name.toLowerCase();
+        userExercise = userExerciseMapLower.get(exerciseNameLower);
+        masterExercise = masterExerciseMapLower.get(exerciseNameLower);
       }
       
       if (userExercise) {
@@ -341,91 +377,100 @@ export default function PlannerDayScreen() {
   };
 
   const savePlan = async (updatedDayData: any, immediate: boolean = false, skipStateUpdate: boolean = false) => {
-    if (!plan || !day) return;
+    if (!plan || !day) {
+      console.error('savePlan: Missing plan or day', { plan: !!plan, day });
+      return;
+    }
 
-    // Update local state immediately for instant UI feedback (unless skipping for focus input)
-    if (!skipStateUpdate) {
-      setDayData(updatedDayData);
-      const updatedPlan = { ...plan };
+    try {
+      // Helper function to safely get or create nested structure
+      const ensureStructure = (planObj: any) => {
+        if (!planObj.plan_data) {
+          planObj.plan_data = { week_schedule: {}, weeks: {} };
+        }
+        if (!planObj.plan_data.weeks) {
+          planObj.plan_data.weeks = {};
+        }
+        if (!planObj.plan_data.week_schedule) {
+          planObj.plan_data.week_schedule = {};
+        }
+        
+        if (weekStart) {
+          if (!planObj.plan_data.weeks[weekStart]) {
+            planObj.plan_data.weeks[weekStart] = { week_schedule: {} };
+          }
+          if (!planObj.plan_data.weeks[weekStart].week_schedule) {
+            planObj.plan_data.weeks[weekStart].week_schedule = {};
+          }
+        }
+      };
+
+      // Prepare the updated plan structure
+      // Deep copy to avoid mutating the original plan
+      let updatedPlan;
+      try {
+        updatedPlan = JSON.parse(JSON.stringify(plan));
+      } catch (copyError) {
+        console.error('Error deep copying plan:', copyError);
+        Alert.alert("Error", "Failed to update plan. Please try again.");
+        return;
+      }
       
-      // Initialize plan_data structure if needed
-      if (!updatedPlan.plan_data) {
-        updatedPlan.plan_data = { week_schedule: {}, weeks: {} };
-      }
-      if (!updatedPlan.plan_data.weeks) {
-        updatedPlan.plan_data.weeks = {};
-      }
+      ensureStructure(updatedPlan);
       
       // Save to week-specific location if weekStart is provided, otherwise save to template
       if (weekStart) {
-        if (!updatedPlan.plan_data.weeks[weekStart]) {
-          updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
-        }
         updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = updatedDayData;
       } else {
-        if (!updatedPlan.plan_data.week_schedule) {
-          updatedPlan.plan_data.week_schedule = {};
-        }
         updatedPlan.plan_data.week_schedule[day] = updatedDayData;
       }
-      
-      setPlan(updatedPlan);
-    }
 
-    // Clear existing timeout
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
+      // Update local state immediately for instant UI feedback (unless skipping for focus input)
+      if (!skipStateUpdate) {
+        setDayData(updatedDayData);
+        setPlan(updatedPlan);
+      }
 
-    // Debounce database save - only save after user stops typing for 1 second
-    const performSave = async () => {
-      const updatedPlan = { ...plan };
-      
-      // Initialize plan_data structure if needed
-      if (!updatedPlan.plan_data) {
-        updatedPlan.plan_data = { weeks: {} };
+      // Clear existing timeout
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
       }
-      if (!updatedPlan.plan_data.weeks) {
-        updatedPlan.plan_data.weeks = {};
-      }
-      
-      // Save to week-specific location if weekStart is provided
-      if (weekStart) {
-        if (!updatedPlan.plan_data.weeks[weekStart]) {
-          updatedPlan.plan_data.weeks[weekStart] = { week_schedule: {} };
+
+      // Debounce database save - only save after user stops typing for 1 second
+      const performSave = async () => {
+        try {
+          const { error } = await supabase
+            .from('workout_plans')
+            .update({ plan_data: updatedPlan.plan_data })
+            .eq('id', plan.id);
+
+          if (error) {
+            console.error('Error saving plan:', error);
+            Alert.alert("Error", "Failed to save changes. Please try again.");
+            throw error;
+          } else {
+            // Only update state after successful save if we skipped it earlier
+            if (skipStateUpdate) {
+              setDayData(updatedDayData);
+              setPlan(updatedPlan);
+            }
+          }
+        } catch (saveError: any) {
+          console.error('Error in performSave:', saveError);
+          throw saveError;
         }
-        updatedPlan.plan_data.weeks[weekStart].week_schedule[day] = updatedDayData;
+      };
+
+      if (immediate) {
+        // Save immediately for actions like delete, reorder, etc.
+        await performSave();
       } else {
-        // Fallback: if no weekStart, save to template (shouldn't happen in new structure)
-        if (!updatedPlan.plan_data.week_schedule) {
-          updatedPlan.plan_data.week_schedule = {};
-        }
-        updatedPlan.plan_data.week_schedule[day] = updatedDayData;
+        // Debounce for text input changes
+        saveTimeoutRef.current = setTimeout(performSave, 1000);
       }
-      
-      const { error } = await supabase
-        .from('workout_plans')
-        .update({ plan_data: updatedPlan.plan_data })
-        .eq('id', plan.id);
-
-      if (error) {
-        console.error('Error saving plan:', error);
-        // Don't show alert on every keystroke - only log error
-      } else {
-        // Only update state after successful save to avoid re-render issues
-        if (skipStateUpdate) {
-          setDayData(updatedDayData);
-          setPlan(updatedPlan);
-        }
-      }
-    };
-
-    if (immediate) {
-      // Save immediately for actions like delete, reorder, etc.
-      await performSave();
-    } else {
-      // Debounce for text input changes
-      saveTimeoutRef.current = setTimeout(performSave, 1000);
+    } catch (error: any) {
+      console.error('Error in savePlan:', error);
+      Alert.alert("Error", error.message || "Failed to save changes. Please try again.");
     }
   };
 
@@ -514,14 +559,32 @@ Return ONLY the JSON array, no other text.`;
     }
   };
 
-  const removeExercise = (index: number) => {
-    const updatedExercises = dayData.exercises.filter((_: any, i: number) => i !== index);
-    const updatedDayData = {
-      ...dayData,
-      exercises: updatedExercises
-    };
-    // Immediate save for delete action
-    savePlan(updatedDayData, true);
+  const removeExercise = async (index: number) => {
+    try {
+      if (!dayData || !dayData.exercises || !Array.isArray(dayData.exercises)) {
+        console.error('Invalid dayData or exercises array');
+        Alert.alert("Error", "Cannot delete exercise: invalid data structure.");
+        return;
+      }
+      
+      if (index < 0 || index >= dayData.exercises.length) {
+        console.error('Invalid index:', index, 'Array length:', dayData.exercises.length);
+        Alert.alert("Error", "Cannot delete exercise: invalid index.");
+        return;
+      }
+      
+      const updatedExercises = dayData.exercises.filter((_: any, i: number) => i !== index);
+      const updatedDayData = {
+        ...dayData,
+        exercises: updatedExercises
+      };
+      
+      // Immediate save for delete action
+      await savePlan(updatedDayData, true);
+    } catch (error: any) {
+      console.error('Error removing exercise:', error);
+      Alert.alert("Error", error.message || "Failed to delete exercise. Please try again.");
+    }
   };
 
   const updateExercise = (index: number, field: string, value: any) => {
@@ -561,12 +624,10 @@ Return ONLY the JSON array, no other text.`;
       
       // Update state synchronously before any async operations
       setDayData(updatedDayData);
-      const updatedPlan = { ...plan };
-      updatedPlan.plan_data.week_schedule[day] = updatedDayData;
-      setPlan(updatedPlan);
       
       // Save to database (async, but state is already updated)
-      savePlan(updatedDayData, true, true); // skipStateUpdate since we already updated
+      // Let savePlan handle the structure updates properly
+      savePlan(updatedDayData, true, false); // Don't skip state update, let savePlan handle it
     }
     dragAllowedRef.current = null;
   };
@@ -750,7 +811,12 @@ Return ONLY the JSON array, no other text.`;
     );
   };
 
-  const renderExerciseCard = (item: any, index: number, drag?: () => void, isActive?: boolean) => {
+  const renderExerciseCard = useCallback((item: any, index: number | undefined, drag?: () => void, isActive?: boolean) => {
+    // Ensure index is valid
+    if (index === undefined || index === null || isNaN(index)) {
+      console.error('renderExerciseCard: Invalid index', index);
+      return null;
+    }
     const isDragging = draggedIndex === index;
     const detail = exerciseDetails.get(item.name);
     const isTimed = detail?.is_timed || false;
@@ -823,16 +889,42 @@ Return ONLY the JSON array, no other text.`;
           <View style={styles.exerciseHeaderActions}>
             <TouchableOpacity
               onPress={() => {
+                const dateString = date ? date : (day ? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}` : '');
                 router.replace({
                   pathname: '/workout-sets',
-                  params: { planId: planId || '', day: day || '', exerciseIndex: (index ?? 0).toString() }
+                  params: { 
+                    planId: planId || '', 
+                    day: day || '', 
+                    exerciseIndex: (index ?? 0).toString(),
+                    weekStart: weekStart || '',
+                    date: dateString
+                  }
                 });
               }}
               style={styles.editButton}
             >
               <Edit2 color="#a3e635" size={18} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => removeExercise(index)}>
+            <TouchableOpacity 
+              onPress={() => {
+                // Find the index from the item if index is not available
+                let exerciseIndex = index;
+                if (exerciseIndex === undefined || exerciseIndex === null || isNaN(exerciseIndex)) {
+                  exerciseIndex = (dayData.exercises || []).findIndex((ex: any) => 
+                    ex === item || (ex.name === item.name && ex.target_sets === item.target_sets)
+                  );
+                }
+                
+                console.log('Delete button pressed', { index, exerciseIndex, itemName: item.name });
+                
+                if (exerciseIndex !== undefined && exerciseIndex !== null && exerciseIndex !== -1) {
+                  removeExercise(exerciseIndex);
+                } else {
+                  console.error('Invalid index for delete:', { index, exerciseIndex, item });
+                  Alert.alert("Error", "Cannot delete exercise: invalid index.");
+                }
+              }}
+            >
               <X color="#ef4444" size={20} />
             </TouchableOpacity>
           </View>
@@ -875,19 +967,45 @@ Return ONLY the JSON array, no other text.`;
               <View key={setIdx} style={styles.setRow}>
                 <Text style={styles.setNumber}>Set {set.index || setIdx + 1}:</Text>
                 {isTimed ? (
-                  <Text style={styles.setValue}>
-                    {set.duration !== null && set.duration !== undefined
-                      ? `${getDurationMinutes(set.duration)}:${getDurationSeconds(set.duration).toString().padStart(2, '0')}`
-                      : '—'}
-                  </Text>
+                  <>
+                    <Text style={styles.setValue}>
+                      {set.duration !== null && set.duration !== undefined
+                        ? `${getDurationMinutes(set.duration)}:${getDurationSeconds(set.duration).toString().padStart(2, '0')}`
+                        : '—'}
+                    </Text>
+                    {set.rest_time_sec !== null && set.rest_time_sec !== undefined && (
+                      <>
+                        <Text style={styles.setValue}> | </Text>
+                        <Text style={styles.setValue}>
+                          {set.rest_time_sec}s rest
+                        </Text>
+                      </>
+                    )}
+                  </>
                 ) : (
-                  <Text style={styles.setValue}>
-                    {set.reps !== null && set.reps !== undefined ? `${set.reps} reps` : '—'}
-                  </Text>
+                  <>
+                    <Text style={styles.setValue}>
+                      {set.reps !== null && set.reps !== undefined ? `${set.reps} reps` : '—'}
+                    </Text>
+                    <Text style={styles.setValue}> | </Text>
+                    <Text style={styles.setValue}>
+                      {(() => {
+                        const isBodyweight = isBodyweightExercise(item.name, detail);
+                        if (set.weight !== null && set.weight !== undefined) {
+                          return set.weight === 0 ? 'BW' : `${set.weight} lbs`;
+                        } else if (isBodyweight) {
+                          return 'BW';
+                        } else {
+                          return '—';
+                        }
+                      })()}
+                    </Text>
+                    <Text style={styles.setValue}> | </Text>
+                    <Text style={styles.setValue}>
+                      {set.rest_time_sec !== null && set.rest_time_sec !== undefined ? `${set.rest_time_sec}s rest` : '—'}
+                    </Text>
+                  </>
                 )}
-                <Text style={styles.setValue}>
-                  {set.rest_time_sec !== null && set.rest_time_sec !== undefined ? `${set.rest_time_sec}s rest` : '—'}
-                </Text>
               </View>
             ))}
           </View>
@@ -901,9 +1019,9 @@ Return ONLY the JSON array, no other text.`;
         )}
       </View>
     );
-  };
+  }, [draggedIndex, exerciseDetails, dayData?.difficulty, removeExercise, router, planId, day, weekStart, date, isBodyweightExercise]);
 
-  const renderHeader = () => (
+  const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => handleBack()} style={styles.backButton}>
@@ -921,9 +1039,9 @@ Return ONLY the JSON array, no other text.`;
         </TouchableOpacity>
       </View>
     </View>
-  );
+  ), [day, dayData.exercises?.length, handleBack, addManualExercise]);
 
-  const renderFooter = () => (
+  const renderFooter = useCallback(() => (
     <View style={styles.footerSection}>
       {dayData.exercises?.length === 0 && (
         <Text style={styles.emptyText}>No exercises yet. Add manually or generate some!</Text>
@@ -961,11 +1079,16 @@ Return ONLY the JSON array, no other text.`;
         </TouchableOpacity>
       </View>
     </View>
-  );
+  ), [dayData.exercises?.length, hasGenerated, generating, handleBack, generateForDay, setShowFeedback]);
+
+  if (isLoading) {
+    return <PlannerDaySkeleton exerciseCount={dayData?.exercises?.length} />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      {Platform.OS === 'web' ? (
+      <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+        {Platform.OS === 'web' ? (
         // Web: Use FlatList with custom drag handlers
         <FlatList
           data={dayData.exercises || []}
@@ -1002,7 +1125,22 @@ Return ONLY the JSON array, no other text.`;
           activationDistance={0}
           dragItemOverflow={false}
           containerStyle={{ flex: 1 }}
-          renderItem={({ item, index, drag, isActive }: any) => {
+          renderItem={({ item, index: itemIndex, drag, isActive, getIndex }: any) => {
+            // Get index from getIndex if available, otherwise use itemIndex
+            // If both are undefined, find the index from the data array
+            let index = getIndex ? getIndex() : itemIndex;
+            
+            if (index === undefined || index === null || isNaN(index)) {
+              // Fallback: find index in the data array
+              const foundIndex = (dayData.exercises || []).findIndex((ex: any) => ex === item || (ex.name === item.name && ex.target_sets === item.target_sets));
+              if (foundIndex !== -1) {
+                index = foundIndex;
+              } else {
+                console.error('DraggableFlatList renderItem: Invalid index', { itemIndex, getIndex: !!getIndex, item, exercisesLength: (dayData.exercises || []).length });
+                return null;
+              }
+            }
+            
             // Store the drag function in a ref so we can call it only from the grip handle
             const dragRef = React.useRef(drag);
             dragRef.current = drag;
@@ -1037,6 +1175,7 @@ Return ONLY the JSON array, no other text.`;
           contentContainerStyle={styles.listContent}
         />
       )}
+      </Animated.View>
 
       <Modal visible={showFeedback} transparent animationType="slide">
         <View style={styles.modalOverlay}>

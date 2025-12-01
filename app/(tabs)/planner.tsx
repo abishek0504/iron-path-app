@@ -79,9 +79,12 @@ export default function PlannerScreen() {
   };
 
   useEffect(() => {
-    loadActivePlan();
-    loadUserProfile();
-  }, [loadActivePlan]);
+    // Only load on initial mount
+    if (!hasInitiallyLoaded) {
+      loadActivePlan();
+      loadUserProfile();
+    }
+  }, [hasInitiallyLoaded, loadActivePlan]);
 
   useFocusEffect(
     useCallback(() => {

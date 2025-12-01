@@ -301,8 +301,31 @@ export default function WorkoutActiveScreen() {
       }
 
       setPlan(planData);
-      const dayData = planData.plan_data?.week_schedule?.[day];
-      if (!dayData || !dayData.exercises) {
+      
+      // Get current week start date (Sunday)
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+      const diff = today.getDate() - dayOfWeek;
+      const weekStart = new Date(today);
+      weekStart.setDate(diff);
+      weekStart.setHours(0, 0, 0, 0);
+      
+      // Format week key (YYYY-MM-DD)
+      const year = weekStart.getFullYear();
+      const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+      const dayNum = String(weekStart.getDate()).padStart(2, '0');
+      const weekKey = `${year}-${month}-${dayNum}`;
+      
+      // Check week-specific data first, then fall back to template
+      let dayData = null;
+      if (planData.plan_data?.weeks?.[weekKey]?.week_schedule?.[day]) {
+        dayData = planData.plan_data.weeks[weekKey].week_schedule[day];
+      } else if (planData.plan_data?.week_schedule?.[day]) {
+        // Fallback to template week_schedule for backward compatibility
+        dayData = planData.plan_data.week_schedule[day];
+      }
+      
+      if (!dayData || !dayData.exercises || dayData.exercises.length === 0) {
         Alert.alert("Error", "No exercises found for this day.");
         safeBack();
         return;
@@ -658,7 +681,7 @@ export default function WorkoutActiveScreen() {
         const isBodyweight = isBodyweightExercise(exercise.name, detail);
         return {
           reps: isTimed ? '' : targetRepsValue,
-          weight: isBodyweight ? '0' : (targetWeight > 0 ? targetWeight.toString() : ''),
+          weight: (isBodyweight && (targetWeight === null || targetWeight === 0)) ? '0' : (targetWeight > 0 ? targetWeight.toString() : ''),
           duration: '',
           notes: ''
         };
@@ -1089,7 +1112,9 @@ export default function WorkoutActiveScreen() {
                         <View style={styles.targetItem}>
                           <Text style={styles.targetLabel}>Weight:</Text>
                           <Text style={styles.targetValue}>
-                            {isBodyweight ? 'Bodyweight' : (targetWeight !== null && targetWeight > 0 ? `${targetWeight} lbs` : 'N/A')}
+                            {(isBodyweight || (targetWeight !== null && targetWeight === 0)) 
+                              ? 'Bodyweight' 
+                              : (targetWeight !== null && targetWeight > 0 ? `${targetWeight} lbs` : 'N/A')}
                           </Text>
                         </View>
                       </>
@@ -1176,20 +1201,20 @@ export default function WorkoutActiveScreen() {
                         <TextInput
                           style={[
                             styles.logInput,
-                            isBodyweight && styles.logInputDisabled
+                            (isBodyweight && (targetWeight === null || targetWeight === 0)) && styles.logInputDisabled
                           ]}
                           value={loggedWeight}
                           onChangeText={(text) => {
-                            if (!isBodyweight) {
+                            if (!(isBodyweight && (targetWeight === null || targetWeight === 0))) {
                               const newLogs = [...setLogs];
                               newLogs[setIndex] = { ...newLogs[setIndex], weight: text, notes: newLogs[setIndex]?.notes || '' };
                               setSetLogs(newLogs);
                             }
                           }}
                           keyboardType="numeric"
-                          placeholder={isBodyweight ? "Bodyweight" : "0"}
+                          placeholder={(isBodyweight && (targetWeight === null || targetWeight === 0)) ? "Bodyweight" : "0"}
                           placeholderTextColor="#6b7280"
-                          editable={!isBodyweight}
+                          editable={!(isBodyweight && (targetWeight === null || targetWeight === 0))}
                         />
                       </View>
                       <View style={styles.logInputHalf}>
