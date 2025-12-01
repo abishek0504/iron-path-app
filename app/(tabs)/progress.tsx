@@ -384,8 +384,8 @@ export default function ProgressScreen() {
   };
 
   const loadWorkoutData = async (startDate?: Date, endDate?: Date, showLoading: boolean = true) => {
-    // Only show loading if explicitly requested (initial load)
-    const shouldShowLoading = showLoading && !hasInitiallyLoaded;
+    // Show loading when explicitly requested (initial load, tab focus, view/week/month changes)
+    const shouldShowLoading = showLoading;
     if (shouldShowLoading) {
       setLoading(true);
     }
@@ -730,9 +730,9 @@ export default function ProgressScreen() {
   }, [viewMode, currentWeekStart, currentMonth, hasInitiallyLoaded]);
 
   useEffect(() => {
-    // Only reload data when view changes if we've already loaded initially
+    // Reload data when view or date range changes after initial load
     if (hasInitiallyLoaded) {
-      loadWorkoutData(undefined, undefined, false);
+      loadWorkoutData(undefined, undefined, true);
     }
   }, [viewMode, currentWeekStart, currentMonth, hasInitiallyLoaded]);
 
