@@ -71,6 +71,7 @@ export default function ProgressScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   
+  
   // Animation for the sliding indicator
   const indicatorPosition = useSharedValue(0);
   const indicatorWidth = useSharedValue(0);
@@ -777,10 +778,10 @@ export default function ProgressScreen() {
   };
 
   const formatDuration = (seconds: number | null | undefined): string => {
-    if (!seconds && seconds !== 0) return 'N/A';
+    if (seconds === null || seconds === undefined || (typeof seconds !== 'number' || isNaN(seconds))) return 'N/A';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${String(mins)}:${String(secs).padStart(2, '0')}`;
   };
 
   const formatTime = (dateString: string): string => {
@@ -930,7 +931,7 @@ export default function ProgressScreen() {
                       {shortDayNames[day.getDay()]}
                     </Text>
                     <Text style={[styles.weekDayNumber, today && styles.weekDayNumberToday]}>
-                      {day.getDate()}
+                      {String(day.getDate())}
                     </Text>
                   </View>
                   {today && (
@@ -946,15 +947,15 @@ export default function ProgressScreen() {
                       <View style={styles.weekDayStatItem}>
                         <TrendingUp color="#a3e635" size={16} />
                         <Text style={styles.weekDayStatText}>
-                          {Array.isArray(workout.sessions) ? workout.sessions.length : 0} workout{Array.isArray(workout.sessions) && workout.sessions.length !== 1 ? 's' : ''}
+                          {String(Array.isArray(workout.sessions) ? workout.sessions.length : 0)} workout{Array.isArray(workout.sessions) && workout.sessions.length !== 1 ? 's' : ''}
                         </Text>
                       </View>
                       <View style={styles.weekDayStatItem}>
-                        <Text style={styles.weekDayStatText}>{totalExercises} exercises</Text>
+                        <Text style={styles.weekDayStatText}>{String(totalExercises)} exercises</Text>
                       </View>
                       {typeof totalVolume === 'number' && totalVolume > 0 && (
                         <View style={styles.weekDayStatItem}>
-                          <Text style={styles.weekDayStatText}>{Math.round(totalVolume)} lbs</Text>
+                          <Text style={styles.weekDayStatText}>{String(Math.round(totalVolume))} lbs</Text>
                         </View>
                       )}
                     </View>
@@ -995,7 +996,7 @@ export default function ProgressScreen() {
         <View style={styles.monthStats}>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>
-              {workoutData.reduce((sum, w) => sum + (Array.isArray(w.sessions) ? w.sessions.length : 0), 0)}
+              {String(workoutData.reduce((sum, w) => sum + (Array.isArray(w.sessions) ? w.sessions.length : 0), 0))}
             </Text>
             <Text style={styles.statLabel}>Workouts</Text>
           </View>
@@ -1070,18 +1071,11 @@ export default function ProgressScreen() {
   };
 
   const renderTimelineView = () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1056',message:'renderTimelineView entry',data:{workoutDataLength:workoutData.length,workoutDataSample:workoutData[0]?JSON.stringify(workoutData[0]).substring(0,200):null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     return (
       <FlatList
         data={workoutData.filter((w) => w && typeof w === 'object' && typeof w.date === 'string' && Array.isArray(w.sessions))}
         keyExtractor={(item) => item.date}
         renderItem={({ item }) => {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1061',message:'Timeline item render',data:{date:item.date,sessionsCount:item.sessions?.length,sessionsType:typeof item.sessions,hasSessions:!!item.sessions},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
-          
           // Top-level validation: ensure item is valid
           if (!item || typeof item !== 'object' || typeof item.date !== 'string' || !Array.isArray(item.sessions)) {
             return null;
@@ -1120,10 +1114,6 @@ export default function ProgressScreen() {
                 return true;
               })
               .map((session, idx) => {
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1084',message:'Timeline session render entry',data:{sessionIdx:idx,hasDay:!!session.session.day,dayType:typeof session.session.day,dayValue:session.session.day,exercisesCount:session.exercises?.length,exercisesType:typeof session.exercises},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-              // #endregion
-              
               // Additional defensive check (already filtered, but double-check for safety)
               if (!session || typeof session !== 'object' || Array.isArray(session) || !session.session || typeof session.session !== 'object') return null;
               
@@ -1136,10 +1126,6 @@ export default function ProgressScreen() {
                   {session.exercises && Array.isArray(session.exercises) && session.exercises
                     .filter((ex) => ex && typeof ex === 'object' && !Array.isArray(ex) && ex.name && typeof ex.name === 'string' && ex.sets && Array.isArray(ex.sets))
                     .map((exercise, exIdx) => {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1090',message:'Exercise render entry',data:{sessionIdx:idx,exIdx,exerciseType:typeof exercise,exerciseName:exercise?.name,exerciseNameType:typeof exercise?.name,hasSets:!!exercise?.sets,setsType:typeof exercise?.sets},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                    // #endregion
-                    
                     // Additional defensive check (already filtered, but double-check for safety)
                     if (!exercise || typeof exercise !== 'object' || Array.isArray(exercise)) return null;
                     if (!exercise.name || typeof exercise.name !== 'string') return null;
@@ -1164,24 +1150,15 @@ export default function ProgressScreen() {
                     const hasDuration = isTimed && firstSet.duration !== null;
 
                     // Build a single summary string for the sets line
-                    let setsSummary = `${validSets.length} set${validSets.length !== 1 ? 's' : ''}`;
+                    let setsSummary = `${String(validSets.length)} set${validSets.length !== 1 ? 's' : ''}`;
                     if (hasWeightAndReps) {
-                      setsSummary += ` • ${firstSet.weight}lbs × ${firstSet.reps}`;
+                      setsSummary += ` • ${String(firstSet.weight)}lbs × ${String(firstSet.reps)}`;
                     }
                     if (hasDuration) {
-                      // #region agent log
-                      fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1114',message:'Before formatDuration',data:{duration:firstSet.duration,durationType:typeof firstSet.duration},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                      // #endregion
                       const formatted = formatDuration(firstSet.duration);
-                      // #region agent log
-                      fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1116',message:'After formatDuration',data:{formatted,formattedType:typeof formatted},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                      // #endregion
-                      setsSummary += ` • ${formatted}`;
+                      setsSummary += ` • ${String(formatted || 'N/A')}`;
                     }
                     
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/84d99d4d-09ab-4bfa-a71a-c4ba4b52cab1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'progress.tsx:1120',message:'Before rendering exercise',data:{exerciseName:exercise.name,exerciseNameType:typeof exercise.name,setsSummary,setsSummaryType:typeof setsSummary},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                    // #endregion
                     return (
                       <View key={exIdx} style={styles.timelineExercise}>
                         <Text style={styles.timelineExerciseName}>{exercise.name || ''}</Text>
@@ -1191,11 +1168,11 @@ export default function ProgressScreen() {
                   })}
                 </View>
                 <View style={styles.timelineFooter}>
-                  {session.duration && typeof session.duration === 'number' && (
-                    <Text style={styles.timelineDuration}>{session.duration} min</Text>
+                  {typeof session.duration === 'number' && !isNaN(session.duration) && session.duration > 0 && (
+                    <Text style={styles.timelineDuration}>{String(session.duration)} min</Text>
                   )}
-                  {session.totalVolume && typeof session.totalVolume === 'number' && session.totalVolume > 0 && (
-                    <Text style={styles.timelineVolume}>{Math.round(session.totalVolume)} lbs volume</Text>
+                  {typeof session.totalVolume === 'number' && !isNaN(session.totalVolume) && session.totalVolume > 0 && (
+                    <Text style={styles.timelineVolume}>{String(Math.round(session.totalVolume))} lbs volume</Text>
                   )}
                 </View>
               </View>
@@ -2062,25 +2039,29 @@ export default function ProgressScreen() {
             </View>
 
             <ScrollView style={styles.modalScroll} contentContainerStyle={isEditing ? styles.modalScrollContentWithFloating : undefined}>
-              {displayWorkout.sessions.map((session, idx) => (
+              {displayWorkout.sessions && Array.isArray(displayWorkout.sessions) && displayWorkout.sessions
+                .filter((s) => s && typeof s === 'object' && !Array.isArray(s) && s.session && typeof s.session === 'object' && !Array.isArray(s.session) && Array.isArray(s.exercises))
+                .map((session, idx) => (
                 <View key={idx} style={styles.modalSession}>
-                  {session.session.day && (
+                  {session.session.day && typeof session.session.day === 'string' && (
                     <Text style={styles.modalDay}>{session.session.day}</Text>
                   )}
-                  {session.duration && (
+                  {typeof session.duration === 'number' && !isNaN(session.duration) && session.duration > 0 && (
                     <View style={styles.modalStats}>
                       <Clock color="#9ca3af" size={16} />
                       <Text style={styles.modalStatText}>{session.duration} minutes</Text>
                     </View>
                   )}
-                  {session.totalVolume > 0 && (
+                  {typeof session.totalVolume === 'number' && !isNaN(session.totalVolume) && session.totalVolume > 0 && (
                     <View style={styles.modalStats}>
                       <TrendingUp color="#9ca3af" size={16} />
-                      <Text style={styles.modalStatText}>{Math.round(session.totalVolume)} lbs total volume</Text>
+                      <Text style={styles.modalStatText}>{String(Math.round(session.totalVolume))} lbs total volume</Text>
                     </View>
                   )}
 
-                  {session.exercises.map((exercise, exIdx) => {
+                  {session.exercises && Array.isArray(session.exercises) && session.exercises
+                    .filter((ex) => ex && typeof ex === 'object' && !Array.isArray(ex) && ex.name && typeof ex.name === 'string' && Array.isArray(ex.sets))
+                    .map((exercise, exIdx) => {
                     const isTimed = exerciseDetails.get(exercise.name)?.is_timed || false;
                     // Get target values from plan data
                     const planId = session.session.plan_id;
@@ -2098,7 +2079,9 @@ export default function ProgressScreen() {
                           if (isTimed) {
                             targetDuration = exerciseData.target_duration_sec || null;
                           } else {
-                            targetReps = exerciseData.target_reps || null;
+                            // Ensure targetReps is always a string or null
+                            const repsValue = exerciseData.target_reps;
+                            targetReps = repsValue !== null && repsValue !== undefined ? String(repsValue) : null;
                             // Note: target_weight is not stored in plan, so we'll show "BW" or actual weight
                           }
                         }
@@ -2106,9 +2089,12 @@ export default function ProgressScreen() {
                     }
                     
                     // Filter out deleted sets for display
-                    const visibleSets = isEditing 
-                      ? exercise.sets.filter((set: any) => !set.id || !deletedSetIds.has(set.id))
-                      : exercise.sets;
+                    // Ensure sets is always an array
+                    const visibleSets = Array.isArray(exercise.sets) 
+                      ? (isEditing 
+                          ? exercise.sets.filter((set: any) => set && typeof set === 'object' && (!set.id || !deletedSetIds.has(set.id)))
+                          : exercise.sets.filter((set: any) => set && typeof set === 'object'))
+                      : [];
                     
                     // Get exercise metadata from plan data
                     let exerciseRestTime: number | null = null;
@@ -2127,21 +2113,32 @@ export default function ProgressScreen() {
                       }
                     }
                     
+                    // Additional defensive check
+                    if (!exercise || typeof exercise !== 'object' || Array.isArray(exercise)) return null;
+                    if (!exercise.name || typeof exercise.name !== 'string') return null;
+                    if (!exercise.sets || !Array.isArray(exercise.sets)) return null;
+                    
+                    
                     return (
                       <View key={exIdx} style={styles.modalExercise}>
-                        <Text style={styles.modalExerciseName}>{exercise.name}</Text>
+                        <Text style={styles.modalExerciseName}>{exercise.name || ''}</Text>
                         {renderDifficultyIndicator(difficulty)}
-                        {exerciseRestTime !== null && (
+                        {typeof exerciseRestTime === 'number' && !isNaN(exerciseRestTime) && exerciseRestTime > 0 && (
                           <View style={styles.modalExerciseMeta}>
-                            <Text style={styles.modalExerciseMetaText}>Rest: {exerciseRestTime} sec</Text>
+                            <Text style={styles.modalExerciseMetaText}>Rest: {String(exerciseRestTime)} sec</Text>
                           </View>
                         )}
-                        {exerciseNotes && exerciseNotes.trim() && !isEditing && (
+                        {exerciseNotes && typeof exerciseNotes === 'string' && exerciseNotes.trim() && !isEditing && (
                           <View style={styles.modalExerciseNotes}>
                             <Text style={styles.modalExerciseNotesText}>{exerciseNotes}</Text>
                           </View>
                         )}
-                        {visibleSets.map((set, displayIdx) => {
+                        {visibleSets && Array.isArray(visibleSets) && visibleSets
+                          .filter((set) => set && typeof set === 'object' && !Array.isArray(set))
+                          .map((set, displayIdx) => {
+                          // Additional defensive check for set
+                          if (!set || typeof set !== 'object' || Array.isArray(set)) return null;
+                          
                           // Find the original index in the full sets array for updates
                           const originalSetIdx = exercise.sets.findIndex((s: any) => s === set);
                           return (
@@ -2338,12 +2335,12 @@ export default function ProgressScreen() {
                                 <View style={styles.modalSetContent}>
                                   <Text style={styles.modalSetText}>
                                     {isTimed ? (
-                                      `Set ${displayIdx + 1}: ${formatDuration(set.duration)}${targetDuration ? ` / Target: ${formatDuration(targetDuration)}` : ''}`
+                                      `Set ${displayIdx + 1}: ${typeof set.duration === 'number' && !isNaN(set.duration) ? formatDuration(set.duration) : 'N/A'}${typeof targetDuration === 'number' && !isNaN(targetDuration) && targetDuration > 0 ? ` / Target: ${formatDuration(targetDuration)}` : ''}`
                                     ) : (
-                                      `Set ${displayIdx + 1}: ${set.weight ? `${set.weight}lbs` : 'BW'} × ${set.reps || 'N/A'} reps${targetReps ? ` / Target: ${targetReps}` : ''}`
+                                      `Set ${displayIdx + 1}: ${typeof set.weight === 'number' && !isNaN(set.weight) && set.weight > 0 ? `${set.weight}lbs` : 'BW'} × ${typeof set.reps === 'number' && !isNaN(set.reps) ? String(set.reps) : 'N/A'} reps${targetReps && typeof targetReps === 'string' && targetReps.trim() ? ` / Target: ${targetReps}` : ''}`
                                     )}
                                   </Text>
-                                  {set.notes && (
+                                  {set.notes && typeof set.notes === 'string' && set.notes.trim() && (
                                     <Text style={styles.modalNotes}>{set.notes}</Text>
                                   )}
                                 </View>
