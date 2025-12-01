@@ -7,6 +7,7 @@ import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { X, Plus, ArrowLeft, GripVertical, Edit2 } from 'lucide-react-native';
 import { PlannerDaySkeleton } from '../src/components/skeletons/PlannerDaySkeleton';
+import { Toast } from '../src/components/Toast';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -72,6 +73,8 @@ export default function PlannerDayScreen() {
   const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>>(new Map());
   const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
   const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -550,7 +553,8 @@ Return ONLY the JSON array, no other text.`;
       // Reload exercise details after adding new exercises
       await loadExerciseDetails(updatedExercises);
       setHasGenerated(true);
-      Alert.alert("Success", `Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
+      setToastMessage(`Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
+      setToastVisible(true);
     } catch (error: any) {
       console.error('Error generating exercises:', error);
       Alert.alert("Error", error.message || "Failed to generate exercises. Please try again.");
@@ -1212,6 +1216,13 @@ Return ONLY the JSON array, no other text.`;
           </View>
         </View>
       </Modal>
+
+      <Toast
+        message={toastMessage}
+        visible={toastVisible}
+        onHide={() => setToastVisible(false)}
+        duration={2000}
+      />
     </SafeAreaView>
   );
 }

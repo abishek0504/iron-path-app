@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Search, X, Plus } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../src/lib/supabase';
+import { Toast } from '../src/components/Toast';
 
 export default function ExerciseSelectScreen() {
   const router = useRouter();
@@ -72,6 +73,8 @@ export default function ExerciseSelectScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseDescription, setNewExerciseDescription] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   useEffect(() => {
     loadMasterExercises();
@@ -301,8 +304,11 @@ export default function ExerciseSelectScreen() {
         throw updateError;
       }
 
-      Alert.alert("Success", "Exercise added!");
-      safeBack();
+      setToastMessage("Exercise added!");
+      setToastVisible(true);
+      setTimeout(() => {
+        safeBack();
+      }, 500);
     } catch (error: any) {
       console.error('Error adding exercise:', error);
       Alert.alert("Error", error.message || "Failed to add exercise.");
@@ -499,8 +505,11 @@ export default function ExerciseSelectScreen() {
       if (context === 'progress') {
         safeBack(newCustomExercise.name);
       } else {
-        Alert.alert("Success", "Custom exercise created and added!");
-        safeBack();
+        setToastMessage("Custom exercise created and added!");
+        setToastVisible(true);
+        setTimeout(() => {
+          safeBack();
+        }, 500);
       }
     } catch (error: any) {
       console.error('Error creating custom exercise:', error);
@@ -772,6 +781,13 @@ export default function ExerciseSelectScreen() {
           </View>
         </View>
       </Modal>
+
+      <Toast
+        message={toastMessage}
+        visible={toastVisible}
+        onHide={() => setToastVisible(false)}
+        duration={2000}
+      />
     </SafeAreaView>
   );
 }
