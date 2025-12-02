@@ -117,7 +117,9 @@ const CircularButton = ({
             isCompleted && styles.circularButtonInnerCompleted
           ]}>
             {!isCompleted ? (
-              <Text style={styles.circularButtonText}>{text}</Text>
+              <View style={styles.circularButtonTextContainer}>
+                <Text style={styles.circularButtonText}>{text}</Text>
+              </View>
             ) : (
               <Text style={styles.circularButtonTextCompleted}>✓</Text>
             )}
@@ -975,6 +977,12 @@ const styles = StyleSheet.create({
   },
   circularButtonInnerCompleted: {
     backgroundColor: 'rgba(24, 24, 27, 0.7)', // zinc-900 with 70% opacity
+  },
+  circularButtonTextContainer: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   circularButtonText: {
     color: '#ffffff',
