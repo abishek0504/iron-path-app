@@ -1414,26 +1414,6 @@ export default function WorkoutActiveScreen() {
                 {isLastExercise ? 'Finish Workout' : 'Continue to Next Exercise'}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.loggingButton, styles.loggingButtonSecondary]}
-              onPress={async () => {
-                // Move to next exercise if not the last one
-                if (completedExerciseIndex !== null && completedExerciseIndex < exercises.length - 1) {
-                  const updatedProgress = { ...progress };
-                  updatedProgress.currentExerciseIndex = completedExerciseIndex + 1;
-                  updatedProgress.currentSetIndex = 0;
-                  await saveProgress(updatedProgress);
-                  setProgress(updatedProgress);
-                }
-                setShowLoggingScreen(false);
-                setCompletedExerciseIndex(null);
-                setSetLogs([]);
-              }}
-            >
-              <Text style={[styles.loggingButtonText, styles.loggingButtonTextSecondary]}>
-                Back to Workout
-              </Text>
-            </TouchableOpacity>
           </View>
         </ScrollView>
 

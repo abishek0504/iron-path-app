@@ -723,6 +723,22 @@ export default function ExerciseDetailScreen() {
           </View>
         )}
 
+        {exerciseDetail?.how_to && Array.isArray(exerciseDetail.how_to) && exerciseDetail.how_to.length > 0 && (
+          <View style={styles.infoSection}>
+            <Text style={styles.sectionTitle}>How To</Text>
+            <View style={styles.howToContainer}>
+              {exerciseDetail.how_to.map((step: string, idx: number) => (
+                <View key={idx} style={styles.howToStep}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>{idx + 1}</Text>
+                  </View>
+                  <Text style={styles.howToStepText}>{step}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         <View style={styles.setsSection}>
           <Text style={styles.sectionTitle}>
             {isTimed ? 'Configure duration and rest for each set.' : 'Configure weight, reps, and rest for each set.'}
@@ -834,6 +850,34 @@ const styles = StyleSheet.create({
   difficultyBar2: { width: 6, height: 12 },
   difficultyBar3: { width: 6, height: 16 },
   difficultyText: { fontSize: 14, fontWeight: '600' },
+  howToContainer: {
+    gap: 20,
+  },
+  howToStep: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  stepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#a3e635',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  stepNumberText: {
+    color: '#09090b',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  howToStepText: {
+    color: '#a1a1aa',
+    fontSize: 16,
+    lineHeight: 24,
+    flex: 1,
+  },
   setsSection: {
     marginBottom: 24,
   },

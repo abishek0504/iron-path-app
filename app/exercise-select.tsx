@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Search, X, Plus, ChevronRight } from 'lucide-react-native';
+import { Search, X, Plus, ChevronRight, ChevronDown, ChevronUp, Check } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../src/lib/supabase';
 import { Toast } from '../src/components/Toast';
@@ -73,13 +73,72 @@ export default function ExerciseSelectScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseDescription, setNewExerciseDescription] = useState('');
+  const [newExerciseIsTimed, setNewExerciseIsTimed] = useState<boolean>(false);
+  const [newExerciseDefaultDuration, setNewExerciseDefaultDuration] = useState<string>('');
+  const [newExerciseDefaultSets, setNewExerciseDefaultSets] = useState<string>('');
+  const [newExerciseDefaultReps, setNewExerciseDefaultReps] = useState<string>('');
+  const [newExerciseDefaultRest, setNewExerciseDefaultRest] = useState<string>('');
+  const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<Set<string>>(new Set());
+  const [selectedEquipment, setSelectedEquipment] = useState<Set<string>>(new Set());
+  const [showMuscleGroupsDropdown, setShowMuscleGroupsDropdown] = useState(false);
+  const [showEquipmentDropdown, setShowEquipmentDropdown] = useState(false);
+  const [availableMuscleGroups, setAvailableMuscleGroups] = useState<string[]>([]);
+  const [availableEquipment, setAvailableEquipment] = useState<string[]>([]);
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
   useEffect(() => {
     loadMasterExercises();
     loadCustomExercises();
+    loadMuscleGroups();
+    loadEquipment();
   }, []);
+
+  const loadMuscleGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('muscle_groups')
+        .not('muscle_groups', 'is', null);
+
+      if (!error && data) {
+        const allGroups = new Set<string>();
+        data.forEach(ex => {
+          if (ex.muscle_groups && Array.isArray(ex.muscle_groups)) {
+            ex.muscle_groups.forEach((mg: string) => {
+              if (mg) allGroups.add(mg);
+            });
+          }
+        });
+        setAvailableMuscleGroups(Array.from(allGroups).sort());
+      }
+    } catch (err) {
+      console.error('Error loading muscle groups:', err);
+    }
+  };
+
+  const loadEquipment = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('equipment_needed')
+        .not('equipment_needed', 'is', null);
+
+      if (!error && data) {
+        const allEquipment = new Set<string>();
+        data.forEach(ex => {
+          if (ex.equipment_needed && Array.isArray(ex.equipment_needed)) {
+            ex.equipment_needed.forEach((eq: string) => {
+              if (eq) allEquipment.add(eq);
+            });
+          }
+        });
+        setAvailableEquipment(Array.from(allEquipment).sort());
+      }
+    } catch (err) {
+      console.error('Error loading equipment:', err);
+    }
+  };
 
   const loadMasterExercises = async () => {
     try {
@@ -317,55 +376,34 @@ export default function ExerciseSelectScreen() {
     }
   };
 
-  const handleCreateCustomExercise = async () => {
-    if (!newExerciseName.trim()) {
-      Alert.alert("Error", "Please enter an exercise name.");
-      return;
+  const toggleMuscleGroup = (group: string) => {
+    const newSelected = new Set(selectedMuscleGroups);
+    if (newSelected.has(group)) {
+      newSelected.delete(group);
+    } else {
+      newSelected.add(group);
     }
+    setSelectedMuscleGroups(newSelected);
+  };
 
+  const toggleEquipment = (equipment: string) => {
+    const newSelected = new Set(selectedEquipment);
+    if (newSelected.has(equipment)) {
+      newSelected.delete(equipment);
+    } else {
+      newSelected.add(equipment);
+    }
+    setSelectedEquipment(newSelected);
+  };
+
+  const addExerciseToPlan = async (newCustomExercise: any) => {
     if (!planId || !day) {
-      Alert.alert("Error", "Missing plan or day information.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      // Create custom exercise in database
-      const { data: newCustomExercise, error: createError } = await supabase
-        .from('user_exercises')
-        .insert([
-          {
-            user_id: user.id,
-            name: newExerciseName.trim(),
-            description: newExerciseDescription.trim() || null,
-            muscle_groups: [],
-            equipment_needed: [],
-            is_timed: false,
-            default_duration_sec: null,
-            default_sets: 3,
-            default_reps: "10",
-            default_rest_sec: 60
-          }
-        ])
-        .select()
-        .single();
-
-      if (createError) {
-        throw createError;
-      }
-
-      // Defensive check: ensure newCustomExercise is not null/undefined
-      // .single() should return a single object, but check for safety
-      if (!newCustomExercise) {
-        throw new Error('Failed to create exercise: no data returned');
-      }
-
       // Add to workout plan
       const { data: plan, error: planError } = await supabase
         .from('workout_plans')
@@ -425,13 +463,13 @@ export default function ExerciseSelectScreen() {
           });
         }
       } else {
-        // Parse default_reps (could be "8-12" or a number) and use first number for sets
-        const defaultRepsStr = newCustomExercise.default_reps || "8-12";
+        // Parse default_reps as a single number
+        const defaultRepsStr = newCustomExercise.default_reps || "10";
         const defaultRepsNum = typeof defaultRepsStr === 'number' 
           ? defaultRepsStr 
-          : (typeof defaultRepsStr === 'string' && Number.isFinite(Number(defaultRepsStr.split('-')[0])))
-          ? parseInt(defaultRepsStr.split('-')[0], 10)
-          : 8;
+          : (typeof defaultRepsStr === 'string' && Number.isFinite(Number(defaultRepsStr)))
+          ? parseInt(defaultRepsStr, 10)
+          : 10;
         newExercise.target_reps = defaultRepsNum;
         const numSets = newCustomExercise.default_sets || 3;
         const restSec = newCustomExercise.default_rest_sec || 60;
@@ -495,26 +533,118 @@ export default function ExerciseSelectScreen() {
         throw updateError;
       }
 
+      setToastMessage("Custom exercise created and added!");
+      setToastVisible(true);
+      setTimeout(() => {
+        safeBack();
+      }, 500);
+    } catch (error: any) {
+      console.error('Error adding exercise to plan:', error);
+      Alert.alert("Error", error.message || "Failed to add exercise to plan.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateCustomExercise = async () => {
+    if (!newExerciseName.trim()) {
+      Alert.alert("Error", "Please enter an exercise name.");
+      return;
+    }
+
+    if (!planId || !day) {
+      Alert.alert("Error", "Missing plan or day information.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Create custom exercise in database
+      const { data: newCustomExercise, error: createError } = await supabase
+        .from('user_exercises')
+        .insert([
+          {
+            user_id: user.id,
+            name: newExerciseName.trim(),
+            description: newExerciseDescription.trim() || null,
+            muscle_groups: selectedMuscleGroups.size > 0 ? Array.from(selectedMuscleGroups) : null,
+            equipment_needed: selectedEquipment.size > 0 ? Array.from(selectedEquipment) : null,
+            is_timed: newExerciseIsTimed,
+            default_duration_sec: newExerciseDefaultDuration.trim() ? parseInt(newExerciseDefaultDuration.trim()) : null,
+            default_sets: newExerciseDefaultSets.trim() ? parseInt(newExerciseDefaultSets.trim()) : null,
+            default_reps: newExerciseDefaultReps.trim() || null,
+            default_rest_sec: newExerciseDefaultRest.trim() ? parseInt(newExerciseDefaultRest.trim()) : null
+          }
+        ])
+        .select()
+        .single();
+
+      if (createError) {
+        throw createError;
+      }
+
+      // Defensive check: ensure newCustomExercise is not null/undefined
+      // .single() should return a single object, but check for safety
+      if (!newCustomExercise) {
+        throw new Error('Failed to create exercise: no data returned');
+      }
+
       // Refresh custom exercises list
       await loadCustomExercises();
       
+      // Reset form
       setShowCreateModal(false);
       setNewExerciseName('');
       setNewExerciseDescription('');
+      setNewExerciseIsTimed(false);
+      setNewExerciseDefaultDuration('');
+      setNewExerciseDefaultSets('');
+      setNewExerciseDefaultReps('');
+      setNewExerciseDefaultRest('');
+      setSelectedMuscleGroups(new Set());
+      setSelectedEquipment(new Set());
+      setShowMuscleGroupsDropdown(false);
+      setShowEquipmentDropdown(false);
       
+      setLoading(false);
+
+      // Ask if they want to add it to the workout plan
       if (context === 'progress') {
         safeBack(newCustomExercise.name);
+      } else if (planId && day) {
+        Alert.alert(
+          "Exercise Created",
+          "Would you like to add this exercise to your workout plan?",
+          [
+            {
+              text: "No",
+              style: "cancel",
+              onPress: () => {
+                setToastMessage("Custom exercise created!");
+                setToastVisible(true);
+              }
+            },
+            {
+              text: "Yes",
+              onPress: async () => {
+                await addExerciseToPlan(newCustomExercise);
+              }
+            }
+          ]
+        );
       } else {
-        setToastMessage("Custom exercise created and added!");
+        setToastMessage("Custom exercise created!");
         setToastVisible(true);
-        setTimeout(() => {
-          safeBack();
-        }, 500);
       }
     } catch (error: any) {
       console.error('Error creating custom exercise:', error);
       Alert.alert("Error", error.message || "Failed to create custom exercise.");
-    } finally {
       setLoading(false);
     }
   };
@@ -741,13 +871,22 @@ export default function ExerciseSelectScreen() {
                 setShowCreateModal(false);
                 setNewExerciseName('');
                 setNewExerciseDescription('');
+                setNewExerciseIsTimed(false);
+                setNewExerciseDefaultDuration('');
+                setNewExerciseDefaultSets('');
+                setNewExerciseDefaultReps('');
+                setNewExerciseDefaultRest('');
+                setSelectedMuscleGroups(new Set());
+                setSelectedEquipment(new Set());
+                setShowMuscleGroupsDropdown(false);
+                setShowEquipmentDropdown(false);
               }}>
                 <X color="#a1a1aa" size={24} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
-              <Text style={styles.modalLabel}>Exercise Name</Text>
+              <Text style={styles.modalLabel}>Exercise Name *</Text>
               <TextInput
                 style={styles.modalInput}
                 value={newExerciseName}
@@ -756,7 +895,7 @@ export default function ExerciseSelectScreen() {
                 placeholderTextColor="#71717a"
               />
 
-              <Text style={styles.modalLabel}>Description (Optional)</Text>
+              <Text style={styles.modalLabel}>Description</Text>
               <TextInput
                 style={[styles.modalInput, styles.modalTextArea]}
                 value={newExerciseDescription}
@@ -764,6 +903,166 @@ export default function ExerciseSelectScreen() {
                 placeholder="Exercise description or notes..."
                 placeholderTextColor="#71717a"
                 multiline
+              />
+
+              <Text style={styles.modalLabel}>Muscle Groups</Text>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => setShowMuscleGroupsDropdown(!showMuscleGroupsDropdown)}
+              >
+                <Text style={styles.dropdownButtonText}>
+                  {selectedMuscleGroups.size > 0 
+                    ? `${selectedMuscleGroups.size} selected` 
+                    : 'Select muscle groups...'}
+                </Text>
+                {showMuscleGroupsDropdown ? (
+                  <ChevronUp color="#a1a1aa" size={20} />
+                ) : (
+                  <ChevronDown color="#a1a1aa" size={20} />
+                )}
+              </TouchableOpacity>
+              {showMuscleGroupsDropdown && (
+                <View style={styles.dropdownContainer}>
+                  <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                    {availableMuscleGroups.map((group) => (
+                      <TouchableOpacity
+                        key={group}
+                        style={styles.dropdownItem}
+                        onPress={() => toggleMuscleGroup(group)}
+                      >
+                        <View style={[
+                          styles.checkbox,
+                          selectedMuscleGroups.has(group) && styles.checkboxChecked
+                        ]}>
+                          {selectedMuscleGroups.has(group) && (
+                            <Check size={14} color="#09090b" />
+                          )}
+                        </View>
+                        <Text style={styles.dropdownItemText}>{group}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              <Text style={styles.modalLabel}>Equipment Needed</Text>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => setShowEquipmentDropdown(!showEquipmentDropdown)}
+              >
+                <Text style={styles.dropdownButtonText}>
+                  {selectedEquipment.size > 0 
+                    ? `${selectedEquipment.size} selected` 
+                    : 'Select equipment...'}
+                </Text>
+                {showEquipmentDropdown ? (
+                  <ChevronUp color="#a1a1aa" size={20} />
+                ) : (
+                  <ChevronDown color="#a1a1aa" size={20} />
+                )}
+              </TouchableOpacity>
+              {showEquipmentDropdown && (
+                <View style={styles.dropdownContainer}>
+                  <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                    {availableEquipment.map((equipment) => (
+                      <TouchableOpacity
+                        key={equipment}
+                        style={styles.dropdownItem}
+                        onPress={() => toggleEquipment(equipment)}
+                      >
+                        <View style={[
+                          styles.checkbox,
+                          selectedEquipment.has(equipment) && styles.checkboxChecked
+                        ]}>
+                          {selectedEquipment.has(equipment) && (
+                            <Check size={14} color="#09090b" />
+                          )}
+                        </View>
+                        <Text style={styles.dropdownItemText}>{equipment}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              <Text style={styles.modalLabel}>Is Timed Exercise</Text>
+              <View style={styles.toggleContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.toggleOption,
+                    newExerciseIsTimed === true && styles.toggleOptionSelected
+                  ]}
+                  onPress={() => setNewExerciseIsTimed(true)}
+                >
+                  <Text style={[
+                    styles.toggleOptionText,
+                    newExerciseIsTimed === true && styles.toggleOptionTextSelected
+                  ]}>
+                    Yes
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.toggleOption,
+                    newExerciseIsTimed === false && styles.toggleOptionSelected
+                  ]}
+                  onPress={() => setNewExerciseIsTimed(false)}
+                >
+                  <Text style={[
+                    styles.toggleOptionText,
+                    newExerciseIsTimed === false && styles.toggleOptionTextSelected
+                  ]}>
+                    No
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {newExerciseIsTimed === true && (
+                <>
+                  <Text style={styles.modalLabel}>Default Duration (seconds)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newExerciseDefaultDuration}
+                    onChangeText={setNewExerciseDefaultDuration}
+                    placeholder="e.g., 60"
+                    placeholderTextColor="#71717a"
+                    keyboardType="numeric"
+                  />
+                </>
+              )}
+
+              <Text style={styles.modalLabel}>Default Sets</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newExerciseDefaultSets}
+                onChangeText={setNewExerciseDefaultSets}
+                placeholder="e.g., 3"
+                placeholderTextColor="#71717a"
+                keyboardType="numeric"
+              />
+
+              {newExerciseIsTimed !== true && (
+                <>
+                  <Text style={styles.modalLabel}>Default Reps</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newExerciseDefaultReps}
+                    onChangeText={setNewExerciseDefaultReps}
+                    placeholder="e.g., 10"
+                    placeholderTextColor="#71717a"
+                    keyboardType="numeric"
+                  />
+                </>
+              )}
+
+              <Text style={styles.modalLabel}>Default Rest (seconds)</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newExerciseDefaultRest}
+                onChangeText={setNewExerciseDefaultRest}
+                placeholder="e.g., 60"
+                placeholderTextColor="#71717a"
+                keyboardType="numeric"
               />
 
               <View style={styles.modalButtons}>
@@ -834,5 +1133,84 @@ const styles = StyleSheet.create({
   modalButtonDisabled: { backgroundColor: '#84cc16', opacity: 0.5 }, // lime-500
   modalButtonTextSecondary: { color: '#a1a1aa', fontWeight: 'bold' }, // zinc-400
   modalButtonTextPrimary: { color: '#09090b', fontWeight: 'bold' }, // zinc-950 for contrast
+  dropdownButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#09090b',
+    padding: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginBottom: 8,
+  },
+  dropdownButtonText: {
+    color: '#a1a1aa',
+    fontSize: 16,
+  },
+  dropdownContainer: {
+    backgroundColor: '#18181b',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginBottom: 16,
+    maxHeight: 200,
+  },
+  dropdownScroll: {
+    maxHeight: 200,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a',
+    gap: 12,
+  },
+  dropdownItemText: {
+    color: 'white',
+    fontSize: 16,
+    flex: 1,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#71717a',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#a3e635',
+    borderColor: '#a3e635',
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  toggleOption: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#09090b',
+    alignItems: 'center',
+  },
+  toggleOptionSelected: {
+    borderColor: '#a3e635',
+    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+  },
+  toggleOptionText: {
+    color: '#a1a1aa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  toggleOptionTextSelected: {
+    color: '#a3e635',
+  },
 });
 

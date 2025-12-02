@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
 import { ProgressSkeleton } from '../../src/components/skeletons/ProgressSkeleton';
+import { Toast } from '../../src/components/Toast';
 
 type ViewMode = 'week' | 'month' | 'timeline';
 
@@ -1683,6 +1684,8 @@ export default function ProgressScreen() {
   const [deletedSetIds, setDeletedSetIds] = useState<Set<number>>(new Set());
   const wasEditingRef = useRef(false);
   const [validationErrors, setValidationErrors] = useState<Map<string, string>>(new Map());
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   const handleAddExercise = async () => {
     if (!editingWorkout || editingWorkout.sessions.length === 0) return;
@@ -1887,7 +1890,8 @@ export default function ProgressScreen() {
       setDeleteConfirmVisible(false);
       setDeleteConfirmData(null);
       await loadWorkoutData(undefined, undefined, false);
-      Alert.alert("Success", "Workout deleted successfully!");
+      setToastMessage("Workout deleted");
+      setToastVisible(true);
     } catch (error: any) {
       console.error('Error deleting workout:', error);
       setDeleteConfirmVisible(false);
@@ -1945,7 +1949,8 @@ export default function ProgressScreen() {
       setDeleteConfirmVisible(false);
       setDeleteConfirmData(null);
       await loadWorkoutData(undefined, undefined, false);
-      Alert.alert("Success", "Workout deleted successfully!");
+      setToastMessage("Workout deleted");
+      setToastVisible(true);
     } catch (error: any) {
       console.error('Error deleting workout:', error);
       setDeleteConfirmVisible(false);
@@ -2494,6 +2499,13 @@ export default function ProgressScreen() {
       )}
 
       {renderWorkoutDetail()}
+
+      <Toast
+        message={toastMessage}
+        visible={toastVisible}
+        onHide={() => setToastVisible(false)}
+        duration={2000}
+      />
     </SafeAreaView>
   );
 }

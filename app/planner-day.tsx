@@ -1019,13 +1019,6 @@ Return ONLY the JSON array, no other text.`;
             ))}
           </View>
         )}
-
-        {item.notes && (
-          <View style={styles.notesContainer}>
-            <Text style={styles.notesLabel}>Notes</Text>
-            <Text style={styles.notesText}>{item.notes}</Text>
-          </View>
-        )}
       </View>
     );
   }, [draggedIndex, exerciseDetails, dayData?.difficulty, removeExercise, router, planId, day, weekStart, date, isBodyweightExercise]);
@@ -1069,7 +1062,7 @@ Return ONLY the JSON array, no other text.`;
                 <Text style={styles.buttonText}>Generating...</Text>
               </>
             ) : (
-              <Text style={styles.buttonText}>Generate Supplementary Exercises</Text>
+              <Text style={styles.buttonText}>Generate Exercises</Text>
             )}
           </TouchableOpacity>
         ) : (
@@ -1248,6 +1241,7 @@ const styles = StyleSheet.create({
   exerciseCard: { 
     backgroundColor: '#18181b', // zinc-900
     padding: 32, // p-8
+    paddingBottom: 20, // Reduced bottom padding
     borderRadius: 24, // rounded-3xl
     marginBottom: 12, 
     borderWidth: 1, 
@@ -1298,7 +1292,7 @@ const styles = StyleSheet.create({
   setsButtonRow: { marginTop: 12, flexDirection: 'row', justifyContent: 'flex-end' },
   setsButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: '#a3e635' }, // lime-400
   setsButtonText: { color: '#a3e635', fontWeight: '600', fontSize: 14 }, // lime-400
-  setsContainer: { marginBottom: 12 },
+  setsContainer: { marginBottom: 0 },
   setsTitle: { color: '#a1a1aa', fontSize: 12, marginBottom: 8, fontWeight: '600' }, // zinc-400
   setRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' },
   setNumber: { color: 'white', fontSize: 14, fontWeight: '600' },
