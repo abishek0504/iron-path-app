@@ -52,11 +52,12 @@ const isBodyweightExercise = (exerciseName: string, detail: { is_timed?: boolean
 
 export default function PlannerDayScreen() {
   const router = useRouter();
-  const { day, planId, date, weekStart } = useLocalSearchParams<{ 
+  const { day, planId, date, weekStart, exerciseAdded } = useLocalSearchParams<{ 
     day: string; 
     planId: string; 
     date?: string;
     weekStart?: string;
+    exerciseAdded?: string;
   }>();
   const [plan, setPlan] = useState<any>(null);
   const [dayData, setDayData] = useState<any>({ exercises: [] });
@@ -153,7 +154,11 @@ export default function PlannerDayScreen() {
   useFocusEffect(
     useCallback(() => {
       loadPlan();
-    }, [planId])
+      if (exerciseAdded === 'true') {
+        setToastMessage('Exercise added!');
+        setToastVisible(true);
+      }
+    }, [planId, exerciseAdded])
   );
 
   const handleBack = () => {
