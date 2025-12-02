@@ -8,6 +8,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { X, Plus, ArrowLeft, GripVertical, Edit2 } from 'lucide-react-native';
 import { PlannerDaySkeleton } from '../src/components/skeletons/PlannerDaySkeleton';
 import { Toast } from '../src/components/Toast';
+import { buildSupplementaryPrompt } from '../src/lib/aiPrompts';
+import { extractJSON, JSONParseError } from '../src/lib/jsonParser';
+import { validateAndNormalizeExercises } from '../src/lib/workoutValidation';
+import { getCachedModel, clearModelCache } from '../src/lib/geminiModels';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -524,49 +528,135 @@ export default function PlannerDayScreen() {
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+      
+      // Get the best available model dynamically
+      const modelName = await getCachedModel(apiKey);
+      if (__DEV__) {
+        console.log('Using Gemini model:', modelName);
+      }
+      
+      const model = genAI.getGenerativeModel({ model: modelName });
 
       const existingExercises = dayData.exercises || [];
-      const existingNames = existingExercises.map((e: any) => e.name).join(', ');
 
-      const feedbackContext = userFeedback ? `\n\nUser feedback to consider: ${userFeedback}` : '';
+      // Load available exercises from database
+      const { data: masterExercises } = await supabase
+        .from('exercises')
+        .select('name, is_timed')
+        .order('name', { ascending: true });
 
-      const prompt = `Generate supplementary exercises for ${day} workout. The user is a ${userProfile.age}-year-old ${userProfile.gender || 'person'} with goal: ${userProfile.goal}, training ${userProfile.days_per_week} days per week, equipment: ${userProfile.equipment_access?.join(', ') || 'Gym'}.
+      const { data: userExercises } = await supabase
+        .from('user_exercises')
+        .select('name, is_timed')
+        .eq('user_id', user.id)
+        .order('name', { ascending: true });
 
-IMPORTANT: The user already has these exercises for this day: ${existingNames || 'None'}. Generate exercises that COMPLEMENT these existing exercises and work well together. DO NOT duplicate or replace existing exercises. Only add supplementary exercises that make sense.
+      const availableExerciseNames = [
+        ...(masterExercises || []).map((ex: any) => ex.name),
+        ...(userExercises || []).map((ex: any) => ex.name)
+      ].filter(Boolean);
 
-${feedbackContext}
-
-The response must be STRICTLY valid JSON array in this exact format:
-[
-  {
-    "name": "Exercise Name",
-    "target_sets": 3,
-    "target_reps": 10,
-    "rest_time_sec": 90,
-    "notes": "Form tips"
-  }
-]
-
-Return ONLY the JSON array, no other text.`;
+      // Build comprehensive prompt using all profile data and available exercises
+      const prompt = buildSupplementaryPrompt(userProfile, day || '', existingExercises, availableExerciseNames);
 
       const result = await model.generateContent(prompt);
       const response = result.response;
-      let text = response.text().trim();
+      const text = response.text();
       
-      // Extract JSON from response
-      if (text.startsWith('```')) {
-        text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      // Extract JSON using robust parser
+      let newExercises;
+      try {
+        newExercises = extractJSON(text);
+      } catch (error: any) {
+        if (error instanceof JSONParseError) {
+          if (__DEV__) {
+            console.error('JSON extraction failed:', error.message);
+            console.error('Original response:', error.originalText);
+          }
+          throw new Error('Failed to parse AI response. The response format was unexpected. Please try again.');
+        }
+        throw error;
+      }
+      
+      // Validate array structure
+      if (!Array.isArray(newExercises)) {
+        throw new Error('Invalid response format: expected an array of exercises');
       }
 
-      const newExercises = JSON.parse(text);
+      // Validate and normalize exercises
+      const { valid, errors } = validateAndNormalizeExercises(newExercises);
       
-      if (!Array.isArray(newExercises)) {
-        throw new Error('Invalid response format');
+      if (errors.length > 0) {
+        if (__DEV__) {
+          console.warn('Validation errors in generated exercises:', errors);
+        }
+        // Use valid exercises only, log warnings for invalid ones
+        if (valid.length === 0) {
+          throw new Error('All generated exercises failed validation. Please try again.');
+        }
+        newExercises = valid;
+      } else {
+        newExercises = valid;
       }
+
+      // Convert exercises to format with sets array (matching manual exercise format)
+      const convertedExercises = newExercises.map((ex: any) => {
+        const converted = { ...ex };
+        
+        // Ensure target_reps is a number (not string)
+        if (typeof converted.target_reps === 'string') {
+          // Try to parse string like "8-12" to a number (take first number)
+          const match = converted.target_reps.match(/\d+/);
+          converted.target_reps = match ? parseInt(match[0], 10) : 10;
+        }
+        
+        // Create sets array matching manual format
+        const numSets = converted.target_sets || 3;
+        const targetReps = converted.target_reps || 10;
+        const restTime = converted.rest_time_sec || 60;
+        
+        // Check if exercise is bodyweight or timed
+        const exerciseName = (converted.name || '').toLowerCase();
+        const isBodyweight = [
+          'pull up', 'pull-up', 'pullup', 'chin up', 'chin-up',
+          'push up', 'push-up', 'pushup',
+          'dip', 'dips', 'sit up', 'sit-up', 'situp',
+          'crunch', 'crunches', 'plank', 'planks',
+          'burpee', 'burpees', 'mountain climber', 'mountain climbers',
+          'bodyweight squat', 'air squat', 'lunge', 'lunges',
+          'jumping jack', 'jumping jacks', 'pistol squat',
+          'handstand push up', 'handstand push-up', 'muscle up', 'muscle-up'
+        ].some(bw => exerciseName.includes(bw));
+        
+        // Check if it's a timed exercise from database
+        const masterExercise = (masterExercises || []).find((me: any) => 
+          me.name.toLowerCase() === exerciseName
+        );
+        const userExercise = (userExercises || []).find((ue: any) => 
+          ue.name.toLowerCase() === exerciseName
+        );
+        const isTimed = masterExercise?.is_timed || userExercise?.is_timed || false;
+        
+        if (isTimed && converted.target_duration_sec) {
+          converted.sets = Array.from({ length: numSets }, (_, i) => ({
+            index: i + 1,
+            duration: converted.target_duration_sec,
+            rest_time_sec: restTime
+          }));
+        } else {
+          converted.sets = Array.from({ length: numSets }, (_, i) => ({
+            index: i + 1,
+            reps: targetReps,
+            weight: isBodyweight ? 0 : null,
+            rest_time_sec: restTime
+          }));
+        }
+        
+        return converted;
+      });
 
       // Add new exercises to existing ones (user preference - don't overwrite)
-      const updatedExercises = [...existingExercises, ...newExercises];
+      const updatedExercises = [...existingExercises, ...convertedExercises];
       const updatedDayData = {
         ...dayData,
         exercises: updatedExercises
@@ -579,8 +669,38 @@ Return ONLY the JSON array, no other text.`;
       setToastMessage(`Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
       setToastVisible(true);
     } catch (error: any) {
-      console.error('Error generating exercises:', error);
-      Alert.alert("Error", error.message || "Failed to generate exercises. Please try again.");
+      if (__DEV__) {
+        console.error('Error generating exercises:', error);
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
+      
+      // If it's a model not found error, clear the cache to try a different model next time
+      if (error.message && (error.message.includes('not found') || error.message.includes('404'))) {
+        clearModelCache();
+        if (__DEV__) {
+          console.log('Cleared model cache due to model not found error');
+        }
+      }
+      
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to generate exercises. Please try again.";
+      if (error.message) {
+        if (error.message.includes('parse') || error.message.includes('JSON')) {
+          errorMessage = "The AI response was in an unexpected format. Please try generating again.";
+        } else if (error.message.includes('validation') || error.message.includes('Invalid')) {
+          errorMessage = "The generated exercises had validation issues. Please try generating again.";
+        } else if (error.message.includes('not found') || error.message.includes('404')) {
+          errorMessage = "The AI model is not available. Please try again in a moment.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      Alert.alert("Error", errorMessage);
     } finally {
       setGenerating(false);
     }

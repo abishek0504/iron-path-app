@@ -7,6 +7,10 @@ import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { PlannerSkeleton } from '../../src/components/skeletons/PlannerSkeleton';
+import { buildFullPlanPrompt } from '../../src/lib/aiPrompts';
+import { extractJSON, JSONParseError } from '../../src/lib/jsonParser';
+import { ensureAllDays, validateWeekSchedule, normalizeExercise } from '../../src/lib/workoutValidation';
+import { getCachedModel, clearModelCache } from '../../src/lib/geminiModels';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -183,47 +187,164 @@ export default function PlannerScreen() {
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+      
+      // Get the best available model dynamically
+      const modelName = await getCachedModel(apiKey);
+      if (__DEV__) {
+        console.log('Using Gemini model:', modelName);
+      }
+      
+      const model = genAI.getGenerativeModel({ model: modelName });
 
-      const prompt = `Generate a weekly workout plan in JSON format for a ${userProfile.age}-year-old ${userProfile.gender || 'person'} who weighs ${userProfile.current_weight || 'N/A'} lbs, is ${userProfile.height || 'N/A'} cm tall, with a goal of ${userProfile.goal}, training ${userProfile.days_per_week} days per week, with access to: ${userProfile.equipment_access?.join(', ') || 'Gym'}.
+      // Load available exercises from database
+      const { data: masterExercises } = await supabase
+        .from('exercises')
+        .select('name')
+        .order('name', { ascending: true });
 
-The response must be STRICTLY valid JSON in this exact format:
-{
-  "week_schedule": {
-    "Monday": {
-      "exercises": [
-        {
-          "name": "Bench Press",
-          "target_sets": 3,
-          "target_reps": 10,
-          "rest_time_sec": 90,
-          "notes": "Keep elbows tucked and squeeze scapula at top"
-        }
-      ]
-    },
-    "Tuesday": {
-      "exercises": [...]
-    }
-  }
-}
+      const { data: userExercises } = await supabase
+        .from('user_exercises')
+        .select('name')
+        .eq('user_id', user.id)
+        .order('name', { ascending: true });
 
-Include all 7 days (Monday through Sunday). Days with no workout should have an empty exercises array. Use exercises from common gym exercises like Bench Press, Squat, Deadlift, Overhead Press, Barbell Row, Pull Up, etc. Include technique tips and focus points in the "notes" field for each exercise.`;
+      const availableExerciseNames = [
+        ...(masterExercises || []).map((ex: any) => ex.name),
+        ...(userExercises || []).map((ex: any) => ex.name)
+      ].filter(Boolean);
+
+      // Build comprehensive prompt using all profile data and available exercises
+      const prompt = buildFullPlanPrompt(userProfile, availableExerciseNames);
 
       const result = await model.generateContent(prompt);
       const response = result.response;
       const text = response.text();
       
-      // Extract JSON from response (handle markdown code blocks if present)
-      let jsonText = text.trim();
-      if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      // Extract JSON using robust parser
+      let planData;
+      try {
+        planData = extractJSON(text);
+      } catch (error: any) {
+        if (error instanceof JSONParseError) {
+          if (__DEV__) {
+            console.error('JSON extraction failed:', error.message);
+            console.error('Original response:', error.originalText);
+          }
+          throw new Error('Failed to parse AI response. The response format was unexpected. Please try again.');
+        }
+        throw error;
       }
 
-      const planData = JSON.parse(jsonText);
-
       // Validate structure
-      if (!planData.week_schedule) {
-        throw new Error('Invalid plan structure');
+      if (!planData || typeof planData !== 'object' || !planData.week_schedule) {
+        throw new Error('Invalid plan structure: week_schedule is missing');
+      }
+
+      // Ensure all 7 days exist
+      planData.week_schedule = ensureAllDays(planData.week_schedule);
+
+      // Validate that days_per_week is respected
+      const daysWithExercises = Object.keys(planData.week_schedule).filter(day => {
+        const exercises = planData.week_schedule[day]?.exercises || [];
+        return Array.isArray(exercises) && exercises.length > 0;
+      });
+      
+      const daysPerWeek = userProfile.days_per_week || 3;
+      if (daysWithExercises.length > daysPerWeek) {
+        if (__DEV__) {
+          console.warn(`Generated plan has ${daysWithExercises.length} workout days, but user wants ${daysPerWeek}. Removing excess days.`);
+        }
+        // Keep only the first N days with exercises
+        const daysToKeep = daysWithExercises.slice(0, daysPerWeek);
+        for (const day of Object.keys(planData.week_schedule)) {
+          if (!daysToKeep.includes(day)) {
+            planData.week_schedule[day].exercises = [];
+          }
+        }
+      } else if (daysWithExercises.length < daysPerWeek) {
+        if (__DEV__) {
+          console.warn(`Generated plan has ${daysWithExercises.length} workout days, but user wants ${daysPerWeek}.`);
+        }
+      }
+
+      // Validate week schedule
+      const validationErrors = validateWeekSchedule(planData.week_schedule);
+      if (validationErrors.length > 0) {
+        if (__DEV__) {
+          console.warn('Validation errors found:', validationErrors);
+        }
+        // Try to fix common issues: normalize exercises
+        for (const day of Object.keys(planData.week_schedule)) {
+          if (Array.isArray(planData.week_schedule[day].exercises)) {
+            planData.week_schedule[day].exercises = planData.week_schedule[day].exercises.map((ex: any) => normalizeExercise(ex));
+          }
+        }
+      }
+
+      // Final validation after normalization
+      const finalValidationErrors = validateWeekSchedule(planData.week_schedule);
+      if (finalValidationErrors.length > 0 && __DEV__) {
+        console.warn('Remaining validation errors after normalization:', finalValidationErrors);
+      }
+
+      // Convert exercises to format with sets array (matching manual exercise format)
+      for (const day of Object.keys(planData.week_schedule)) {
+        if (Array.isArray(planData.week_schedule[day].exercises)) {
+          planData.week_schedule[day].exercises = planData.week_schedule[day].exercises.map((ex: any) => {
+            const converted = { ...ex };
+            
+            // Ensure target_reps is a number (not string)
+            if (typeof converted.target_reps === 'string') {
+              // Try to parse string like "8-12" to a number (take first number)
+              const match = converted.target_reps.match(/\d+/);
+              converted.target_reps = match ? parseInt(match[0], 10) : 10;
+            }
+            
+            // Create sets array matching manual format
+            const numSets = converted.target_sets || 3;
+            const targetReps = converted.target_reps || 10;
+            const restTime = converted.rest_time_sec || 60;
+            
+            // Check if exercise is bodyweight or timed
+            const exerciseName = (converted.name || '').toLowerCase();
+            const isBodyweight = [
+              'pull up', 'pull-up', 'pullup', 'chin up', 'chin-up',
+              'push up', 'push-up', 'pushup',
+              'dip', 'dips', 'sit up', 'sit-up', 'situp',
+              'crunch', 'crunches', 'plank', 'planks',
+              'burpee', 'burpees', 'mountain climber', 'mountain climbers',
+              'bodyweight squat', 'air squat', 'lunge', 'lunges',
+              'jumping jack', 'jumping jacks', 'pistol squat',
+              'handstand push up', 'handstand push-up', 'muscle up', 'muscle-up'
+            ].some(bw => exerciseName.includes(bw));
+            
+            // Check if it's a timed exercise from database
+            const isTimed = availableExerciseNames.some(name => {
+              const dbName = name.toLowerCase();
+              return dbName === exerciseName && (
+                dbName.includes('plank') || dbName.includes('hold') || 
+                dbName.includes('time') || dbName.includes('duration')
+              );
+            });
+            
+            if (isTimed && converted.target_duration_sec) {
+              converted.sets = Array.from({ length: numSets }, (_, i) => ({
+                index: i + 1,
+                duration: converted.target_duration_sec,
+                rest_time_sec: restTime
+              }));
+            } else {
+              converted.sets = Array.from({ length: numSets }, (_, i) => ({
+                index: i + 1,
+                reps: targetReps,
+                weight: isBodyweight ? 0 : null,
+                rest_time_sec: restTime
+              }));
+            }
+            
+            return converted;
+          });
+        }
       }
 
       // Create plan for current week
@@ -261,8 +382,38 @@ Include all 7 days (Monday through Sunday). Days with no workout should have an 
       Alert.alert("Success", "Workout plan generated successfully!");
       loadActivePlan();
     } catch (error: any) {
-      console.error('Error generating plan:', error);
-      Alert.alert("Error", error.message || "Failed to generate workout plan. Please try again.");
+      if (__DEV__) {
+        console.error('Error generating plan:', error);
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
+      
+      // If it's a model not found error, clear the cache to try a different model next time
+      if (error.message && (error.message.includes('not found') || error.message.includes('404'))) {
+        clearModelCache();
+        if (__DEV__) {
+          console.log('Cleared model cache due to model not found error');
+        }
+      }
+      
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to generate workout plan. Please try again.";
+      if (error.message) {
+        if (error.message.includes('parse') || error.message.includes('JSON')) {
+          errorMessage = "The AI response was in an unexpected format. Please try generating again.";
+        } else if (error.message.includes('structure') || error.message.includes('week_schedule')) {
+          errorMessage = "The generated plan structure was invalid. Please try generating again.";
+        } else if (error.message.includes('not found') || error.message.includes('404')) {
+          errorMessage = "The AI model is not available. Please try again in a moment.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      Alert.alert("Error", errorMessage);
     } finally {
       setGenerating(false);
     }

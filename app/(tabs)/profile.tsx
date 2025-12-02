@@ -4,7 +4,8 @@ import AnimatedReanimated, { FadeIn } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Edit, LogOut, Check } from 'lucide-react-native';
+import { Edit, LogOut, Check, RotateCcw } from 'lucide-react-native';
+import { Alert } from 'react-native';
 import { supabase } from '../../src/lib/supabase';
 import { ProfileSkeleton } from '../../src/components/skeletons/ProfileSkeleton';
 
@@ -24,11 +25,13 @@ export default function ProfileScreen() {
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
   const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
   const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('Changes saved');
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const toastTranslateY = useRef(new Animated.Value(-100)).current;
   const hasShownToastForParam = useRef(false);
 
   const showToastMessage = useCallback(() => {
+    setToastMessage('Changes saved');
     setShowToast(true);
     hasShownToastForParam.current = true;
     Animated.parallel([
@@ -162,6 +165,80 @@ export default function ProfileScreen() {
     router.replace('/login');
   };
 
+  const handleResetPlan = async () => {
+    Alert.alert(
+      "Reset Workout Plan",
+      "This will clear your current workout plan. You can generate a new one from the Planner tab. Continue?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) {
+                Alert.alert("Error", "You must be logged in.");
+                return;
+              }
+
+              // Deactivate all active plans
+              const { error } = await supabase
+                .from('workout_plans')
+                .update({ is_active: false })
+                .eq('user_id', user.id)
+                .eq('is_active', true);
+
+              if (error) {
+                throw error;
+              }
+
+              // Show success toast
+              setToastMessage('Plan reset successfully');
+              setShowToast(true);
+              hasShownToastForParam.current = true;
+              Animated.parallel([
+                Animated.timing(toastOpacity, {
+                  toValue: 1,
+                  duration: 200,
+                  useNativeDriver: true,
+                }),
+                Animated.timing(toastTranslateY, {
+                  toValue: 0,
+                  duration: 200,
+                  useNativeDriver: true,
+                }),
+              ]).start();
+
+              setTimeout(() => {
+                Animated.parallel([
+                  Animated.timing(toastOpacity, {
+                    toValue: 0,
+                    duration: 200,
+                    useNativeDriver: true,
+                  }),
+                  Animated.timing(toastTranslateY, {
+                    toValue: -100,
+                    duration: 200,
+                    useNativeDriver: true,
+                  }),
+                ]).start(() => {
+                  setShowToast(false);
+                });
+              }, 2000);
+            } catch (error: any) {
+              console.error('Error resetting plan:', error);
+              Alert.alert("Error", error.message || "Failed to reset workout plan.");
+            }
+          }
+        }
+      ]
+    );
+  };
+
   if (loading) {
     return <ProfileSkeleton />;
   }
@@ -190,7 +267,7 @@ export default function ProfileScreen() {
         >
           <View style={styles.toastContent}>
             <Check size={20} color="#a3e635" />
-            <Text style={styles.toastText}>Changes saved</Text>
+            <Text style={styles.toastText}>{toastMessage}</Text>
           </View>
         </Animated.View>
       )}
@@ -324,6 +401,13 @@ export default function ProfileScreen() {
           </AnimatedReanimated.View>
 
           <AnimatedReanimated.View entering={FadeIn.duration(400).delay(600)}>
+            <TouchableOpacity style={styles.resetPlanButton} onPress={handleResetPlan}>
+              <RotateCcw size={20} color="#f59e0b" />
+              <Text style={styles.resetPlanText}>Reset Plan</Text>
+            </TouchableOpacity>
+          </AnimatedReanimated.View>
+
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(650)}>
             <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
               <LogOut size={20} color="#ef4444" />
               <Text style={styles.signOutText}>Sign Out</Text>
@@ -437,6 +521,25 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  resetPlanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    padding: 18,
+    borderRadius: 24, // rounded-3xl
+    borderWidth: 1,
+    borderColor: '#f59e0b', // amber-500
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  resetPlanText: {
+    color: '#f59e0b', // amber-500
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -447,7 +550,7 @@ const styles = StyleSheet.create({
     borderRadius: 24, // rounded-3xl
     borderWidth: 1,
     borderColor: '#ef4444',
-    marginTop: 8,
+    marginTop: 0,
   },
   signOutText: {
     color: '#ef4444',
