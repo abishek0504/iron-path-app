@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Play, Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
 import { HomeScreenSkeleton } from '../../src/components/skeletons/HomeScreenSkeleton';
+import { Toast } from '../../src/components/Toast';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -138,6 +139,8 @@ export default function HomeScreen() {
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
   useEffect(() => {
     const dayIndex = new Date().getDay();
@@ -400,11 +403,13 @@ export default function HomeScreen() {
       setHasActiveWorkout(false);
       setIsWorkoutCompleted(false);
       setShowResetModal(false);
-      
-      Alert.alert("Success", "Workout has been reset. You can now start fresh!");
+
+      setToastMessage('Workout has been reset. You can now start fresh!');
+      setToastVisible(true);
     } catch (error: any) {
       console.error('Error resetting workout:', error);
-      Alert.alert("Error", error.message || "Failed to reset workout.");
+      setToastMessage(error.message || 'Failed to reset workout.');
+      setToastVisible(true);
     } finally {
       setIsResetting(false);
     }
@@ -425,6 +430,11 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <Toast
+        message={toastMessage}
+        visible={toastVisible}
+        onHide={() => setToastVisible(false)}
+      />
       {/* Background Ambient Glows */}
       <View style={styles.glowTop} />
       <View style={styles.glowBottom} />

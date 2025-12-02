@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Pressable } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -517,10 +517,14 @@ export default function WorkoutActiveScreen() {
     };
   };
 
-  const saveProgress = async (updatedProgress: WorkoutProgress) => {
+  const saveProgress = async (updatedProgress: WorkoutProgress, skipStateUpdate: boolean = false) => {
     // Always save to AsyncStorage for fast local access
     await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
-    setProgress(updatedProgress);
+    
+    // Only update state if not skipping (to allow manual state updates)
+    if (!skipStateUpdate) {
+      setProgress(updatedProgress);
+    }
 
     // Save only current position to database (minimal state)
     if (workoutSession) {
@@ -735,6 +739,49 @@ export default function WorkoutActiveScreen() {
     }
   };
 
+  const handleReopenLogging = (exerciseIndex: number) => {
+    const exercise = exercises[exerciseIndex];
+    const detail = exerciseDetails.get(exercise.name);
+    const isTimed = detail?.is_timed || false;
+    const totalSets = exercise.target_sets || 3;
+    const exerciseProgress = progress.exercises[exerciseIndex];
+
+    // Load saved data from progress
+    const loadedLogs: Array<{ reps: string; weight: string; duration: string; notes: string }> = [];
+    const minsMap = new Map<number, string>();
+    const secsMap = new Map<number, string>();
+
+    for (let i = 0; i < totalSets; i++) {
+      const set = exerciseProgress?.sets?.[i];
+      if (isTimed) {
+        const duration = set?.duration ?? 0;
+        const mins = Math.floor(duration / 60);
+        const secs = duration % 60;
+        minsMap.set(i, mins.toString());
+        secsMap.set(i, secs.toString());
+        loadedLogs.push({
+          reps: '',
+          weight: '',
+          duration: duration.toString(),
+          notes: set?.notes || '',
+        });
+      } else {
+        loadedLogs.push({
+          reps: set?.reps?.toString() || '',
+          weight: set?.weight?.toString() || '',
+          duration: '',
+          notes: set?.notes || '',
+        });
+      }
+    }
+
+    setSetLogs(loadedLogs);
+    setDurationMinutes(minsMap);
+    setDurationSeconds(secsMap);
+    setCompletedExerciseIndex(exerciseIndex);
+    setShowLoggingScreen(true);
+  };
+
   const handleSaveExerciseLogs = async () => {
     if (completedExerciseIndex === null) return;
     
@@ -770,13 +817,140 @@ export default function WorkoutActiveScreen() {
       // Save to workout_logs before moving to next exercise
       await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets, setLogs);
       
-      updatedProgress.currentExerciseIndex = completedExerciseIndex + 1;
+      const nextExerciseIndex = completedExerciseIndex + 1;
+      
+      // Ensure next exercise is initialized in progress
+      if (!updatedProgress.exercises[nextExerciseIndex]) {
+        const nextExercise = exercises[nextExerciseIndex];
+        updatedProgress.exercises[nextExerciseIndex] = {
+          exerciseIndex: nextExerciseIndex,
+          name: nextExercise.name,
+          completed: false,
+          sets: Array.from({ length: nextExercise.target_sets || 3 }, (_, setIndex) => ({
+            setIndex,
+            completed: false,
+            reps: null,
+            weight: null,
+            duration: null
+          }))
+        };
+      } else {
+        // Reset the next exercise if it was previously completed (don't auto-show logging screen)
+        const nextExercise = updatedProgress.exercises[nextExerciseIndex];
+        if (nextExercise.completed) {
+          nextExercise.completed = false;
+          // Reset all sets to incomplete
+          nextExercise.sets.forEach(set => {
+            set.completed = false;
+          });
+        }
+      }
+      
+      updatedProgress.currentExerciseIndex = nextExerciseIndex;
       updatedProgress.currentSetIndex = 0;
-      await saveProgress(updatedProgress);
+      
+      // Complete all sets for the next exercise and show its logging screen
+      const nextExercise = exercises[nextExerciseIndex];
+      const nextExerciseDetail = exerciseDetails.get(nextExercise.name);
+      const nextIsTimed = nextExerciseDetail?.is_timed || false;
+      const nextTotalSets = nextExercise.target_sets || 3;
+      
+      // Mark all sets as completed for the next exercise
+      if (!updatedProgress.exercises[nextExerciseIndex].sets || updatedProgress.exercises[nextExerciseIndex].sets.length !== nextTotalSets) {
+        updatedProgress.exercises[nextExerciseIndex].sets = Array.from({ length: nextTotalSets }, (_, setIndex) => ({
+          setIndex,
+          completed: true,
+          reps: null,
+          weight: null,
+          duration: null
+        }));
+      } else {
+        updatedProgress.exercises[nextExerciseIndex].sets.forEach(set => {
+          set.completed = true;
+        });
+      }
+      
+      // Mark the next exercise as completed so logging screen shows
+      updatedProgress.exercises[nextExerciseIndex].completed = true;
+      
+      // Initialize logging screen for next exercise BEFORE saving progress
+      const lastWeight = await getLastWeight(nextExercise.name);
+      const initialLogs = Array.from({ length: nextTotalSets }, (_, i) => {
+        const set = nextExercise.sets && Array.isArray(nextExercise.sets) && nextExercise.sets[i] 
+          ? nextExercise.sets[i] 
+          : null;
+        const setReps = set?.reps !== null && set?.reps !== undefined ? set.reps : null;
+        const targetRepsValue = setReps !== null 
+          ? setReps.toString()
+          : (typeof nextExercise.target_reps === 'number' 
+              ? nextExercise.target_reps.toString() 
+              : (typeof nextExercise.target_reps === 'string' 
+                  ? (nextExercise.target_reps.includes('-') ? nextExercise.target_reps.split('-')[0].trim() : nextExercise.target_reps) 
+                  : '10'));
+        const setWeight = set?.weight !== null && set?.weight !== undefined ? set.weight : null;
+        const targetWeight = setWeight !== null ? setWeight : (lastWeight || 0);
+        const isBodyweight = isBodyweightExercise(nextExercise.name, nextExerciseDetail);
+        return {
+          reps: nextIsTimed ? '' : targetRepsValue,
+          weight: (isBodyweight && (targetWeight === null || targetWeight === 0)) ? '0' : (targetWeight > 0 ? targetWeight.toString() : ''),
+          duration: '',
+          notes: ''
+        };
+      });
+      
+      setSetLogs(initialLogs);
+      
+      // Initialize duration minutes/seconds for timed exercises
+      if (nextIsTimed) {
+        const minsMap = new Map<number, string>();
+        const secsMap = new Map<number, string>();
+        for (let i = 0; i < nextTotalSets; i++) {
+          const set = nextExercise.sets && Array.isArray(nextExercise.sets) && nextExercise.sets[i] 
+            ? nextExercise.sets[i] 
+            : null;
+          const setDuration = set?.duration !== null && set?.duration !== undefined 
+            ? set.duration 
+            : null;
+          const targetDuration = setDuration || nextExercise.target_duration_sec || nextExerciseDetail?.default_duration_sec || 60;
+          const mins = Math.floor(targetDuration / 60);
+          const secs = targetDuration % 60;
+          minsMap.set(i, mins.toString());
+          secsMap.set(i, secs.toString());
+        }
+        setDurationMinutes(minsMap);
+        setDurationSeconds(secsMap);
+      } else {
+        setDurationMinutes(new Map());
+        setDurationSeconds(new Map());
+      }
+      
+      // CRITICAL: Save to AsyncStorage FIRST to ensure state is persisted
+      await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
+      
+      // Update progress state - this must happen synchronously
       setProgress(updatedProgress);
-      setShowLoggingScreen(false);
-      setCompletedExerciseIndex(null);
-      setSetLogs([]);
+      
+      // Set logging screen state - React 18 will batch these together
+      // Use the next exercise index to show the logging screen
+      setCompletedExerciseIndex(nextExerciseIndex);
+      setShowLoggingScreen(true);
+      
+      // Save progress to database (skip state update since we already set it)
+      // Don't await this - let it run in background so state updates aren't blocked
+      saveProgress(updatedProgress, true).catch(err => {
+        console.error('Error saving progress:', err);
+      });
+      
+      if (__DEV__) {
+        console.log('[Continue to Next Exercise] State updated:', {
+          nextExerciseIndex,
+          currentExerciseIndex: updatedProgress.currentExerciseIndex,
+          currentSetIndex: updatedProgress.currentSetIndex,
+          nextExerciseCompleted: updatedProgress.exercises[nextExerciseIndex]?.completed,
+          showLoggingScreen: true,
+          completedExerciseIndex: nextExerciseIndex
+        });
+      }
     } else {
       // Workout complete - mark session as completed FIRST, then save logs
       updatedProgress.exercises.forEach(ex => ex.completed = true);
@@ -1002,8 +1176,18 @@ export default function WorkoutActiveScreen() {
   }
 
   // Show logging screen if exercise is complete
-  if (showLoggingScreen && completedExerciseIndex !== null) {
+  // Check both showLoggingScreen flag AND that the exercise at completedExerciseIndex exists
+  if (showLoggingScreen && completedExerciseIndex !== null && completedExerciseIndex < exercises.length && exercises[completedExerciseIndex]) {
     const exercise = exercises[completedExerciseIndex];
+    
+    if (__DEV__) {
+      console.log('[Render] Showing logging screen for exercise:', {
+        completedExerciseIndex,
+        exerciseName: exercise.name,
+        showLoggingScreen,
+        exercisesLength: exercises.length
+      });
+    }
     const detail = exerciseDetails.get(exercise.name);
     const isTimed = detail?.is_timed || false;
     const totalSets = exercise.target_sets || 3;
@@ -1287,8 +1471,63 @@ export default function WorkoutActiveScreen() {
                 {isLastExercise ? 'Finish Workout' : 'Continue to Next Exercise'}
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.loggingButton, styles.loggingButtonSecondary]}
+              onPress={async () => {
+                // Move to next exercise if not the last one
+                if (completedExerciseIndex !== null && completedExerciseIndex < exercises.length - 1) {
+                  const updatedProgress = { ...progress };
+                  updatedProgress.currentExerciseIndex = completedExerciseIndex + 1;
+                  updatedProgress.currentSetIndex = 0;
+                  await saveProgress(updatedProgress);
+                  setProgress(updatedProgress);
+                }
+                setShowLoggingScreen(false);
+                setCompletedExerciseIndex(null);
+                setSetLogs([]);
+              }}
+            >
+              <Text style={[styles.loggingButtonText, styles.loggingButtonTextSecondary]}>
+                Back to Workout
+              </Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
+
+        {/* Logging Exit Confirmation Modal */}
+        <Modal
+          visible={showLoggingExitConfirm}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowLoggingExitConfirm(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Exit Logging?</Text>
+              <Text style={styles.modalMessage}>Your logged data will not be saved. Continue logging?</Text>
+              <View style={styles.modalButtons}>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={() => setShowLoggingExitConfirm(false)}
+                >
+                  <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonDanger]}
+                  onPress={() => {
+                    setShowLoggingExitConfirm(false);
+                    setShowLoggingScreen(false);
+                    setCompletedExerciseIndex(null);
+                    setSetLogs([]);
+                    safeBack();
+                  }}
+                >
+                  <Text style={styles.modalButtonText}>Exit</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -1386,40 +1625,6 @@ export default function WorkoutActiveScreen() {
               <Pressable
                 style={[styles.modalButton, styles.modalButtonConfirm]}
                 onPress={handleConfirmExit}
-              >
-                <Text style={styles.modalButtonText}>Exit</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Logging Exit Confirmation Modal */}
-      <Modal
-        visible={showLoggingExitConfirm}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowLoggingExitConfirm(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Exit Logging?</Text>
-            <Text style={styles.modalMessage}>Your logged data will not be saved. Continue logging?</Text>
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => setShowLoggingExitConfirm(false)}
-              >
-                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonDanger]}
-                onPress={() => {
-                  setShowLoggingExitConfirm(false);
-                  setShowLoggingScreen(false);
-                  setCompletedExerciseIndex(null);
-                  setSetLogs([]);
-                }}
               >
                 <Text style={styles.modalButtonText}>Exit</Text>
               </Pressable>
@@ -1549,7 +1754,9 @@ export default function WorkoutActiveScreen() {
                 style={styles.completeTimerButton}
                 onPress={handleCompleteTimedExercise}
               >
-                <Text style={styles.completeTimerButtonText}>Complete Set</Text>
+                <Text style={styles.completeTimerButtonText}>
+                  {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
+                </Text>
               </TouchableOpacity>
             ) : (
               <View style={styles.timerButtons}>
@@ -1597,10 +1804,17 @@ export default function WorkoutActiveScreen() {
         {/* Rest Timer */}
         {restTimer && restTimer.active && (
           <View style={styles.restTimerContainer}>
-            <Clock color="#3b82f6" size={32} />
-            <Text style={styles.restTimerText}>
-              Rest: {formatTime(restTimer.seconds)}
-            </Text>
+            <View style={styles.restTimerLeftContent}>
+              <View style={styles.restTimerIconContainer}>
+                <Clock color="#3b82f6" size={40} />
+                <Text style={styles.restTimerLabel}>Rest:</Text>
+              </View>
+            </View>
+            <View style={styles.restTimerCenterContent}>
+              <Text style={styles.restTimerText}>
+                {formatTime(restTimer.seconds)}
+              </Text>
+            </View>
             <TouchableOpacity
               style={styles.skipButton}
               onPress={() => {
@@ -1631,7 +1845,9 @@ export default function WorkoutActiveScreen() {
                     style={styles.completeSetButton}
                     onPress={handleStartSet}
                   >
-                    <Text style={styles.completeSetButtonText}>Complete Set</Text>
+                    <Text style={styles.completeSetButtonText}>
+                      {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
+                    </Text>
                   </TouchableOpacity>
                 )}
               </>
@@ -1820,14 +2036,33 @@ const styles = StyleSheet.create({
   restTimerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
+    justifyContent: 'space-between',
     padding: 32,
     backgroundColor: 'rgba(6, 182, 212, 0.1)', // cyan-500/10
     borderRadius: 24, // rounded-3xl
     marginBottom: 24,
     borderWidth: 2,
     borderColor: 'rgba(6, 182, 212, 0.3)', // cyan-500/30
+  },
+  restTimerLeftContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 0,
+  },
+  restTimerCenterContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restTimerIconContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restTimerLabel: {
+    color: '#71717a', // zinc-500 - less prominent
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 4,
   },
   restTimerText: {
     color: '#22d3ee', // cyan-400
@@ -1839,13 +2074,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginLeft: 'auto',
     paddingHorizontal: 20,
     paddingVertical: 12,
     backgroundColor: 'rgba(34, 211, 238, 0.2)', // cyan-400/20
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(34, 211, 238, 0.4)', // cyan-400/40
+    flexShrink: 0,
   },
   skipButtonText: {
     color: '#22d3ee', // cyan-400
@@ -1996,6 +2231,8 @@ const styles = StyleSheet.create({
     borderColor: '#27272a', // zinc-800
     fontSize: 16,
     minHeight: 48,
+    flex: 1,
+    minWidth: 0,
   },
   logInputFlex: {
     flex: 1,

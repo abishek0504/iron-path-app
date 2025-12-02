@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: Platform.OS === 'web' ? '#09090b' : 'transparent', // zinc-900 for web to prevent white background
     paddingHorizontal: 16,
     zIndex: 1000,
     pointerEvents: 'box-none', // Allow touches to pass through to content below
