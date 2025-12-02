@@ -849,80 +849,21 @@ export default function WorkoutActiveScreen() {
       updatedProgress.currentExerciseIndex = nextExerciseIndex;
       updatedProgress.currentSetIndex = 0;
       
-      // Complete all sets for the next exercise and show its logging screen
+      // Ensure next exercise is initialized but DON'T mark sets as completed
+      // The logging screen should only show when user actually completes the last set
       const nextExercise = exercises[nextExerciseIndex];
-      const nextExerciseDetail = exerciseDetails.get(nextExercise.name);
-      const nextIsTimed = nextExerciseDetail?.is_timed || false;
-      const nextTotalSets = nextExercise.target_sets || 3;
-      
-      // Mark all sets as completed for the next exercise
-      if (!updatedProgress.exercises[nextExerciseIndex].sets || updatedProgress.exercises[nextExerciseIndex].sets.length !== nextTotalSets) {
-        updatedProgress.exercises[nextExerciseIndex].sets = Array.from({ length: nextTotalSets }, (_, setIndex) => ({
+      if (!updatedProgress.exercises[nextExerciseIndex].sets || updatedProgress.exercises[nextExerciseIndex].sets.length !== (nextExercise.target_sets || 3)) {
+        updatedProgress.exercises[nextExerciseIndex].sets = Array.from({ length: nextExercise.target_sets || 3 }, (_, setIndex) => ({
           setIndex,
-          completed: true,
+          completed: false, // Don't mark as completed - user needs to actually complete sets
           reps: null,
           weight: null,
           duration: null
         }));
-      } else {
-        updatedProgress.exercises[nextExerciseIndex].sets.forEach(set => {
-          set.completed = true;
-        });
       }
       
-      // Mark the next exercise as completed so logging screen shows
-      updatedProgress.exercises[nextExerciseIndex].completed = true;
-      
-      // Initialize logging screen for next exercise BEFORE saving progress
-      const lastWeight = await getLastWeight(nextExercise.name);
-      const initialLogs = Array.from({ length: nextTotalSets }, (_, i) => {
-        const set = nextExercise.sets && Array.isArray(nextExercise.sets) && nextExercise.sets[i] 
-          ? nextExercise.sets[i] 
-          : null;
-        const setReps = set?.reps !== null && set?.reps !== undefined ? set.reps : null;
-        const targetRepsValue = setReps !== null 
-          ? setReps.toString()
-          : (typeof nextExercise.target_reps === 'number' 
-              ? nextExercise.target_reps.toString() 
-              : (typeof nextExercise.target_reps === 'string' 
-                  ? (nextExercise.target_reps.includes('-') ? nextExercise.target_reps.split('-')[0].trim() : nextExercise.target_reps) 
-                  : '10'));
-        const setWeight = set?.weight !== null && set?.weight !== undefined ? set.weight : null;
-        const targetWeight = setWeight !== null ? setWeight : (lastWeight || 0);
-        const isBodyweight = isBodyweightExercise(nextExercise.name, nextExerciseDetail);
-        return {
-          reps: nextIsTimed ? '' : targetRepsValue,
-          weight: (isBodyweight && (targetWeight === null || targetWeight === 0)) ? '0' : (targetWeight > 0 ? targetWeight.toString() : ''),
-          duration: '',
-          notes: ''
-        };
-      });
-      
-      setSetLogs(initialLogs);
-      
-      // Initialize duration minutes/seconds for timed exercises
-      if (nextIsTimed) {
-        const minsMap = new Map<number, string>();
-        const secsMap = new Map<number, string>();
-        for (let i = 0; i < nextTotalSets; i++) {
-          const set = nextExercise.sets && Array.isArray(nextExercise.sets) && nextExercise.sets[i] 
-            ? nextExercise.sets[i] 
-            : null;
-          const setDuration = set?.duration !== null && set?.duration !== undefined 
-            ? set.duration 
-            : null;
-          const targetDuration = setDuration || nextExercise.target_duration_sec || nextExerciseDetail?.default_duration_sec || 60;
-          const mins = Math.floor(targetDuration / 60);
-          const secs = targetDuration % 60;
-          minsMap.set(i, mins.toString());
-          secsMap.set(i, secs.toString());
-        }
-        setDurationMinutes(minsMap);
-        setDurationSeconds(secsMap);
-      } else {
-        setDurationMinutes(new Map());
-        setDurationSeconds(new Map());
-      }
+      // Don't mark the next exercise as completed - let user complete it naturally
+      updatedProgress.exercises[nextExerciseIndex].completed = false;
       
       // CRITICAL: Save to AsyncStorage FIRST to ensure state is persisted
       await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
@@ -930,10 +871,12 @@ export default function WorkoutActiveScreen() {
       // Update progress state - this must happen synchronously
       setProgress(updatedProgress);
       
-      // Set logging screen state - React 18 will batch these together
-      // Use the next exercise index to show the logging screen
-      setCompletedExerciseIndex(nextExerciseIndex);
-      setShowLoggingScreen(true);
+      // Close logging screen and return to workout view for next exercise
+      setShowLoggingScreen(false);
+      setCompletedExerciseIndex(null);
+      setSetLogs([]);
+      setDurationMinutes(new Map());
+      setDurationSeconds(new Map());
       
       // Save progress to database (skip state update since we already set it)
       // Don't await this - let it run in background so state updates aren't blocked
