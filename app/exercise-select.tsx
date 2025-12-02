@@ -87,6 +87,47 @@ export default function ExerciseSelectScreen() {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
+  const getSearchMatchScore = (name: string, query: string): number => {
+    if (!name || !query) return 0;
+
+    const queryTrimmed = query.trim().toLowerCase();
+    if (!queryTrimmed) return 0;
+
+    const nameLower = String(name).toLowerCase();
+    const normalizedName = nameLower.replace(/[\s-]/g, '');
+    const normalizedQuery = queryTrimmed.replace(/[\s-]/g, '');
+
+    // Exact match ignoring spaces and hyphens
+    if (normalizedName === normalizedQuery) {
+      return 100;
+    }
+
+    let score = 0;
+    const words = nameLower.split(/[\s-]+/);
+
+    words.forEach((word, index) => {
+      const positionBoost = Math.max(0, 10 - index); // earlier words get slightly higher score
+
+      if (word === queryTrimmed) {
+        // Full word match
+        score = Math.max(score, 90 + positionBoost);
+      } else if (word.startsWith(queryTrimmed)) {
+        // Word prefix match
+        score = Math.max(score, 80 + positionBoost);
+      } else if (word.includes(queryTrimmed)) {
+        // Word contains query
+        score = Math.max(score, 60 + positionBoost);
+      }
+    });
+
+    // Generic substring match across the whole name as a fallback
+    if (score === 0 && nameLower.includes(queryTrimmed)) {
+      score = 40;
+    }
+
+    return score;
+  };
+
   useEffect(() => {
     loadMasterExercises();
     loadCustomExercises();
@@ -203,13 +244,41 @@ export default function ExerciseSelectScreen() {
     }
   };
 
-  const filteredMasterExercises = masterExercises.filter((exercise) =>
-    exercise?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const trimmedSearchQuery = searchQuery.trim();
+  const hasSearchQuery = trimmedSearchQuery.length > 0;
 
-  const filteredCustomExercises = (customExercises || []).filter((exercise: any) =>
-    exercise?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const scoredMasterExercises = masterExercises.map((exercise: any) => {
+    const name = exercise?.name || '';
+    const base = {
+      name,
+      difficulty: exercise?.difficulty || exercise?.difficulty_level || null,
+      type: 'master' as const,
+    };
+
+    if (!hasSearchQuery) {
+      return { ...base, matchScore: 0 };
+    }
+
+    const matchScore = getSearchMatchScore(name, trimmedSearchQuery);
+    return { ...base, matchScore };
+  });
+
+  const scoredCustomExercises = (customExercises || []).map((exercise: any) => {
+    const name = exercise?.name || '';
+    const base = {
+      name,
+      difficulty: null,
+      type: 'custom' as const,
+      ...exercise,
+    };
+
+    if (!hasSearchQuery) {
+      return { ...base, matchScore: 0 };
+    }
+
+    const matchScore = getSearchMatchScore(name, trimmedSearchQuery);
+    return { ...base, matchScore };
+  });
 
   const handleAddExercise = async (exerciseName: string) => {
     if (context === 'progress') {
@@ -781,11 +850,48 @@ export default function ExerciseSelectScreen() {
     );
   };
 
-  const allExercises = [
-    ...filteredMasterExercises.map(ex => ({ name: ex?.name || '', difficulty: ex?.difficulty || ex?.difficulty_level || null, type: 'master' })),
-    // Note: user_exercises (custom) does NOT have difficulty_level, only exercises table does
-    ...filteredCustomExercises.map((ex: any) => ({ name: ex?.name || '', difficulty: null, ...ex, type: 'custom' }))
-  ].filter(ex => ex.name).sort((a, b) => a.name.localeCompare(b.name));
+  const allExercises = (() => {
+    const combined = [
+      ...scoredMasterExercises,
+      ...scoredCustomExercises,
+    ].filter(ex => ex.name);
+
+    if (!hasSearchQuery) {
+      const sortedByName = combined.sort((a, b) => a.name.localeCompare(b.name));
+
+      if (__DEV__) {
+        console.log('[ExerciseSelect] search (empty query)', {
+          query: trimmedSearchQuery,
+          resultCount: sortedByName.length,
+        });
+      }
+
+      return sortedByName;
+    }
+
+    const filteredByScore = combined.filter(ex => ex.matchScore && ex.matchScore > 0);
+
+    const sortedByScore = filteredByScore.sort((a, b) => {
+      if (a.matchScore !== b.matchScore) {
+        return (b.matchScore || 0) - (a.matchScore || 0);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    if (__DEV__) {
+      console.log('[ExerciseSelect] search', {
+        query: trimmedSearchQuery,
+        resultCount: sortedByScore.length,
+        topResults: sortedByScore.slice(0, 3).map(ex => ({
+          name: ex.name,
+          matchScore: ex.matchScore,
+          type: ex.type,
+        })),
+      });
+    }
+
+    return sortedByScore;
+  })();
 
   return (
     <SafeAreaView style={styles.container}>
