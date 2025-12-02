@@ -59,7 +59,7 @@ export default function PlannerScreen() {
     
     setIsLoadingPlan(false);
     setHasInitiallyLoaded(true);
-  }, []);
+  }, [hasInitiallyLoaded]);
 
   const loadUserProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();

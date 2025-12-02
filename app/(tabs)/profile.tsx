@@ -67,7 +67,8 @@ export default function ProfileScreen() {
     if (!hasInitiallyLoaded) {
       loadProfile();
     }
-  }, [hasInitiallyLoaded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
