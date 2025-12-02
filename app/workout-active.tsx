@@ -12,6 +12,7 @@ interface ExerciseDetail {
   is_timed: boolean;
   default_duration_sec: number | null;
   description: string | null;
+  how_to?: string[] | null;
   equipment_needed?: string[];
 }
 
@@ -342,7 +343,7 @@ export default function WorkoutActiveScreen() {
         // Note: exercises table doesn't have default_duration_sec, only user_exercises does
         const { data: masterExercises } = await supabase
           .from('exercises')
-          .select('name, is_timed, description, equipment_needed')
+          .select('name, is_timed, description, how_to, equipment_needed')
           .in('name', exerciseNames);
 
         // Batch query all user exercises
@@ -396,6 +397,7 @@ export default function WorkoutActiveScreen() {
               is_timed: masterExercise.is_timed || false,
               default_duration_sec: null, // Master exercises table doesn't have default_duration_sec, use null (will default to 60 in code)
               description: masterExercise.description,
+              how_to: masterExercise.how_to || null,
               equipment_needed: masterExercise.equipment_needed || []
             });
           } else {
@@ -404,6 +406,7 @@ export default function WorkoutActiveScreen() {
               is_timed: false,
               default_duration_sec: null,
               description: null,
+              how_to: null,
               equipment_needed: []
             });
           }
@@ -1593,7 +1596,11 @@ export default function WorkoutActiveScreen() {
         </View>
       </View>
 
-      <View style={styles.exerciseContainer}>
+      <ScrollView 
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.exerciseContainer}
+        showsVerticalScrollIndicator={true}
+      >
         <Text style={styles.exerciseName}>{exercise.name}</Text>
         <Text style={styles.setNumber}>Set {setIndex + 1} of {totalSets}</Text>
 
@@ -1648,17 +1655,15 @@ export default function WorkoutActiveScreen() {
           </View>
         </View>
 
-        {exercise.notes && (
-          <View style={styles.instructionsSection}>
-            <Text style={styles.instructionsTitle}>Focus:</Text>
-            <Text style={styles.instructionsText}>{exercise.notes}</Text>
-          </View>
-        )}
-
-        {detail && detail.description && detail.description.trim() && (
+        {detail && detail.how_to && Array.isArray(detail.how_to) && detail.how_to.length > 0 && (
           <View style={styles.instructionsSection}>
             <Text style={styles.instructionsTitle}>Instructions:</Text>
-            <Text style={styles.instructionsText}>{detail.description}</Text>
+            {detail.how_to.map((step: string, idx: number) => (
+              <View key={idx} style={styles.howToStep}>
+                <Text style={styles.howToStepNumber}>{idx + 1}.</Text>
+                <Text style={styles.instructionsText}>{step}</Text>
+              </View>
+            ))}
           </View>
         )}
 
@@ -1724,60 +1729,59 @@ export default function WorkoutActiveScreen() {
           </View>
         )}
 
-        {/* Rest Timer */}
-        {restTimer && restTimer.active && (
-          <View style={styles.restTimerContainer}>
-            <View style={styles.restTimerLeftContent}>
-              <View style={styles.restTimerIconContainer}>
-                <Clock color="#3b82f6" size={40} />
-                <Text style={styles.restTimerLabel}>Rest:</Text>
+      </ScrollView>
+
+      {/* Floating Rest Timer */}
+      {restTimer && restTimer.active && (
+        <View style={styles.floatingButtonContainer}>
+          <View style={styles.floatingRestTimerContainer}>
+            <View style={styles.floatingRestTimerLeftContent}>
+              <View style={styles.floatingRestTimerIconContainer}>
+                <Clock color="#ffffff" size={32} />
+                <Text style={styles.floatingRestTimerLabel}>Rest</Text>
               </View>
             </View>
-            <View style={styles.restTimerCenterContent}>
-              <Text style={styles.restTimerText}>
+            <View style={styles.floatingRestTimerCenterContent}>
+              <Text style={styles.floatingRestTimerText}>
                 {formatTime(restTimer.seconds)}
               </Text>
             </View>
             <TouchableOpacity
-              style={styles.skipButton}
+              style={styles.floatingRestTimerSkipButton}
               onPress={() => {
                 setRestTimer(null);
                 handleRestComplete();
               }}
             >
-              <SkipForward color="#3b82f6" size={20} />
-              <Text style={styles.skipButtonText}>Skip</Text>
+              <SkipForward color="#ffffff" size={20} />
+              <Text style={styles.floatingRestTimerSkipText}>Skip</Text>
             </TouchableOpacity>
           </View>
-        )}
+        </View>
+      )}
 
-        {/* Action Buttons */}
-        {!exerciseTimer?.active && !restTimer?.active && !allSetsComplete && (
-          <View style={styles.actionButtons}>
-            {!isSetComplete && (
-              <>
-                {isTimed ? (
-                  <TouchableOpacity
-                    style={styles.completeSetButton}
-                    onPress={handleStartSet}
-                  >
-                    <Text style={styles.completeSetButtonText}>Start Timer</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.completeSetButton}
-                    onPress={handleStartSet}
-                  >
-                    <Text style={styles.completeSetButtonText}>
-                      {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
-        )}
-      </View>
+      {/* Floating Complete Set Button */}
+      {!exerciseTimer?.active && !restTimer?.active && !allSetsComplete && !isSetComplete && (
+        <View style={styles.floatingButtonContainer}>
+          {isTimed ? (
+            <TouchableOpacity
+              style={styles.floatingCompleteSetButton}
+              onPress={handleStartSet}
+            >
+              <Text style={styles.floatingCompleteSetButtonText}>Start Timer</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.floatingCompleteSetButton}
+              onPress={handleStartSet}
+            >
+              <Text style={styles.floatingCompleteSetButtonText}>
+                {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
       </Animated.View>
     </SafeAreaView>
   );
@@ -1837,8 +1841,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#a3e635', // lime-400
     borderRadius: 4,
   },
-  exerciseContainer: {
+  scrollContainer: {
     flex: 1,
+  },
+  exerciseContainer: {
+    paddingBottom: 120, // Space for floating button
     padding: 24,
   },
   exerciseName: {
@@ -1899,6 +1906,19 @@ const styles = StyleSheet.create({
     color: '#e4e4e7', // zinc-200
     fontSize: 14,
     lineHeight: 22,
+    flex: 1,
+  },
+  howToStep: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  howToStepNumber: {
+    color: '#a3e635', // lime-400
+    fontSize: 14,
+    fontWeight: '700',
+    minWidth: 24,
   },
   exerciseTimerContainer: {
     alignItems: 'center',
@@ -2025,6 +2045,93 @@ const styles = StyleSheet.create({
   completeSetButtonText: {
     color: '#09090b', // zinc-950
     fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  floatingButtonContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 24,
+    paddingBottom: 40,
+    backgroundColor: 'transparent',
+    pointerEvents: 'box-none',
+  },
+  floatingCompleteSetButton: {
+    backgroundColor: '#a3e635', // lime-400
+    padding: 20,
+    borderRadius: 24, // rounded-3xl
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  floatingCompleteSetButtonText: {
+    color: '#09090b', // zinc-950
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  floatingRestTimerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#06b6d4', // cyan-500 solid
+    borderRadius: 24, // rounded-3xl
+    padding: 20,
+    borderWidth: 2,
+    borderColor: '#06b6d4', // cyan-500
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  floatingRestTimerLeftContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 0,
+  },
+  floatingRestTimerIconContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingRestTimerLabel: {
+    color: '#ffffff', // white for contrast on solid cyan
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  floatingRestTimerCenterContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingRestTimerText: {
+    color: '#ffffff', // white for contrast on solid cyan
+    fontSize: 32,
+    fontWeight: '700',
+    fontFamily: 'monospace',
+  },
+  floatingRestTimerSkipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)', // white/20 for contrast
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)', // white/40
+    flexShrink: 0,
+  },
+  floatingRestTimerSkipText: {
+    color: '#ffffff', // white for contrast on solid cyan
+    fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.5,
   },

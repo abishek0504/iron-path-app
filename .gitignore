@@ -52,3 +52,6 @@ node_modules/
 
 # supabase schema
 schema/
+
+# cursor rules
+.cursor/
