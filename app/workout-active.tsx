@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, Scro
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
+import { X, Check, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WorkoutActiveSkeleton } from '../src/components/skeletons/WorkoutActiveSkeleton';
@@ -39,6 +39,7 @@ interface SetProgress {
   reps: number | null;
   weight: number | null;
   duration: number | null;
+  notes?: string | null;
 }
 
 interface ExerciseProgress {
@@ -104,6 +105,13 @@ export default function WorkoutActiveScreen() {
           if (!prev) return null;
           if (prev.seconds <= 1) {
             if (restTimerInterval.current) clearInterval(restTimerInterval.current);
+            if (__DEV__) {
+              console.log('[WorkoutActive] Timer complete', {
+                type: 'rest',
+                exerciseIndex: progress.currentExerciseIndex,
+                setIndex: progress.currentSetIndex,
+              });
+            }
             // Auto-advance to next set - use setTimeout to ensure state updates are processed
             setTimeout(() => {
               handleRestComplete();
@@ -122,7 +130,7 @@ export default function WorkoutActiveScreen() {
     return () => {
       if (restTimerInterval.current) clearInterval(restTimerInterval.current);
     };
-  }, [restTimer?.active]);
+  }, [restTimer?.active, progress.currentExerciseIndex, progress.currentSetIndex]);
 
   useEffect(() => {
     if (exerciseTimer?.active && !exerciseTimer?.paused) {
@@ -134,6 +142,13 @@ export default function WorkoutActiveScreen() {
             // 3-second countdown phase
             if (prev.seconds <= 1) {
               // Countdown finished, start exercise timer
+              if (__DEV__) {
+                console.log('[WorkoutActive] Timer transition', {
+                  from: 'exercise-get-ready',
+                  to: 'exercise-main',
+                  targetDuration: prev.targetDuration,
+                });
+              }
               return {
                 active: true,
                 seconds: prev.targetDuration,
@@ -147,6 +162,12 @@ export default function WorkoutActiveScreen() {
             // Exercise countdown phase
             if (prev.seconds <= 1) {
               // Timer finished - keep active but set to 0 so UI shows complete button
+              if (__DEV__) {
+                console.log('[WorkoutActive] Timer complete', {
+                  type: 'exercise-main',
+                  targetDuration: prev.targetDuration,
+                });
+              }
               return { ...prev, seconds: 0, active: true, paused: false };
             }
             return { ...prev, seconds: prev.seconds - 1 };
@@ -700,6 +721,14 @@ export default function WorkoutActiveScreen() {
         targetDuration: targetDuration,
         paused: false
       });
+      if (__DEV__) {
+        console.log('[WorkoutActive] Timer start', {
+          type: 'exercise-get-ready',
+          exerciseIndex,
+          setIndex,
+          targetDuration,
+        });
+      }
     } else {
       // Just mark set as complete (no logging yet)
       handleCompleteSet();
@@ -1163,6 +1192,14 @@ export default function WorkoutActiveScreen() {
       : null;
     const restTime = setRestTime || exercise.rest_time_sec || 60;
     setRestTimer({ active: true, seconds: restTime });
+    if (__DEV__) {
+      console.log('[WorkoutActive] Timer start', {
+        type: 'rest',
+        exerciseIndex,
+        setIndex,
+        restTime,
+      });
+    }
   };
 
   const formatTime = (seconds: number | null | undefined): string => {
@@ -1794,121 +1831,119 @@ export default function WorkoutActiveScreen() {
           </View>
         )}
 
-        {/* Exercise Timer */}
-        {exerciseTimer?.active && (
-          <View style={styles.exerciseTimerContainer}>
-            <Clock color="#10b981" size={32} />
-            <Text style={styles.exerciseTimerText}>
-              {exerciseTimer.countdown ? exerciseTimer.seconds.toString() : formatTime(exerciseTimer.seconds)}
-            </Text>
-            {exerciseTimer.countdown && (
-              <Text style={styles.countdownLabel}>Get ready...</Text>
-            )}
+      </ScrollView>
+
+      <View style={styles.floatingButtonContainer}>
+        {exerciseTimer?.active ? (
+          <View style={styles.floatingRestTimerContainer}>
+            <View style={styles.floatingTimerHeader}>
+              <View style={styles.floatingTimerHeaderTextContainer}>
+                <Text style={styles.floatingRestTimerLabel}>
+                  {exerciseTimer.countdown ? 'Get ready' : 'Timed set'}
+                </Text>
+                <Text style={styles.floatingRestTimerText}>
+                  {exerciseTimer.countdown
+                    ? exerciseTimer.seconds.toString()
+                    : formatTime(exerciseTimer.seconds)}
+                </Text>
+              </View>
+            </View>
             {exerciseTimer.seconds === 0 && !exerciseTimer.countdown ? (
               <TouchableOpacity
-                style={styles.completeTimerButton}
+                style={[styles.floatingRestTimerSkipButton, styles.floatingTimerFullWidthButton]}
                 onPress={handleCompleteTimedExercise}
               >
-                <Text style={styles.completeTimerButtonText}>
-                  {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
-                </Text>
+                <View style={styles.floatingTimerButtonContent}>
+                  <Check color="#ffffff" size={20} />
+                  <Text style={styles.floatingRestTimerSkipText}>
+                    {setIndex === totalSets - 1 ? 'Complete & Log' : 'Complete Set'}
+                  </Text>
+                </View>
               </TouchableOpacity>
             ) : (
-              <View style={styles.timerButtons}>
+              <View style={styles.floatingTimerActionsRow}>
                 {!exerciseTimer.countdown && (
-                  <>
+                  <TouchableOpacity
+                    style={[
+                      styles.floatingRestTimerSkipButton,
+                      styles.floatingTimerSecondaryButton,
+                      styles.floatingTimerAction,
+                    ]}
+                    onPress={() => {
+                      setExerciseTimer(prev =>
+                        prev ? { ...prev, paused: !prev.paused } : null
+                      );
+                    }}
+                  >
                     {exerciseTimer.paused ? (
-                      <TouchableOpacity
-                        style={[styles.timerControlButton, { backgroundColor: '#10b981' }]}
-                        onPress={() => {
-                          setExerciseTimer(prev => prev ? { ...prev, paused: false } : null);
-                        }}
-                      >
-                        <Play color="white" size={20} />
-                        <Text style={styles.timerControlButtonText}>Resume</Text>
-                      </TouchableOpacity>
+                      <Play color="#ffffff" size={18} />
                     ) : (
-                      <TouchableOpacity
-                        style={[styles.timerControlButton, { backgroundColor: '#f59e0b' }]}
-                        onPress={() => {
-                          setExerciseTimer(prev => prev ? { ...prev, paused: true } : null);
-                        }}
-                      >
-                        <Pause color="white" size={20} />
-                        <Text style={styles.timerControlButtonText}>Pause</Text>
-                      </TouchableOpacity>
+                      <Pause color="#ffffff" size={18} />
                     )}
-                  </>
+                    <Text style={styles.floatingRestTimerSkipText}>
+                      {exerciseTimer.paused ? 'Resume' : 'Pause'}
+                    </Text>
+                  </TouchableOpacity>
                 )}
                 <TouchableOpacity
-                  style={[styles.skipButton, { backgroundColor: '#10b981', marginLeft: 0 }]}
+                  style={[styles.floatingRestTimerSkipButton, styles.floatingTimerAction]}
                   onPress={() => {
                     // Skip timer - save 0 seconds and complete the set
                     setExerciseTimer(null);
                     handleCompleteSet();
                   }}
                 >
-                  <SkipForward color="white" size={20} />
-                  <Text style={styles.skipButtonText}>Skip</Text>
+                  <SkipForward color="#ffffff" size={20} />
+                  <Text style={styles.floatingRestTimerSkipText}>Skip</Text>
                 </TouchableOpacity>
               </View>
             )}
           </View>
-        )}
-
-      </ScrollView>
-
-      {/* Floating Rest Timer */}
-      {restTimer && restTimer.active && (
-        <View style={styles.floatingButtonContainer}>
+        ) : restTimer && restTimer.active ? (
           <View style={styles.floatingRestTimerContainer}>
-            <View style={styles.floatingRestTimerLeftContent}>
-              <View style={styles.floatingRestTimerIconContainer}>
-                <Clock color="#ffffff" size={32} />
+            <View style={styles.floatingTimerHeader}>
+              <View style={styles.floatingTimerHeaderTextContainer}>
                 <Text style={styles.floatingRestTimerLabel}>Rest</Text>
+                <Text style={styles.floatingRestTimerText}>
+                  {formatTime(restTimer.seconds)}
+                </Text>
               </View>
             </View>
-            <View style={styles.floatingRestTimerCenterContent}>
-              <Text style={styles.floatingRestTimerText}>
-                {formatTime(restTimer.seconds)}
-              </Text>
-            </View>
             <TouchableOpacity
-              style={styles.floatingRestTimerSkipButton}
+              style={[styles.floatingRestTimerSkipButton, styles.floatingTimerFullWidthButton]}
               onPress={() => {
                 setRestTimer(null);
                 handleRestComplete();
               }}
             >
-              <SkipForward color="#ffffff" size={20} />
-              <Text style={styles.floatingRestTimerSkipText}>Skip</Text>
+              <View style={styles.floatingTimerButtonContent}>
+                <SkipForward color="#ffffff" size={20} />
+                <Text style={styles.floatingRestTimerSkipText}>Skip</Text>
+              </View>
             </TouchableOpacity>
           </View>
-        </View>
-      )}
-
-      {/* Floating Complete Set Button */}
-      {!exerciseTimer?.active && !restTimer?.active && !allSetsComplete && !isSetComplete && (
-        <View style={styles.floatingButtonContainer}>
-          {isTimed ? (
-            <TouchableOpacity
-              style={styles.floatingCompleteSetButton}
-              onPress={handleStartSet}
-            >
-              <Text style={styles.floatingCompleteSetButtonText}>Start Timer</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.floatingCompleteSetButton}
-              onPress={handleStartSet}
-            >
-              <Text style={styles.floatingCompleteSetButtonText}>
-                {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+        ) : !allSetsComplete && !isSetComplete ? (
+          <View>
+            {isTimed ? (
+              <TouchableOpacity
+                style={styles.floatingCompleteSetButton}
+                onPress={handleStartSet}
+              >
+                <Text style={styles.floatingCompleteSetButtonText}>Start Timer</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.floatingCompleteSetButton}
+                onPress={handleStartSet}
+              >
+                <Text style={styles.floatingCompleteSetButtonText}>
+                  {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : null}
+      </View>
       </Animated.View>
     </SafeAreaView>
   );
@@ -1972,7 +2007,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   exerciseContainer: {
-    paddingBottom: 120, // Space for floating button
+    paddingBottom: 260, // Extra space so floating timer/complete buttons (including timed set pause controls) don't cover content
     padding: 24,
   },
   exerciseName: {
@@ -2130,15 +2165,17 @@ const styles = StyleSheet.create({
   },
   restTimerLabel: {
     color: '#71717a', // zinc-500 - less prominent
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '500',
     marginTop: 4,
   },
   restTimerText: {
     color: '#22d3ee', // cyan-400
-    fontSize: 40,
+    fontSize: 48,
     fontWeight: '700',
     fontFamily: 'monospace',
+    minWidth: 90, // Prevent horizontal jank as numbers change
+    textAlign: 'center',
   },
   skipButton: {
     flexDirection: 'row',
@@ -2154,7 +2191,7 @@ const styles = StyleSheet.create({
   },
   skipButtonText: {
     color: '#22d3ee', // cyan-400
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
@@ -2184,6 +2221,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     backgroundColor: 'transparent',
     pointerEvents: 'box-none',
+    alignItems: 'stretch',
   },
   floatingCompleteSetButton: {
     backgroundColor: '#a3e635', // lime-400
@@ -2191,6 +2229,8 @@ const styles = StyleSheet.create({
     borderRadius: 24, // rounded-3xl
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
+    alignSelf: 'stretch',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -2204,7 +2244,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   floatingRestTimerContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#06b6d4', // cyan-500 solid
@@ -2217,6 +2256,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 10,
+    width: '100%',
+    flexDirection: 'column',
   },
   floatingRestTimerLeftContent: {
     alignItems: 'center',
@@ -2229,9 +2270,10 @@ const styles = StyleSheet.create({
   },
   floatingRestTimerLabel: {
     color: '#ffffff', // white for contrast on solid cyan
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '500',
     marginTop: 4,
+    textAlign: 'center',
   },
   floatingRestTimerCenterContent: {
     flex: 1,
@@ -2240,9 +2282,11 @@ const styles = StyleSheet.create({
   },
   floatingRestTimerText: {
     color: '#ffffff', // white for contrast on solid cyan
-    fontSize: 32,
+    fontSize: 40,
     fontWeight: '700',
     fontFamily: 'monospace',
+    minWidth: 90, // Prevent horizontal jank as numbers change
+    textAlign: 'center',
   },
   floatingRestTimerSkipButton: {
     flexDirection: 'row',
@@ -2261,6 +2305,45 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  floatingTimerActionsRow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    width: '100%',
+  },
+  floatingTimerSecondaryButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  floatingTimerAction: {
+    width: '100%',
+  },
+  floatingTimerFullWidthButton: {
+    marginTop: 12,
+    width: '100%',
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  floatingTimerButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  floatingTimerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  floatingTimerHeaderTextContainer: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    alignSelf: 'stretch',
   },
   loggingScrollView: {
     flex: 1,
