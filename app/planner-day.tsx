@@ -76,6 +76,7 @@ export default function PlannerDayScreen() {
   const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [hasActiveWorkout, setHasActiveWorkout] = useState(false);
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
@@ -258,6 +259,23 @@ export default function PlannerDayScreen() {
         } else {
           // No data found, use empty exercises
           setDayData({ exercises: [] });
+        }
+        
+        // Check for active workout session
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && day) {
+          const { data: activeSession } = await supabase
+            .from('workout_sessions')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('plan_id', parseInt(planId))
+            .eq('day', day)
+            .eq('status', 'active')
+            .maybeSingle();
+          
+          setHasActiveWorkout(!!activeSession);
+        } else {
+          setHasActiveWorkout(false);
         }
       }
       setIsLoading(false);
@@ -623,6 +641,11 @@ Return ONLY the JSON array, no other text.`;
   };
 
   const handleDragEnd = ({ data }: { data: any[] }) => {
+    // Don't allow drag if workout is active
+    if (hasActiveWorkout) {
+      dragAllowedRef.current = null;
+      return;
+    }
     // Only allow drag end if drag was started from grip handle
     if (dragAllowedRef.current !== null && plan && day) {
       // Update state immediately and synchronously
@@ -644,6 +667,10 @@ Return ONLY the JSON array, no other text.`;
   // Web drag handlers using touch/mouse events (React Native Responder System)
   const handleWebTouchStart = (index: number, e: any) => {
     if (Platform.OS === 'web') {
+      // Don't allow drag if workout is active
+      if (hasActiveWorkout) {
+        return;
+      }
       // Only allow drag if initiated from grip handle
       if (dragAllowedRef.current !== index) {
         return;
@@ -852,7 +879,7 @@ Return ONLY the JSON array, no other text.`;
           onMoveShouldSetResponder={Platform.OS === 'web' ? () => false : () => false}
         >
         <View style={styles.exerciseHeader}>
-          {drag ? (
+          {!hasActiveWorkout && drag ? (
             <TouchableOpacity
               activeOpacity={1}
               onPressIn={() => {
@@ -867,7 +894,7 @@ Return ONLY the JSON array, no other text.`;
             </TouchableOpacity>
           ) : (
             <View style={styles.dragHandleContainer}>
-              <GripVertical color={(isActive || isDragging) ? "#a3e635" : "#71717a"} size={22} />
+              <GripVertical color={hasActiveWorkout ? "#3f3f46" : ((isActive || isDragging) ? "#a3e635" : "#71717a")} size={22} />
             </View>
           )}
           {item.name === "New Exercise" ? (
@@ -1021,7 +1048,7 @@ Return ONLY the JSON array, no other text.`;
         )}
       </View>
     );
-  }, [draggedIndex, exerciseDetails, dayData?.difficulty, removeExercise, router, planId, day, weekStart, date, isBodyweightExercise]);
+  }, [draggedIndex, exerciseDetails, dayData?.difficulty, removeExercise, router, planId, day, weekStart, date, isBodyweightExercise, hasActiveWorkout]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
@@ -1091,7 +1118,7 @@ Return ONLY the JSON array, no other text.`;
     <SafeAreaView style={styles.container}>
       <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
         {Platform.OS === 'web' ? (
-        // Web: Use FlatList with custom drag handlers
+        // Web: Use FlatList with custom drag handlers (disabled if workout is active)
         <FlatList
           data={dayData.exercises || []}
           keyExtractor={(item: any, index: number) => `exercise-${index}`}

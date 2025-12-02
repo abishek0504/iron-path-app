@@ -414,14 +414,16 @@ export default function WorkoutActiveScreen() {
       }
       setExerciseDetails(detailsMap);
 
-      // Check for existing active workout session
+      // Check for existing workout session (active or completed)
       const { data: existingSession, error: sessionQueryError } = await supabase
         .from('workout_sessions')
         .select('*')
         .eq('user_id', user.id)
         .eq('plan_id', parseInt(planId))
         .eq('day', day)
-        .eq('status', 'active')
+        .in('status', ['active', 'completed'])
+        .order('started_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (sessionQueryError && sessionQueryError.code !== 'PGRST116') {
@@ -435,7 +437,6 @@ export default function WorkoutActiveScreen() {
       const initialProgress = initializeProgress(dayData.exercises);
       
       if (existingSession) {
-        setWorkoutSession(existingSession);
         // Reconstruct progress from logs and session position
         // Handle both old schema (with progress) and new schema (with current_exercise_index)
         const currentExerciseIndex = existingSession.current_exercise_index ?? 
@@ -443,8 +444,37 @@ export default function WorkoutActiveScreen() {
         const currentSetIndex = existingSession.current_set_index ?? 
           (existingSession.progress?.currentSetIndex ?? 0);
         
-        const reconstructedProgress = await reconstructProgressFromLogs(
-          dayData.exercises,
+        // First, determine which exercises were in the original workout by checking logs
+        const { data: loggedExercises } = await supabase
+          .from('workout_logs')
+          .select('exercise_name')
+          .eq('user_id', user.id)
+          .eq('session_id', existingSession.id)
+          .eq('day', day);
+        
+        const loggedExerciseNames = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+        
+        // Build a map of exercise name to its index in the full dayData.exercises array
+        const exerciseIndexMap = new Map<string, number>();
+        dayData.exercises.forEach((exercise: any, index: number) => {
+          exerciseIndexMap.set(exercise.name, index);
+        });
+        
+        // Separate original exercises (have logs) from new exercises (no logs)
+        const originalExercises: any[] = [];
+        const newExercises: any[] = [];
+        
+        dayData.exercises.forEach((exercise: any) => {
+          if (loggedExerciseNames.has(exercise.name)) {
+            originalExercises.push(exercise);
+          } else {
+            newExercises.push(exercise);
+          }
+        });
+        
+        // Reconstruct progress only for original exercises
+        const originalProgress = await reconstructProgressFromLogs(
+          originalExercises,
           currentExerciseIndex,
           currentSetIndex,
           parseInt(planId),
@@ -452,7 +482,85 @@ export default function WorkoutActiveScreen() {
           user.id,
           existingSession.id
         );
-        setProgress(reconstructedProgress);
+        
+        // Fix exercise indices to match full dayData.exercises array
+        originalProgress.exercises.forEach((exProgress) => {
+          const globalIndex = exerciseIndexMap.get(exProgress.name);
+          if (globalIndex !== undefined) {
+            exProgress.exerciseIndex = globalIndex;
+          }
+        });
+        
+        // Check if all original exercises are completed
+        const allOriginalCompleted = originalExercises.length > 0 && originalProgress.exercises.every(ex => ex.completed);
+        
+        // Reactivate session if it was completed and there are new exercises
+        if (existingSession.status === 'completed' && newExercises.length > 0) {
+          const { data: reactivatedSession, error: reactivateError } = await supabase
+            .from('workout_sessions')
+            .update({
+              status: 'active',
+              completed_at: null
+            })
+            .eq('id', existingSession.id)
+            .select()
+            .single();
+          
+          if (!reactivateError && reactivatedSession) {
+            setWorkoutSession(reactivatedSession);
+          } else {
+            setWorkoutSession(existingSession);
+          }
+        } else {
+          setWorkoutSession(existingSession);
+        }
+        
+        // Add new exercises to progress with correct indices
+        if (newExercises.length > 0) {
+          newExercises.forEach((exercise) => {
+            const globalIndex = exerciseIndexMap.get(exercise.name);
+            if (globalIndex !== undefined) {
+              originalProgress.exercises.push({
+                exerciseIndex: globalIndex,
+                name: exercise.name,
+                completed: false,
+                sets: Array.from({ length: exercise.target_sets || 3 }, (_, setIndex) => ({
+                  setIndex,
+                  completed: false,
+                  reps: null,
+                  weight: null,
+                  duration: null
+                }))
+              });
+            }
+          });
+          
+          // Sort exercises by their global index to maintain order
+          originalProgress.exercises.sort((a, b) => a.exerciseIndex - b.exerciseIndex);
+          
+          // If all original exercises are completed, start from first new exercise
+          if (allOriginalCompleted) {
+            const firstNewExerciseIndex = newExercises.length > 0 
+              ? exerciseIndexMap.get(newExercises[0].name) 
+              : originalProgress.exercises.length;
+            if (firstNewExerciseIndex !== undefined) {
+              originalProgress.currentExerciseIndex = firstNewExerciseIndex;
+              originalProgress.currentSetIndex = 0;
+            }
+          }
+          // Otherwise, keep current position (workout in progress continues from where it was)
+          // But ensure currentExerciseIndex is valid
+          if (originalProgress.currentExerciseIndex >= originalProgress.exercises.length) {
+            // If current index is out of bounds, find the first incomplete exercise
+            const firstIncomplete = originalProgress.exercises.findIndex(ex => !ex.completed);
+            if (firstIncomplete !== -1) {
+              originalProgress.currentExerciseIndex = originalProgress.exercises[firstIncomplete].exerciseIndex;
+              originalProgress.currentSetIndex = 0;
+            }
+          }
+        }
+        
+        setProgress(originalProgress);
       } else {
         // Check AsyncStorage for local progress
         const localProgress = await AsyncStorage.getItem(`workout_session_${planId}_${day}`);
@@ -938,6 +1046,25 @@ export default function WorkoutActiveScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Check if this exercise has already been logged for this session
+      if (workoutSession?.id) {
+        const { data: existingLogs } = await supabase
+          .from('workout_logs')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('session_id', workoutSession.id)
+          .eq('exercise_name', exercise.name)
+          .limit(1);
+        
+        // If exercise already has logs for this session, skip saving
+        if (existingLogs && existingLogs.length > 0) {
+          if (__DEV__) {
+            console.log(`[saveSetsToLogs] Skipping ${exercise.name} - already logged for this session`);
+          }
+          return;
+        }
+      }
 
       // Get exercise detail to check if timed
       const detail = exerciseDetails.get(exercise.name);

@@ -226,10 +226,46 @@ export default function HomeScreen() {
             console.error('Error checking completed workout:', completedSessionError);
           }
           
+          // If there's a completed session, check if new exercises were added
+          let isTrulyCompleted = false;
+          if (completedSession && !activeSession) {
+            // Get current plan exercises count
+            const weekStart = new Date();
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+            weekStart.setHours(0, 0, 0, 0);
+            const year = weekStart.getFullYear();
+            const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+            const dayNum = String(weekStart.getDate()).padStart(2, '0');
+            const weekKey = `${year}-${month}-${dayNum}`;
+            
+            let dayData = null;
+            if (planData.plan_data?.weeks?.[weekKey]?.week_schedule?.[currentDay]) {
+              dayData = planData.plan_data.weeks[weekKey].week_schedule[currentDay];
+            } else if (planData.plan_data?.week_schedule?.[currentDay]) {
+              dayData = planData.plan_data.week_schedule[currentDay];
+            }
+            
+            const currentExerciseCount = dayData?.exercises?.length || 0;
+            
+            // Count how many unique exercises were logged for this session
+            const { data: loggedExercises } = await supabase
+              .from('workout_logs')
+              .select('exercise_name')
+              .eq('user_id', user.id)
+              .eq('session_id', completedSession.id)
+              .eq('day', currentDay);
+            
+            const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+            const loggedExerciseCount = uniqueLoggedExercises.size;
+            
+            // Workout is truly completed only if all current exercises were logged
+            isTrulyCompleted = currentExerciseCount > 0 && loggedExerciseCount >= currentExerciseCount;
+          }
+          
           // Set states based on whether data exists
           if (isMounted) {
             setHasActiveWorkout(!!activeSession);
-            setIsWorkoutCompleted(!!completedSession && !activeSession);
+            setIsWorkoutCompleted(isTrulyCompleted);
             setIsLoading(false);
             setHasInitiallyLoaded(true);
           }
@@ -293,8 +329,44 @@ export default function HomeScreen() {
             .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
+          // If there's a completed session, check if new exercises were added
+          let isTrulyCompleted = false;
+          if (completedSession && !activeSession) {
+            // Get current plan exercises count
+            const weekStart = new Date();
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+            weekStart.setHours(0, 0, 0, 0);
+            const year = weekStart.getFullYear();
+            const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+            const dayNum = String(weekStart.getDate()).padStart(2, '0');
+            const weekKey = `${year}-${month}-${dayNum}`;
+            
+            let dayData = null;
+            if (activePlan.plan_data?.weeks?.[weekKey]?.week_schedule?.[currentDay]) {
+              dayData = activePlan.plan_data.weeks[weekKey].week_schedule[currentDay];
+            } else if (activePlan.plan_data?.week_schedule?.[currentDay]) {
+              dayData = activePlan.plan_data.week_schedule[currentDay];
+            }
+            
+            const currentExerciseCount = dayData?.exercises?.length || 0;
+            
+            // Count how many unique exercises were logged for this session
+            const { data: loggedExercises } = await supabase
+              .from('workout_logs')
+              .select('exercise_name')
+              .eq('user_id', user.id)
+              .eq('session_id', completedSession.id)
+              .eq('day', currentDay);
+            
+            const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+            const loggedExerciseCount = uniqueLoggedExercises.size;
+            
+            // Workout is truly completed only if all current exercises were logged
+            isTrulyCompleted = currentExerciseCount > 0 && loggedExerciseCount >= currentExerciseCount;
+          }
+          
           setHasActiveWorkout(!!activeSession);
-          setIsWorkoutCompleted(!!completedSession && !activeSession);
+          setIsWorkoutCompleted(isTrulyCompleted);
         };
         refresh();
       }
