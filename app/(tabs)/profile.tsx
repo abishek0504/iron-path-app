@@ -194,19 +194,21 @@ export default function ProfileScreen() {
         </Animated.View>
       )}
       <AnimatedReanimated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
+        {/* Header */}
+        <AnimatedReanimated.View entering={FadeIn.duration(400).delay(50)}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Profile</Text>
+            <TouchableOpacity 
+              style={styles.editButton}
+              onPress={() => router.push('/edit-profile')}
+            >
+              <Edit size={20} color="#a3e635" />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+        </AnimatedReanimated.View>
+
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
-          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(50)}>
-            <View style={styles.header}>
-              <Text style={styles.title}>Profile</Text>
-              <TouchableOpacity 
-                style={styles.editButton}
-                onPress={() => router.push('/edit-profile')}
-              >
-                <Edit size={20} color="#a3e635" />
-                <Text style={styles.editButtonText}>Edit</Text>
-              </TouchableOpacity>
-            </View>
-          </AnimatedReanimated.View>
 
           <AnimatedReanimated.View entering={FadeIn.duration(400).delay(100)}>
             <View style={styles.profilePictureContainer}>
@@ -357,13 +359,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 32,
+    padding: 16,
+    paddingBottom: 12,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.5,
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#a3e635', // lime-400
+    marginBottom: 16,
   },
   editButton: {
     flexDirection: 'row',

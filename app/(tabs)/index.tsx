@@ -513,25 +513,24 @@ export default function HomeScreen() {
       <View style={styles.glowTop} />
       <View style={styles.glowBottom} />
 
+      {/* Header */}
+      <Animated.View 
+        entering={FadeIn.duration(400)}
+        style={styles.header}
+      >
+        <Text style={styles.dayTitle}>
+          {currentDay || 'Loading...'}
+        </Text>
+        <Text style={styles.greetingText}>
+          {getGreeting()}
+        </Text>
+      </Animated.View>
+
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <Animated.View 
-          entering={FadeIn.duration(400)}
-          style={styles.header}
-        >
-          <View>
-            <Text style={styles.greetingText}>
-              {getGreeting()}
-            </Text>
-            <Text style={styles.titleText}>
-              {currentDay ? `Ready to Crush It?` : 'Loading...'}
-            </Text>
-          </View>
-        </Animated.View>
 
         {!activePlan ? (
           <Animated.View 
@@ -735,10 +734,14 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 32,
+    padding: 16,
+    paddingBottom: 12,
+  },
+  dayTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#a3e635', // lime-400
+    marginBottom: 4,
   },
   greetingText: {
     color: '#a1a1aa', // zinc-400
@@ -746,13 +749,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  titleText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.5,
   },
   logoutButton: {
     height: 40,
