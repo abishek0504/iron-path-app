@@ -163,6 +163,7 @@ ${exerciseListSection}
 8. Ensure proper rest periods based on experience level and exercise intensity.
 9. Create a balanced program that targets all major muscle groups throughout the ${daysPerWeek} workout days.
 ${goalWeightStr ? `10. Consider the weight difference (current: ${weightStr}, goal: ${goalWeightStr}) when designing the program.` : ''}
+11. Do NOT guess exact barbell/dumbbell weights. Focus on appropriate relative difficulty, set/rep schemes, and rest times. A separate progression engine will assign concrete loads from the user's workout history.
 
 EXERCISE FORMAT REQUIREMENTS:
 Each exercise must have this EXACT structure:

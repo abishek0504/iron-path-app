@@ -12,6 +12,10 @@ import { buildSupplementaryPrompt } from '../src/lib/aiPrompts';
 import { extractJSON, JSONParseError } from '../src/lib/jsonParser';
 import { validateAndNormalizeExercises } from '../src/lib/workoutValidation';
 import { getCachedModel, clearModelCache } from '../src/lib/geminiModels';
+import { estimateExerciseDuration } from '../src/lib/timeEstimation';
+import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../src/lib/progressionMetrics';
+import { computeProgressionSuggestion } from '../src/lib/progressionEngine';
+import { applyVolumeTemplate } from '../src/lib/volumeTemplates';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -83,6 +87,8 @@ export default function PlannerDayScreen() {
   const [hasActiveWorkout, setHasActiveWorkout] = useState(false);
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [targetDurationMin, setTargetDurationMin] = useState<number | null>(null);
+  const [estimatedDurationSec, setEstimatedDurationSec] = useState<number | null>(null);
 
   useEffect(() => {
     loadUserProfile();
@@ -235,6 +241,11 @@ export default function PlannerDayScreen() {
           if (needsMigration) {
             const migratedDayData = { ...loadedDayData, exercises: migratedExercises };
             setDayData(migratedDayData);
+            setTargetDurationMin(
+              typeof migratedDayData.target_duration_min === 'number'
+                ? migratedDayData.target_duration_min
+                : null,
+            );
             
             // Save migrated data back to database
             const updatedPlan = { ...data };
@@ -256,6 +267,11 @@ export default function PlannerDayScreen() {
             }
           } else {
             setDayData(loadedDayData);
+            setTargetDurationMin(
+              typeof loadedDayData.target_duration_min === 'number'
+                ? loadedDayData.target_duration_min
+                : null,
+            );
           }
           
           // Load exercise details
@@ -263,6 +279,7 @@ export default function PlannerDayScreen() {
         } else {
           // No data found, use empty exercises
           setDayData({ exercises: [] });
+          setTargetDurationMin(null);
         }
         
         // Check for active workout session
@@ -504,6 +521,76 @@ export default function PlannerDayScreen() {
     }
   };
 
+  const updateTargetDuration = (minutes: number) => {
+    const current = dayData || { exercises: [] };
+    const updatedDayData = {
+      ...current,
+      target_duration_min: minutes,
+    };
+    setTargetDurationMin(minutes);
+    savePlan(updatedDayData, true);
+  };
+
+  const estimateSessionDuration = useCallback(
+    (exercises: any[]): number => {
+      if (!Array.isArray(exercises) || exercises.length === 0) return 0;
+      let total = 0;
+
+      exercises.forEach((ex: any, idx: number) => {
+        const sets = Array.isArray(ex.sets) ? ex.sets : [];
+        const isTimed = sets.some((s: any) => s.duration != null);
+
+        if (isTimed) {
+          sets.forEach((s: any) => {
+            const duration = typeof s.duration === 'number' ? s.duration : 0;
+            const rest = typeof s.rest_time_sec === 'number' ? s.rest_time_sec : ex.rest_time_sec || 0;
+            total += duration + rest;
+          });
+        } else {
+          const targetSets =
+            typeof ex.target_sets === 'number' && ex.target_sets > 0
+              ? ex.target_sets
+              : sets.length > 0
+              ? sets.length
+              : 3;
+          const targetReps =
+            typeof ex.target_reps === 'number'
+              ? ex.target_reps
+              : typeof sets[0]?.reps === 'number'
+              ? sets[0].reps
+              : 8;
+
+          const estimation = estimateExerciseDuration({
+            targetSets,
+            targetReps,
+            movementPattern: ex.movement_pattern || null,
+            tempoCategory: ex.tempo_category || null,
+            setupBufferSec: ex.setup_buffer_sec || null,
+            isUnilateral: ex.is_unilateral || false,
+            positionIndex: idx,
+          });
+
+          const restPerSet =
+            typeof ex.rest_time_sec === 'number'
+              ? ex.rest_time_sec
+              : typeof sets[0]?.rest_time_sec === 'number'
+              ? sets[0].rest_time_sec
+              : 60;
+
+          total += estimation.estimatedDurationSec + restPerSet * targetSets;
+        }
+      });
+
+      return total;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const total = estimateSessionDuration(dayData.exercises || []);
+    setEstimatedDurationSec(total || null);
+  }, [dayData.exercises, estimateSessionDuration]);
+
   const generateForDay = async () => {
     if (!userProfile) {
       Alert.alert("Error", "Please complete your profile setup first.");
@@ -601,7 +688,9 @@ export default function PlannerDayScreen() {
 
       // Convert exercises to format with sets array (matching manual exercise format)
       const convertedExercises = newExercises.map((ex: any) => {
-        const converted = { ...ex };
+        let converted = { ...ex };
+        // Normalize and apply volume templates for realistic sets/reps/rest
+        converted = applyVolumeTemplate(converted);
         
         // Ensure target_reps is a number (not string)
         if (typeof converted.target_reps === 'string') {
@@ -655,8 +744,63 @@ export default function PlannerDayScreen() {
         return converted;
       });
 
+      // Attach history-based weight suggestions for new exercises
+      const exerciseNames = new Set<string>();
+      convertedExercises.forEach((ex: any) => {
+        if (ex?.name) {
+          exerciseNames.add(ex.name);
+        }
+      });
+
+      let logsByExercise = new Map<string, WorkoutLogLike[]>();
+      if (exerciseNames.size > 0) {
+        const { data: logs } = await supabase
+          .from('workout_logs')
+          .select('exercise_name, weight, reps, scheduled_weight, scheduled_reps, performed_at')
+          .eq('user_id', user.id)
+          .in('exercise_name', Array.from(exerciseNames));
+
+        if (logs && Array.isArray(logs)) {
+          logsByExercise = logs.reduce((map, log) => {
+            const name = log.exercise_name;
+            if (!name) return map;
+            const list = map.get(name) || [];
+            list.push(log as WorkoutLogLike);
+            map.set(name, list);
+            return map;
+          }, new Map<string, WorkoutLogLike[]>());
+        }
+      }
+
+      const exercisesWithWeights = convertedExercises.map((ex: any) => {
+        if (!ex?.name) return ex;
+        const logs = logsByExercise.get(ex.name) || [];
+        const metrics = computeExerciseHistoryMetrics(logs);
+        const suggestion = computeProgressionSuggestion({
+          profile: userProfile,
+          exercise: ex,
+          metrics,
+        });
+
+        if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0 && Array.isArray(ex.sets)) {
+          ex.sets = ex.sets.map((set: any) => {
+            const currentWeight = set.weight;
+            if (
+              currentWeight === null ||
+              currentWeight === undefined ||
+              Number.isNaN(currentWeight)
+            ) {
+              return { ...set, weight: suggestion.suggestedWeight };
+            }
+            return set;
+          });
+        }
+
+        return ex;
+      });
+
       // Add new exercises to existing ones (user preference - don't overwrite)
-      const updatedExercises = [...existingExercises, ...convertedExercises];
+      const updatedExercises = [...existingExercises, ...exercisesWithWeights];
       const updatedDayData = {
         ...dayData,
         exercises: updatedExercises
@@ -1187,8 +1331,41 @@ export default function PlannerDayScreen() {
           <Text style={styles.addButtonText}>Add</Text>
         </TouchableOpacity>
       </View>
+
+      <View style={styles.durationTargetRow}>
+        <Text style={styles.durationTargetLabel}>Target duration</Text>
+        <View style={styles.durationChipsRow}>
+          {[30, 45, 60, 75].map((min) => (
+            <TouchableOpacity
+              key={min}
+              style={[
+                styles.durationChip,
+                targetDurationMin === min && styles.durationChipActive,
+              ]}
+              onPress={() => updateTargetDuration(min)}
+            >
+              <Text
+                style={[
+                  styles.durationChipText,
+                  targetDurationMin === min && styles.durationChipTextActive,
+                ]}
+              >
+                {min}m
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {estimatedDurationSec !== null && estimatedDurationSec > 0 && (
+        <Text style={styles.durationEstimateText}>
+          Estimated session:{' '}
+          {Math.round(estimatedDurationSec / 60)} min
+          {targetDurationMin ? ` · Target ${targetDurationMin} min` : ''}
+        </Text>
+      )}
     </View>
-  ), [day, dayData.exercises?.length, handleBack, addManualExercise]);
+  ), [day, dayData.exercises?.length, handleBack, addManualExercise, targetDurationMin, estimatedDurationSec, updateTargetDuration]);
 
   const renderFooter = useCallback(() => (
     <View style={styles.footerSection}>
@@ -1448,5 +1625,23 @@ const styles = StyleSheet.create({
   notesContainer: { marginTop: 8, marginBottom: 12 },
   notesLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' }, // zinc-400
   notesText: { color: '#a1a1aa', fontSize: 14 }, // zinc-400
+  durationTargetRow: { marginTop: 8, marginBottom: 4 },
+  durationTargetLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' },
+  durationChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  durationChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: 'transparent',
+  },
+  durationChipActive: {
+    borderColor: '#a3e635',
+    backgroundColor: 'rgba(163, 230, 53, 0.12)',
+  },
+  durationChipText: { color: '#a1a1aa', fontSize: 12, fontWeight: '600' },
+  durationChipTextActive: { color: '#a3e635' },
+  durationEstimateText: { color: '#a1a1aa', fontSize: 12, marginTop: 6 },
 });
 

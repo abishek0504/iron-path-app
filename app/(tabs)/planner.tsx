@@ -10,6 +10,8 @@ import { extractJSON, JSONParseError } from '../../src/lib/jsonParser';
 import { ensureAllDays, validateWeekSchedule, normalizeExercise } from '../../src/lib/workoutValidation';
 import { clearModelCache } from '../../src/lib/geminiModels';
 import { generateWeekScheduleWithAI } from '../../src/lib/adaptiveWorkoutEngine';
+import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../../src/lib/progressionMetrics';
+import { computeProgressionSuggestion } from '../../src/lib/progressionEngine';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -249,6 +251,73 @@ export default function PlannerScreen() {
       const finalValidationErrors = validateWeekSchedule(planData.week_schedule);
       if (finalValidationErrors.length > 0 && __DEV__) {
         console.warn('Remaining validation errors after normalization:', finalValidationErrors);
+      }
+
+      // --- History-based progression: suggest weights for non-bodyweight exercises ---
+      const exerciseNames = new Set<string>();
+      for (const dayName of Object.keys(planData.week_schedule)) {
+        const dayInfo = planData.week_schedule[dayName];
+        const exercises = Array.isArray(dayInfo?.exercises) ? dayInfo.exercises : [];
+        exercises.forEach((ex: any) => {
+          if (ex?.name) {
+            exerciseNames.add(ex.name);
+          }
+        });
+      }
+
+      let logsByExercise = new Map<string, WorkoutLogLike[]>();
+      if (exerciseNames.size > 0) {
+        const { data: logs } = await supabase
+          .from('workout_logs')
+          .select('exercise_name, weight, reps, scheduled_weight, scheduled_reps, performed_at')
+          .eq('user_id', user.id)
+          .in('exercise_name', Array.from(exerciseNames));
+
+        if (logs && Array.isArray(logs)) {
+          logsByExercise = logs.reduce((map, log) => {
+            const name = log.exercise_name;
+            if (!name) return map;
+            const list = map.get(name) || [];
+            list.push(log as WorkoutLogLike);
+            map.set(name, list);
+            return map;
+          }, new Map<string, WorkoutLogLike[]>());
+        }
+      }
+
+      for (const dayName of Object.keys(planData.week_schedule)) {
+        const dayInfo = planData.week_schedule[dayName];
+        if (!dayInfo || !Array.isArray(dayInfo.exercises)) continue;
+
+        dayInfo.exercises = dayInfo.exercises.map((ex: any) => {
+          if (!ex?.name) return ex;
+
+          const logs = logsByExercise.get(ex.name) || [];
+          const metrics = computeExerciseHistoryMetrics(logs);
+
+          const suggestion = computeProgressionSuggestion({
+            profile: userProfile,
+            exercise: ex,
+            metrics,
+          });
+
+          if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0 && Array.isArray(ex.sets)) {
+            ex.sets = ex.sets.map((set: any) => {
+              const currentWeight = set.weight;
+              // Respect existing explicit weights and bodyweight (0); only fill blanks.
+              if (
+                currentWeight === null ||
+                currentWeight === undefined ||
+                Number.isNaN(currentWeight)
+              ) {
+                return { ...set, weight: suggestion.suggestedWeight };
+              }
+              return set;
+            });
+          }
+
+          return ex;
+        });
       }
 
       // Create plan for current week

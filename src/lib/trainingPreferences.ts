@@ -116,6 +116,10 @@ export const deriveStyleAndComponentsFromGoal = (
   return { style, components };
 };
 
+export const getTrainingStyleLabel = (style: TrainingStyleId): string => {
+  return STYLE_LABELS[style];
+};
+
 export const serializeComponentsForStorage = (components: ComponentPreferences): ComponentPreferences => {
   return {
     include_tier1_compounds: !!components.include_tier1_compounds,

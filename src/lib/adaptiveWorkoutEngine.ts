@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buildFullPlanPrompt } from './aiPrompts';
 import { extractJSON, JSONParseError } from './jsonParser';
 import { ensureAllDays, validateWeekSchedule, normalizeExercise } from './workoutValidation';
+import { applyVolumeTemplate } from './volumeTemplates';
 import { getCachedModel, clearModelCache } from './geminiModels';
 
 type NamedExercise = { name: string; is_timed?: boolean | null };
@@ -77,7 +78,9 @@ export const generateWeekScheduleWithAI = async (
     for (const day of Object.keys(planData.week_schedule)) {
       if (Array.isArray(planData.week_schedule[day].exercises)) {
         planData.week_schedule[day].exercises = planData.week_schedule[day].exercises.map((ex: any) => {
-          const converted = normalizeExercise(ex);
+          // Normalize basic fields then apply deterministic volume template
+          let converted = normalizeExercise(ex);
+          converted = applyVolumeTemplate(converted);
 
           // Ensure target_reps is a number (not string)
           if (typeof converted.target_reps === 'string') {

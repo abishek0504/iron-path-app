@@ -8,6 +8,7 @@ import { Edit, LogOut, Check, RotateCcw } from 'lucide-react-native';
 import { Alert } from 'react-native';
 import { supabase } from '../../src/lib/supabase';
 import { ProfileSkeleton } from '../../src/components/skeletons/ProfileSkeleton';
+import { deriveStyleAndComponentsFromProfile, getTrainingStyleLabel } from '../../src/lib/trainingPreferences';
 
 const kgToLbs = (kg: number): number => kg / 0.453592;
 const cmToFtIn = (cm: number): { feet: number; inches: number } => {
@@ -397,6 +398,25 @@ export default function ProfileScreen() {
                   </View>
                 </AnimatedReanimated.View>
               )}
+
+              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(600)}>
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoLabel}>AI Workout Style</Text>
+                  <Text style={styles.infoValueSmall}>
+                    {(() => {
+                      const { style, components } = deriveStyleAndComponentsFromProfile(profile);
+                      const styleLabel = getTrainingStyleLabel(style);
+                      const parts: string[] = [];
+                      if (components.include_tier1_compounds) parts.push('Tier 1');
+                      if (components.include_tier2_accessories) parts.push('Tier 2');
+                      if (components.include_tier3_prehab_mobility) parts.push('Mobility');
+                      if (components.include_cardio_conditioning) parts.push('Cardio');
+                      const tiers = parts.length ? parts.join(' · ') : 'No components selected';
+                      return `${styleLabel} · ${tiers}`;
+                    })()}
+                  </Text>
+                </View>
+              </AnimatedReanimated.View>
             </View>
           </AnimatedReanimated.View>
 
@@ -520,6 +540,11 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 20,
     fontWeight: '700',
+  },
+  infoValueSmall: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   resetPlanButton: {
     flexDirection: 'row',
