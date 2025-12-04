@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Pressable } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { X, Check, Clock, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
+import { X, Check, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WorkoutActiveSkeleton } from '../src/components/skeletons/WorkoutActiveSkeleton';
@@ -12,6 +12,7 @@ interface ExerciseDetail {
   is_timed: boolean;
   default_duration_sec: number | null;
   description: string | null;
+  how_to?: string[] | null;
   equipment_needed?: string[];
 }
 
@@ -38,6 +39,7 @@ interface SetProgress {
   reps: number | null;
   weight: number | null;
   duration: number | null;
+  notes?: string | null;
 }
 
 interface ExerciseProgress {
@@ -103,6 +105,13 @@ export default function WorkoutActiveScreen() {
           if (!prev) return null;
           if (prev.seconds <= 1) {
             if (restTimerInterval.current) clearInterval(restTimerInterval.current);
+            if (__DEV__) {
+              console.log('[WorkoutActive] Timer complete', {
+                type: 'rest',
+                exerciseIndex: progress.currentExerciseIndex,
+                setIndex: progress.currentSetIndex,
+              });
+            }
             // Auto-advance to next set - use setTimeout to ensure state updates are processed
             setTimeout(() => {
               handleRestComplete();
@@ -121,7 +130,7 @@ export default function WorkoutActiveScreen() {
     return () => {
       if (restTimerInterval.current) clearInterval(restTimerInterval.current);
     };
-  }, [restTimer?.active]);
+  }, [restTimer?.active, progress.currentExerciseIndex, progress.currentSetIndex]);
 
   useEffect(() => {
     if (exerciseTimer?.active && !exerciseTimer?.paused) {
@@ -133,6 +142,13 @@ export default function WorkoutActiveScreen() {
             // 3-second countdown phase
             if (prev.seconds <= 1) {
               // Countdown finished, start exercise timer
+              if (__DEV__) {
+                console.log('[WorkoutActive] Timer transition', {
+                  from: 'exercise-get-ready',
+                  to: 'exercise-main',
+                  targetDuration: prev.targetDuration,
+                });
+              }
               return {
                 active: true,
                 seconds: prev.targetDuration,
@@ -146,6 +162,12 @@ export default function WorkoutActiveScreen() {
             // Exercise countdown phase
             if (prev.seconds <= 1) {
               // Timer finished - keep active but set to 0 so UI shows complete button
+              if (__DEV__) {
+                console.log('[WorkoutActive] Timer complete', {
+                  type: 'exercise-main',
+                  targetDuration: prev.targetDuration,
+                });
+              }
               return { ...prev, seconds: 0, active: true, paused: false };
             }
             return { ...prev, seconds: prev.seconds - 1 };
@@ -342,7 +364,7 @@ export default function WorkoutActiveScreen() {
         // Note: exercises table doesn't have default_duration_sec, only user_exercises does
         const { data: masterExercises } = await supabase
           .from('exercises')
-          .select('name, is_timed, description, equipment_needed')
+          .select('name, is_timed, description, how_to, equipment_needed')
           .in('name', exerciseNames);
 
         // Batch query all user exercises
@@ -396,6 +418,7 @@ export default function WorkoutActiveScreen() {
               is_timed: masterExercise.is_timed || false,
               default_duration_sec: null, // Master exercises table doesn't have default_duration_sec, use null (will default to 60 in code)
               description: masterExercise.description,
+              how_to: masterExercise.how_to || null,
               equipment_needed: masterExercise.equipment_needed || []
             });
           } else {
@@ -404,6 +427,7 @@ export default function WorkoutActiveScreen() {
               is_timed: false,
               default_duration_sec: null,
               description: null,
+              how_to: null,
               equipment_needed: []
             });
           }
@@ -411,14 +435,16 @@ export default function WorkoutActiveScreen() {
       }
       setExerciseDetails(detailsMap);
 
-      // Check for existing active workout session
+      // Check for existing workout session (active or completed)
       const { data: existingSession, error: sessionQueryError } = await supabase
         .from('workout_sessions')
         .select('*')
         .eq('user_id', user.id)
         .eq('plan_id', parseInt(planId))
         .eq('day', day)
-        .eq('status', 'active')
+        .in('status', ['active', 'completed'])
+        .order('started_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (sessionQueryError && sessionQueryError.code !== 'PGRST116') {
@@ -432,7 +458,6 @@ export default function WorkoutActiveScreen() {
       const initialProgress = initializeProgress(dayData.exercises);
       
       if (existingSession) {
-        setWorkoutSession(existingSession);
         // Reconstruct progress from logs and session position
         // Handle both old schema (with progress) and new schema (with current_exercise_index)
         const currentExerciseIndex = existingSession.current_exercise_index ?? 
@@ -440,8 +465,37 @@ export default function WorkoutActiveScreen() {
         const currentSetIndex = existingSession.current_set_index ?? 
           (existingSession.progress?.currentSetIndex ?? 0);
         
-        const reconstructedProgress = await reconstructProgressFromLogs(
-          dayData.exercises,
+        // First, determine which exercises were in the original workout by checking logs
+        const { data: loggedExercises } = await supabase
+          .from('workout_logs')
+          .select('exercise_name')
+          .eq('user_id', user.id)
+          .eq('session_id', existingSession.id)
+          .eq('day', day);
+        
+        const loggedExerciseNames = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+        
+        // Build a map of exercise name to its index in the full dayData.exercises array
+        const exerciseIndexMap = new Map<string, number>();
+        dayData.exercises.forEach((exercise: any, index: number) => {
+          exerciseIndexMap.set(exercise.name, index);
+        });
+        
+        // Separate original exercises (have logs) from new exercises (no logs)
+        const originalExercises: any[] = [];
+        const newExercises: any[] = [];
+        
+        dayData.exercises.forEach((exercise: any) => {
+          if (loggedExerciseNames.has(exercise.name)) {
+            originalExercises.push(exercise);
+          } else {
+            newExercises.push(exercise);
+          }
+        });
+        
+        // Reconstruct progress only for original exercises
+        const originalProgress = await reconstructProgressFromLogs(
+          originalExercises,
           currentExerciseIndex,
           currentSetIndex,
           parseInt(planId),
@@ -449,7 +503,85 @@ export default function WorkoutActiveScreen() {
           user.id,
           existingSession.id
         );
-        setProgress(reconstructedProgress);
+        
+        // Fix exercise indices to match full dayData.exercises array
+        originalProgress.exercises.forEach((exProgress) => {
+          const globalIndex = exerciseIndexMap.get(exProgress.name);
+          if (globalIndex !== undefined) {
+            exProgress.exerciseIndex = globalIndex;
+          }
+        });
+        
+        // Check if all original exercises are completed
+        const allOriginalCompleted = originalExercises.length > 0 && originalProgress.exercises.every(ex => ex.completed);
+        
+        // Reactivate session if it was completed and there are new exercises
+        if (existingSession.status === 'completed' && newExercises.length > 0) {
+          const { data: reactivatedSession, error: reactivateError } = await supabase
+            .from('workout_sessions')
+            .update({
+              status: 'active',
+              completed_at: null
+            })
+            .eq('id', existingSession.id)
+            .select()
+            .single();
+          
+          if (!reactivateError && reactivatedSession) {
+            setWorkoutSession(reactivatedSession);
+          } else {
+            setWorkoutSession(existingSession);
+          }
+        } else {
+          setWorkoutSession(existingSession);
+        }
+        
+        // Add new exercises to progress with correct indices
+        if (newExercises.length > 0) {
+          newExercises.forEach((exercise) => {
+            const globalIndex = exerciseIndexMap.get(exercise.name);
+            if (globalIndex !== undefined) {
+              originalProgress.exercises.push({
+                exerciseIndex: globalIndex,
+                name: exercise.name,
+                completed: false,
+                sets: Array.from({ length: exercise.target_sets || 3 }, (_, setIndex) => ({
+                  setIndex,
+                  completed: false,
+                  reps: null,
+                  weight: null,
+                  duration: null
+                }))
+              });
+            }
+          });
+          
+          // Sort exercises by their global index to maintain order
+          originalProgress.exercises.sort((a, b) => a.exerciseIndex - b.exerciseIndex);
+          
+          // If all original exercises are completed, start from first new exercise
+          if (allOriginalCompleted) {
+            const firstNewExerciseIndex = newExercises.length > 0 
+              ? exerciseIndexMap.get(newExercises[0].name) 
+              : originalProgress.exercises.length;
+            if (firstNewExerciseIndex !== undefined) {
+              originalProgress.currentExerciseIndex = firstNewExerciseIndex;
+              originalProgress.currentSetIndex = 0;
+            }
+          }
+          // Otherwise, keep current position (workout in progress continues from where it was)
+          // But ensure currentExerciseIndex is valid
+          if (originalProgress.currentExerciseIndex >= originalProgress.exercises.length) {
+            // If current index is out of bounds, find the first incomplete exercise
+            const firstIncomplete = originalProgress.exercises.findIndex(ex => !ex.completed);
+            if (firstIncomplete !== -1) {
+              originalProgress.currentExerciseIndex = originalProgress.exercises[firstIncomplete].exerciseIndex;
+              originalProgress.currentSetIndex = 0;
+            }
+          }
+        }
+        
+        setProgress(originalProgress);
       } else {
         // Check AsyncStorage for local progress
         const localProgress = await AsyncStorage.getItem(`workout_session_${planId}_${day}`);
@@ -517,10 +649,14 @@ export default function WorkoutActiveScreen() {
     };
   };
 
-  const saveProgress = async (updatedProgress: WorkoutProgress) => {
+  const saveProgress = async (updatedProgress: WorkoutProgress, skipStateUpdate: boolean = false) => {
     // Always save to AsyncStorage for fast local access
     await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
-    setProgress(updatedProgress);
+    
+    // Only update state if not skipping (to allow manual state updates)
+    if (!skipStateUpdate) {
+      setProgress(updatedProgress);
+    }
 
     // Save only current position to database (minimal state)
     if (workoutSession) {
@@ -585,6 +721,14 @@ export default function WorkoutActiveScreen() {
         targetDuration: targetDuration,
         paused: false
       });
+      if (__DEV__) {
+        console.log('[WorkoutActive] Timer start', {
+          type: 'exercise-get-ready',
+          exerciseIndex,
+          setIndex,
+          targetDuration,
+        });
+      }
     } else {
       // Just mark set as complete (no logging yet)
       handleCompleteSet();
@@ -735,6 +879,49 @@ export default function WorkoutActiveScreen() {
     }
   };
 
+  const handleReopenLogging = (exerciseIndex: number) => {
+    const exercise = exercises[exerciseIndex];
+    const detail = exerciseDetails.get(exercise.name);
+    const isTimed = detail?.is_timed || false;
+    const totalSets = exercise.target_sets || 3;
+    const exerciseProgress = progress.exercises[exerciseIndex];
+
+    // Load saved data from progress
+    const loadedLogs: Array<{ reps: string; weight: string; duration: string; notes: string }> = [];
+    const minsMap = new Map<number, string>();
+    const secsMap = new Map<number, string>();
+
+    for (let i = 0; i < totalSets; i++) {
+      const set = exerciseProgress?.sets?.[i];
+      if (isTimed) {
+        const duration = set?.duration ?? 0;
+        const mins = Math.floor(duration / 60);
+        const secs = duration % 60;
+        minsMap.set(i, mins.toString());
+        secsMap.set(i, secs.toString());
+        loadedLogs.push({
+          reps: '',
+          weight: '',
+          duration: duration.toString(),
+          notes: set?.notes || '',
+        });
+      } else {
+        loadedLogs.push({
+          reps: set?.reps?.toString() || '',
+          weight: set?.weight?.toString() || '',
+          duration: '',
+          notes: set?.notes || '',
+        });
+      }
+    }
+
+    setSetLogs(loadedLogs);
+    setDurationMinutes(minsMap);
+    setDurationSeconds(secsMap);
+    setCompletedExerciseIndex(exerciseIndex);
+    setShowLoggingScreen(true);
+  };
+
   const handleSaveExerciseLogs = async () => {
     if (completedExerciseIndex === null) return;
     
@@ -770,13 +957,83 @@ export default function WorkoutActiveScreen() {
       // Save to workout_logs before moving to next exercise
       await saveSetsToLogs(exercise, updatedProgress.exercises[completedExerciseIndex].sets, setLogs);
       
-      updatedProgress.currentExerciseIndex = completedExerciseIndex + 1;
+      const nextExerciseIndex = completedExerciseIndex + 1;
+      
+      // Ensure next exercise is initialized in progress
+      if (!updatedProgress.exercises[nextExerciseIndex]) {
+        const nextExercise = exercises[nextExerciseIndex];
+        updatedProgress.exercises[nextExerciseIndex] = {
+          exerciseIndex: nextExerciseIndex,
+          name: nextExercise.name,
+          completed: false,
+          sets: Array.from({ length: nextExercise.target_sets || 3 }, (_, setIndex) => ({
+            setIndex,
+            completed: false,
+            reps: null,
+            weight: null,
+            duration: null
+          }))
+        };
+      } else {
+        // Reset the next exercise if it was previously completed (don't auto-show logging screen)
+        const nextExercise = updatedProgress.exercises[nextExerciseIndex];
+        if (nextExercise.completed) {
+          nextExercise.completed = false;
+          // Reset all sets to incomplete
+          nextExercise.sets.forEach(set => {
+            set.completed = false;
+          });
+        }
+      }
+      
+      updatedProgress.currentExerciseIndex = nextExerciseIndex;
       updatedProgress.currentSetIndex = 0;
-      await saveProgress(updatedProgress);
+      
+      // Ensure next exercise is initialized but DON'T mark sets as completed
+      // The logging screen should only show when user actually completes the last set
+      const nextExercise = exercises[nextExerciseIndex];
+      if (!updatedProgress.exercises[nextExerciseIndex].sets || updatedProgress.exercises[nextExerciseIndex].sets.length !== (nextExercise.target_sets || 3)) {
+        updatedProgress.exercises[nextExerciseIndex].sets = Array.from({ length: nextExercise.target_sets || 3 }, (_, setIndex) => ({
+          setIndex,
+          completed: false, // Don't mark as completed - user needs to actually complete sets
+          reps: null,
+          weight: null,
+          duration: null
+        }));
+      }
+      
+      // Don't mark the next exercise as completed - let user complete it naturally
+      updatedProgress.exercises[nextExerciseIndex].completed = false;
+      
+      // CRITICAL: Save to AsyncStorage FIRST to ensure state is persisted
+      await AsyncStorage.setItem(`workout_session_${planId}_${day}`, JSON.stringify(updatedProgress));
+      
+      // Update progress state - this must happen synchronously
       setProgress(updatedProgress);
+      
+      // Close logging screen and return to workout view for next exercise
       setShowLoggingScreen(false);
       setCompletedExerciseIndex(null);
       setSetLogs([]);
+      setDurationMinutes(new Map());
+      setDurationSeconds(new Map());
+      
+      // Save progress to database (skip state update since we already set it)
+      // Don't await this - let it run in background so state updates aren't blocked
+      saveProgress(updatedProgress, true).catch(err => {
+        console.error('Error saving progress:', err);
+      });
+      
+      if (__DEV__) {
+        console.log('[Continue to Next Exercise] State updated:', {
+          nextExerciseIndex,
+          currentExerciseIndex: updatedProgress.currentExerciseIndex,
+          currentSetIndex: updatedProgress.currentSetIndex,
+          nextExerciseCompleted: updatedProgress.exercises[nextExerciseIndex]?.completed,
+          showLoggingScreen: true,
+          completedExerciseIndex: nextExerciseIndex
+        });
+      }
     } else {
       // Workout complete - mark session as completed FIRST, then save logs
       updatedProgress.exercises.forEach(ex => ex.completed = true);
@@ -818,6 +1075,25 @@ export default function WorkoutActiveScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Check if this exercise has already been logged for this session
+      if (workoutSession?.id) {
+        const { data: existingLogs } = await supabase
+          .from('workout_logs')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('session_id', workoutSession.id)
+          .eq('exercise_name', exercise.name)
+          .limit(1);
+        
+        // If exercise already has logs for this session, skip saving
+        if (existingLogs && existingLogs.length > 0) {
+          if (__DEV__) {
+            console.log(`[saveSetsToLogs] Skipping ${exercise.name} - already logged for this session`);
+          }
+          return;
+        }
+      }
 
       // Get exercise detail to check if timed
       const detail = exerciseDetails.get(exercise.name);
@@ -916,6 +1192,14 @@ export default function WorkoutActiveScreen() {
       : null;
     const restTime = setRestTime || exercise.rest_time_sec || 60;
     setRestTimer({ active: true, seconds: restTime });
+    if (__DEV__) {
+      console.log('[WorkoutActive] Timer start', {
+        type: 'rest',
+        exerciseIndex,
+        setIndex,
+        restTime,
+      });
+    }
   };
 
   const formatTime = (seconds: number | null | undefined): string => {
@@ -1002,8 +1286,18 @@ export default function WorkoutActiveScreen() {
   }
 
   // Show logging screen if exercise is complete
-  if (showLoggingScreen && completedExerciseIndex !== null) {
+  // Check both showLoggingScreen flag AND that the exercise at completedExerciseIndex exists
+  if (showLoggingScreen && completedExerciseIndex !== null && completedExerciseIndex < exercises.length && exercises[completedExerciseIndex]) {
     const exercise = exercises[completedExerciseIndex];
+    
+    if (__DEV__) {
+      console.log('[Render] Showing logging screen for exercise:', {
+        completedExerciseIndex,
+        exerciseName: exercise.name,
+        showLoggingScreen,
+        exercisesLength: exercises.length
+      });
+    }
     const detail = exerciseDetails.get(exercise.name);
     const isTimed = detail?.is_timed || false;
     const totalSets = exercise.target_sets || 3;
@@ -1289,6 +1583,41 @@ export default function WorkoutActiveScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+
+        {/* Logging Exit Confirmation Modal */}
+        <Modal
+          visible={showLoggingExitConfirm}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowLoggingExitConfirm(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Exit Logging?</Text>
+              <Text style={styles.modalMessage}>Your logged data will not be saved. Continue logging?</Text>
+              <View style={styles.modalButtons}>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={() => setShowLoggingExitConfirm(false)}
+                >
+                  <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalButton, styles.modalButtonDanger]}
+                  onPress={() => {
+                    setShowLoggingExitConfirm(false);
+                    setShowLoggingScreen(false);
+                    setCompletedExerciseIndex(null);
+                    setSetLogs([]);
+                    safeBack();
+                  }}
+                >
+                  <Text style={styles.modalButtonText}>Exit</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -1394,40 +1723,6 @@ export default function WorkoutActiveScreen() {
         </View>
       </Modal>
 
-      {/* Logging Exit Confirmation Modal */}
-      <Modal
-        visible={showLoggingExitConfirm}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowLoggingExitConfirm(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Exit Logging?</Text>
-            <Text style={styles.modalMessage}>Your logged data will not be saved. Continue logging?</Text>
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonCancel]}
-                onPress={() => setShowLoggingExitConfirm(false)}
-              >
-                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonDanger]}
-                onPress={() => {
-                  setShowLoggingExitConfirm(false);
-                  setShowLoggingScreen(false);
-                  setCompletedExerciseIndex(null);
-                  setSetLogs([]);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Exit</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
         <View style={styles.header}>
         <Text style={styles.headerTitle}>{day} Workout</Text>
@@ -1465,7 +1760,11 @@ export default function WorkoutActiveScreen() {
         </View>
       </View>
 
-      <View style={styles.exerciseContainer}>
+      <ScrollView 
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.exerciseContainer}
+        showsVerticalScrollIndicator={true}
+      >
         <Text style={styles.exerciseName}>{exercise.name}</Text>
         <Text style={styles.setNumber}>Set {setIndex + 1} of {totalSets}</Text>
 
@@ -1520,124 +1819,130 @@ export default function WorkoutActiveScreen() {
           </View>
         </View>
 
-        {exercise.notes && (
-          <View style={styles.instructionsSection}>
-            <Text style={styles.instructionsTitle}>Focus:</Text>
-            <Text style={styles.instructionsText}>{exercise.notes}</Text>
-          </View>
-        )}
-
-        {detail && detail.description && detail.description.trim() && (
+        {detail && detail.how_to && Array.isArray(detail.how_to) && detail.how_to.length > 0 && (
           <View style={styles.instructionsSection}>
             <Text style={styles.instructionsTitle}>Instructions:</Text>
-            <Text style={styles.instructionsText}>{detail.description}</Text>
+            {detail.how_to.map((step: string, idx: number) => (
+              <View key={idx} style={styles.howToStep}>
+                <Text style={styles.howToStepNumber}>{idx + 1}.</Text>
+                <Text style={styles.instructionsText}>{step}</Text>
+              </View>
+            ))}
           </View>
         )}
 
-        {/* Exercise Timer */}
-        {exerciseTimer?.active && (
-          <View style={styles.exerciseTimerContainer}>
-            <Clock color="#10b981" size={32} />
-            <Text style={styles.exerciseTimerText}>
-              {exerciseTimer.countdown ? exerciseTimer.seconds.toString() : formatTime(exerciseTimer.seconds)}
-            </Text>
-            {exerciseTimer.countdown && (
-              <Text style={styles.countdownLabel}>Get ready...</Text>
-            )}
+      </ScrollView>
+
+      <View style={styles.floatingButtonContainer}>
+        {exerciseTimer?.active ? (
+          <View style={styles.floatingRestTimerContainer}>
+            <View style={styles.floatingTimerHeader}>
+              <View style={styles.floatingTimerHeaderTextContainer}>
+                <Text style={styles.floatingRestTimerLabel}>
+                  {exerciseTimer.countdown ? 'Get ready' : 'Timed set'}
+                </Text>
+                <Text style={styles.floatingRestTimerText}>
+                  {exerciseTimer.countdown
+                    ? exerciseTimer.seconds.toString()
+                    : formatTime(exerciseTimer.seconds)}
+                </Text>
+              </View>
+            </View>
             {exerciseTimer.seconds === 0 && !exerciseTimer.countdown ? (
               <TouchableOpacity
-                style={styles.completeTimerButton}
+                style={[styles.floatingRestTimerSkipButton, styles.floatingTimerFullWidthButton]}
                 onPress={handleCompleteTimedExercise}
               >
-                <Text style={styles.completeTimerButtonText}>Complete Set</Text>
+                <View style={styles.floatingTimerButtonContent}>
+                  <Check color="#ffffff" size={20} />
+                  <Text style={styles.floatingRestTimerSkipText}>
+                    {setIndex === totalSets - 1 ? 'Complete & Log' : 'Complete Set'}
+                  </Text>
+                </View>
               </TouchableOpacity>
             ) : (
-              <View style={styles.timerButtons}>
+              <View style={styles.floatingTimerActionsRow}>
                 {!exerciseTimer.countdown && (
-                  <>
+                  <TouchableOpacity
+                    style={[
+                      styles.floatingRestTimerSkipButton,
+                      styles.floatingTimerSecondaryButton,
+                      styles.floatingTimerAction,
+                    ]}
+                    onPress={() => {
+                      setExerciseTimer(prev =>
+                        prev ? { ...prev, paused: !prev.paused } : null
+                      );
+                    }}
+                  >
                     {exerciseTimer.paused ? (
-                      <TouchableOpacity
-                        style={[styles.timerControlButton, { backgroundColor: '#10b981' }]}
-                        onPress={() => {
-                          setExerciseTimer(prev => prev ? { ...prev, paused: false } : null);
-                        }}
-                      >
-                        <Play color="white" size={20} />
-                        <Text style={styles.timerControlButtonText}>Resume</Text>
-                      </TouchableOpacity>
+                      <Play color="#ffffff" size={18} />
                     ) : (
-                      <TouchableOpacity
-                        style={[styles.timerControlButton, { backgroundColor: '#f59e0b' }]}
-                        onPress={() => {
-                          setExerciseTimer(prev => prev ? { ...prev, paused: true } : null);
-                        }}
-                      >
-                        <Pause color="white" size={20} />
-                        <Text style={styles.timerControlButtonText}>Pause</Text>
-                      </TouchableOpacity>
+                      <Pause color="#ffffff" size={18} />
                     )}
-                  </>
+                    <Text style={styles.floatingRestTimerSkipText}>
+                      {exerciseTimer.paused ? 'Resume' : 'Pause'}
+                    </Text>
+                  </TouchableOpacity>
                 )}
                 <TouchableOpacity
-                  style={[styles.skipButton, { backgroundColor: '#10b981', marginLeft: 0 }]}
+                  style={[styles.floatingRestTimerSkipButton, styles.floatingTimerAction]}
                   onPress={() => {
                     // Skip timer - save 0 seconds and complete the set
                     setExerciseTimer(null);
                     handleCompleteSet();
                   }}
                 >
-                  <SkipForward color="white" size={20} />
-                  <Text style={styles.skipButtonText}>Skip</Text>
+                  <SkipForward color="#ffffff" size={20} />
+                  <Text style={styles.floatingRestTimerSkipText}>Skip</Text>
                 </TouchableOpacity>
               </View>
             )}
           </View>
-        )}
-
-        {/* Rest Timer */}
-        {restTimer && restTimer.active && (
-          <View style={styles.restTimerContainer}>
-            <Clock color="#3b82f6" size={32} />
-            <Text style={styles.restTimerText}>
-              Rest: {formatTime(restTimer.seconds)}
-            </Text>
+        ) : restTimer && restTimer.active ? (
+          <View style={styles.floatingRestTimerContainer}>
+            <View style={styles.floatingTimerHeader}>
+              <View style={styles.floatingTimerHeaderTextContainer}>
+                <Text style={styles.floatingRestTimerLabel}>Rest</Text>
+                <Text style={styles.floatingRestTimerText}>
+                  {formatTime(restTimer.seconds)}
+                </Text>
+              </View>
+            </View>
             <TouchableOpacity
-              style={styles.skipButton}
+              style={[styles.floatingRestTimerSkipButton, styles.floatingTimerFullWidthButton]}
               onPress={() => {
                 setRestTimer(null);
                 handleRestComplete();
               }}
             >
-              <SkipForward color="#3b82f6" size={20} />
-              <Text style={styles.skipButtonText}>Skip</Text>
+              <View style={styles.floatingTimerButtonContent}>
+                <SkipForward color="#ffffff" size={20} />
+                <Text style={styles.floatingRestTimerSkipText}>Skip</Text>
+              </View>
             </TouchableOpacity>
           </View>
-        )}
-
-        {/* Action Buttons */}
-        {!exerciseTimer?.active && !restTimer?.active && !allSetsComplete && (
-          <View style={styles.actionButtons}>
-            {!isSetComplete && (
-              <>
-                {isTimed ? (
-                  <TouchableOpacity
-                    style={styles.completeSetButton}
-                    onPress={handleStartSet}
-                  >
-                    <Text style={styles.completeSetButtonText}>Start Timer</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.completeSetButton}
-                    onPress={handleStartSet}
-                  >
-                    <Text style={styles.completeSetButtonText}>Complete Set</Text>
-                  </TouchableOpacity>
-                )}
-              </>
+        ) : !allSetsComplete && !isSetComplete ? (
+          <View>
+            {isTimed ? (
+              <TouchableOpacity
+                style={styles.floatingCompleteSetButton}
+                onPress={handleStartSet}
+              >
+                <Text style={styles.floatingCompleteSetButtonText}>Start Timer</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.floatingCompleteSetButton}
+                onPress={handleStartSet}
+              >
+                <Text style={styles.floatingCompleteSetButtonText}>
+                  {setIndex === totalSets - 1 ? 'Complete and Log Sets' : 'Complete Set'}
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
-        )}
+        ) : null}
       </View>
       </Animated.View>
     </SafeAreaView>
@@ -1698,8 +2003,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#a3e635', // lime-400
     borderRadius: 4,
   },
-  exerciseContainer: {
+  scrollContainer: {
     flex: 1,
+  },
+  exerciseContainer: {
+    paddingBottom: 260, // Extra space so floating timer/complete buttons (including timed set pause controls) don't cover content
     padding: 24,
   },
   exerciseName: {
@@ -1760,6 +2068,19 @@ const styles = StyleSheet.create({
     color: '#e4e4e7', // zinc-200
     fontSize: 14,
     lineHeight: 22,
+    flex: 1,
+  },
+  howToStep: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  howToStepNumber: {
+    color: '#a3e635', // lime-400
+    fontSize: 14,
+    fontWeight: '700',
+    minWidth: 24,
   },
   exerciseTimerContainer: {
     alignItems: 'center',
@@ -1820,8 +2141,7 @@ const styles = StyleSheet.create({
   restTimerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
+    justifyContent: 'space-between',
     padding: 32,
     backgroundColor: 'rgba(6, 182, 212, 0.1)', // cyan-500/10
     borderRadius: 24, // rounded-3xl
@@ -1829,27 +2149,49 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(6, 182, 212, 0.3)', // cyan-500/30
   },
+  restTimerLeftContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 0,
+  },
+  restTimerCenterContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restTimerIconContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restTimerLabel: {
+    color: '#71717a', // zinc-500 - less prominent
+    fontSize: 18,
+    fontWeight: '500',
+    marginTop: 4,
+  },
   restTimerText: {
     color: '#22d3ee', // cyan-400
-    fontSize: 40,
+    fontSize: 48,
     fontWeight: '700',
     fontFamily: 'monospace',
+    minWidth: 90, // Prevent horizontal jank as numbers change
+    textAlign: 'center',
   },
   skipButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginLeft: 'auto',
     paddingHorizontal: 20,
     paddingVertical: 12,
     backgroundColor: 'rgba(34, 211, 238, 0.2)', // cyan-400/20
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(34, 211, 238, 0.4)', // cyan-400/40
+    flexShrink: 0,
   },
   skipButtonText: {
     color: '#22d3ee', // cyan-400
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
@@ -1869,6 +2211,139 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  floatingButtonContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 24,
+    paddingBottom: 40,
+    backgroundColor: 'transparent',
+    pointerEvents: 'box-none',
+    alignItems: 'stretch',
+  },
+  floatingCompleteSetButton: {
+    backgroundColor: '#a3e635', // lime-400
+    padding: 20,
+    borderRadius: 24, // rounded-3xl
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    alignSelf: 'stretch',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  floatingCompleteSetButtonText: {
+    color: '#09090b', // zinc-950
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  floatingRestTimerContainer: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#06b6d4', // cyan-500 solid
+    borderRadius: 24, // rounded-3xl
+    padding: 20,
+    borderWidth: 2,
+    borderColor: '#06b6d4', // cyan-500
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    width: '100%',
+    flexDirection: 'column',
+  },
+  floatingRestTimerLeftContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 0,
+  },
+  floatingRestTimerIconContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingRestTimerLabel: {
+    color: '#ffffff', // white for contrast on solid cyan
+    fontSize: 18,
+    fontWeight: '500',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  floatingRestTimerCenterContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingRestTimerText: {
+    color: '#ffffff', // white for contrast on solid cyan
+    fontSize: 40,
+    fontWeight: '700',
+    fontFamily: 'monospace',
+    minWidth: 90, // Prevent horizontal jank as numbers change
+    textAlign: 'center',
+  },
+  floatingRestTimerSkipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)', // white/20 for contrast
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)', // white/40
+    flexShrink: 0,
+  },
+  floatingRestTimerSkipText: {
+    color: '#ffffff', // white for contrast on solid cyan
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  floatingTimerActionsRow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    width: '100%',
+  },
+  floatingTimerSecondaryButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  floatingTimerAction: {
+    width: '100%',
+  },
+  floatingTimerFullWidthButton: {
+    marginTop: 12,
+    width: '100%',
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  floatingTimerButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  floatingTimerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  floatingTimerHeaderTextContainer: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    alignSelf: 'stretch',
   },
   loggingScrollView: {
     flex: 1,
@@ -1996,6 +2471,8 @@ const styles = StyleSheet.create({
     borderColor: '#27272a', // zinc-800
     fontSize: 16,
     minHeight: 48,
+    flex: 1,
+    minWidth: 0,
   },
   logInputFlex: {
     flex: 1,
