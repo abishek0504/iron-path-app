@@ -5,6 +5,13 @@ import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
+import {
+  deriveStyleAndComponentsFromProfile,
+  getDefaultComponentsForStyle,
+  serializeComponentsForStorage,
+  TrainingStyleId,
+  ComponentPreferences,
+} from '../src/lib/trainingPreferences';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, Upload, X, Check } from 'lucide-react-native';
 import { ConfirmDialog } from '../src/components/ConfirmDialog';
@@ -38,8 +45,10 @@ export default function EditProfileScreen() {
 
   const hasProfileChanges = () => {
     if (!profile || !originalProfile) return false;
-    
-    // Compare all relevant fields
+
+    const originalComponents = originalProfile.include_components || null;
+    const currentComponents = serializeComponentsForStorage(componentPrefs);
+
     return (
       fullName !== (originalProfile.full_name || '') ||
       age !== (originalProfile.age?.toString() || '') ||
@@ -51,7 +60,9 @@ export default function EditProfileScreen() {
       daysPerWeek !== (originalProfile.days_per_week || null) ||
       JSON.stringify(Array.from(selectedDays).sort()) !== JSON.stringify((originalProfile.selected_days || []).sort()) ||
       useImperial !== (originalProfile.use_imperial !== false) ||
-      profilePictureUri !== (originalProfile.profile_picture_url || null)
+      profilePictureUri !== (originalProfile.profile_picture_url || null) ||
+      preferredTrainingStyle !== (originalProfile.preferred_training_style || null) ||
+      JSON.stringify(currentComponents) !== JSON.stringify(originalComponents || null)
     );
   };
 
@@ -94,6 +105,13 @@ export default function EditProfileScreen() {
   const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
   const [profilePictureUri, setProfilePictureUri] = useState<string | null>(null);
   const [useImperial, setUseImperial] = useState(true); // Will be loaded from database
+
+  // Adaptive training preferences
+  const [preferredTrainingStyle, setPreferredTrainingStyle] =
+    useState<TrainingStyleId>('comprehensive');
+  const [componentPrefs, setComponentPrefs] = useState<ComponentPreferences>(
+    getDefaultComponentsForStyle('comprehensive'),
+  );
 
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
@@ -259,6 +277,11 @@ export default function EditProfileScreen() {
       setDaysPerWeek(data.days_per_week || null);
       setSelectedDays(data.workout_days && Array.isArray(data.workout_days) ? new Set(data.workout_days) : new Set());
       setProfilePictureUri(data.avatar_url || null);
+
+      // Training style and components
+      const { style, components } = deriveStyleAndComponentsFromProfile(data);
+      setPreferredTrainingStyle(style);
+      setComponentPrefs(components);
     }
   };
 
@@ -528,6 +551,8 @@ export default function EditProfileScreen() {
       days_per_week: finalDaysPerWeek,
       workout_days: workoutDays,
       use_imperial: useImperial,
+      preferred_training_style: preferredTrainingStyle,
+      include_components: serializeComponentsForStorage(componentPrefs),
     };
 
     const { error } = await supabase
@@ -801,6 +826,89 @@ export default function EditProfileScreen() {
                 }
               </Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Workout Components</Text>
+            <View style={styles.trainingStyleRow}>
+              {(['comprehensive', 'strength_primary_plus_accessories', 'calisthenics_compound_only', 'cardio_only'] as TrainingStyleId[]).map(
+                (styleId) => {
+                  const isSelected = preferredTrainingStyle === styleId;
+                  const label =
+                    styleId === 'comprehensive'
+                      ? 'Comprehensive'
+                      : styleId === 'strength_primary_plus_accessories'
+                      ? 'Strength + accessories'
+                      : styleId === 'calisthenics_compound_only'
+                      ? 'Calisthenics'
+                      : 'Cardio only';
+                  return (
+                    <TouchableOpacity
+                      key={styleId}
+                      style={[styles.trainingStylePill, isSelected && styles.trainingStylePillSelected]}
+                      onPress={() => {
+                        setPreferredTrainingStyle(styleId);
+                        setComponentPrefs(getDefaultComponentsForStyle(styleId));
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.trainingStylePillText,
+                          isSelected && styles.trainingStylePillTextSelected,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                },
+              )}
+            </View>
+
+            <View style={styles.componentToggleRow}>
+              <Text style={styles.componentLabel}>Tier 1 Compounds</Text>
+              <Switch
+                value={componentPrefs.include_tier1_compounds}
+                onValueChange={(value) =>
+                  setComponentPrefs((prev) => ({ ...prev, include_tier1_compounds: value }))
+                }
+                trackColor={{ false: '#27272a', true: '#a3e635' }}
+                thumbColor="#ffffff"
+              />
+            </View>
+            <View style={styles.componentToggleRow}>
+              <Text style={styles.componentLabel}>Tier 2 Accessories</Text>
+              <Switch
+                value={componentPrefs.include_tier2_accessories}
+                onValueChange={(value) =>
+                  setComponentPrefs((prev) => ({ ...prev, include_tier2_accessories: value }))
+                }
+                trackColor={{ false: '#27272a', true: '#a3e635' }}
+                thumbColor="#ffffff"
+              />
+            </View>
+            <View style={styles.componentToggleRow}>
+              <Text style={styles.componentLabel}>Tier 3 Prehab & Mobility</Text>
+              <Switch
+                value={componentPrefs.include_tier3_prehab_mobility}
+                onValueChange={(value) =>
+                  setComponentPrefs((prev) => ({ ...prev, include_tier3_prehab_mobility: value }))
+                }
+                trackColor={{ false: '#27272a', true: '#a3e635' }}
+                thumbColor="#ffffff"
+              />
+            </View>
+            <View style={styles.componentToggleRow}>
+              <Text style={styles.componentLabel}>Cardio / Conditioning</Text>
+              <Switch
+                value={componentPrefs.include_cardio_conditioning}
+                onValueChange={(value) =>
+                  setComponentPrefs((prev) => ({ ...prev, include_cardio_conditioning: value }))
+                }
+                trackColor={{ false: '#27272a', true: '#a3e635' }}
+                thumbColor="#ffffff"
+              />
+            </View>
           </View>
         </View>
 
@@ -1687,5 +1795,44 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 18,
     letterSpacing: 0.5,
+  },
+  trainingStyleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  trainingStylePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#18181b',
+  },
+  trainingStylePillSelected: {
+    borderColor: '#a3e635',
+    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+  },
+  trainingStylePillText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#a1a1aa',
+  },
+  trainingStylePillTextSelected: {
+    color: '#a3e635',
+  },
+  componentToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  componentLabel: {
+    fontSize: 14,
+    color: '#e4e4e7',
+    flexShrink: 1,
+    marginRight: 12,
   },
 });

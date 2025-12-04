@@ -5,6 +5,10 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Check } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
+import {
+  deriveStyleAndComponentsFromGoal,
+  serializeComponentsForStorage,
+} from '../src/lib/trainingPreferences';
 
 const TOTAL_STEPS = 6;
 
@@ -182,6 +186,8 @@ export default function OnboardingScreen() {
         }
       }
 
+      const { style: preferred_training_style, components } = deriveStyleAndComponentsFromGoal(goal);
+
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -196,6 +202,8 @@ export default function OnboardingScreen() {
           gender: gender,
           experience_level: experienceLevel || null,
           use_imperial: !useMetric,
+          preferred_training_style,
+          include_components: serializeComponentsForStorage(components),
         })
         .eq('id', user.id);
 

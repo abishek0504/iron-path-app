@@ -5,12 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { PlannerSkeleton } from '../../src/components/skeletons/PlannerSkeleton';
-import { buildFullPlanPrompt } from '../../src/lib/aiPrompts';
 import { extractJSON, JSONParseError } from '../../src/lib/jsonParser';
 import { ensureAllDays, validateWeekSchedule, normalizeExercise } from '../../src/lib/workoutValidation';
-import { getCachedModel, clearModelCache } from '../../src/lib/geminiModels';
+import { clearModelCache } from '../../src/lib/geminiModels';
+import { generateWeekScheduleWithAI } from '../../src/lib/adaptiveWorkoutEngine';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -186,62 +185,27 @@ export default function PlannerScreen() {
         return;
       }
 
-      const genAI = new GoogleGenerativeAI(apiKey);
-      
-      // Get the best available model dynamically
-      const modelName = await getCachedModel(apiKey);
-      if (__DEV__) {
-        console.log('Using Gemini model:', modelName);
-      }
-      
-      const model = genAI.getGenerativeModel({ model: modelName });
-
       // Load available exercises from database
       const { data: masterExercises } = await supabase
         .from('exercises')
-        .select('name')
+        .select('name, is_timed')
         .order('name', { ascending: true });
 
       const { data: userExercises } = await supabase
         .from('user_exercises')
-        .select('name')
+        .select('name, is_timed')
         .eq('user_id', user.id)
         .order('name', { ascending: true });
 
-      const availableExerciseNames = [
-        ...(masterExercises || []).map((ex: any) => ex.name),
-        ...(userExercises || []).map((ex: any) => ex.name)
-      ].filter(Boolean);
+      // Generate week_schedule via adaptive engine
+      const { week_schedule } = await generateWeekScheduleWithAI({
+        profile: userProfile,
+        masterExercises: (masterExercises || []) as any,
+        userExercises: (userExercises || []) as any,
+        apiKey,
+      });
 
-      // Build comprehensive prompt using all profile data and available exercises
-      const prompt = buildFullPlanPrompt(userProfile, availableExerciseNames);
-
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      const text = response.text();
-      
-      // Extract JSON using robust parser
-      let planData;
-      try {
-        planData = extractJSON(text);
-      } catch (error: any) {
-        if (error instanceof JSONParseError) {
-          if (__DEV__) {
-            console.error('JSON extraction failed:', error.message);
-            console.error('Original response:', error.originalText);
-          }
-          throw new Error('Failed to parse AI response. The response format was unexpected. Please try again.');
-        }
-        throw error;
-      }
-
-      // Validate structure
-      if (!planData || typeof planData !== 'object' || !planData.week_schedule) {
-        throw new Error('Invalid plan structure: week_schedule is missing');
-      }
-
-      // Ensure all 7 days exist
-      planData.week_schedule = ensureAllDays(planData.week_schedule);
+      const planData = { week_schedule: ensureAllDays(week_schedule) };
 
       // Validate that days_per_week is respected
       const daysWithExercises = Object.keys(planData.week_schedule).filter(day => {
@@ -285,66 +249,6 @@ export default function PlannerScreen() {
       const finalValidationErrors = validateWeekSchedule(planData.week_schedule);
       if (finalValidationErrors.length > 0 && __DEV__) {
         console.warn('Remaining validation errors after normalization:', finalValidationErrors);
-      }
-
-      // Convert exercises to format with sets array (matching manual exercise format)
-      for (const day of Object.keys(planData.week_schedule)) {
-        if (Array.isArray(planData.week_schedule[day].exercises)) {
-          planData.week_schedule[day].exercises = planData.week_schedule[day].exercises.map((ex: any) => {
-            const converted = { ...ex };
-            
-            // Ensure target_reps is a number (not string)
-            if (typeof converted.target_reps === 'string') {
-              // Try to parse string like "8-12" to a number (take first number)
-              const match = converted.target_reps.match(/\d+/);
-              converted.target_reps = match ? parseInt(match[0], 10) : 10;
-            }
-            
-            // Create sets array matching manual format
-            const numSets = converted.target_sets || 3;
-            const targetReps = converted.target_reps || 10;
-            const restTime = converted.rest_time_sec || 60;
-            
-            // Check if exercise is bodyweight or timed
-            const exerciseName = (converted.name || '').toLowerCase();
-            const isBodyweight = [
-              'pull up', 'pull-up', 'pullup', 'chin up', 'chin-up',
-              'push up', 'push-up', 'pushup',
-              'dip', 'dips', 'sit up', 'sit-up', 'situp',
-              'crunch', 'crunches', 'plank', 'planks',
-              'burpee', 'burpees', 'mountain climber', 'mountain climbers',
-              'bodyweight squat', 'air squat', 'lunge', 'lunges',
-              'jumping jack', 'jumping jacks', 'pistol squat',
-              'handstand push up', 'handstand push-up', 'muscle up', 'muscle-up'
-            ].some(bw => exerciseName.includes(bw));
-            
-            // Check if it's a timed exercise from database
-            const isTimed = availableExerciseNames.some(name => {
-              const dbName = name.toLowerCase();
-              return dbName === exerciseName && (
-                dbName.includes('plank') || dbName.includes('hold') || 
-                dbName.includes('time') || dbName.includes('duration')
-              );
-            });
-            
-            if (isTimed && converted.target_duration_sec) {
-              converted.sets = Array.from({ length: numSets }, (_, i) => ({
-                index: i + 1,
-                duration: converted.target_duration_sec,
-                rest_time_sec: restTime
-              }));
-            } else {
-              converted.sets = Array.from({ length: numSets }, (_, i) => ({
-                index: i + 1,
-                reps: targetReps,
-                weight: isBodyweight ? 0 : null,
-                rest_time_sec: restTime
-              }));
-            }
-            
-            return converted;
-          });
-        }
       }
 
       // Create plan for current week
@@ -520,6 +424,24 @@ export default function PlannerScreen() {
             <Text style={styles.title}>Workout Planner</Text>
             <Text style={styles.subtitle}>Create or generate your personalized weekly workout plan</Text>
 
+            {userProfile && (
+              <View style={styles.preferenceCard}>
+                <Text style={styles.preferenceTitle}>AI Workout Style</Text>
+                <Text style={styles.preferenceText}>
+                  {userProfile.preferred_training_style || 'Comprehensive'} ·{' '}
+                  {(() => {
+                    const comps = userProfile.include_components || {};
+                    const parts: string[] = [];
+                    if (comps.include_tier1_compounds) parts.push('Tier 1');
+                    if (comps.include_tier2_accessories) parts.push('Tier 2');
+                    if (comps.include_tier3_prehab_mobility) parts.push('Mobility');
+                    if (comps.include_cardio_conditioning) parts.push('Cardio');
+                    return parts.length ? parts.join(' · ') : 'No components selected';
+                  })()}
+                </Text>
+              </View>
+            )}
+
             <View style={styles.buttonColumn}>
               <TouchableOpacity
                 style={[styles.buttonPrimary, loading && styles.buttonDisabled]}
@@ -642,6 +564,25 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   subtitle: { color: '#a1a1aa', textAlign: 'center', marginBottom: 32, fontSize: 14 }, // zinc-400
+  preferenceCard: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginBottom: 20,
+  },
+  preferenceTitle: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  preferenceText: {
+    color: '#ffffff',
+    fontSize: 14,
+  },
   weekHeader: {
     flexDirection: 'row',
     alignItems: 'center',

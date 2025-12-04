@@ -4,6 +4,10 @@
  */
 
 import { formatWeight, formatHeight } from './unitConversion';
+import {
+  deriveStyleAndComponentsFromProfile,
+  describeComponentsForPrompt,
+} from './trainingPreferences';
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -70,12 +74,16 @@ export const buildFullPlanPrompt = (profile: any, availableExercises: string[] =
 
   const experienceGuidelines = getExperienceGuidelines(profile.experience_level);
   const goalConsiderations = getGoalConsiderations(profile.goal);
+  const { style: trainingStyle, components } = deriveStyleAndComponentsFromProfile(profile);
+  const componentDescription = describeComponentsForPrompt(trainingStyle, components);
   
   const equipmentStr = profile.equipment_access?.length > 0 
     ? profile.equipment_access.join(', ')
     : 'Gym (full equipment access)';
 
   const daysPerWeek = profile.days_per_week || 3;
+  const goldilocksText =
+    'If the user does not specify a time constraint, aim for a per-session duration in the 45–60 minute Goldilocks zone. Prefer closer to 45 minutes when in doubt, while preserving Tier 1 compounds.';
   
   // Build exercise list section
   let exerciseListSection = '';
@@ -99,6 +107,12 @@ ${goalWeightStr ? `- Goal Weight: ${goalWeightStr}` : ''}
 TRAINING GUIDELINES:
 ${experienceGuidelines}
 ${goalConsiderations ? `\n${goalConsiderations}` : ''}
+
+WORKOUT COMPONENT PREFERENCES:
+${componentDescription}
+
+TIME GUIDELINES:
+- ${goldilocksText}
 
 ${profile.workout_feedback ? `\nUSER FEEDBACK TO CONSIDER:\n${profile.workout_feedback}\n` : ''}
 
