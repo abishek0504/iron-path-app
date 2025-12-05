@@ -13,8 +13,181 @@ import {
   ComponentPreferences,
 } from '../src/lib/trainingPreferences';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, Upload, X, Check } from 'lucide-react-native';
+import { Camera, Upload, X, Check, Search, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { ConfirmDialog } from '../src/components/ConfirmDialog';
+
+// Equipment types and constants
+interface EquipmentWeight {
+  weight: string;
+  quantity: number;
+}
+
+interface EquipmentItem {
+  name: string;
+  hasEditableWeights?: boolean;
+  weightOptions?: string[];
+  icon?: string;
+}
+
+interface EquipmentCategory {
+  title: string;
+  items: EquipmentItem[];
+}
+
+const EQUIPMENT_CATEGORIES: EquipmentCategory[] = [
+  {
+    title: 'Small weights',
+    items: [
+      { 
+        name: 'Dumbbells',
+        hasEditableWeights: true,
+        weightOptions: ['2.5', '3.0', '5.0', '8.0', '10.0', '12.0', '15.0', '20.0', '25.0', '30.0', '35.0', '40.0', '45.0', '50.0', '55.0', '60.0', '65.0', '70.0', '75.0', '80.0', '85.0', '90.0', '95.0', '100.0']
+      },
+      { 
+        name: 'Kettlebells',
+        hasEditableWeights: true,
+        weightOptions: ['9.0', '13.0', '18.0', '26.0', '35.0', '44.0', '53.0', '62.0', '70.0']
+      },
+      { 
+        name: 'Medicine Balls',
+        hasEditableWeights: true,
+        weightOptions: ['4.0', '6.0', '8.0', '10.0', '12.0', '14.0', '16.0', '20.0']
+      },
+    ],
+  },
+  {
+    title: 'Bars & plates',
+    items: [
+      { 
+        name: 'Barbells',
+        hasEditableWeights: true,
+        weightOptions: ['35.0', '45.0']
+      },
+      { 
+        name: 'Plates',
+        hasEditableWeights: true,
+        weightOptions: ['2.5', '5.0', '10.0', '25.0', '35.0', '45.0']
+      },
+      { name: 'EZ Bar' },
+      { name: 'Landmine' },
+      { name: 'PVC Pipe' },
+      { name: "Farmer's Walk Handles" },
+      { name: 'Trap Bar' },
+      { name: 'Yoke' },
+    ],
+  },
+  {
+    title: 'Benches & racks',
+    items: [
+      { name: 'Pull Up Bar' },
+      { name: 'Squat Rack' },
+      { name: 'Flat Bench' },
+      { name: 'Incline Bench' },
+      { name: 'Decline Bench' },
+      { name: 'Vertical Bench (Vertical Knee Raise)' },
+      { name: 'Reverse Hyper Bench' },
+      { name: 'Preacher Curl Bench' },
+    ],
+  },
+  {
+    title: '',
+    items: [
+      { name: 'Back Extension Bench' },
+      { name: 'Glute Ham Raise Bench' },
+      { name: 'Dip (Parallel) Bar' },
+    ],
+  },
+  {
+    title: 'Cable machines',
+    items: [
+      { name: 'Crossover Cable' },
+      { name: 'Lat Pulldown Cable' },
+      { name: 'Hi-Lo Pulley Cable' },
+      { name: 'Row Cable' },
+      { name: 'Rope Cable' },
+    ],
+  },
+  {
+    title: 'Resistance bands',
+    items: [
+      { 
+        name: 'Handle Bands',
+        hasEditableWeights: true,
+        weightOptions: ['Extra Light', 'Light', 'Medium', 'Heavy', 'Extra Heavy']
+      },
+      { 
+        name: 'Mini Loop Bands',
+        hasEditableWeights: true,
+        weightOptions: ['Extra Light', 'Light', 'Medium', 'Heavy', 'Extra Heavy']
+      },
+      { 
+        name: 'Loop Bands',
+        hasEditableWeights: true,
+        weightOptions: ['Extra Light', 'Light', 'Medium', 'Heavy', 'Extra Heavy']
+      },
+    ],
+  },
+  {
+    title: 'Exercise balls & more',
+    items: [
+      { name: 'BOSU® Balance Trainer' },
+      { name: 'Stability (Swiss) Ball' },
+      { name: 'Foam Roller' },
+      { name: 'Parallette Bars' },
+      { name: 'Ab Wheel' },
+      { name: 'Tire' },
+      { name: 'Box' },
+      { name: 'Sled' },
+      { name: 'Cone' },
+      { name: 'Platforms' },
+    ],
+  },
+  {
+    title: 'Plated machines',
+    items: [
+      { name: 'Leg Press' },
+      { name: 'Smith Machine' },
+      { name: 'Hammerstrength (Leverage) Machine (all forms)' },
+      { name: 'T Bar' },
+    ],
+  },
+  {
+    title: 'Weight machines',
+    items: [
+      { name: 'Ab Crunch Machine' },
+      { name: 'Preacher Curl Machine' },
+      { name: 'Bicep Curl Machine' },
+      { name: 'Bench Press Machine' },
+      { name: 'Leg Press Machine' },
+      { name: 'Fly Machine' },
+      { name: 'Thigh Adductor Machine' },
+      { name: 'Leg Extension Machine' },
+      { name: 'Hack Squat Machine' },
+      { name: 'Tricep Dip Machine' },
+      { name: 'Thigh Abductor Machine' },
+      { name: 'Assisted Weight Machine' },
+      { name: 'Calf Raise Machine' },
+      { name: 'Squat Machine' },
+      { name: 'Glute Kickback Machine' },
+      { name: 'Freemotion Machine (all forms)' },
+      { name: 'Row Machine' },
+      { name: 'Triceps Extension Machine' },
+      { name: 'Shoulder Press Machine' },
+      { name: 'Leg Curl Machine' },
+      { name: 'Shoulder Shrug Machine' },
+      { name: 'Back Extension Machine' },
+    ],
+  },
+  {
+    title: 'Rope & suspension',
+    items: [
+      { name: 'TRX' },
+      { name: 'Battle Ropes' },
+      { name: 'Rings' },
+      { name: 'Rope' },
+    ],
+  },
+];
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 const GOALS = ['Strength', 'Hypertrophy', 'Endurance', 'Weight Loss', 'General Fitness'];
@@ -62,7 +235,8 @@ export default function EditProfileScreen() {
       useImperial !== (originalProfile.use_imperial !== false) ||
       profilePictureUri !== (originalProfile.profile_picture_url || null) ||
       preferredTrainingStyle !== (originalProfile.preferred_training_style || null) ||
-      JSON.stringify(currentComponents) !== JSON.stringify(originalComponents || null)
+      JSON.stringify(currentComponents) !== JSON.stringify(originalComponents || null) ||
+      JSON.stringify(Array.from(selectedEquipment).sort()) !== JSON.stringify((originalProfile.equipment_access || []).map((item: any) => typeof item === 'string' ? item : item?.name).filter(Boolean).sort())
     );
   };
 
@@ -112,6 +286,12 @@ export default function EditProfileScreen() {
   const [componentPrefs, setComponentPrefs] = useState<ComponentPreferences>(
     getDefaultComponentsForStyle('comprehensive'),
   );
+
+  // Equipment state
+  const [selectedEquipment, setSelectedEquipment] = useState<Set<string>>(new Set());
+  const [equipmentDetails, setEquipmentDetails] = useState<Map<string, EquipmentWeight[]>>(new Map());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedEquipment, setExpandedEquipment] = useState<string | null>(null);
 
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
@@ -184,6 +364,105 @@ export default function EditProfileScreen() {
         Alert.alert('Permission needed', 'We need permission to access your photos to set a profile picture.');
       }
     }
+  };
+
+  // Equipment handling functions
+  const handleEquipmentClick = (equipmentName: string, item: EquipmentItem) => {
+    if (item.hasEditableWeights && item.weightOptions) {
+      // Toggle expansion for equipment with editable weights
+      if (expandedEquipment === equipmentName) {
+        setExpandedEquipment(null);
+      } else {
+        setExpandedEquipment(equipmentName);
+        // Initialize with one weight entry if none exist
+        const existingWeights = equipmentDetails.get(equipmentName);
+        if (!existingWeights || existingWeights.length === 0) {
+          const newDetails = new Map(equipmentDetails);
+          newDetails.set(equipmentName, [{ weight: item.weightOptions[0], quantity: 1 }]);
+          setEquipmentDetails(newDetails);
+          setSelectedEquipment(new Set(selectedEquipment).add(equipmentName));
+        }
+      }
+    } else {
+      // Toggle selection for regular equipment
+      handleEquipmentToggle(equipmentName);
+    }
+  };
+
+  const handleEquipmentToggle = (equipmentName: string) => {
+    const newSelected = new Set(selectedEquipment);
+    if (newSelected.has(equipmentName)) {
+      newSelected.delete(equipmentName);
+      const newDetails = new Map(equipmentDetails);
+      newDetails.delete(equipmentName);
+      setEquipmentDetails(newDetails);
+      if (expandedEquipment === equipmentName) {
+        setExpandedEquipment(null);
+      }
+    } else {
+      newSelected.add(equipmentName);
+    }
+    setSelectedEquipment(newSelected);
+  };
+
+  const handleAddWeight = (equipmentName: string, item: EquipmentItem) => {
+    if (!item.weightOptions || item.weightOptions.length === 0) return;
+    
+    const existingWeights = equipmentDetails.get(equipmentName) || [];
+    const newWeights = [...existingWeights, { weight: item.weightOptions[0], quantity: 1 }];
+    const newDetails = new Map(equipmentDetails);
+    newDetails.set(equipmentName, newWeights);
+    setEquipmentDetails(newDetails);
+    setSelectedEquipment(new Set(selectedEquipment).add(equipmentName));
+  };
+
+  const handleRemoveWeight = (equipmentName: string, index: number) => {
+    const existingWeights = equipmentDetails.get(equipmentName) || [];
+    const newWeights = existingWeights.filter((_, i) => i !== index);
+    const newDetails = new Map(equipmentDetails);
+    
+    if (newWeights.length === 0) {
+      newDetails.delete(equipmentName);
+      const newSelected = new Set(selectedEquipment);
+      newSelected.delete(equipmentName);
+      setSelectedEquipment(newSelected);
+      setExpandedEquipment(null);
+    } else {
+      newDetails.set(equipmentName, newWeights);
+    }
+    setEquipmentDetails(newDetails);
+  };
+
+  const handleWeightChange = (equipmentName: string, index: number, weight: string) => {
+    const existingWeights = equipmentDetails.get(equipmentName) || [];
+    const newWeights = [...existingWeights];
+    newWeights[index].weight = weight;
+    const newDetails = new Map(equipmentDetails);
+    newDetails.set(equipmentName, newWeights);
+    setEquipmentDetails(newDetails);
+  };
+
+  const handleQuantityChange = (equipmentName: string, index: number, quantity: string) => {
+    const qty = parseInt(quantity) || 0;
+    if (qty >= 0) {
+      const existingWeights = equipmentDetails.get(equipmentName) || [];
+      const newWeights = [...existingWeights];
+      newWeights[index].quantity = qty;
+      const newDetails = new Map(equipmentDetails);
+      newDetails.set(equipmentName, newWeights);
+      setEquipmentDetails(newDetails);
+      if (qty > 0) {
+        setSelectedEquipment(new Set(selectedEquipment).add(equipmentName));
+      }
+    }
+  };
+
+  const getDisplayWeights = (equipmentName: string): string => {
+    const weights = equipmentDetails.get(equipmentName);
+    if (weights && weights.length > 0) {
+      return weights.map(w => `${w.weight} (${w.quantity}x)`).join(', ');
+    }
+    return '';
   };
 
   const loadProfile = async () => {
@@ -282,6 +561,28 @@ export default function EditProfileScreen() {
       const { style, components } = deriveStyleAndComponentsFromProfile(data);
       setPreferredTrainingStyle(style);
       setComponentPrefs(components);
+
+      // Load equipment
+      const equipmentArray = data.equipment_access || [];
+      const newSelectedEquipment = new Set<string>();
+      const newEquipmentDetails = new Map<string, EquipmentWeight[]>();
+
+      equipmentArray.forEach((item: any) => {
+        if (typeof item === 'string') {
+          newSelectedEquipment.add(item);
+        } else if (item && item.name) {
+          newSelectedEquipment.add(item.name);
+          if (item.weights && Array.isArray(item.weights) && item.weights.length > 0) {
+            newEquipmentDetails.set(item.name, item.weights.map((w: any) => ({
+              weight: w.weight || w,
+              quantity: w.quantity || 1,
+            })));
+          }
+        }
+      });
+
+      setSelectedEquipment(newSelectedEquipment);
+      setEquipmentDetails(newEquipmentDetails);
     }
   };
 
@@ -540,6 +841,14 @@ export default function EditProfileScreen() {
       workoutDays = null;
     }
 
+    // Prepare equipment array
+    const equipmentArray = Array.from(selectedEquipment).map(name => {
+      const weights = equipmentDetails.get(name);
+      return weights && weights.length > 0 
+        ? { name, weights: weights.map(w => ({ weight: w.weight, quantity: w.quantity })) }
+        : name;
+    });
+
     const updateData: any = {
       full_name: fullName,
       age: age ? parseInt(age, 10) : null,
@@ -553,6 +862,7 @@ export default function EditProfileScreen() {
       use_imperial: useImperial,
       preferred_training_style: preferredTrainingStyle,
       include_components: serializeComponentsForStorage(componentPrefs),
+      equipment_access: equipmentArray,
     };
 
     const { error } = await supabase
@@ -578,7 +888,7 @@ export default function EditProfileScreen() {
           <TouchableOpacity onPress={safeBack}>
             <Text style={styles.cancelButton}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Profile</Text>
+          <Text style={styles.headerTitle}>Settings</Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -909,6 +1219,173 @@ export default function EditProfileScreen() {
                 thumbColor="#ffffff"
               />
             </View>
+          </View>
+
+          {/* Equipment Section */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Available Equipment</Text>
+            <Text style={styles.sectionDescription}>
+              Select the equipment you have access to. This helps the AI generate workouts tailored to your setup.
+            </Text>
+            
+            {/* Search Bar */}
+            <View style={styles.equipmentSearchContainer}>
+              <Search size={20} color="#71717a" style={styles.equipmentSearchIcon} />
+              <TextInput
+                style={styles.equipmentSearchInput}
+                placeholder="Search equipment..."
+                placeholderTextColor="#71717a"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
+                  <X size={18} color="#71717a" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Equipment List */}
+            <ScrollView style={styles.equipmentScrollView} nestedScrollEnabled={true}>
+              {(searchQuery
+                ? EQUIPMENT_CATEGORIES.map(category => ({
+                    ...category,
+                    items: category.items.filter(item =>
+                      item.name.toLowerCase().includes(searchQuery.toLowerCase())
+                    ),
+                  })).filter(category => category.items.length > 0)
+                : EQUIPMENT_CATEGORIES
+              ).map((category) => (
+                <View key={category.title || 'other'} style={styles.equipmentCategorySection}>
+                  {category.title && (
+                    <Text style={styles.equipmentCategoryTitle}>{category.title}</Text>
+                  )}
+                  {category.items.map((item) => {
+                    const isSelected = selectedEquipment.has(item.name);
+                    const isExpanded = expandedEquipment === item.name;
+                    const weights = equipmentDetails.get(item.name) || [];
+
+                    return (
+                      <View key={item.name}>
+                        <TouchableOpacity
+                          style={[
+                            styles.equipmentItem,
+                            isSelected && styles.equipmentItemSelected,
+                          ]}
+                          onPress={() => handleEquipmentClick(item.name, item)}
+                        >
+                          <View style={styles.equipmentContent}>
+                            <View style={styles.equipmentTextContainer}>
+                              <Text
+                                style={[
+                                  styles.equipmentName,
+                                  isSelected && styles.equipmentNameSelected,
+                                ]}
+                              >
+                                {item.name}
+                              </Text>
+                              {weights.length > 0 && (
+                                <Text style={styles.weightsText}>{getDisplayWeights(item.name)}</Text>
+                              )}
+                            </View>
+                          </View>
+                          <View style={styles.rightSection}>
+                            {item.hasEditableWeights && item.weightOptions && (
+                              <TouchableOpacity
+                                onPress={() => handleEquipmentClick(item.name, item)}
+                                style={styles.expandButton}
+                              >
+                                {isExpanded ? (
+                                  <ChevronUp size={20} color="#a1a1aa" />
+                                ) : (
+                                  <ChevronDown size={20} color="#a1a1aa" />
+                                )}
+                              </TouchableOpacity>
+                            )}
+                            <View
+                              style={[
+                                styles.checkbox,
+                                isSelected && styles.checkboxSelected,
+                              ]}
+                            >
+                              {isSelected && <Check size={16} color="#09090b" />}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+
+                        {/* Expanded weight input section */}
+                        {isExpanded && item.hasEditableWeights && item.weightOptions && (
+                          <View style={styles.expandedContent}>
+                            {weights.map((weight, weightIndex) => (
+                              <View key={weightIndex} style={styles.weightRow}>
+                                <View style={styles.weightInputContainer}>
+                                  <Text style={styles.weightLabel}>Weight</Text>
+                                  <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    style={styles.weightPicker}
+                                  >
+                                    {item.weightOptions?.map((weightOption) => (
+                                      <TouchableOpacity
+                                        key={weightOption}
+                                        style={[
+                                          styles.weightOption,
+                                          weight.weight === weightOption &&
+                                            styles.weightOptionSelected,
+                                        ]}
+                                        onPress={() =>
+                                          handleWeightChange(item.name, weightIndex, weightOption)
+                                        }
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.weightOptionText,
+                                            weight.weight === weightOption &&
+                                              styles.weightOptionTextSelected,
+                                          ]}
+                                        >
+                                          {weightOption}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    )) || []}
+                                  </ScrollView>
+                                </View>
+                                <View style={styles.quantityContainer}>
+                                  <Text style={styles.weightLabel}>Qty</Text>
+                                  <TextInput
+                                    style={styles.quantityInput}
+                                    value={weight.quantity.toString()}
+                                    onChangeText={(text) =>
+                                      handleQuantityChange(item.name, weightIndex, text)
+                                    }
+                                    keyboardType="number-pad"
+                                    placeholder="0"
+                                    placeholderTextColor="#71717a"
+                                  />
+                                </View>
+                                <TouchableOpacity
+                                  onPress={() => handleRemoveWeight(item.name, weightIndex)}
+                                  style={styles.removeButton}
+                                >
+                                  <X size={20} color="#ef4444" />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+
+                            <TouchableOpacity
+                              onPress={() => handleAddWeight(item.name, item)}
+                              style={styles.addWeightButton}
+                            >
+                              <Text style={styles.addWeightText}>+ Add Weight</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+            </ScrollView>
           </View>
         </View>
 
@@ -1834,5 +2311,191 @@ const styles = StyleSheet.create({
     color: '#e4e4e7',
     flexShrink: 1,
     marginRight: 12,
+  },
+  // Equipment styles
+  equipmentSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  equipmentSearchIcon: {
+    marginRight: 12,
+  },
+  equipmentSearchInput: {
+    flex: 1,
+    color: '#ffffff',
+    fontSize: 16,
+  },
+  clearSearchButton: {
+    padding: 4,
+  },
+  equipmentScrollView: {
+    maxHeight: 400,
+    marginTop: 8,
+  },
+  equipmentCategorySection: {
+    marginBottom: 24,
+  },
+  equipmentCategoryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 12,
+    letterSpacing: -0.3,
+  },
+  equipmentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  equipmentItemSelected: {
+    borderColor: '#a3e635',
+    backgroundColor: 'rgba(163, 230, 53, 0.05)',
+  },
+  equipmentContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  equipmentTextContainer: {
+    flex: 1,
+  },
+  equipmentName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  equipmentNameSelected: {
+    color: '#ffffff',
+  },
+  weightsText: {
+    fontSize: 14,
+    color: '#a1a1aa',
+  },
+  rightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  expandButton: {
+    padding: 8,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#71717a',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxSelected: {
+    borderColor: '#a3e635',
+    backgroundColor: '#a3e635',
+  },
+  expandedContent: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: -8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderTopWidth: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+  },
+  weightRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    gap: 12,
+  },
+  weightInputContainer: {
+    flex: 1,
+  },
+  weightLabel: {
+    fontSize: 12,
+    color: '#a1a1aa',
+    marginBottom: 8,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  weightPicker: {
+    flexDirection: 'row',
+  },
+  weightOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(39, 39, 42, 0.5)',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginRight: 8,
+  },
+  weightOptionSelected: {
+    backgroundColor: '#a3e635',
+    borderColor: '#a3e635',
+  },
+  weightOptionText: {
+    fontSize: 14,
+    color: '#ffffff',
+    fontWeight: '600',
+  },
+  weightOptionTextSelected: {
+    color: '#09090b',
+  },
+  quantityContainer: {
+    width: 80,
+  },
+  quantityInput: {
+    backgroundColor: 'rgba(39, 39, 42, 0.5)',
+    borderRadius: 16,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  removeButton: {
+    padding: 12,
+    marginTop: 24,
+  },
+  addWeightButton: {
+    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+    borderRadius: 16,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#a3e635',
+    marginTop: 8,
+  },
+  addWeightText: {
+    color: '#a3e635',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sectionDescription: {
+    fontSize: 14,
+    color: '#a1a1aa',
+    marginBottom: 16,
+    lineHeight: 20,
   },
 });

@@ -1,7 +1,7 @@
 import { Tabs } from "expo-router";
 import { View, StyleSheet, Platform, TouchableOpacity, Text } from "react-native";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
-import { Dumbbell, Calendar, TrendingUp, User } from "lucide-react-native";
+import { Dumbbell, Calendar, TrendingUp, Trophy } from "lucide-react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useState, useEffect } from "react";
@@ -90,7 +90,7 @@ const CustomTabBar = (props: BottomTabBarProps) => {
           let IconComponent = Dumbbell;
           if (route.name === 'planner') IconComponent = Calendar;
           else if (route.name === 'progress') IconComponent = TrendingUp;
-          else if (route.name === 'profile') IconComponent = User;
+          else if (route.name === 'profile') IconComponent = Trophy;
           
           return (
             <TouchableOpacity

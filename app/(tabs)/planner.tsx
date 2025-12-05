@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Settings } from 'lucide-react-native';
 import Slider from '@react-native-community/slider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
@@ -862,6 +862,12 @@ export default function PlannerScreen() {
         <Animated.View entering={FadeIn.duration(400)} style={{ flex: 1 }}>
           <View style={styles.header}>
             <Text style={styles.title}>Weekly Plan</Text>
+            <TouchableOpacity 
+              onPress={() => router.push('/edit-profile')}
+              style={styles.settingsButton}
+            >
+              <Settings size={24} color="#a1a1aa" />
+            </TouchableOpacity>
           </View>
           
           <View style={styles.weekHeader}>
@@ -946,6 +952,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#27272a', // zinc-800
     backgroundColor: '#09090b', // zinc-950
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  settingsButton: {
+    padding: 8,
   },
   title: {
     fontSize: 32,

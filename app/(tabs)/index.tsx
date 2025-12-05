@@ -14,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient, Stop, Circle, G } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Play, Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
+import { Play, Dumbbell, Timer, RotateCcw, Settings } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase';
 import { HomeScreenSkeleton } from '../../src/components/skeletons/HomeScreenSkeleton';
 import { Toast } from '../../src/components/Toast';
@@ -599,12 +599,20 @@ export default function HomeScreen() {
         entering={FadeIn.duration(400)}
         style={styles.header}
       >
-        <Text style={styles.dayTitle}>
-          {currentDay || 'Loading...'}
-        </Text>
-        <Text style={styles.greetingText}>
-          {getGreeting()}
-        </Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.dayTitle}>
+            {currentDay || 'Loading...'}
+          </Text>
+          <Text style={styles.greetingText}>
+            {getGreeting()}
+          </Text>
+        </View>
+        <TouchableOpacity 
+          onPress={() => router.push('/edit-profile')}
+          style={styles.settingsButton}
+        >
+          <Settings size={24} color="#a1a1aa" />
+        </TouchableOpacity>
       </Animated.View>
 
       <ScrollView 
@@ -820,8 +828,17 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
     paddingBottom: 12,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  settingsButton: {
+    padding: 8,
   },
   dayTitle: {
     fontSize: 32,

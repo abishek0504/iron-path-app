@@ -455,7 +455,7 @@ export default function OnboardingEquipmentScreen() {
                               showsHorizontalScrollIndicator={false}
                               style={styles.weightPicker}
                             >
-                              {item.weightOptions.map((weightOption) => (
+                              {item.weightOptions?.map((weightOption) => (
                                 <TouchableOpacity
                                   key={weightOption}
                                   style={[
@@ -471,7 +471,7 @@ export default function OnboardingEquipmentScreen() {
                                     {weightOption}
                                   </Text>
                                 </TouchableOpacity>
-                              ))}
+                              )) || []}
                             </ScrollView>
                           </View>
                           <View style={styles.quantityContainer}>

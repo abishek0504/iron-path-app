@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, Modal, 
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
-import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus, CheckCircle2 } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus, CheckCircle2, Settings } from 'lucide-react-native';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
@@ -2467,7 +2467,15 @@ export default function ProgressScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Progress</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.title}>Progress</Text>
+          <TouchableOpacity 
+            onPress={() => router.push('/edit-profile')}
+            style={styles.settingsButton}
+          >
+            <Settings size={24} color="#a1a1aa" />
+          </TouchableOpacity>
+        </View>
         <View style={styles.viewModeSelector}>
           <Animated.View style={[styles.viewModeIndicator, indicatorStyle]} />
           <TouchableOpacity
@@ -2531,11 +2539,19 @@ const styles = StyleSheet.create({
     borderBottomColor: '#27272a', // zinc-800
     backgroundColor: '#09090b', // zinc-950
   },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#a3e635', // lime-400
-    marginBottom: 16,
+  },
+  settingsButton: {
+    padding: 8,
   },
   viewModeSelector: {
     flexDirection: 'row',

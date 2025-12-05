@@ -4,7 +4,7 @@ import AnimatedReanimated, { FadeIn } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Edit, LogOut, Check, RotateCcw } from 'lucide-react-native';
+import { LogOut, Check, Trophy, Users, TrendingUp, Settings } from 'lucide-react-native';
 import { Alert } from 'react-native';
 import { supabase } from '../../src/lib/supabase';
 import { ProfileSkeleton } from '../../src/components/skeletons/ProfileSkeleton';
@@ -166,79 +166,6 @@ export default function ProfileScreen() {
     router.replace('/login');
   };
 
-  const handleResetPlan = async () => {
-    Alert.alert(
-      "Reset Workout Plan",
-      "This will clear your current workout plan. You can generate a new one from the Planner tab. Continue?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Reset",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const { data: { user } } = await supabase.auth.getUser();
-              if (!user) {
-                Alert.alert("Error", "You must be logged in.");
-                return;
-              }
-
-              // Deactivate all active plans
-              const { error } = await supabase
-                .from('workout_plans')
-                .update({ is_active: false })
-                .eq('user_id', user.id)
-                .eq('is_active', true);
-
-              if (error) {
-                throw error;
-              }
-
-              // Show success toast
-              setToastMessage('Plan reset successfully');
-              setShowToast(true);
-              hasShownToastForParam.current = true;
-              Animated.parallel([
-                Animated.timing(toastOpacity, {
-                  toValue: 1,
-                  duration: 200,
-                  useNativeDriver: true,
-                }),
-                Animated.timing(toastTranslateY, {
-                  toValue: 0,
-                  duration: 200,
-                  useNativeDriver: true,
-                }),
-              ]).start();
-
-              setTimeout(() => {
-                Animated.parallel([
-                  Animated.timing(toastOpacity, {
-                    toValue: 0,
-                    duration: 200,
-                    useNativeDriver: true,
-                  }),
-                  Animated.timing(toastTranslateY, {
-                    toValue: -100,
-                    duration: 200,
-                    useNativeDriver: true,
-                  }),
-                ]).start(() => {
-                  setShowToast(false);
-                });
-              }, 2000);
-            } catch (error: any) {
-              console.error('Error resetting plan:', error);
-              Alert.alert("Error", error.message || "Failed to reset workout plan.");
-            }
-          }
-        }
-      ]
-    );
-  };
 
   if (loading) {
     return <ProfileSkeleton />;
@@ -278,17 +205,16 @@ export default function ProfileScreen() {
           <View style={styles.header}>
             <Text style={styles.title}>Profile</Text>
             <TouchableOpacity 
-              style={styles.editButton}
               onPress={() => router.push('/edit-profile')}
+              style={styles.settingsButton}
             >
-              <Edit size={20} color="#a3e635" />
-              <Text style={styles.editButtonText}>Edit</Text>
+              <Settings size={24} color="#a1a1aa" />
             </TouchableOpacity>
           </View>
         </AnimatedReanimated.View>
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.contentContainer}>
-
+          {/* Profile Picture and Name */}
           <AnimatedReanimated.View entering={FadeIn.duration(400).delay(100)}>
             <View style={styles.profilePictureContainer}>
               {profile.avatar_url ? (
@@ -304,127 +230,47 @@ export default function ProfileScreen() {
                 </View>
               )}
             </View>
+            <Text style={styles.profileName}>
+              {profile.full_name && typeof profile.full_name === 'string' 
+                ? profile.full_name 
+                : 'User'}
+            </Text>
           </AnimatedReanimated.View>
 
-          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(150)}>
-            <View style={styles.infoSection}>
-              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(200)}>
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>Name</Text>
-                  <Text style={styles.infoValue}>
-                    {profile.full_name && typeof profile.full_name === 'string' 
-                      ? profile.full_name 
-                      : 'Not set'}
-                  </Text>
-                </View>
-              </AnimatedReanimated.View>
-
-              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(250)}>
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>Age</Text>
-                  <Text style={styles.infoValue}>
-                    {profile.age != null && typeof profile.age === 'number' 
-                      ? `${profile.age} years` 
-                      : 'Not set'}
-                  </Text>
-                </View>
-              </AnimatedReanimated.View>
-
-              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(300)}>
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>Current Weight</Text>
-                  <Text style={styles.infoValue}>
-                    {profile.current_weight != null && typeof profile.current_weight === 'number'
-                      ? useImperial 
-                        ? `${kgToLbs(profile.current_weight).toFixed(1)} lbs`
-                        : `${profile.current_weight.toFixed(1)} kg`
-                      : 'Not set'}
-                  </Text>
-                </View>
-              </AnimatedReanimated.View>
-
-              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(350)}>
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>Goal Weight</Text>
-                  <Text style={styles.infoValue}>
-                    {profile.goal_weight != null && typeof profile.goal_weight === 'number'
-                      ? useImperial 
-                        ? `${kgToLbs(profile.goal_weight).toFixed(1)} lbs`
-                        : `${profile.goal_weight.toFixed(1)} kg`
-                      : 'Not set'}
-                  </Text>
-                </View>
-              </AnimatedReanimated.View>
-
-              {profile.height != null && typeof profile.height === 'number' && (
-                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(400)}>
-                  <View style={styles.infoCard}>
-                    <Text style={styles.infoLabel}>Height</Text>
-                    <Text style={styles.infoValue}>
-                      {useImperial 
-                        ? (() => {
-                            const { feet, inches } = cmToFtIn(profile.height);
-                            return `${feet}'${inches}"`;
-                          })()
-                        : `${profile.height.toFixed(1)} cm`}
-                    </Text>
-                  </View>
-                </AnimatedReanimated.View>
-              )}
-
-              {profile.gender && typeof profile.gender === 'string' && (
-                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(450)}>
-                  <View style={styles.infoCard}>
-                    <Text style={styles.infoLabel}>Gender</Text>
-                    <Text style={styles.infoValue}>{String(profile.gender)}</Text>
-                  </View>
-                </AnimatedReanimated.View>
-              )}
-
-              {profile.goal && typeof profile.goal === 'string' && (
-                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(500)}>
-                  <View style={styles.infoCard}>
-                    <Text style={styles.infoLabel}>Primary Goal</Text>
-                    <Text style={styles.infoValue}>{String(profile.goal)}</Text>
-                  </View>
-                </AnimatedReanimated.View>
-              )}
-
-              {profile.days_per_week != null && typeof profile.days_per_week === 'number' && (
-                <AnimatedReanimated.View entering={FadeIn.duration(300).delay(550)}>
-                  <View style={styles.infoCard}>
-                    <Text style={styles.infoLabel}>Workout Days per Week</Text>
-                    <Text style={styles.infoValue}>{profile.days_per_week} days</Text>
-                  </View>
-                </AnimatedReanimated.View>
-              )}
-
-              <AnimatedReanimated.View entering={FadeIn.duration(300).delay(600)}>
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>AI Workout Style</Text>
-                  <Text style={styles.infoValueSmall}>
-                    {(() => {
-                      const { style, components } = deriveStyleAndComponentsFromProfile(profile);
-                      const styleLabel = getTrainingStyleLabel(style);
-                      const parts: string[] = [];
-                      if (components.include_tier1_compounds) parts.push('Tier 1');
-                      if (components.include_tier2_accessories) parts.push('Tier 2');
-                      if (components.include_tier3_prehab_mobility) parts.push('Mobility');
-                      if (components.include_cardio_conditioning) parts.push('Cardio');
-                      const tiers = parts.length ? parts.join(' · ') : 'No components selected';
-                      return `${styleLabel} · ${tiers}`;
-                    })()}
-                  </Text>
-                </View>
-              </AnimatedReanimated.View>
+          {/* Achievements Placeholder */}
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(200)}>
+            <View style={styles.placeholderCard}>
+              <Trophy size={32} color="#a3e635" />
+              <Text style={styles.placeholderCardTitle}>Achievements</Text>
+              <Text style={styles.placeholderCardSubtitle}>Coming soon</Text>
+              <Text style={styles.placeholderCardDescription}>
+                Track your workout milestones and unlock achievements as you progress
+              </Text>
             </View>
           </AnimatedReanimated.View>
 
-          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(600)}>
-            <TouchableOpacity style={styles.resetPlanButton} onPress={handleResetPlan}>
-              <RotateCcw size={20} color="#f59e0b" />
-              <Text style={styles.resetPlanText}>Reset Plan</Text>
-            </TouchableOpacity>
+          {/* Leaderboard Placeholder */}
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(250)}>
+            <View style={styles.placeholderCard}>
+              <Users size={32} color="#a3e635" />
+              <Text style={styles.placeholderCardTitle}>Leaderboard</Text>
+              <Text style={styles.placeholderCardSubtitle}>Coming soon</Text>
+              <Text style={styles.placeholderCardDescription}>
+                Compete with friends and see how you rank on the global leaderboard
+              </Text>
+            </View>
+          </AnimatedReanimated.View>
+
+          {/* Stats Placeholder */}
+          <AnimatedReanimated.View entering={FadeIn.duration(400).delay(300)}>
+            <View style={styles.placeholderCard}>
+              <TrendingUp size={32} color="#a3e635" />
+              <Text style={styles.placeholderCardTitle}>Stats</Text>
+              <Text style={styles.placeholderCardSubtitle}>Coming soon</Text>
+              <Text style={styles.placeholderCardDescription}>
+                View your workout streaks, total workouts completed, and progress over time
+              </Text>
+            </View>
           </AnimatedReanimated.View>
 
           <AnimatedReanimated.View entering={FadeIn.duration(400).delay(650)}>
@@ -473,6 +319,9 @@ const styles = StyleSheet.create({
     color: '#a3e635', // lime-400
     marginBottom: 16,
   },
+  settingsButton: {
+    padding: 8,
+  },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -492,12 +341,51 @@ const styles = StyleSheet.create({
   },
   profilePictureContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 16,
     paddingVertical: 32,
     backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
     borderRadius: 24, // rounded-3xl
     borderWidth: 1,
     borderColor: '#27272a', // zinc-800
+  },
+  profileName: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#ffffff',
+    textAlign: 'center',
+    marginBottom: 32,
+    letterSpacing: -0.5,
+  },
+  placeholderCard: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 24,
+    padding: 32,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    alignItems: 'center',
+  },
+  placeholderCardTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginTop: 16,
+    marginBottom: 8,
+    letterSpacing: -0.3,
+  },
+  placeholderCardSubtitle: {
+    fontSize: 14,
+    color: '#a3e635',
+    fontWeight: '600',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  placeholderCardDescription: {
+    fontSize: 14,
+    color: '#a1a1aa',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   profilePicture: {
     width: 150,
