@@ -51,7 +51,10 @@ This checklist ensures all features from the conversation history and plan are i
 - [x] Logic to calculate and save `user_seconds_per_rep_override` when user edits set duration in `workout-sets.tsx`
 - [x] Calculates `seconds_per_rep = total_duration / number_of_sets` for timed exercises
 - [x] Saves to `user_exercises` table (creates or updates record)
-- [ ] Logic to use `user_seconds_per_rep_override` when available in time estimation (fallback to `base_seconds_per_rep`) - TODO: integrate into `estimateExerciseDuration`
+- [x] Logic to use `user_seconds_per_rep_override` when available in time estimation (fallback to `base_seconds_per_rep`)
+- [x] `estimateExerciseDuration` accepts `userSecondsPerRepOverride` and `baseSecondsPerRep` parameters
+- [x] Priority order: user override > base > tempo-based calculation
+- [x] Integrated into `planner-day.tsx` and `planner.tsx` time estimation
 
 ### 2.3 Time Estimation Display ✅
 - [x] Estimated session duration shown in `planner-day.tsx` header
@@ -160,28 +163,36 @@ This checklist ensures all features from the conversation history and plan are i
 
 ## 6. RECOVERY & COVERAGE AWARENESS ⚠️ PARTIAL
 
-### 6.1 Movement Pattern Tagging
+### 6.1 Movement Pattern Tagging ✅
 - [x] Schema supports `movement_pattern` enum
-- [ ] Heuristic tagging function to infer pattern from exercise name
-- [ ] Backfill existing exercises with movement patterns
-- [ ] Use in coverage analysis
+- [x] `src/lib/movementPatterns.ts` created with `inferMovementPattern` function
+- [x] Heuristic tagging function infers patterns: squat, hinge, lunge, push_vert, push_horiz, pull_vert, pull_horiz, carry
+- [x] Integrated into `adaptiveWorkoutEngine.ts` - automatically tags exercises during generation
+- [x] Helper functions: `getMovementPatternLabel`, `getAllMovementPatterns`
+- [ ] Backfill existing exercises with movement patterns (optional - can be done via migration)
 
-### 6.2 Coverage Analysis Module ⚠️ MISSING
-- [ ] `src/lib/coverageAnalysis.ts` created
-- [ ] Function to analyze week schedule + recent workout logs:
-  - Count sets per movement pattern per week
-  - Flag under-served patterns (e.g., no horizontal pull)
-  - Flag heavily loaded patterns (e.g., multiple heavy hinge days)
-- [ ] Integration into AI prompts (e.g., "User has done little vertical pulling recently")
-- [ ] Optional post-process pass to insert/replace accessories for balance
+### 6.2 Coverage Analysis Module ✅
+- [x] `src/lib/coverageAnalysis.ts` created
+- [x] `analyzeCoverage` function analyzes week schedule + recent workout logs:
+  - Counts sets per movement pattern per week
+  - Flags under-served patterns (< 3 sets per week)
+  - Flags over-served patterns (> 15 sets or > 2x average)
+  - Tracks last worked date per pattern
+- [x] Integration into AI prompts via `buildFullPlanPrompt`
+- [x] `getCoverageSummary` helper for UI display
+- [x] Recommendations generated for missing essential patterns (squat, hinge, push_horiz, pull_horiz)
 
-### 6.3 Recovery Heuristics ⚠️ MISSING
-- [ ] Track last heavy session date per movement pattern from `workout_logs`
-- [ ] When generating new week:
-  - Avoid scheduling heavy session for same pattern <48-72 hours
-  - Use lighter variations or accessories instead
-  - Or move heavy day to later slot
-- [ ] Integration into `adaptiveWorkoutEngine.ts`
+### 6.3 Recovery Heuristics ✅
+- [x] `src/lib/recoveryHeuristics.ts` created
+- [x] `analyzeRecovery` function tracks last heavy session date per movement pattern from `workout_logs`
+- [x] Minimum recovery hours per pattern: squat (48h), hinge (72h), others (48h), carry (24h)
+- [x] `canScheduleExercise` function checks if exercise can be safely scheduled
+- [x] When generating new week:
+  - Analyzes recent logs for recovery conflicts
+  - Generates warnings for patterns worked <48-72 hours ago
+  - Provides recommendations for scheduling
+- [x] Integration into `adaptiveWorkoutEngine.ts` - passes recovery analysis to AI prompt
+- [x] Integration into AI prompts via `buildFullPlanPrompt`
 
 ---
 
@@ -336,19 +347,21 @@ This checklist ensures all features from the conversation history and plan are i
 - [x] Exercise select → workout-sets editor → save
 - [x] Workout-sets editor pre-fills weights from progression
 
-### 11.4 Time Override Flow ✅ (Partial - save implemented, usage pending)
+### 11.4 Time Override Flow ✅
 - [x] User edits set duration in workout-sets editor
 - [x] Calculate `seconds_per_rep = total_duration / number_of_sets` (for timed exercises)
 - [x] Save to `user_exercises.user_seconds_per_rep_override` in `handleSave`
-- [ ] Future time estimations use override instead of base (TODO: integrate into `estimateExerciseDuration`)
+- [x] Future time estimations use override instead of base
+- [x] Integrated into `estimateExerciseDuration` with priority: user override > base > tempo
+- [x] Integrated into `planner-day.tsx` and `planner.tsx` time estimation
 
 ---
 
 ## SUMMARY
 
-### ✅ Completed (40+ items)
+### ✅ Completed (50+ items)
 - Core data structure & schema (including PR fields)
-- Time estimation module (deterministic)
+- Time estimation module (deterministic) with user override support
 - Volume templates
 - History-aware progression (metrics + engine)
 - Personal Record (PR) system (module, auto-update, UI, integration)
@@ -357,18 +370,17 @@ This checklist ensures all features from the conversation history and plan are i
 - Planner day duration controls
 - Estimated time per exercise on cards
 - Training preferences module
+- Movement pattern tagging (heuristic inference)
+- Coverage analysis module
+- Recovery heuristics
 - Dev diagnostics
 - Bug fixes (useFocusEffect coupling, estimateDayDuration for timed exercises, rest time clamping)
 
-### ⚠️ Partially Complete (2 items)
-- Time estimation persistence (save implemented, usage in estimation pending)
-- Recovery & coverage awareness (schema exists, logic missing)
+### ⚠️ Partially Complete (0 items)
+- All major features implemented
 
-### ❌ Missing (3 items - Lower Priority)
-- Coverage analysis module
-- Recovery heuristics
-- Movement pattern heuristic tagging
-- Time override usage in `estimateExerciseDuration` (read `user_seconds_per_rep_override` when available)
+### ❌ Missing (1 item - Optional)
+- Backfill existing exercises with movement patterns (optional - can be done via database migration)
 
 ---
 
@@ -384,8 +396,9 @@ This checklist ensures all features from the conversation history and plan are i
 8. ✅ **PR auto-update on log save** - COMPLETED
 9. ✅ **PR integration with progression** - COMPLETED
 10. ✅ **Bug fixes** - COMPLETED (useFocusEffect, estimateDayDuration, rest time clamping)
-11. **Coverage analysis module** - Analyze movement patterns and suggest balance improvements
-12. **Recovery heuristics** - Avoid scheduling heavy sessions too close together
-13. **Movement pattern tagging** - Heuristic function to infer patterns from exercise names
-14. **Time override usage in estimation** - Read `user_seconds_per_rep_override` when available in `estimateExerciseDuration`
+11. ✅ **Coverage analysis module** - COMPLETED
+12. ✅ **Recovery heuristics** - COMPLETED
+13. ✅ **Movement pattern tagging** - COMPLETED
+14. ✅ **Time override usage in estimation** - COMPLETED
+15. **Backfill existing exercises with movement patterns** - Optional database migration task
 

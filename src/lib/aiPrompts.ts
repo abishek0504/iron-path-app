@@ -61,8 +61,18 @@ const getGoalConsiderations = (goal: string | null | undefined): string => {
 
 /**
  * Build comprehensive prompt for full weekly workout plan generation
+ * 
+ * @param profile - User profile data
+ * @param availableExercises - List of available exercise names
+ * @param coverageAnalysis - Optional coverage analysis results to include in prompt
+ * @param recoveryAnalysis - Optional recovery analysis results to include in prompt
  */
-export const buildFullPlanPrompt = (profile: any, availableExercises: string[] = []): string => {
+export const buildFullPlanPrompt = (
+  profile: any,
+  availableExercises: string[] = [],
+  coverageAnalysis?: { recommendations: string[] },
+  recoveryAnalysis?: { warnings: string[]; recommendations: string[] }
+): string => {
   const useImperial = profile.use_imperial !== false; // Default to true
   const weightStr = formatWeight(profile.current_weight, useImperial);
   const heightStr = formatHeight(profile.height, useImperial);
@@ -113,6 +123,14 @@ ${componentDescription}
 
 TIME GUIDELINES:
 - ${goldilocksText}
+
+${coverageAnalysis && coverageAnalysis.recommendations.length > 0
+  ? `\nMOVEMENT PATTERN COVERAGE ANALYSIS:\n${coverageAnalysis.recommendations.join('\n')}\n`
+  : ''}
+
+${recoveryAnalysis && (recoveryAnalysis.warnings.length > 0 || recoveryAnalysis.recommendations.length > 0)
+  ? `\nRECOVERY CONSIDERATIONS:\n${[...recoveryAnalysis.warnings, ...recoveryAnalysis.recommendations].join('\n')}\n`
+  : ''}
 
 ${profile.workout_feedback ? `\nUSER FEEDBACK TO CONSIDER:\n${profile.workout_feedback}\n` : ''}
 

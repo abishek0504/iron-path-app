@@ -26,6 +26,7 @@ export default function PlannerScreen() {
   const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
   const [durationTargetMin, setDurationTargetMin] = useState<number | null>(45); // Default 45 minutes
+  const [userExerciseTimeOverrides, setUserExerciseTimeOverrides] = useState<Map<string, { user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>>(new Map());
   
   // Week navigation state
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => {
@@ -73,6 +74,63 @@ export default function PlannerScreen() {
     setIsLoadingPlan(false);
     if (isInitialLoad) {
       setHasInitiallyLoaded(true);
+    }
+
+    // Load user exercise time overrides for time estimation
+    if (user && data) {
+      const exerciseNames = new Set<string>();
+      const weekSchedule = data.plan_data?.week_schedule || {};
+      const weeks = data.plan_data?.weeks || {};
+      
+      // Collect all exercise names from plan
+      Object.values(weekSchedule).forEach((day: any) => {
+        if (Array.isArray(day?.exercises)) {
+          day.exercises.forEach((ex: any) => {
+            if (ex?.name) exerciseNames.add(ex.name);
+          });
+        }
+      });
+      
+      Object.values(weeks).forEach((week: any) => {
+        if (week?.week_schedule) {
+          Object.values(week.week_schedule).forEach((day: any) => {
+            if (Array.isArray(day?.exercises)) {
+              day.exercises.forEach((ex: any) => {
+                if (ex?.name) exerciseNames.add(ex.name);
+              });
+            }
+          });
+        }
+      });
+
+      if (exerciseNames.size > 0) {
+        const { data: userExercises } = await supabase
+          .from('user_exercises')
+          .select('name, user_seconds_per_rep_override')
+          .eq('user_id', user.id)
+          .in('name', Array.from(exerciseNames));
+
+        const { data: masterExercises } = await supabase
+          .from('exercises')
+          .select('name, base_seconds_per_rep')
+          .in('name', Array.from(exerciseNames));
+
+        const overridesMap = new Map<string, { user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>();
+        
+        const masterMap = new Map((masterExercises || []).map((ex: any) => [ex.name, ex]));
+        const userMap = new Map((userExercises || []).map((ex: any) => [ex.name, ex]));
+
+        exerciseNames.forEach((name) => {
+          const userEx = userMap.get(name);
+          const masterEx = masterMap.get(name);
+          overridesMap.set(name, {
+            user_seconds_per_rep_override: userEx?.user_seconds_per_rep_override || null,
+            base_seconds_per_rep: masterEx?.base_seconds_per_rep || null,
+          });
+        });
+
+        setUserExerciseTimeOverrides(overridesMap);
+      }
     }
   }, []);
 
@@ -209,6 +267,18 @@ export default function PlannerScreen() {
         .eq('user_id', user.id)
         .order('name', { ascending: true });
 
+      // Fetch recent workout logs for coverage/recovery analysis (last 2 weeks)
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      
+      const { data: recentLogs } = await supabase
+        .from('workout_logs')
+        .select('exercise_name, weight, reps, performed_at')
+        .eq('user_id', user.id)
+        .gte('performed_at', twoWeeksAgo.toISOString())
+        .order('performed_at', { ascending: false })
+        .limit(200);
+
       // Generate week_schedule via adaptive engine
       const { week_schedule } = await generateWeekScheduleWithAI({
         profile: userProfile,
@@ -216,6 +286,7 @@ export default function PlannerScreen() {
         userExercises: (userExercises || []) as any,
         apiKey,
         durationTargetMin: durationTargetMin,
+        recentLogs: (recentLogs || []) as any,
       });
 
       const planData = { week_schedule: ensureAllDays(week_schedule) };
@@ -492,6 +563,7 @@ export default function PlannerScreen() {
             ? sets[0].reps
             : 8;
 
+        const timeOverride = userExerciseTimeOverrides.get(ex.name);
         const estimation = estimateExerciseDuration({
           targetSets,
           targetReps,
@@ -500,6 +572,8 @@ export default function PlannerScreen() {
           setupBufferSec: ex.setup_buffer_sec || null,
           isUnilateral: ex.is_unilateral || false,
           positionIndex: idx,
+          userSecondsPerRepOverride: timeOverride?.user_seconds_per_rep_override || null,
+          baseSecondsPerRep: timeOverride?.base_seconds_per_rep || null,
         });
 
         const restPerSet =

@@ -8,6 +8,8 @@ export interface TimeEstimationInput {
   targetSets: number;
   targetReps: number;
   positionIndex?: number; // 0-based index within the workout
+  userSecondsPerRepOverride?: number | null; // Per-user override from user_exercises
+  baseSecondsPerRep?: number | null; // Base value from exercises table
 }
 
 export interface TimeEstimationResult {
@@ -33,14 +35,30 @@ const getTempoSecondsPerRep = (tempoCategory?: string | null): number => {
 /**
  * Very lightweight deterministic time estimation used by the adaptive engine.
  * This is intentionally simple and only runs when building or adjusting plans.
+ * 
+ * Priority order for time per rep:
+ * 1. userSecondsPerRepOverride (user-specific override from user_exercises)
+ * 2. baseSecondsPerRep (base value from exercises table)
+ * 3. Calculated from tempo category (fallback)
  */
 export const estimateExerciseDuration = (input: TimeEstimationInput): TimeEstimationResult => {
-  const tempo = getTempoSecondsPerRep(input.tempoCategory);
+  // Determine seconds per rep: user override > base > tempo-based calculation
+  let secondsPerRep: number;
+  
+  if (input.userSecondsPerRepOverride != null && input.userSecondsPerRepOverride > 0) {
+    secondsPerRep = input.userSecondsPerRepOverride;
+  } else if (input.baseSecondsPerRep != null && input.baseSecondsPerRep > 0) {
+    secondsPerRep = input.baseSecondsPerRep;
+  } else {
+    // Fallback to tempo-based calculation
+    secondsPerRep = getTempoSecondsPerRep(input.tempoCategory);
+  }
+
   const unilateralFactor = input.isUnilateral ? 2 : 1;
   const setup = input.setupBufferSec ?? 15;
 
   const totalReps = input.targetSets * input.targetReps;
-  const baseSeconds = totalReps * tempo * unilateralFactor;
+  const baseSeconds = totalReps * secondsPerRep * unilateralFactor;
 
   // Simple fatigue bump: later exercises are slightly slower.
   const idx = input.positionIndex ?? 0;
@@ -53,7 +71,9 @@ export const estimateExerciseDuration = (input: TimeEstimationInput): TimeEstima
   if (__DEV__) {
     console.log('[timeEstimation] estimateExerciseDuration', {
       input,
-      tempo,
+      secondsPerRep,
+      source: input.userSecondsPerRepOverride != null ? 'user_override' : 
+              input.baseSecondsPerRep != null ? 'base' : 'tempo',
       unilateralFactor,
       setup,
       fatigueMultiplier,

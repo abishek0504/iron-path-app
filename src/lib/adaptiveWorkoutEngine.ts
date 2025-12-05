@@ -5,6 +5,9 @@ import { ensureAllDays, validateWeekSchedule, normalizeExercise } from './workou
 import { applyVolumeTemplate } from './volumeTemplates';
 import { getCachedModel, clearModelCache } from './geminiModels';
 import { applySmartCompression } from './smartCompression';
+import { inferMovementPattern } from './movementPatterns';
+import { analyzeCoverage } from './coverageAnalysis';
+import { analyzeRecovery } from './recoveryHeuristics';
 
 type NamedExercise = { name: string; is_timed?: boolean | null };
 
@@ -14,6 +17,12 @@ export interface GenerateWeekScheduleParams {
   userExercises: NamedExercise[];
   apiKey: string;
   durationTargetMin?: number | null; // Week-level duration target in minutes
+  recentLogs?: Array<{
+    exercise_name: string;
+    performed_at: string;
+    weight: number;
+    reps: number;
+  }>; // Recent workout logs for coverage/recovery analysis
 }
 
 export interface GeneratedWeekScheduleResult {
@@ -29,7 +38,7 @@ export interface GeneratedWeekScheduleResult {
 export const generateWeekScheduleWithAI = async (
   params: GenerateWeekScheduleParams,
 ): Promise<GeneratedWeekScheduleResult> => {
-  const { profile, masterExercises, userExercises, apiKey } = params;
+  const { profile, masterExercises, userExercises, apiKey, recentLogs = [] } = params;
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const modelName = await getCachedModel(apiKey);
@@ -45,7 +54,29 @@ export const generateWeekScheduleWithAI = async (
     ...(userExercises || []).map((ex) => ex.name),
   ].filter(Boolean);
 
-  const prompt = buildFullPlanPrompt(profile, availableExerciseNames);
+  // Analyze coverage and recovery from recent logs (if available)
+  let coverageAnalysis: { recommendations: string[] } | undefined;
+  let recoveryAnalysis: { warnings: string[]; recommendations: string[] } | undefined;
+
+  if (recentLogs.length > 0) {
+    // Analyze coverage (we'll analyze the generated plan after, but can provide initial guidance)
+    coverageAnalysis = {
+      recommendations: [
+        'Consider balancing movement patterns across the week: squat, hinge, push (vertical & horizontal), pull (vertical & horizontal), and single-leg movements.',
+      ],
+    };
+
+    // Analyze recovery from recent logs
+    const recoveryResult = analyzeRecovery(recentLogs);
+    if (recoveryResult.warnings.length > 0 || recoveryResult.recommendations.length > 0) {
+      recoveryAnalysis = {
+        warnings: recoveryResult.warnings,
+        recommendations: recoveryResult.recommendations,
+      };
+    }
+  }
+
+  const prompt = buildFullPlanPrompt(profile, availableExerciseNames, coverageAnalysis, recoveryAnalysis);
 
   try {
     const result = await model.generateContent(prompt);
@@ -82,6 +113,12 @@ export const generateWeekScheduleWithAI = async (
         let dayExercises = planData.week_schedule[day].exercises.map((ex: any) => {
           // Normalize basic fields then apply deterministic volume template
           let converted = normalizeExercise(ex);
+          
+          // Infer and attach movement pattern if not already present
+          if (!converted.movement_pattern) {
+            converted.movement_pattern = inferMovementPattern(converted.name);
+          }
+          
           converted = applyVolumeTemplate(converted);
 
           // Ensure target_reps is a number (not string)

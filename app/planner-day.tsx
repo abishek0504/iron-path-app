@@ -80,7 +80,7 @@ export default function PlannerDayScreen() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [dragStartY, setDragStartY] = useState<number>(0);
-  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>>(new Map());
+  const [exerciseDetails, setExerciseDetails] = useState<Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null; user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>>(new Map());
   const [durationMinutes, setDurationMinutes] = useState<Map<number, string>>(new Map());
   const [durationSeconds, setDurationSeconds] = useState<Map<number, string>>(new Map());
   const [toastVisible, setToastVisible] = useState(false);
@@ -321,13 +321,13 @@ export default function PlannerDayScreen() {
     const exerciseNames = exercises.map((ex: any) => ex.name).filter(Boolean);
     if (exerciseNames.length === 0) return;
 
-    const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null }>();
+    const detailsMap = new Map<string, { is_timed: boolean; default_duration_sec: number | null; difficulty: string | null; user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>();
 
     // Batch query all exercises from master exercises table
     // Note: exercises table doesn't have default_duration_sec, only user_exercises does
     const { data: masterExercises, error: masterError } = await supabase
       .from('exercises')
-      .select('name, is_timed, difficulty_level')
+      .select('name, is_timed, difficulty_level, base_seconds_per_rep')
       .in('name', exerciseNames);
 
     if (masterError) {
@@ -338,7 +338,7 @@ export default function PlannerDayScreen() {
     // Note: user_exercises table does NOT have difficulty_level column (only exercises table has it)
     const { data: userExercises, error: userError } = await supabase
       .from('user_exercises')
-      .select('name, is_timed, default_duration_sec')
+      .select('name, is_timed, default_duration_sec, user_seconds_per_rep_override')
       .eq('user_id', user.id)
       .in('name', exerciseNames);
 
@@ -381,13 +381,17 @@ export default function PlannerDayScreen() {
         detailsMap.set(exercise.name, {
           is_timed: userExercise.is_timed || false,
           default_duration_sec: userExercise.default_duration_sec,
-          difficulty: difficulty
+          difficulty: difficulty,
+          user_seconds_per_rep_override: userExercise.user_seconds_per_rep_override || null,
+          base_seconds_per_rep: masterExercise?.base_seconds_per_rep || null,
         });
       } else if (masterExercise) {
         detailsMap.set(exercise.name, {
           is_timed: masterExercise.is_timed || false,
           default_duration_sec: null, // Master exercises table doesn't have default_duration_sec, use null (will default to 60 in code)
-          difficulty: masterExercise.difficulty_level || null
+          difficulty: masterExercise.difficulty_level || null,
+          user_seconds_per_rep_override: null,
+          base_seconds_per_rep: masterExercise.base_seconds_per_rep || null,
         });
       } else {
         // Default values if not found in either table
@@ -650,6 +654,7 @@ export default function PlannerDayScreen() {
             ? sets[0].reps
             : 8;
 
+        const detail = exerciseDetails.get(ex.name);
         const estimation = estimateExerciseDuration({
           targetSets,
           targetReps,
@@ -658,6 +663,8 @@ export default function PlannerDayScreen() {
           setupBufferSec: ex.setup_buffer_sec || null,
           isUnilateral: ex.is_unilateral || false,
           positionIndex: idx,
+          userSecondsPerRepOverride: detail?.user_seconds_per_rep_override || null,
+          baseSecondsPerRep: detail?.base_seconds_per_rep || null,
         });
 
         const restPerSet =
