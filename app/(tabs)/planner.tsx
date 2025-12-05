@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+  import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -93,7 +93,7 @@ export default function PlannerScreen() {
         if (data.plan_data?.duration_target_min != null) {
           setDurationTargetMin(data.plan_data.duration_target_min);
           // Save to AsyncStorage for future use
-          AsyncStorage.setItem('last_duration_target_min', data.plan_data.duration_target_min.toString());
+          await AsyncStorage.setItem('last_duration_target_min', data.plan_data.duration_target_min.toString());
         } else {
           // Try to load from AsyncStorage (user's last choice)
           try {
@@ -813,10 +813,10 @@ export default function PlannerScreen() {
                   maximumValue={150}
                   step={5}
                   value={durationTargetMin}
-                  onValueChange={(value) => {
+                  onValueChange={async (value) => {
                     setDurationTargetMin(Math.round(value));
                     // Save to AsyncStorage for future use
-                    AsyncStorage.setItem('last_duration_target_min', Math.round(value).toString());
+                    await AsyncStorage.setItem('last_duration_target_min', Math.round(value).toString());
                   }}
                   minimumTrackTintColor="#a3e635"
                   maximumTrackTintColor="#27272a"
