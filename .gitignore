@@ -55,3 +55,8 @@ schema/
 
 # cursor rules
 .cursor/
+
+# editor swap files
+*.swp
+*.swo
+*~
