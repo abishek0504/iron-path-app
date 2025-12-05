@@ -4,6 +4,7 @@ export interface ProgressionInput {
   profile: any;
   exercise: any;
   metrics: ExerciseHistoryMetrics;
+  personalRecord?: { weight: number; reps: number | null } | null; // Optional PR from user_exercises
 }
 
 export interface ProgressionSuggestion {
@@ -118,12 +119,22 @@ export const computeProgressionSuggestion = (input: ProgressionInput): Progressi
   const lastWeight =
     metrics.lastLog && typeof metrics.lastLog.weight === 'number' ? metrics.lastLog.weight : null;
 
-  let baselineWeight = lastSuccessfulWeight ?? lastWeight ?? null;
+  // Use PR if available and higher than recent logs (PR takes precedence for baseline)
+  const prWeight = input.personalRecord?.weight && input.personalRecord.weight > 0
+    ? input.personalRecord.weight
+    : null;
+
+  // Baseline: PR > lastSuccessful > lastWeight > heuristic
+  let baselineWeight = prWeight ?? lastSuccessfulWeight ?? lastWeight ?? null;
   let note: string | undefined;
 
   if (baselineWeight == null || baselineWeight <= 0) {
     baselineWeight = getHeuristicStartingWeight(profile, exercise);
     note = 'On-ramp: conservative starting weight';
+  } else if (prWeight && prWeight > (lastSuccessfulWeight ?? 0)) {
+    // If using PR that's higher than recent logs, use a conservative percentage of PR
+    baselineWeight = prWeight * 0.85; // Start at 85% of PR for safety
+    note = `Based on PR: ${prWeight} lbs (starting at 85% for safety)`;
   }
 
   let suggestedWeight = baselineWeight ?? null;

@@ -197,6 +197,22 @@ export const applyVolumeTemplate = (exercise: any): any => {
     rest_time_sec: output.rest_time_sec,
   };
 
+  // Also clamp rest_time_sec in sets array if it exists
+  if (Array.isArray(merged.sets)) {
+    merged.sets = merged.sets.map((set: any) => {
+      if (set.rest_time_sec != null && typeof set.rest_time_sec === 'number') {
+        return {
+          ...set,
+          rest_time_sec: clamp(Math.round(set.rest_time_sec), minRest, maxRest),
+        };
+      }
+      return {
+        ...set,
+        rest_time_sec: output.rest_time_sec,
+      };
+    });
+  }
+
   if (__DEV__) {
     console.log('[volumeTemplates] applied template', {
       name: input.name,
@@ -212,5 +228,6 @@ export const applyVolumeTemplate = (exercise: any): any => {
 
   return merged;
 };
+
 
 

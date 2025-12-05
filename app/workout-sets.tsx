@@ -15,6 +15,9 @@ import {
 import { ArrowLeft, Plus, X } from 'lucide-react-native';
 import { supabase } from '../src/lib/supabase';
 import { ConfirmDialog } from '../src/components/ConfirmDialog';
+import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../src/lib/progressionMetrics';
+import { computeProgressionSuggestion } from '../src/lib/progressionEngine';
+import { getExercisePR } from '../src/lib/personalRecord';
 
 type SetItem = {
   index: number;
@@ -289,6 +292,70 @@ export default function WorkoutSetsScreen() {
 
     setPlan(data);
     setExerciseName(exercise.name || 'Workout');
+    
+    // Pre-fill weights from progression engine if available
+    if (user && exercise.name && !exerciseIsTimed) {
+      try {
+        // Fetch workout logs for this exercise
+        const { data: logs } = await supabase
+          .from('workout_logs')
+          .select('exercise_name, weight, reps, scheduled_weight, scheduled_reps, performed_at')
+          .eq('user_id', user.id)
+          .eq('exercise_name', exercise.name)
+          .order('performed_at', { ascending: false })
+          .limit(20);
+
+        if (logs && Array.isArray(logs) && logs.length > 0) {
+          const metrics = computeExerciseHistoryMetrics(logs as WorkoutLogLike[]);
+          
+          // Get PR for this exercise
+          const pr = await getExercisePR(user.id, exercise.name);
+          const prData = pr && pr.weight > 0 ? { weight: pr.weight, reps: pr.reps } : null;
+          
+          // Get user profile for progression
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
+          if (profile) {
+            const suggestion = computeProgressionSuggestion({
+              profile,
+              exercise,
+              metrics,
+              personalRecord: prData,
+            });
+
+            // Pre-fill weights if suggestion is available and set weight is null/undefined
+            if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0) {
+              initializedSets = initializedSets.map((set) => {
+                if (set.weight === null || set.weight === undefined || Number.isNaN(set.weight)) {
+                  return { ...set, weight: suggestion.suggestedWeight };
+                }
+                return set;
+              });
+              
+              // Update bodyweight flags
+              initializedSets.forEach((set, idx) => {
+                if (set.weight === 0) {
+                  bwFlagsMap.set(idx, true);
+                } else if (set.weight != null && set.weight > 0) {
+                  bwFlagsMap.set(idx, false);
+                }
+              });
+              setBodyweightFlags(new Map(bwFlagsMap));
+            }
+          }
+        }
+      } catch (error) {
+        if (__DEV__) {
+          console.error('[workout-sets] Error pre-filling weights:', error);
+        }
+        // Continue without pre-fill if there's an error
+      }
+    }
+    
     setSets(initializedSets);
     setOriginalSets(JSON.parse(JSON.stringify(initializedSets))); // Deep copy for comparison
     setLoading(false);
@@ -299,6 +366,13 @@ export default function WorkoutSetsScreen() {
       loadData();
     }, [planId, day, exerciseIndex])
   );
+
+  // Recalculate estimation when sets change (for display in parent screen)
+  // This doesn't update the parent directly, but ensures we have current data when saving
+  useEffect(() => {
+    // The estimation will be recalculated in planner-day when it receives updated dayData
+    // This effect just ensures we're working with the latest sets data
+  }, [sets]);
 
   const handleChangeSetWeight = (setIndex: number, value: string) => {
     // If user types a value (and it's not "0"), uncheck bodyweight
@@ -498,12 +572,20 @@ export default function WorkoutSetsScreen() {
           finalDuration = finalDuration > 0 ? finalDuration : null;
         }
         
+        // Clamp rest_time_sec to reasonable range (30-300 seconds)
+        let clampedRest = set.rest_time_sec;
+        if (typeof clampedRest === 'number' && clampedRest > 0) {
+          clampedRest = Math.max(30, Math.min(300, Math.round(clampedRest)));
+        } else {
+          clampedRest = 60; // Default if null/undefined
+        }
+        
         return {
           index: idx + 1,
           weight: set.weight,
           reps: set.reps,
           duration: finalDuration,
-          rest_time_sec: set.rest_time_sec,
+          rest_time_sec: clampedRest,
         };
       });
 
@@ -517,6 +599,64 @@ export default function WorkoutSetsScreen() {
       // For timed exercises, update target_duration_sec from the first set's duration
       if (isTimed && normalizedSets.length > 0 && normalizedSets[0].duration !== null && normalizedSets[0].duration !== undefined) {
         updatedExercise.target_duration_sec = normalizedSets[0].duration;
+        
+        // Calculate and save user_seconds_per_rep_override if duration changed
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && exerciseName) {
+          try {
+            // Calculate total duration and total "reps" (for timed exercises, we use duration as the "work")
+            const totalDuration = normalizedSets.reduce((sum, set) => {
+              return sum + (set.duration || 0);
+            }, 0);
+            
+            // For timed exercises, we treat each set as 1 "rep" of work
+            // So seconds_per_rep = total_duration / number_of_sets
+            const totalSets = normalizedSets.length;
+            if (totalSets > 0 && totalDuration > 0) {
+              const secondsPerRep = totalDuration / totalSets;
+              
+              // Check if user_exercise exists
+              const { data: existingUserExercise } = await supabase
+                .from('user_exercises')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('name', exerciseName)
+                .maybeSingle();
+              
+              if (existingUserExercise) {
+                // Update existing user_exercise
+                await supabase
+                  .from('user_exercises')
+                  .update({ user_seconds_per_rep_override: secondsPerRep })
+                  .eq('id', existingUserExercise.id);
+              } else {
+                // Create new user_exercise with override
+                await supabase
+                  .from('user_exercises')
+                  .insert({
+                    user_id: user.id,
+                    name: exerciseName,
+                    is_timed: true,
+                    user_seconds_per_rep_override: secondsPerRep,
+                  });
+              }
+              
+              if (__DEV__) {
+                console.log('[workout-sets] Saved time override', {
+                  exerciseName,
+                  secondsPerRep,
+                  totalDuration,
+                  totalSets,
+                });
+              }
+            }
+          } catch (error) {
+            if (__DEV__) {
+              console.error('[workout-sets] Error saving time override:', error);
+            }
+            // Don't block save if time override fails
+          }
+        }
       }
 
       dayData.exercises[parsedExerciseIndex] = updatedExercise;

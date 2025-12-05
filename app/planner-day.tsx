@@ -12,6 +12,7 @@ import { buildSupplementaryPrompt } from '../src/lib/aiPrompts';
 import { extractJSON, JSONParseError } from '../src/lib/jsonParser';
 import { validateAndNormalizeExercises } from '../src/lib/workoutValidation';
 import { getCachedModel, clearModelCache } from '../src/lib/geminiModels';
+import { getExercisePR, saveExercisePR, type PersonalRecord } from '../src/lib/personalRecord';
 import { estimateExerciseDuration } from '../src/lib/timeEstimation';
 import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../src/lib/progressionMetrics';
 import { computeProgressionSuggestion } from '../src/lib/progressionEngine';
@@ -89,6 +90,11 @@ export default function PlannerDayScreen() {
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [targetDurationMin, setTargetDurationMin] = useState<number | null>(null);
   const [estimatedDurationSec, setEstimatedDurationSec] = useState<number | null>(null);
+  const [exercisePRs, setExercisePRs] = useState<Map<string, PersonalRecord | null>>(new Map());
+  const [exerciseEstimatedTimes, setExerciseEstimatedTimes] = useState<Map<string, number>>(new Map());
+  const [editingPR, setEditingPR] = useState<{ exerciseName: string; pr: PersonalRecord | null } | null>(null);
+  const [prEditWeight, setPrEditWeight] = useState<string>('');
+  const [prEditReps, setPrEditReps] = useState<string>('');
 
   useEffect(() => {
     loadUserProfile();
@@ -164,6 +170,8 @@ export default function PlannerDayScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Reload plan when returning to screen (e.g., after editing sets in workout-sets)
+      // This ensures estimation recalculates with latest data
       loadPlan();
       if (exerciseAdded === 'true') {
         setToastMessage('Exercise added!');
@@ -274,8 +282,9 @@ export default function PlannerDayScreen() {
             );
           }
           
-          // Load exercise details
+          // Load exercise details and PRs
           await loadExerciseDetails(loadedDayData.exercises || []);
+          await loadExercisePRs(loadedDayData.exercises || []);
         } else {
           // No data found, use empty exercises
           setDayData({ exercises: [] });
@@ -391,6 +400,29 @@ export default function PlannerDayScreen() {
     }
 
     setExerciseDetails(detailsMap);
+  };
+
+  const loadExercisePRs = async (exercises: any[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !exercises.length) return;
+
+    const prsMap = new Map<string, PersonalRecord | null>();
+    
+    for (const exercise of exercises) {
+      if (!exercise.name) continue;
+      
+      try {
+        const pr = await getExercisePR(user.id, exercise.name);
+        prsMap.set(exercise.name, pr);
+      } catch (error) {
+        if (__DEV__) {
+          console.error(`[planner-day] Error loading PR for ${exercise.name}:`, error);
+        }
+        prsMap.set(exercise.name, null);
+      }
+    }
+    
+    setExercisePRs(prsMap);
   };
 
   const loadUserProfile = async () => {
@@ -586,10 +618,67 @@ export default function PlannerDayScreen() {
     [],
   );
 
+  // Calculate estimated time per exercise and total session duration
   useEffect(() => {
-    const total = estimateSessionDuration(dayData.exercises || []);
+    const exercises = dayData.exercises || [];
+    const timesMap = new Map<string, number>();
+    let total = 0;
+
+    exercises.forEach((ex: any, idx: number) => {
+      const sets = Array.isArray(ex.sets) ? ex.sets : [];
+      const isTimed = sets.some((s: any) => s.duration != null);
+
+      let exerciseTime = 0;
+
+      if (isTimed) {
+        sets.forEach((s: any) => {
+          const duration = typeof s.duration === 'number' ? s.duration : 0;
+          const rest = typeof s.rest_time_sec === 'number' ? s.rest_time_sec : ex.rest_time_sec || 0;
+          exerciseTime += duration + rest;
+        });
+      } else {
+        const targetSets =
+          typeof ex.target_sets === 'number' && ex.target_sets > 0
+            ? ex.target_sets
+            : sets.length > 0
+            ? sets.length
+            : 3;
+        const targetReps =
+          typeof ex.target_reps === 'number'
+            ? ex.target_reps
+            : typeof sets[0]?.reps === 'number'
+            ? sets[0].reps
+            : 8;
+
+        const estimation = estimateExerciseDuration({
+          targetSets,
+          targetReps,
+          movementPattern: ex.movement_pattern || null,
+          tempoCategory: ex.tempo_category || null,
+          setupBufferSec: ex.setup_buffer_sec || null,
+          isUnilateral: ex.is_unilateral || false,
+          positionIndex: idx,
+        });
+
+        const restPerSet =
+          typeof ex.rest_time_sec === 'number'
+            ? ex.rest_time_sec
+            : typeof sets[0]?.rest_time_sec === 'number'
+            ? sets[0].rest_time_sec
+            : 60;
+
+        exerciseTime = estimation.estimatedDurationSec + restPerSet * targetSets;
+      }
+
+      if (ex.name) {
+        timesMap.set(ex.name, exerciseTime);
+      }
+      total += exerciseTime;
+    });
+
+    setExerciseEstimatedTimes(timesMap);
     setEstimatedDurationSec(total || null);
-  }, [dayData.exercises, estimateSessionDuration]);
+  }, [dayData.exercises]);
 
   const generateForDay = async () => {
     if (!userProfile) {
@@ -772,14 +861,37 @@ export default function PlannerDayScreen() {
         }
       }
 
+      // Fetch PRs for generated exercises
+      const { data: userExercisesWithPR } = await supabase
+        .from('user_exercises')
+        .select('name, pr_weight, pr_reps')
+        .eq('user_id', user.id)
+        .in('name', Array.from(exerciseNames))
+        .not('pr_weight', 'is', null);
+
+      const prsByExercise = new Map<string, { weight: number; reps: number | null }>();
+      if (userExercisesWithPR) {
+        userExercisesWithPR.forEach((ue: any) => {
+          if (ue.pr_weight && ue.pr_weight > 0) {
+            prsByExercise.set(ue.name, {
+              weight: ue.pr_weight,
+              reps: ue.pr_reps || null,
+            });
+          }
+        });
+      }
+
       const exercisesWithWeights = convertedExercises.map((ex: any) => {
         if (!ex?.name) return ex;
         const logs = logsByExercise.get(ex.name) || [];
         const metrics = computeExerciseHistoryMetrics(logs);
+        const pr = prsByExercise.get(ex.name) || null;
+
         const suggestion = computeProgressionSuggestion({
           profile: userProfile,
           exercise: ex,
           metrics,
+          personalRecord: pr,
         });
 
         if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0 && Array.isArray(ex.sets)) {
@@ -1122,6 +1234,9 @@ export default function PlannerDayScreen() {
     const isTimed = detail?.is_timed || false;
     const defaultDuration = detail?.default_duration_sec || 60;
     const difficulty = item.difficulty || detail?.difficulty || dayData?.difficulty || null;
+    const pr = exercisePRs.get(item.name) || null;
+    const estimatedTimeSec = exerciseEstimatedTimes.get(item.name) || 0;
+    const estimatedTimeMin = Math.round(estimatedTimeSec / 60);
     
     // Check if exercise has sets with different values per set
     const hasSets = Array.isArray(item.sets) && item.sets.length > 0;
@@ -1230,6 +1345,31 @@ export default function PlannerDayScreen() {
           </View>
         </View>
         
+        {/* Estimated time and PR row */}
+        <View style={styles.exerciseMetaRow}>
+          {estimatedTimeMin > 0 && (
+            <View style={styles.exerciseMetaItem}>
+              <Text style={styles.exerciseMetaLabel}>Est. time</Text>
+              <Text style={styles.exerciseMetaValue}>~{estimatedTimeMin}m</Text>
+            </View>
+          )}
+          {!isTimed && (
+            <TouchableOpacity
+              style={styles.exerciseMetaItem}
+              onPress={() => {
+                setEditingPR({ exerciseName: item.name, pr });
+                setPrEditWeight(pr ? String(pr.weight) : '');
+                setPrEditReps(pr && pr.reps ? String(pr.reps) : '');
+              }}
+            >
+              <Text style={styles.exerciseMetaLabel}>PR</Text>
+              <Text style={styles.exerciseMetaValue}>
+                {pr && pr.weight > 0 ? `${pr.weight} lbs${pr.reps ? ` × ${pr.reps}` : ''}` : 'Set PR'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {!hasSets && (
           <View style={styles.exerciseRow}>
             <View style={styles.exerciseField}>
@@ -1312,7 +1452,7 @@ export default function PlannerDayScreen() {
         )}
       </View>
     );
-  }, [draggedIndex, exerciseDetails, dayData?.difficulty, removeExercise, router, planId, day, weekStart, date, isBodyweightExercise, hasActiveWorkout]);
+  }, [draggedIndex, exerciseDetails, dayData?.difficulty, exercisePRs, exerciseEstimatedTimes, removeExercise, router, planId, day, weekStart, date, isBodyweightExercise, hasActiveWorkout]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
@@ -1545,6 +1685,118 @@ export default function PlannerDayScreen() {
         onHide={() => setToastVisible(false)}
         duration={2000}
       />
+
+      {/* PR Edit Modal */}
+      <Modal visible={editingPR !== null} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Edit Personal Record</Text>
+            <Text style={styles.modalSubtitle}>{editingPR?.exerciseName}</Text>
+            
+            <View style={styles.modalInputRow}>
+              <View style={styles.modalInputField}>
+                <Text style={styles.modalInputLabel}>Weight (lbs)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  keyboardType="numeric"
+                  value={prEditWeight}
+                  onChangeText={setPrEditWeight}
+                  placeholder="0"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+              <View style={styles.modalInputField}>
+                <Text style={styles.modalInputLabel}>Reps</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  keyboardType="numeric"
+                  value={prEditReps}
+                  onChangeText={setPrEditReps}
+                  placeholder="0"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalButtonSecondary}
+                onPress={() => {
+                  setEditingPR(null);
+                  setPrEditWeight('');
+                  setPrEditReps('');
+                }}
+              >
+                <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButtonPrimary}
+                onPress={async () => {
+                  if (!editingPR) return;
+                  
+                  const { data: { user } } = await supabase.auth.getUser();
+                  if (!user) return;
+
+                  const weight = parseFloat(prEditWeight);
+                  const reps = prEditReps ? parseInt(prEditReps, 10) : null;
+
+                  if (weight > 0) {
+                    const newPR: PersonalRecord = {
+                      exerciseName: editingPR.exerciseName,
+                      weight,
+                      reps,
+                      performedAt: new Date().toISOString(),
+                      sessionId: null,
+                    };
+
+                    const success = await saveExercisePR(user.id, editingPR.exerciseName, newPR);
+                    if (success) {
+                      setExercisePRs((prev) => {
+                        const updated = new Map(prev);
+                        updated.set(editingPR.exerciseName, newPR);
+                        return updated;
+                      });
+                      setToastMessage('PR updated!');
+                      setToastVisible(true);
+                    } else {
+                      Alert.alert('Error', 'Failed to save PR');
+                    }
+                  } else {
+                    // Clear PR
+                    const { data: existing } = await supabase
+                      .from('user_exercises')
+                      .select('id')
+                      .eq('user_id', user.id)
+                      .eq('name', editingPR.exerciseName)
+                      .maybeSingle();
+
+                    if (existing) {
+                      await supabase
+                        .from('user_exercises')
+                        .update({ pr_weight: null, pr_reps: null, pr_performed_at: null })
+                        .eq('id', existing.id);
+                    }
+
+                    setExercisePRs((prev) => {
+                      const updated = new Map(prev);
+                      updated.set(editingPR.exerciseName, null);
+                      return updated;
+                    });
+                    setToastMessage('PR cleared');
+                    setToastVisible(true);
+                  }
+
+                  setEditingPR(null);
+                  setPrEditWeight('');
+                  setPrEditReps('');
+                }}
+              >
+                <Text style={styles.modalButtonTextPrimary}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1588,6 +1840,10 @@ const styles = StyleSheet.create({
   difficultyBar2: { width: 6, height: 12 },
   difficultyBar3: { width: 6, height: 16 },
   difficultyText: { fontSize: 14, fontWeight: '600' },
+  exerciseMetaRow: { flexDirection: 'row', gap: 16, marginBottom: 12, alignItems: 'center' },
+  exerciseMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  exerciseMetaLabel: { color: '#71717a', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }, // zinc-500
+  exerciseMetaValue: { color: '#a1a1aa', fontSize: 13, fontWeight: '600' }, // zinc-400
   exerciseRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   exerciseField: { flex: 1 },
   fieldLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4 }, // zinc-400
@@ -1626,6 +1882,19 @@ const styles = StyleSheet.create({
   notesLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' }, // zinc-400
   notesText: { color: '#a1a1aa', fontSize: 14 }, // zinc-400
   durationTargetRow: { marginTop: 8, marginBottom: 4 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', padding: 24 },
+  modalContent: { backgroundColor: '#18181b', borderRadius: 24, padding: 32, borderWidth: 1, borderColor: '#27272a' }, // zinc-900, rounded-3xl, zinc-800
+  modalTitle: { color: 'white', fontSize: 24, fontWeight: 'bold', marginBottom: 8 },
+  modalSubtitle: { color: '#a1a1aa', fontSize: 14, marginBottom: 16 }, // zinc-400
+  modalInputRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  modalInputField: { flex: 1 },
+  modalInputLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' }, // zinc-400
+  modalInput: { backgroundColor: '#09090b', color: 'white', padding: 16, borderRadius: 24, borderWidth: 1, borderColor: '#27272a', fontSize: 16 }, // zinc-950, rounded-3xl, zinc-800
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  modalButtonSecondary: { flex: 1, borderWidth: 1, borderColor: '#27272a', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // zinc-800, rounded-3xl
+  modalButtonPrimary: { flex: 1, backgroundColor: '#a3e635', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // lime-400, rounded-3xl
+  modalButtonTextSecondary: { color: '#a1a1aa', fontWeight: 'bold' }, // zinc-400
+  modalButtonTextPrimary: { color: '#09090b', fontWeight: 'bold' }, // zinc-950 for contrast
   durationTargetLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' },
   durationChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   durationChip: {

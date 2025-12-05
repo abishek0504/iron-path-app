@@ -12,6 +12,7 @@ import { clearModelCache } from '../../src/lib/geminiModels';
 import { generateWeekScheduleWithAI } from '../../src/lib/adaptiveWorkoutEngine';
 import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../../src/lib/progressionMetrics';
 import { computeProgressionSuggestion } from '../../src/lib/progressionEngine';
+import { estimateExerciseDuration } from '../../src/lib/timeEstimation';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -24,6 +25,7 @@ export default function PlannerScreen() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
+  const [durationTargetMin, setDurationTargetMin] = useState<number | null>(45); // Default 45 minutes
   
   // Week navigation state
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => {
@@ -36,16 +38,18 @@ export default function PlannerScreen() {
     return weekStart;
   });
 
-  const loadActivePlan = useCallback(async () => {
+  const loadActivePlan = useCallback(async (isInitialLoad: boolean = false) => {
     // Only show loading on initial load
-    if (!hasInitiallyLoaded) {
+    if (isInitialLoad) {
       setIsLoadingPlan(true);
     }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setIsLoadingPlan(false);
-      setHasInitiallyLoaded(true);
+      if (isInitialLoad) {
+        setHasInitiallyLoaded(true);
+      }
       return;
     }
 
@@ -60,11 +64,17 @@ export default function PlannerScreen() {
       console.error('Error loading plan:', error);
     } else if (data) {
       setActivePlan(data);
+      // Load duration target from plan_data if available
+      if (data.plan_data?.duration_target_min != null) {
+        setDurationTargetMin(data.plan_data.duration_target_min);
+      }
     }
     
     setIsLoadingPlan(false);
-    setHasInitiallyLoaded(true);
-  }, [hasInitiallyLoaded]);
+    if (isInitialLoad) {
+      setHasInitiallyLoaded(true);
+    }
+  }, []);
 
   const loadUserProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -86,16 +96,16 @@ export default function PlannerScreen() {
   useEffect(() => {
     // Only load on initial mount
     if (!hasInitiallyLoaded) {
-      loadActivePlan();
+      loadActivePlan(true);
       loadUserProfile();
     }
-  }, [loadActivePlan]);
+  }, [hasInitiallyLoaded, loadActivePlan]);
 
   useFocusEffect(
     useCallback(() => {
       // Only refresh if we've already loaded initially
       if (hasInitiallyLoaded) {
-        loadActivePlan();
+        loadActivePlan(false);
       }
     }, [hasInitiallyLoaded, loadActivePlan])
   );
@@ -205,6 +215,7 @@ export default function PlannerScreen() {
         masterExercises: (masterExercises || []) as any,
         userExercises: (userExercises || []) as any,
         apiKey,
+        durationTargetMin: durationTargetMin,
       });
 
       const planData = { week_schedule: ensureAllDays(week_schedule) };
@@ -285,6 +296,26 @@ export default function PlannerScreen() {
         }
       }
 
+      // Fetch PRs for all exercises
+      const { data: userExercisesWithPR } = await supabase
+        .from('user_exercises')
+        .select('name, pr_weight, pr_reps')
+        .eq('user_id', user.id)
+        .in('name', Array.from(exerciseNames))
+        .not('pr_weight', 'is', null);
+
+      const prsByExercise = new Map<string, { weight: number; reps: number | null }>();
+      if (userExercisesWithPR) {
+        userExercisesWithPR.forEach((ue: any) => {
+          if (ue.pr_weight && ue.pr_weight > 0) {
+            prsByExercise.set(ue.name, {
+              weight: ue.pr_weight,
+              reps: ue.pr_reps || null,
+            });
+          }
+        });
+      }
+
       for (const dayName of Object.keys(planData.week_schedule)) {
         const dayInfo = planData.week_schedule[dayName];
         if (!dayInfo || !Array.isArray(dayInfo.exercises)) continue;
@@ -294,11 +325,13 @@ export default function PlannerScreen() {
 
           const logs = logsByExercise.get(ex.name) || [];
           const metrics = computeExerciseHistoryMetrics(logs);
+          const pr = prsByExercise.get(ex.name) || null;
 
           const suggestion = computeProgressionSuggestion({
             profile: userProfile,
             exercise: ex,
             metrics,
+            personalRecord: pr,
           });
 
           if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0 && Array.isArray(ex.sets)) {
@@ -323,6 +356,7 @@ export default function PlannerScreen() {
       // Create plan for current week
       const weekKey = getWeekKey(currentWeekStart);
       const weekPlan = {
+        duration_target_min: durationTargetMin, // Week-level duration target
         weeks: {
           [weekKey]: {
             week_schedule: planData.week_schedule
@@ -425,6 +459,63 @@ export default function PlannerScreen() {
     return { exercises: [] };
   };
 
+  const estimateDayDuration = (exercises: any[]): number => {
+    if (!Array.isArray(exercises) || exercises.length === 0) return 0;
+    let total = 0;
+
+    exercises.forEach((ex: any, idx: number) => {
+      const sets = Array.isArray(ex.sets) ? ex.sets : [];
+      const isTimed = sets.some((s: any) => s.duration != null);
+
+      if (isTimed) {
+        // For timed exercises, sum all durations and add rest only between exercises (not after each set)
+        // Rest time for timed exercises is typically minimal or between exercises
+        let exerciseDuration = 0;
+        sets.forEach((s: any) => {
+          const duration = typeof s.duration === 'number' ? s.duration : 0;
+          exerciseDuration += duration;
+        });
+        // Add rest only once per exercise (between exercises), not per set
+        const restBetweenExercises = typeof ex.rest_time_sec === 'number' ? ex.rest_time_sec : 30;
+        total += exerciseDuration + restBetweenExercises;
+      } else {
+        const targetSets =
+          typeof ex.target_sets === 'number' && ex.target_sets > 0
+            ? ex.target_sets
+            : sets.length > 0
+            ? sets.length
+            : 3;
+        const targetReps =
+          typeof ex.target_reps === 'number'
+            ? ex.target_reps
+            : typeof sets[0]?.reps === 'number'
+            ? sets[0].reps
+            : 8;
+
+        const estimation = estimateExerciseDuration({
+          targetSets,
+          targetReps,
+          movementPattern: ex.movement_pattern || null,
+          tempoCategory: ex.tempo_category || null,
+          setupBufferSec: ex.setup_buffer_sec || null,
+          isUnilateral: ex.is_unilateral || false,
+          positionIndex: idx,
+        });
+
+        const restPerSet =
+          typeof ex.rest_time_sec === 'number'
+            ? ex.rest_time_sec
+            : typeof sets[0]?.rest_time_sec === 'number'
+            ? sets[0].rest_time_sec
+            : 60;
+
+        total += estimation.estimatedDurationSec + restPerSet * targetSets;
+      }
+    });
+
+    return total;
+  };
+
   const getCurrentWeekStart = (): Date => {
     const today = new Date();
     const day = today.getDay();
@@ -511,6 +602,31 @@ export default function PlannerScreen() {
               </View>
             )}
 
+            <View style={styles.durationTargetCard}>
+              <Text style={styles.durationTargetLabel}>Target workout duration</Text>
+              <View style={styles.durationChipsRow}>
+                {[30, 45, 60, 75].map((min) => (
+                  <TouchableOpacity
+                    key={min}
+                    style={[
+                      styles.durationChip,
+                      durationTargetMin === min && styles.durationChipActive,
+                    ]}
+                    onPress={() => setDurationTargetMin(min)}
+                  >
+                    <Text
+                      style={[
+                        styles.durationChipText,
+                        durationTargetMin === min && styles.durationChipTextActive,
+                      ]}
+                    >
+                      {min}m
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
             <View style={styles.buttonColumn}>
               <TouchableOpacity
                 style={[styles.buttonPrimary, loading && styles.buttonDisabled]}
@@ -581,6 +697,7 @@ export default function PlannerScreen() {
               const exerciseCount = dayData.exercises?.length || 0;
               const dayName = DAYS_OF_WEEK[date.getDay()];
               const isToday = date.toDateString() === new Date().toDateString();
+              const estimatedMin = exerciseCount > 0 ? Math.round(estimateDayDuration(dayData.exercises || []) / 60) : 0;
               
               return (
                 <Animated.View entering={FadeIn.duration(400).delay(index * 50)}>
@@ -601,9 +718,14 @@ export default function PlannerScreen() {
                         </View>
                       )}
                     </View>
-                    <Text style={styles.dayFocus}>
-                      {exerciseCount > 0 ? `${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}` : "Rest"}
-                    </Text>
+                    <View style={styles.dayCardContent}>
+                      <Text style={styles.dayFocus}>
+                        {exerciseCount > 0 ? `${exerciseCount} exercise${exerciseCount !== 1 ? 's' : ''}` : "Rest"}
+                      </Text>
+                      {estimatedMin > 0 && (
+                        <Text style={styles.dayDurationEstimate}>~{estimatedMin} min</Text>
+                      )}
+                    </View>
                   </TouchableOpacity>
                 </Animated.View>
               );
@@ -704,7 +826,14 @@ const styles = StyleSheet.create({
   },
   dayName: { color: '#ffffff', fontSize: 20, fontWeight: '700', marginBottom: 4 },
   dayDate: { color: '#a1a1aa', fontSize: 14, letterSpacing: 0.5 }, // zinc-400
+  dayCardContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
   dayFocus: { color: '#a1a1aa', fontSize: 14, letterSpacing: 0.5 }, // zinc-400
+  dayDurationEstimate: { color: '#71717a', fontSize: 12, letterSpacing: 0.5 }, // zinc-500
   todayBadge: {
     backgroundColor: '#a3e635', // lime-400
     paddingHorizontal: 8,
@@ -739,5 +868,44 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#09090b', textAlign: 'center', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 }, // zinc-950
   buttonTextSecondary: { color: '#a3e635', textAlign: 'center', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 }, // lime-400
+  durationTargetCard: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginBottom: 20,
+  },
+  durationTargetLabel: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 12,
+  },
+  durationChipsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  durationChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: 'transparent',
+  },
+  durationChipActive: {
+    borderColor: '#a3e635',
+    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+  },
+  durationChipText: {
+    color: '#a1a1aa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  durationChipTextActive: {
+    color: '#a3e635',
+  },
 });
 

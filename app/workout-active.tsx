@@ -7,6 +7,7 @@ import { X, Check, Play, SkipForward, TrendingUp, TrendingDown, Pause } from 'lu
 import { supabase } from '../src/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WorkoutActiveSkeleton } from '../src/components/skeletons/WorkoutActiveSkeleton';
+import { maybeUpdatePRFromLog } from '../src/lib/personalRecord';
 
 interface ExerciseDetail {
   is_timed: boolean;
@@ -1164,6 +1165,45 @@ export default function WorkoutActiveScreen() {
         if (insertError) {
           console.error('Error saving to workout_logs:', insertError);
           throw insertError;
+        }
+
+        // Auto-update PR for each logged set if it's a new record
+        // Check the highest weight (for non-bodyweight) or highest reps (for bodyweight/timed)
+        if (user) {
+          let maxWeight = 0;
+          let maxReps = 0;
+          let maxDuration = 0; // For timed exercises, duration is stored in reps field
+
+          dbLogs.forEach((log: any) => {
+            if (isTimed) {
+              // For timed exercises, compare duration (stored in reps field)
+              if (log.reps > maxDuration) {
+                maxDuration = log.reps;
+              }
+            } else if (log.weight > 0) {
+              // Non-bodyweight: track highest weight
+              if (log.weight > maxWeight) {
+                maxWeight = log.weight;
+                maxReps = log.reps; // Track reps at max weight
+              } else if (log.weight === maxWeight && log.reps > maxReps) {
+                maxReps = log.reps; // Same weight, higher reps
+              }
+            } else {
+              // Bodyweight: track highest reps
+              if (log.reps > maxReps) {
+                maxReps = log.reps;
+              }
+            }
+          });
+
+          // Update PR if we found a new record
+          if (isTimed && maxDuration > 0) {
+            await maybeUpdatePRFromLog(user.id, exercise.name, 0, maxDuration, true);
+          } else if (maxWeight > 0) {
+            await maybeUpdatePRFromLog(user.id, exercise.name, maxWeight, maxReps, false);
+          } else if (maxReps > 0) {
+            await maybeUpdatePRFromLog(user.id, exercise.name, 0, maxReps, false);
+          }
         }
       }
     } catch (error) {

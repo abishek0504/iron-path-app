@@ -4,6 +4,7 @@ import { extractJSON, JSONParseError } from './jsonParser';
 import { ensureAllDays, validateWeekSchedule, normalizeExercise } from './workoutValidation';
 import { applyVolumeTemplate } from './volumeTemplates';
 import { getCachedModel, clearModelCache } from './geminiModels';
+import { applySmartCompression } from './smartCompression';
 
 type NamedExercise = { name: string; is_timed?: boolean | null };
 
@@ -12,6 +13,7 @@ export interface GenerateWeekScheduleParams {
   masterExercises: NamedExercise[];
   userExercises: NamedExercise[];
   apiKey: string;
+  durationTargetMin?: number | null; // Week-level duration target in minutes
 }
 
 export interface GeneratedWeekScheduleResult {
@@ -77,7 +79,7 @@ export const generateWeekScheduleWithAI = async (
     // Normalize exercises and attach basic sets metadata, mirroring PlannerScreen.
     for (const day of Object.keys(planData.week_schedule)) {
       if (Array.isArray(planData.week_schedule[day].exercises)) {
-        planData.week_schedule[day].exercises = planData.week_schedule[day].exercises.map((ex: any) => {
+        let dayExercises = planData.week_schedule[day].exercises.map((ex: any) => {
           // Normalize basic fields then apply deterministic volume template
           let converted = normalizeExercise(ex);
           converted = applyVolumeTemplate(converted);
@@ -154,6 +156,25 @@ export const generateWeekScheduleWithAI = async (
 
           return converted;
         });
+
+        // Apply Smart Compression if duration target is provided
+        if (params.durationTargetMin != null && params.durationTargetMin > 0) {
+          const compressionResult = applySmartCompression({
+            exercises: dayExercises,
+            durationTargetMin: params.durationTargetMin,
+          });
+          dayExercises = compressionResult.exercises;
+          
+          if (__DEV__ && compressionResult.wasCompressed) {
+            console.log(`[adaptiveWorkoutEngine] Compressed ${day}`, {
+              actions: compressionResult.compressionActions,
+              estimatedMin: Math.round(compressionResult.estimatedDurationSec / 60),
+              targetMin: params.durationTargetMin,
+            });
+          }
+        }
+
+        planData.week_schedule[day].exercises = dayExercises;
       }
     }
 
