@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, Modal, 
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
-import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Calendar, Clock, TrendingUp, Edit2, Save, X, Trash2, Plus, CheckCircle2 } from 'lucide-react-native';
 import { ConfirmDialog } from '../../src/components/ConfirmDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
@@ -944,6 +944,10 @@ export default function ProgressScreen() {
 
                 {hasWorkout ? (
                   <View style={styles.weekDayWorkoutInfo}>
+                    {/* Checkmark for completed workouts */}
+                    {workout && Array.isArray(workout.sessions) && workout.sessions.some(s => s.session?.status === 'completed') && (
+                      <CheckCircle2 color="#a3e635" size={20} style={styles.weekDayCheckmark} />
+                    )}
                     <View style={styles.weekDayWorkoutStats}>
                       <View style={styles.weekDayStatItem}>
                         <TrendingUp color="#a3e635" size={16} />
@@ -1060,7 +1064,12 @@ export default function ProgressScreen() {
                     {dayWorkout.date.getDate()}
                   </Text>
                   {hasWorkout && (
-                    <View style={styles.calendarWorkoutIndicator} />
+                    <>
+                      <View style={styles.calendarWorkoutIndicator} />
+                      {workout && Array.isArray(workout.sessions) && workout.sessions.some(s => s.session?.status === 'completed') && (
+                        <CheckCircle2 color="#a3e635" size={16} style={styles.calendarCheckmark} />
+                      )}
+                    </>
                   )}
                 </TouchableOpacity>
               );
@@ -2681,6 +2690,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginLeft: 16,
+    position: 'relative',
+  },
+  weekDayCheckmark: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#09090b',
+    borderRadius: 10,
   },
   weekDayWorkoutStats: {
     flexDirection: 'row',
@@ -2785,6 +2802,13 @@ const styles = StyleSheet.create({
   calendarDayTextWithWorkout: {
     color: '#60a5fa',
     fontWeight: '700',
+  },
+  calendarCheckmark: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: '#09090b',
+    borderRadius: 8,
   },
   calendarWorkoutIndicator: {
     position: 'absolute',

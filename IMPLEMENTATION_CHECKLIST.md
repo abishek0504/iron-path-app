@@ -220,11 +220,13 @@ This checklist ensures all features from the conversation history and plan are i
 - [x] Displays style and components summary
 
 ### 7.5 Planner Tab - Week Generation Duration Control ✅
-- [x] Duration target control (chips: 30m, 45m, 60m, 75m) in `planner.tsx` "Generate" flow
+- [x] Duration target control (slider: 15-150 min) in `planner.tsx` "Generate" flow
 - [x] Stored in `plan_data.duration_target_min` (week-level)
 - [x] Passed to `generateWeekScheduleWithAI` for Smart Compression
 - [x] Loaded from `plan_data` when loading active plan
 - [x] Default value: 45 minutes
+- [x] Remembers user's last selected duration in AsyncStorage
+- [x] Slider with 5-minute increments, displays current value
 
 ### 7.6 Planner Tab - Estimated Durations Per Day ✅
 - [x] Calculate estimated duration for each day in week view using `estimateDayDuration` helper
@@ -274,6 +276,7 @@ This checklist ensures all features from the conversation history and plan are i
 - [x] `loadActivePlan` no longer depends on `hasInitiallyLoaded` state
 - [x] Uses parameter-based approach to distinguish initial load vs refresh
 - [x] Prevents unnecessary plan refetches when navigating back to planner tab
+- [x] Added `isMounted` flag to `loadActivePlan` to prevent memory leaks from unmounted component state updates
 
 ---
 
@@ -374,13 +377,13 @@ This checklist ensures all features from the conversation history and plan are i
 - Coverage analysis module
 - Recovery heuristics
 - Dev diagnostics
-- Bug fixes (useFocusEffect coupling, estimateDayDuration for timed exercises, rest time clamping)
+- Bug fixes (useFocusEffect coupling, estimateDayDuration for timed exercises, rest time clamping, rest day completion check, unreachable code removal, memory leak prevention)
 
 ### ⚠️ Partially Complete (0 items)
 - All major features implemented
 
-### ❌ Missing (1 item - Optional)
-- Backfill existing exercises with movement patterns (optional - can be done via database migration)
+### ✅ Completed (All items)
+- Backfill existing exercises with movement patterns - COMPLETED (database migration applied)
 
 ---
 
@@ -400,5 +403,11 @@ This checklist ensures all features from the conversation history and plan are i
 12. ✅ **Recovery heuristics** - COMPLETED
 13. ✅ **Movement pattern tagging** - COMPLETED
 14. ✅ **Time override usage in estimation** - COMPLETED
-15. **Backfill existing exercises with movement patterns** - Optional database migration task
+15. ✅ **Backfill existing exercises with movement patterns** - COMPLETED
+16. ✅ **Duration slider** - COMPLETED (replaced chips with slider, 15-150 min range, remembers last choice)
+17. ✅ **Continue/Restart buttons** - COMPLETED (shows Continue and Restart when saved progress exists)
+18. ✅ **Bug fixes** - COMPLETED:
+    - Fixed rest day completion check (explicitly excludes rest days from completion validation)
+    - Removed unreachable dead code in `useFocusEffect` callback
+    - Added `isMounted` flag to `loadActivePlan` to prevent memory leaks
 

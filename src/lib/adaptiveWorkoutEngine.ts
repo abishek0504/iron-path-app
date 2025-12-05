@@ -23,6 +23,12 @@ export interface GenerateWeekScheduleParams {
     weight: number;
     reps: number;
   }>; // Recent workout logs for coverage/recovery analysis
+  missedWorkouts?: Array<{
+    day: string;
+    scheduled_at: string; // Date when workout was scheduled
+    exercises_planned: number;
+    exercises_completed: number;
+  }>; // Missed/incomplete workouts for AI awareness
 }
 
 export interface GeneratedWeekScheduleResult {
@@ -38,7 +44,7 @@ export interface GeneratedWeekScheduleResult {
 export const generateWeekScheduleWithAI = async (
   params: GenerateWeekScheduleParams,
 ): Promise<GeneratedWeekScheduleResult> => {
-  const { profile, masterExercises, userExercises, apiKey, recentLogs = [] } = params;
+  const { profile, masterExercises, userExercises, apiKey, recentLogs = [], missedWorkouts = [] } = params;
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const modelName = await getCachedModel(apiKey);
@@ -76,7 +82,7 @@ export const generateWeekScheduleWithAI = async (
     }
   }
 
-  const prompt = buildFullPlanPrompt(profile, availableExerciseNames, coverageAnalysis, recoveryAnalysis);
+  const prompt = buildFullPlanPrompt(profile, availableExerciseNames, coverageAnalysis, recoveryAnalysis, missedWorkouts);
 
   try {
     const result = await model.generateContent(prompt);

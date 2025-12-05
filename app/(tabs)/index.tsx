@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Modal, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, Modal, Alert, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, { 
@@ -191,11 +191,27 @@ export default function HomeScreen() {
         
         // Check for active workout session
         if (currentDay) {
-          // Query by date range to ensure we get sessions from the current week only
+          // Check for active sessions from TODAY only (workouts are day-specific)
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           const tomorrow = new Date(today);
           tomorrow.setDate(tomorrow.getDate() + 1);
+          
+          // Also check AsyncStorage for saved progress (faster, more reliable for in-progress workouts)
+          const savedProgressKey = `workout_session_${planData.id}_${currentDay}`;
+          let hasSavedProgress = false;
+          try {
+            const savedProgress = await AsyncStorage.getItem(savedProgressKey);
+            if (savedProgress) {
+              const progress = JSON.parse(savedProgress);
+              // Check if there's actual progress (not just empty state)
+              if (progress && (progress.exercises?.length > 0 || progress.currentExerciseIndex > 0 || progress.currentSetIndex > 0)) {
+                hasSavedProgress = true;
+              }
+            }
+          } catch (error) {
+            // Ignore AsyncStorage errors
+          }
           
           const { data: activeSession, error: activeSessionError } = await supabase
             .from('workout_sessions')
@@ -208,7 +224,26 @@ export default function HomeScreen() {
             .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
-          // Check for completed workout session
+          // Cleanup: Mark any old active sessions (from previous days) as abandoned
+          // This ensures workouts are day-specific and missed workouts are tracked
+          const { data: oldActiveSessions } = await supabase
+            .from('workout_sessions')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('plan_id', planData.id)
+            .eq('day', currentDay)
+            .eq('status', 'active')
+            .lt('started_at', today.toISOString());
+          
+          if (oldActiveSessions && oldActiveSessions.length > 0) {
+            // Mark old sessions as abandoned (they weren't completed on the scheduled day)
+            await supabase
+              .from('workout_sessions')
+              .update({ status: 'abandoned' })
+              .in('id', oldActiveSessions.map(s => s.id));
+          }
+          
+          // Check for completed workout session from today
           const { data: completedSession, error: completedSessionError } = await supabase
             .from('workout_sessions')
             .select('id')
@@ -216,8 +251,8 @@ export default function HomeScreen() {
             .eq('plan_id', planData.id)
             .eq('day', currentDay)
             .eq('status', 'completed')
-            .gte('started_at', today.toISOString())
-            .lt('started_at', tomorrow.toISOString())
+            .gte('completed_at', today.toISOString())
+            .lt('completed_at', tomorrow.toISOString())
             .maybeSingle();
           
           // Only set based on data existence, ignore acceptable errors
@@ -249,24 +284,29 @@ export default function HomeScreen() {
             
             const currentExerciseCount = dayData?.exercises?.length || 0;
             
-            // Count how many unique exercises were logged for this session
-            const { data: loggedExercises } = await supabase
-              .from('workout_logs')
-              .select('exercise_name')
-              .eq('user_id', user.id)
-              .eq('session_id', completedSession.id)
-              .eq('day', currentDay);
-            
-            const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
-            const loggedExerciseCount = uniqueLoggedExercises.size;
-            
-            // Workout is truly completed only if all current exercises were logged
-            isTrulyCompleted = currentExerciseCount > 0 && loggedExerciseCount >= currentExerciseCount;
+            // Skip completion check for rest days (no exercises scheduled)
+            if (currentExerciseCount > 0) {
+              // Count how many unique exercises were logged for this session
+              const { data: loggedExercises } = await supabase
+                .from('workout_logs')
+                .select('exercise_name')
+                .eq('user_id', user.id)
+                .eq('session_id', completedSession.id)
+                .eq('day', currentDay);
+              
+              const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+              const loggedExerciseCount = uniqueLoggedExercises.size;
+              
+              // Workout is truly completed only if all current exercises were logged
+              isTrulyCompleted = loggedExerciseCount >= currentExerciseCount;
+            }
+            // For rest days (currentExerciseCount === 0), isTrulyCompleted remains false
           }
           
           // Set states based on whether data exists
+          // Show Continue/Restart if there's an active session OR saved progress in AsyncStorage
           if (isMounted) {
-            setHasActiveWorkout(!!activeSession);
+            setHasActiveWorkout(!!activeSession || hasSavedProgress);
             setIsWorkoutCompleted(isTrulyCompleted);
             setIsLoading(false);
             setHasInitiallyLoaded(true);
@@ -297,17 +337,33 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // Only refresh data on focus, don't show loading if we already have data
-      if (hasInitiallyLoaded && activePlan && currentDay) {
+      // Always refresh workout state when screen gains focus (to detect saved progress)
+      if (activePlan && currentDay) {
         const refresh = async () => {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
-          // Query by date range to ensure we get sessions from the current week only
+          // Check for active sessions from TODAY only (workouts are day-specific)
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           const tomorrow = new Date(today);
           tomorrow.setDate(tomorrow.getDate() + 1);
+          
+          // Also check AsyncStorage for saved progress (faster, more reliable for in-progress workouts)
+          const savedProgressKey = `workout_session_${activePlan.id}_${currentDay}`;
+          let hasSavedProgress = false;
+          try {
+            const savedProgress = await AsyncStorage.getItem(savedProgressKey);
+            if (savedProgress) {
+              const progress = JSON.parse(savedProgress);
+              // Check if there's actual progress (not just empty state)
+              if (progress && (progress.exercises?.length > 0 || progress.currentExerciseIndex > 0 || progress.currentSetIndex > 0)) {
+                hasSavedProgress = true;
+              }
+            }
+          } catch (error) {
+            // Ignore AsyncStorage errors
+          }
           
           const { data: activeSession } = await supabase
             .from('workout_sessions')
@@ -320,6 +376,26 @@ export default function HomeScreen() {
             .lt('started_at', tomorrow.toISOString())
             .maybeSingle();
           
+          // Cleanup: Mark any old active sessions (from previous days) as abandoned
+          // This ensures workouts are day-specific and missed workouts are tracked
+          const { data: oldActiveSessions } = await supabase
+            .from('workout_sessions')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('plan_id', activePlan.id)
+            .eq('day', currentDay)
+            .eq('status', 'active')
+            .lt('started_at', today.toISOString());
+          
+          if (oldActiveSessions && oldActiveSessions.length > 0) {
+            // Mark old sessions as abandoned (they weren't completed on the scheduled day)
+            await supabase
+              .from('workout_sessions')
+              .update({ status: 'abandoned' })
+              .in('id', oldActiveSessions.map(s => s.id));
+          }
+          
+          // Check for completed sessions from today (for completion status)
           const { data: completedSession } = await supabase
             .from('workout_sessions')
             .select('id')
@@ -327,8 +403,8 @@ export default function HomeScreen() {
             .eq('plan_id', activePlan.id)
             .eq('day', currentDay)
             .eq('status', 'completed')
-            .gte('started_at', today.toISOString())
-            .lt('started_at', tomorrow.toISOString())
+            .gte('completed_at', today.toISOString())
+            .lt('completed_at', tomorrow.toISOString())
             .maybeSingle();
           
           // If there's a completed session, check if new exercises were added
@@ -352,22 +428,27 @@ export default function HomeScreen() {
             
             const currentExerciseCount = dayData?.exercises?.length || 0;
             
-            // Count how many unique exercises were logged for this session
-            const { data: loggedExercises } = await supabase
-              .from('workout_logs')
-              .select('exercise_name')
-              .eq('user_id', user.id)
-              .eq('session_id', completedSession.id)
-              .eq('day', currentDay);
-            
-            const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
-            const loggedExerciseCount = uniqueLoggedExercises.size;
-            
-            // Workout is truly completed only if all current exercises were logged
-            isTrulyCompleted = currentExerciseCount > 0 && loggedExerciseCount >= currentExerciseCount;
+            // Skip completion check for rest days (no exercises scheduled)
+            if (currentExerciseCount > 0) {
+              // Count how many unique exercises were logged for this session
+              const { data: loggedExercises } = await supabase
+                .from('workout_logs')
+                .select('exercise_name')
+                .eq('user_id', user.id)
+                .eq('session_id', completedSession.id)
+                .eq('day', currentDay);
+              
+              const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+              const loggedExerciseCount = uniqueLoggedExercises.size;
+              
+              // Workout is truly completed only if all current exercises were logged
+              isTrulyCompleted = loggedExerciseCount >= currentExerciseCount;
+            }
+            // For rest days (currentExerciseCount === 0), isTrulyCompleted remains false
           }
           
-          setHasActiveWorkout(!!activeSession);
+          // Show Continue/Restart if there's an active session OR saved progress in AsyncStorage
+          setHasActiveWorkout(!!activeSession || hasSavedProgress);
           setIsWorkoutCompleted(isTrulyCompleted);
         };
         refresh();
@@ -627,21 +708,26 @@ export default function HomeScreen() {
               </View>
             </Animated.View>
 
-            {/* Start Workout Button */}
+            {/* Start/Continue Workout Button */}
             <Animated.View
               entering={FadeIn.duration(400).delay(150)}
               style={styles.buttonContainer}
             >
-              <CircularButton
-                onPress={handleStartWorkout}
-                disabled={isWorkoutCompleted}
-                text={isWorkoutCompleted 
-                  ? 'Completed' 
-                  : hasActiveWorkout 
-                    ? 'Continue' 
-                    : 'Start'}
-                isCompleted={isWorkoutCompleted}
-              />
+              {isWorkoutCompleted ? (
+                <CircularButton
+                  onPress={handleStartWorkout}
+                  disabled={false}
+                  text="Completed"
+                  isCompleted={true}
+                />
+              ) : (
+                <CircularButton
+                  onPress={handleStartWorkout}
+                  disabled={false}
+                  text={hasActiveWorkout ? "Continue" : "Start"}
+                  isCompleted={false}
+                />
+              )}
             </Animated.View>
           </>
         )}

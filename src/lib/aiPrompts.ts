@@ -71,7 +71,8 @@ export const buildFullPlanPrompt = (
   profile: any,
   availableExercises: string[] = [],
   coverageAnalysis?: { recommendations: string[] },
-  recoveryAnalysis?: { warnings: string[]; recommendations: string[] }
+  recoveryAnalysis?: { warnings: string[]; recommendations: string[] },
+  missedWorkouts?: Array<{ day: string; scheduled_at: string; exercises_planned: number; exercises_completed: number }>
 ): string => {
   const useImperial = profile.use_imperial !== false; // Default to true
   const weightStr = formatWeight(profile.current_weight, useImperial);
@@ -130,6 +131,10 @@ ${coverageAnalysis && coverageAnalysis.recommendations.length > 0
 
 ${recoveryAnalysis && (recoveryAnalysis.warnings.length > 0 || recoveryAnalysis.recommendations.length > 0)
   ? `\nRECOVERY CONSIDERATIONS:\n${[...recoveryAnalysis.warnings, ...recoveryAnalysis.recommendations].join('\n')}\n`
+  : ''}
+
+${missedWorkouts && missedWorkouts.length > 0
+  ? `\nMISSED/INCOMPLETE WORKOUTS ANALYSIS:\nThe user has ${missedWorkouts.length} missed or incomplete workout(s) from recent weeks:\n${missedWorkouts.map(mw => `- ${mw.day}: Planned ${mw.exercises_planned} exercises, completed ${mw.exercises_completed} (${mw.exercises_planned - mw.exercises_completed} missed)`).join('\n')}\n\nIMPORTANT: Consider these patterns when generating the new plan:\n- If user consistently misses certain days, consider adjusting schedule or reducing volume on those days\n- If user completes partial workouts, consider breaking workouts into smaller, more manageable sessions\n- Account for any patterns in missed exercises (e.g., always skipping leg day, or struggling with long sessions)\n`
   : ''}
 
 ${profile.workout_feedback ? `\nUSER FEEDBACK TO CONSIDER:\n${profile.workout_feedback}\n` : ''}

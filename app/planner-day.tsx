@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, Tex
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { X, Plus, ArrowLeft, GripVertical, Edit2 } from 'lucide-react-native';
@@ -1481,27 +1482,22 @@ export default function PlannerDayScreen() {
 
       <View style={styles.durationTargetRow}>
         <Text style={styles.durationTargetLabel}>Target duration</Text>
-        <View style={styles.durationChipsRow}>
-          {[30, 45, 60, 75].map((min) => (
-            <TouchableOpacity
-              key={min}
-              style={[
-                styles.durationChip,
-                targetDurationMin === min && styles.durationChipActive,
-              ]}
-              onPress={() => updateTargetDuration(min)}
-            >
-              <Text
-                style={[
-                  styles.durationChipText,
-                  targetDurationMin === min && styles.durationChipTextActive,
-                ]}
-              >
-                {min}m
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.durationSliderContainer}>
+          <Text style={styles.durationSliderLabel}>15</Text>
+          <Slider
+            style={styles.durationSlider}
+            minimumValue={15}
+            maximumValue={150}
+            step={5}
+            value={targetDurationMin || 45}
+            onValueChange={(value) => updateTargetDuration(Math.round(value))}
+            minimumTrackTintColor="#a3e635"
+            maximumTrackTintColor="#27272a"
+            thumbTintColor="#a3e635"
+          />
+          <Text style={styles.durationSliderLabel}>150</Text>
         </View>
+        <Text style={styles.durationTargetValue}>{targetDurationMin || 45} min</Text>
       </View>
 
       {estimatedDurationSec !== null && estimatedDurationSec > 0 && (
@@ -1902,22 +1898,31 @@ const styles = StyleSheet.create({
   modalButtonPrimary: { flex: 1, backgroundColor: '#a3e635', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // lime-400, rounded-3xl
   modalButtonTextSecondary: { color: '#a1a1aa', fontWeight: 'bold' }, // zinc-400
   modalButtonTextPrimary: { color: '#09090b', fontWeight: 'bold' }, // zinc-950 for contrast
-  durationTargetLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 4, fontWeight: '600' },
-  durationChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  durationChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    backgroundColor: 'transparent',
+  durationTargetLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 8, fontWeight: '600' },
+  durationSliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    width: 200,
   },
-  durationChipActive: {
-    borderColor: '#a3e635',
-    backgroundColor: 'rgba(163, 230, 53, 0.12)',
+  durationSlider: {
+    flex: 1,
+    height: 40,
   },
-  durationChipText: { color: '#a1a1aa', fontSize: 12, fontWeight: '600' },
-  durationChipTextActive: { color: '#a3e635' },
+  durationSliderLabel: {
+    color: '#71717a',
+    fontSize: 11,
+    fontWeight: '500',
+    minWidth: 25,
+    textAlign: 'center',
+  },
+  durationTargetValue: {
+    color: '#a3e635',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+  },
   durationEstimateText: { color: '#a1a1aa', fontSize: 12, marginTop: 6 },
 });
 

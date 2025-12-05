@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import Slider from '@react-native-community/slider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
 import { PlannerSkeleton } from '../../src/components/skeletons/PlannerSkeleton';
 import { extractJSON, JSONParseError } from '../../src/lib/jsonParser';
@@ -25,8 +27,27 @@ export default function PlannerScreen() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
-  const [durationTargetMin, setDurationTargetMin] = useState<number | null>(45); // Default 45 minutes
+  const [durationTargetMin, setDurationTargetMin] = useState<number>(45); // Default 45 minutes (slider range: 15-150)
+  
+  // Load last duration preference on mount
+  useEffect(() => {
+    const loadLastDuration = async () => {
+      try {
+        const lastDuration = await AsyncStorage.getItem('last_duration_target_min');
+        if (lastDuration) {
+          const parsed = parseInt(lastDuration, 10);
+          if (parsed >= 15 && parsed <= 150) {
+            setDurationTargetMin(parsed);
+          }
+        }
+      } catch (error) {
+        // Ignore storage errors, use default
+      }
+    };
+    loadLastDuration();
+  }, []);
   const [userExerciseTimeOverrides, setUserExerciseTimeOverrides] = useState<Map<string, { user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>>(new Map());
+  const isMountedRef = useRef<boolean>(true);
   
   // Week navigation state
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => {
@@ -47,9 +68,11 @@ export default function PlannerScreen() {
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      setIsLoadingPlan(false);
-      if (isInitialLoad) {
-        setHasInitiallyLoaded(true);
+      if (isMountedRef.current) {
+        setIsLoadingPlan(false);
+        if (isInitialLoad) {
+          setHasInitiallyLoaded(true);
+        }
       }
       return;
     }
@@ -64,20 +87,54 @@ export default function PlannerScreen() {
     if (error && error.code !== 'PGRST116') {
       console.error('Error loading plan:', error);
     } else if (data) {
-      setActivePlan(data);
-      // Load duration target from plan_data if available
-      if (data.plan_data?.duration_target_min != null) {
-        setDurationTargetMin(data.plan_data.duration_target_min);
+      if (isMountedRef.current) {
+        setActivePlan(data);
+        // Load duration target from plan_data if available, otherwise try AsyncStorage, otherwise default
+        if (data.plan_data?.duration_target_min != null) {
+          setDurationTargetMin(data.plan_data.duration_target_min);
+          // Save to AsyncStorage for future use
+          AsyncStorage.setItem('last_duration_target_min', data.plan_data.duration_target_min.toString());
+        } else {
+          // Try to load from AsyncStorage (user's last choice)
+          try {
+            const lastDuration = await AsyncStorage.getItem('last_duration_target_min');
+            if (lastDuration && isMountedRef.current) {
+              const parsed = parseInt(lastDuration, 10);
+              if (parsed >= 15 && parsed <= 150) {
+                setDurationTargetMin(parsed);
+              }
+            }
+          } catch (error) {
+            // Ignore storage errors, use default
+          }
+        }
+      }
+    } else {
+      // No plan yet - try to load from AsyncStorage
+      if (isMountedRef.current) {
+        try {
+          const lastDuration = await AsyncStorage.getItem('last_duration_target_min');
+          if (lastDuration) {
+            const parsed = parseInt(lastDuration, 10);
+            if (parsed >= 15 && parsed <= 150) {
+              setDurationTargetMin(parsed);
+            }
+          }
+        } catch (error) {
+          // Ignore storage errors, use default
+        }
       }
     }
     
-    setIsLoadingPlan(false);
-    if (isInitialLoad) {
-      setHasInitiallyLoaded(true);
+    if (isMountedRef.current) {
+      setIsLoadingPlan(false);
+      if (isInitialLoad) {
+        setHasInitiallyLoaded(true);
+      }
     }
 
     // Load user exercise time overrides for time estimation
-    if (user && data) {
+    if (user && data && isMountedRef.current) {
       const exerciseNames = new Set<string>();
       const weekSchedule = data.plan_data?.week_schedule || {};
       const weeks = data.plan_data?.weeks || {};
@@ -115,21 +172,23 @@ export default function PlannerScreen() {
           .select('name, base_seconds_per_rep')
           .in('name', Array.from(exerciseNames));
 
-        const overridesMap = new Map<string, { user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>();
-        
-        const masterMap = new Map((masterExercises || []).map((ex: any) => [ex.name, ex]));
-        const userMap = new Map((userExercises || []).map((ex: any) => [ex.name, ex]));
+        if (isMountedRef.current) {
+          const overridesMap = new Map<string, { user_seconds_per_rep_override: number | null; base_seconds_per_rep: number | null }>();
+          
+          const masterMap = new Map((masterExercises || []).map((ex: any) => [ex.name, ex]));
+          const userMap = new Map((userExercises || []).map((ex: any) => [ex.name, ex]));
 
-        exerciseNames.forEach((name) => {
-          const userEx = userMap.get(name);
-          const masterEx = masterMap.get(name);
-          overridesMap.set(name, {
-            user_seconds_per_rep_override: userEx?.user_seconds_per_rep_override || null,
-            base_seconds_per_rep: masterEx?.base_seconds_per_rep || null,
+          exerciseNames.forEach((name) => {
+            const userEx = userMap.get(name);
+            const masterEx = masterMap.get(name);
+            overridesMap.set(name, {
+              user_seconds_per_rep_override: userEx?.user_seconds_per_rep_override || null,
+              base_seconds_per_rep: masterEx?.base_seconds_per_rep || null,
+            });
           });
-        });
 
-        setUserExerciseTimeOverrides(overridesMap);
+          setUserExerciseTimeOverrides(overridesMap);
+        }
       }
     }
   }, []);
@@ -150,6 +209,14 @@ export default function PlannerScreen() {
       setUserProfile(data);
     }
   };
+
+  // Set up cleanup on unmount to prevent memory leaks
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Only load on initial mount
@@ -279,14 +346,71 @@ export default function PlannerScreen() {
         .order('performed_at', { ascending: false })
         .limit(200);
 
+      // Fetch abandoned/missed workouts from the last 2 weeks
+      // These are workouts that were started but not completed on the scheduled day
+      const { data: abandonedSessions } = await supabase
+        .from('workout_sessions')
+        .select('id, day, started_at, plan_id')
+        .eq('user_id', user.id)
+        .eq('status', 'abandoned')
+        .gte('started_at', twoWeeksAgo.toISOString())
+        .order('started_at', { ascending: false });
+
+      // Calculate missed workouts: compare planned vs completed
+      const missedWorkouts: Array<{
+        day: string;
+        scheduled_at: string;
+        exercises_planned: number;
+        exercises_completed: number;
+      }> = [];
+
+      if (abandonedSessions && abandonedSessions.length > 0) {
+        // Get the active plan to compare planned exercises
+        const { data: activePlanData } = await supabase
+          .from('workout_plans')
+          .select('plan_data')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .single();
+
+        for (const session of abandonedSessions) {
+          // Get planned exercises for this day from the plan
+          let exercisesPlanned = 0;
+          if (activePlanData?.plan_data) {
+            const weekSchedule = activePlanData.plan_data.week_schedule || {};
+            const dayData = weekSchedule[session.day];
+            if (dayData?.exercises && Array.isArray(dayData.exercises)) {
+              exercisesPlanned = dayData.exercises.length;
+            }
+          }
+
+          // Count completed exercises (logged sets) for this session
+          const { data: sessionLogs } = await supabase
+            .from('workout_logs')
+            .select('exercise_name')
+            .eq('session_id', session.id)
+            .eq('user_id', user.id);
+
+          const exercisesCompleted = new Set(sessionLogs?.map(log => log.exercise_name) || []).size;
+
+          missedWorkouts.push({
+            day: session.day,
+            scheduled_at: session.started_at,
+            exercises_planned: exercisesPlanned,
+            exercises_completed: exercisesCompleted,
+          });
+        }
+      }
+
       // Generate week_schedule via adaptive engine
       const { week_schedule } = await generateWeekScheduleWithAI({
         profile: userProfile,
         masterExercises: (masterExercises || []) as any,
         userExercises: (userExercises || []) as any,
         apiKey,
-        durationTargetMin: durationTargetMin,
+        durationTargetMin: durationTargetMin || 45,
         recentLogs: (recentLogs || []) as any,
+        missedWorkouts: missedWorkouts.length > 0 ? missedWorkouts : undefined,
       });
 
       const planData = { week_schedule: ensureAllDays(week_schedule) };
@@ -427,7 +551,7 @@ export default function PlannerScreen() {
       // Create plan for current week
       const weekKey = getWeekKey(currentWeekStart);
       const weekPlan = {
-        duration_target_min: durationTargetMin, // Week-level duration target
+        duration_target_min: durationTargetMin || 45, // Week-level duration target
         weeks: {
           [weekKey]: {
             week_schedule: planData.week_schedule
@@ -677,27 +801,28 @@ export default function PlannerScreen() {
             )}
 
             <View style={styles.durationTargetCard}>
-              <Text style={styles.durationTargetLabel}>Target workout duration</Text>
-              <View style={styles.durationChipsRow}>
-                {[30, 45, 60, 75].map((min) => (
-                  <TouchableOpacity
-                    key={min}
-                    style={[
-                      styles.durationChip,
-                      durationTargetMin === min && styles.durationChipActive,
-                    ]}
-                    onPress={() => setDurationTargetMin(min)}
-                  >
-                    <Text
-                      style={[
-                        styles.durationChipText,
-                        durationTargetMin === min && styles.durationChipTextActive,
-                      ]}
-                    >
-                      {min}m
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.durationSliderHeader}>
+                <Text style={styles.durationTargetLabel}>Target workout duration</Text>
+                <Text style={styles.durationValue}>{durationTargetMin} min</Text>
+              </View>
+              <View style={styles.durationSliderContainer}>
+                <Text style={styles.durationSliderLabel}>15 min</Text>
+                <Slider
+                  style={styles.durationSlider}
+                  minimumValue={15}
+                  maximumValue={150}
+                  step={5}
+                  value={durationTargetMin}
+                  onValueChange={(value) => {
+                    setDurationTargetMin(Math.round(value));
+                    // Save to AsyncStorage for future use
+                    AsyncStorage.setItem('last_duration_target_min', Math.round(value).toString());
+                  }}
+                  minimumTrackTintColor="#a3e635"
+                  maximumTrackTintColor="#27272a"
+                  thumbTintColor="#a3e635"
+                />
+                <Text style={styles.durationSliderLabel}>150 min</Text>
               </View>
             </View>
 
@@ -957,29 +1082,32 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 12,
   },
-  durationChipsRow: {
+  durationSliderHeader: {
     flexDirection: 'row',
-    gap: 8,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  durationChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    backgroundColor: 'transparent',
-  },
-  durationChipActive: {
-    borderColor: '#a3e635',
-    backgroundColor: 'rgba(163, 230, 53, 0.1)',
-  },
-  durationChipText: {
-    color: '#a1a1aa',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  durationChipTextActive: {
+  durationValue: {
     color: '#a3e635',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  durationSliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  durationSlider: {
+    flex: 1,
+    height: 40,
+  },
+  durationSliderLabel: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: '500',
+    minWidth: 50,
+    textAlign: 'center',
   },
 });
 
