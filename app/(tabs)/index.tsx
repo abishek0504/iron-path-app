@@ -299,8 +299,10 @@ export default function HomeScreen() {
               
               // Workout is truly completed only if all current exercises were logged
               isTrulyCompleted = loggedExerciseCount >= currentExerciseCount;
+            } else {
+              // Rest days are automatically completed since there are no exercises to perform
+              isTrulyCompleted = true;
             }
-            // For rest days (currentExerciseCount === 0), isTrulyCompleted remains false
           }
           
           // Set states based on whether data exists
