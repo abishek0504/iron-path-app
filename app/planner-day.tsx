@@ -19,6 +19,8 @@ import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../src/lib/progre
 import { computeProgressionSuggestion } from '../src/lib/progressionEngine';
 import { applyVolumeTemplate } from '../src/lib/volumeTemplates';
 import { filterExercisesByEquipment } from '../src/lib/equipmentFilter';
+import { generateDaySessionWithAI } from '../src/lib/adaptiveWorkoutEngine';
+import { calculateAllMuscleRecovery } from '../src/lib/muscleRecovery';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -91,7 +93,6 @@ export default function PlannerDayScreen() {
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [targetDurationMin, setTargetDurationMin] = useState<number | null>(null);
-  const [durationMode, setDurationMode] = useState<'target' | 'max'>('target');
   const [estimatedDurationSec, setEstimatedDurationSec] = useState<number | null>(null);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
   const durationPickerScrollRef = React.useRef<ScrollView>(null);
@@ -234,9 +235,7 @@ export default function PlannerDayScreen() {
       setPlan(data);
       
       // Load duration mode from plan
-      if (data.plan_data?.duration_mode === 'target' || data.plan_data?.duration_mode === 'max') {
-        setDurationMode(data.plan_data.duration_mode);
-      }
+      // Duration mode removed - using constraint-based approach
       
       if (day) {
         let loadedDayData: any = null;
@@ -721,27 +720,17 @@ export default function PlannerDayScreen() {
         return;
       }
 
-      const genAI = new GoogleGenerativeAI(apiKey);
-      
-      // Get the best available model dynamically
-      const modelName = await getCachedModel(apiKey);
-      if (__DEV__) {
-        console.log('Using Gemini model:', modelName);
-      }
-      
-      const model = genAI.getGenerativeModel({ model: modelName });
-
       const existingExercises = dayData.exercises || [];
 
       // Load available exercises from database with equipment_needed
       const { data: masterExercises } = await supabase
         .from('exercises')
-        .select('name, is_timed, equipment_needed')
+        .select('name, is_timed, equipment_needed, muscle_groups')
         .order('name', { ascending: true });
 
       const { data: userExercises } = await supabase
         .from('user_exercises')
-        .select('name, is_timed, equipment_needed')
+        .select('name, is_timed, equipment_needed, muscle_groups')
         .eq('user_id', user.id)
         .order('name', { ascending: true });
 
@@ -761,148 +750,50 @@ export default function PlannerDayScreen() {
         ...(filteredUserExercises || []).map((ex: any) => ex.name)
       ].filter(Boolean);
 
-      // Build comprehensive prompt using all profile data and available exercises
-      const prompt = buildSupplementaryPrompt(userProfile, day || '', existingExercises, availableExerciseNames);
+      // Fetch workout_logs for last 30 days
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      const text = response.text();
-      
-      // Extract JSON using robust parser
-      let newExercises;
-      try {
-        newExercises = extractJSON(text);
-      } catch (error: any) {
-        if (error instanceof JSONParseError) {
-          if (__DEV__) {
-            console.error('JSON extraction failed:', error.message);
-            console.error('Original response:', error.originalText);
-          }
-          throw new Error('Failed to parse AI response. The response format was unexpected. Please try again.');
-        }
-        throw error;
-      }
-      
-      // Validate array structure
-      if (!Array.isArray(newExercises)) {
-        throw new Error('Invalid response format: expected an array of exercises');
-      }
+      const { data: fetchedLogs } = await supabase
+        .from('workout_logs')
+        .select('exercise_name, weight, reps, scheduled_weight, scheduled_reps, performed_at')
+        .eq('user_id', user.id)
+        .gte('performed_at', thirtyDaysAgo.toISOString())
+        .order('performed_at', { ascending: false });
 
-      // Validate and normalize exercises
-      const { valid, errors } = validateAndNormalizeExercises(newExercises);
-      
-      if (errors.length > 0) {
-        if (__DEV__) {
-          console.warn('Validation errors in generated exercises:', errors);
-        }
-        // Use valid exercises only, log warnings for invalid ones
-        if (valid.length === 0) {
-          throw new Error('All generated exercises failed validation. Please try again.');
-        }
-        newExercises = valid;
-      } else {
-        newExercises = valid;
-      }
+      const recentLogs = fetchedLogs || [];
 
-      // Convert exercises to format with sets array (matching manual exercise format)
-      const convertedExercises = newExercises.map((ex: any) => {
-        let converted = { ...ex };
-        // Normalize and apply volume templates for realistic sets/reps/rest
-        converted = applyVolumeTemplate(converted);
-        
-        // Ensure target_reps is a number (not string)
-        if (typeof converted.target_reps === 'string') {
-          // Try to parse string like "8-12" to a number (take first number)
-          const match = converted.target_reps.match(/\d+/);
-          converted.target_reps = match ? parseInt(match[0], 10) : 10;
-        }
-        
-        // Create sets array matching manual format
-        const numSets = converted.target_sets || 3;
-        const targetReps = converted.target_reps || 10;
-        const restTime = converted.rest_time_sec || 60;
-        
-        // Check if exercise is bodyweight or timed
-        const exerciseName = (converted.name || '').toLowerCase();
-        const isBodyweight = [
-          'pull up', 'pull-up', 'pullup', 'chin up', 'chin-up',
-          'push up', 'push-up', 'pushup',
-          'dip', 'dips', 'sit up', 'sit-up', 'situp',
-          'crunch', 'crunches', 'plank', 'planks',
-          'burpee', 'burpees', 'mountain climber', 'mountain climbers',
-          'bodyweight squat', 'air squat', 'lunge', 'lunges',
-          'jumping jack', 'jumping jacks', 'pistol squat',
-          'handstand push up', 'handstand push-up', 'muscle up', 'muscle-up'
-        ].some(bw => exerciseName.includes(bw));
-        
-        // Check if it's a timed exercise from database
-        const masterExercise = (masterExercises || []).find((me: any) => 
-          me.name.toLowerCase() === exerciseName
-        );
-        const userExercise = (userExercises || []).find((ue: any) => 
-          ue.name.toLowerCase() === exerciseName
-        );
-        const isTimed = masterExercise?.is_timed || userExercise?.is_timed || false;
-        
-        if (isTimed && converted.target_duration_sec) {
-          converted.sets = Array.from({ length: numSets }, (_, i) => ({
-            index: i + 1,
-            duration: converted.target_duration_sec,
-            rest_time_sec: restTime
-          }));
-        } else {
-          converted.sets = Array.from({ length: numSets }, (_, i) => ({
-            index: i + 1,
-            reps: targetReps,
-            weight: isBodyweight ? 0 : null,
-            rest_time_sec: restTime
-          }));
-        }
-        
-        return converted;
+      // Build exercise history map (for prompt context)
+      const exerciseHistory = new Map<string, Array<{ weight: number; reps: number; performed_at: string }>>();
+      recentLogs.forEach((log: any) => {
+        if (!log.exercise_name) return;
+        const history = exerciseHistory.get(log.exercise_name) || [];
+        history.push({
+          weight: log.weight,
+          reps: log.reps,
+          performed_at: log.performed_at,
+        });
+        exerciseHistory.set(log.exercise_name, history);
       });
 
-      // Attach history-based weight suggestions for new exercises
-      const exerciseNames = new Set<string>();
-      convertedExercises.forEach((ex: any) => {
-        if (ex?.name) {
-          exerciseNames.add(ex.name);
-        }
+      // Sort and limit history per exercise
+      exerciseHistory.forEach((history, exerciseName) => {
+        history.sort((a, b) => new Date(b.performed_at).getTime() - new Date(a.performed_at).getTime());
+        exerciseHistory.set(exerciseName, history.slice(0, 10));
       });
 
-      let logsByExercise = new Map<string, WorkoutLogLike[]>();
-      if (exerciseNames.size > 0) {
-        const { data: logs } = await supabase
-          .from('workout_logs')
-          .select('exercise_name, weight, reps, scheduled_weight, scheduled_reps, performed_at')
-          .eq('user_id', user.id)
-          .in('exercise_name', Array.from(exerciseNames));
-
-        if (logs && Array.isArray(logs)) {
-          logsByExercise = logs.reduce((map, log) => {
-            const name = log.exercise_name;
-            if (!name) return map;
-            const list = map.get(name) || [];
-            list.push(log as WorkoutLogLike);
-            map.set(name, list);
-            return map;
-          }, new Map<string, WorkoutLogLike[]>());
-        }
-      }
-
-      // Fetch PRs for generated exercises
+      // Fetch user_exercises for PRs
       const { data: userExercisesWithPR } = await supabase
         .from('user_exercises')
         .select('name, pr_weight, pr_reps')
         .eq('user_id', user.id)
-        .in('name', Array.from(exerciseNames))
         .not('pr_weight', 'is', null);
 
-      const prsByExercise = new Map<string, { weight: number; reps: number | null }>();
+      const exercisePRs = new Map<string, { weight: number; reps: number | null }>();
       if (userExercisesWithPR) {
         userExercisesWithPR.forEach((ue: any) => {
           if (ue.pr_weight && ue.pr_weight > 0) {
-            prsByExercise.set(ue.name, {
+            exercisePRs.set(ue.name, {
               weight: ue.pr_weight,
               reps: ue.pr_reps || null,
             });
@@ -910,48 +801,140 @@ export default function PlannerDayScreen() {
         });
       }
 
-      const exercisesWithWeights = convertedExercises.map((ex: any) => {
-        if (!ex?.name) return ex;
-        const logs = logsByExercise.get(ex.name) || [];
-        const metrics = computeExerciseHistoryMetrics(logs);
-        const pr = prsByExercise.get(ex.name) || null;
-
-        const suggestion = computeProgressionSuggestion({
-          profile: userProfile,
-          exercise: ex,
-          metrics,
-          personalRecord: pr,
+      // Calculate muscle recovery (handle empty logs)
+      // Convert logs to format expected by calculateAllMuscleRecovery
+      let muscleRecovery = new Map();
+      
+      if (recentLogs.length > 0) {
+        // Group logs by workout session (performed_at date, rounded to day)
+        const logsBySession = new Map<string, typeof recentLogs>();
+        recentLogs.forEach((log: any) => {
+          if (!log.performed_at) return;
+          // Group by date (YYYY-MM-DD) to treat all logs on same day as one workout
+          const date = new Date(log.performed_at);
+          const sessionKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          const sessionLogs = logsBySession.get(sessionKey) || [];
+          sessionLogs.push(log);
+          logsBySession.set(sessionKey, sessionLogs);
         });
 
-        if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0 && Array.isArray(ex.sets)) {
-          ex.sets = ex.sets.map((set: any) => {
-            const currentWeight = set.weight;
-            if (
-              currentWeight === null ||
-              currentWeight === undefined ||
-              Number.isNaN(currentWeight)
-            ) {
-              return { ...set, weight: suggestion.suggestedWeight };
-            }
-            return set;
-          });
-        }
+        // Fetch muscle_groups for exercises
+        const allExerciseNames = new Set<string>();
+        recentLogs.forEach((log: any) => {
+          if (log.exercise_name) allExerciseNames.add(log.exercise_name);
+        });
 
-        return ex;
+        const { data: exerciseMetadata } = await supabase
+          .from('exercises')
+          .select('name, muscle_groups')
+          .in('name', Array.from(allExerciseNames));
+
+        const { data: userExerciseMetadata } = await supabase
+          .from('user_exercises')
+          .select('name, muscle_groups')
+          .eq('user_id', user.id)
+          .in('name', Array.from(allExerciseNames));
+
+        const exerciseMuscleGroups = new Map<string, string[]>();
+        [...(exerciseMetadata || []), ...(userExerciseMetadata || [])].forEach((ex: any) => {
+          if (ex.muscle_groups && Array.isArray(ex.muscle_groups)) {
+            exerciseMuscleGroups.set(ex.name, ex.muscle_groups);
+          }
+        });
+
+        // Convert to workout history format
+        const workoutHistoryForRecovery: Array<{
+          sets: Array<{
+            weight: number | null;
+            reps: number | null;
+            muscleGroups?: string[] | null;
+          }>;
+          performedAt: Date;
+        }> = [];
+
+        logsBySession.forEach((sessionLogs, sessionKey) => {
+          const sets = sessionLogs.map((log: any) => ({
+            weight: log.weight,
+            reps: log.reps,
+            muscleGroups: exerciseMuscleGroups.get(log.exercise_name) || null,
+          }));
+
+          // Use the date from the session key
+          const [year, month, day] = sessionKey.split('-').map(Number);
+          workoutHistoryForRecovery.push({
+            sets,
+            performedAt: new Date(year, month - 1, day),
+          });
+        });
+
+        muscleRecovery = calculateAllMuscleRecovery(workoutHistoryForRecovery);
+      }
+      // If empty logs, muscleRecovery stays as empty Map (all muscles treated as 100% recovered)
+
+      // Fetch current plan for context (if exists)
+      let currentWeekSchedule: any = null;
+      if (planId) {
+        const { data: currentPlan } = await supabase
+          .from('workout_plans')
+          .select('plan_data')
+          .eq('id', planId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (currentPlan?.plan_data) {
+          // Get current week's schedule
+          const today = new Date();
+          const dayOfWeek = today.getDay();
+          const diff = today.getDate() - dayOfWeek;
+          const weekStart = new Date(today);
+          weekStart.setDate(diff);
+          weekStart.setHours(0, 0, 0, 0);
+          
+          const year = weekStart.getFullYear();
+          const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+          const day = String(weekStart.getDate()).padStart(2, '0');
+          const weekKey = `${year}-${month}-${day}`;
+
+          if (currentPlan.plan_data.weeks?.[weekKey]?.week_schedule) {
+            currentWeekSchedule = currentPlan.plan_data.weeks[weekKey].week_schedule;
+          } else if (currentPlan.plan_data.week_schedule) {
+            currentWeekSchedule = currentPlan.plan_data.week_schedule;
+          }
+        }
+      }
+
+      // Call the new engine
+      const result = await generateDaySessionWithAI({
+        profile: userProfile,
+        day: day || '',
+        existingExercises: existingExercises,
+        timeConstraintMin: targetDurationMin || 45,
+        availableExercises: availableExerciseNames,
+        recentLogs: recentLogs,
+        personalRecords: exercisePRs,
+        muscleRecovery: muscleRecovery,
+        exerciseHistory: exerciseHistory,
+        currentWeekSchedule: currentWeekSchedule,
+        apiKey: apiKey,
       });
 
-      // Add new exercises to existing ones (user preference - don't overwrite)
-      const updatedExercises = [...existingExercises, ...exercisesWithWeights];
+      // Update day data with result
       const updatedDayData = {
         ...dayData,
-        exercises: updatedExercises
+        exercises: result.session.exercises,
       };
 
       await savePlan(updatedDayData, true);
       // Reload exercise details after adding new exercises
-      await loadExerciseDetails(updatedExercises);
+      await loadExerciseDetails(result.session.exercises);
       setHasGenerated(true);
-      setToastMessage(`Added ${newExercises.length} supplementary exercise${newExercises.length !== 1 ? 's' : ''}!`);
+      
+      const newExerciseCount = result.session.exercises.length - existingExercises.length;
+      let message = `Added ${newExerciseCount} exercise${newExerciseCount !== 1 ? 's' : ''}!`;
+      if (result.wasCompressed) {
+        message += ` (Compressed to fit ${targetDurationMin || 45} min)`;
+      }
+      setToastMessage(message);
       setToastVisible(true);
     } catch (error: any) {
       if (__DEV__) {
@@ -1504,48 +1487,14 @@ export default function PlannerDayScreen() {
       <View style={styles.durationTargetRow}>
         <View style={styles.durationHeader}>
           <Text style={styles.durationTargetLabel}>
-            {durationMode === 'target' ? 'Target duration' : 'Maximum duration'}
+            Time Constraint
           </Text>
           <Text style={styles.durationTargetValue}>{targetDurationMin || 45} min</Text>
         </View>
         
-        {/* Mode Toggle */}
-        <View style={styles.durationModeToggle}>
-          <TouchableOpacity
-            style={[
-              styles.durationModeButton,
-              durationMode === 'target' && styles.durationModeButtonActive
-            ]}
-            onPress={() => setDurationMode('target')}
-          >
-            <Text style={[
-              styles.durationModeButtonText,
-              durationMode === 'target' && styles.durationModeButtonTextActive
-            ]}>
-              Target Duration
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.durationModeButton,
-              durationMode === 'max' && styles.durationModeButtonActive
-            ]}
-            onPress={() => setDurationMode('max')}
-          >
-            <Text style={[
-              styles.durationModeButtonText,
-              durationMode === 'max' && styles.durationModeButtonTextActive
-            ]}>
-              Max Time
-            </Text>
-          </TouchableOpacity>
-        </View>
-        
         {/* Explanation Text */}
         <Text style={styles.durationModeExplanation}>
-          {durationMode === 'target' 
-            ? 'Fill the slot as best as possible - the AI will aim to create a workout that matches this duration'
-            : 'Give the best possible workout within the time constraint - the AI will optimize for quality within this limit'}
+          Maximum workout duration - workout will be compressed if it exceeds this time
         </Text>
         
         <TouchableOpacity
@@ -1566,7 +1515,7 @@ export default function PlannerDayScreen() {
         </Text>
       )}
     </View>
-  ), [day, dayData.exercises?.length, handleBack, addManualExercise, targetDurationMin, estimatedDurationSec, updateTargetDuration, durationMode]);
+  ), [day, dayData.exercises?.length, handleBack, addManualExercise, targetDurationMin, estimatedDurationSec, updateTargetDuration]);
 
   const renderFooter = useCallback(() => (
     <View style={styles.footerSection}>

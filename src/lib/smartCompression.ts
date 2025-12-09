@@ -21,7 +21,7 @@ export interface CompressionResult {
 /**
  * Estimates total duration for a day's exercises (in seconds).
  */
-const estimateDayDuration = (exercises: any[]): number => {
+export const estimateDayDuration = (exercises: any[]): number => {
   if (!Array.isArray(exercises) || exercises.length === 0) return 0;
   let total = 0;
 

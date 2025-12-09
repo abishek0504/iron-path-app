@@ -410,3 +410,246 @@ Return ONLY the JSON array, no other text.`;
   return prompt;
 };
 
+/**
+ * Build prompt for day session generation with comprehensive context
+ */
+export const buildDaySessionPrompt = (params: {
+  profile: any;
+  day: string;
+  existingExercises: any[];
+  availableExercises: string[];
+  coveredMovementPatterns: string[];
+  missingMovementPatterns: string[];
+  coveredMuscleGroups: string[];
+  recoveryReadyMuscles: string[];
+  recoveryFatiguedMuscles: string[];
+  remainingTimeSec: number;
+  timeConstraintMin: number;
+  exerciseHistory?: Map<string, Array<{ weight: number; reps: number; performed_at: string }>>;
+  personalRecords?: Map<string, { weight: number; reps: number | null }>;
+  currentWeekSchedule?: any;
+}): string => {
+  const {
+    profile,
+    day,
+    existingExercises,
+    availableExercises,
+    coveredMovementPatterns,
+    missingMovementPatterns,
+    coveredMuscleGroups,
+    recoveryReadyMuscles,
+    recoveryFatiguedMuscles,
+    remainingTimeSec,
+    timeConstraintMin,
+    exerciseHistory = new Map(),
+    personalRecords = new Map(),
+    currentWeekSchedule,
+  } = params;
+
+  const useImperial = profile.use_imperial !== false;
+  const weightStr = formatWeight(profile.current_weight, useImperial);
+  const heightStr = formatHeight(profile.height, useImperial);
+  
+  let goalWeightStr = '';
+  if (profile.goal_weight) {
+    goalWeightStr = formatWeight(profile.goal_weight, useImperial);
+  }
+
+  const experienceGuidelines = getExperienceGuidelines(profile.experience_level);
+  const goalConsiderations = getGoalConsiderations(profile.goal);
+  const { style: trainingStyle, components } = deriveStyleAndComponentsFromProfile(profile);
+  const componentDescription = describeComponentsForPrompt(trainingStyle, components);
+
+  // Format equipment list for prompt
+  const formatEquipmentForPrompt = (equipment: any[]): string => {
+    if (!equipment || equipment.length === 0) {
+      return 'Full gym access (all equipment available)';
+    }
+    return equipment.map((eq: any) => {
+      if (typeof eq === 'string') {
+        return eq;
+      } else if (eq && typeof eq === 'object' && 'name' in eq) {
+        return eq.name;
+      }
+      return '';
+    }).filter(Boolean).join(', ');
+  };
+
+  const equipmentStr = formatEquipmentForPrompt(profile.equipment_access || []);
+
+  // Build existing exercises list
+  const existingNames = existingExercises.map((e: any) => e.name).filter(Boolean);
+  const existingList = existingNames.length > 0 ? existingNames.join(', ') : 'None';
+
+  // Build exercise list section
+  let exerciseListSection = '';
+  if (availableExercises.length > 0) {
+    exerciseListSection = `\nAVAILABLE EXERCISES FROM DATABASE:\n${availableExercises.join(', ')}\n\nIMPORTANT: You MUST prefer exercises from this list. Only create custom exercises if none from the list are suitable.`;
+  }
+
+  // Build gap analysis section
+  let gapAnalysisSection = '';
+  
+  if (existingNames.length > 0) {
+    gapAnalysisSection = `\nEXISTING EXERCISES FOR ${day}:\n${existingList}\n\nGAP ANALYSIS:\n`;
+    
+    // Movement pattern gaps
+    if (coveredMovementPatterns.length > 0) {
+      gapAnalysisSection += `- Covered movement patterns: ${coveredMovementPatterns.join(', ')}\n`;
+    }
+    if (missingMovementPatterns.length > 0) {
+      gapAnalysisSection += `- Missing movement patterns: ${missingMovementPatterns.join(', ')}\n`;
+    }
+    
+    // Muscle group gaps
+    if (coveredMuscleGroups.length > 0) {
+      gapAnalysisSection += `- Covered muscle groups: ${coveredMuscleGroups.join(', ')}\n`;
+    }
+    
+    // Recovery status
+    if (recoveryReadyMuscles.length > 0) {
+      gapAnalysisSection += `- Recovery-ready muscles (>80%): ${recoveryReadyMuscles.join(', ')} - prioritize exercises targeting these\n`;
+    }
+    if (recoveryFatiguedMuscles.length > 0) {
+      gapAnalysisSection += `- Fatigued muscles (<50%): ${recoveryFatiguedMuscles.join(', ')} - avoid heavy work on these\n`;
+    }
+    
+    gapAnalysisSection += '\nINSTRUCTIONS:\n';
+    gapAnalysisSection += '- Generate exercises that COMPLEMENT existing exercises\n';
+    gapAnalysisSection += '- Do NOT duplicate existing exercises or repeat movement patterns already covered\n';
+    
+    // Tier-specific instructions
+    if (components.include_tier1_compounds && !components.include_tier2_accessories) {
+      gapAnalysisSection += '- For Tier 1-only preference: Add Tier 1 exercises to cover missing movement patterns (squat, hinge, push, pull)\n';
+      gapAnalysisSection += '- Do NOT repeat Tier 1 patterns if already present\n';
+    } else {
+      gapAnalysisSection += '- Add complementary Tier 2/3 exercises to fill gaps\n';
+    }
+  } else {
+    gapAnalysisSection = `\nNo existing exercises for ${day}. Generate a complete workout.\n`;
+  }
+
+  // Build exercise history section
+  let historySection = '';
+  if (exerciseHistory && exerciseHistory.size > 0) {
+    const historyList: string[] = [];
+    exerciseHistory.forEach((logs, exerciseName) => {
+      if (logs.length > 0) {
+        const recent = logs.slice(0, Math.min(5, logs.length));
+        const recentStr = recent.map(log => {
+          const weightStr = formatWeight(log.weight, useImperial);
+          return `${weightStr} x ${log.reps}`;
+        }).join(', ');
+        historyList.push(`${exerciseName}: ${recentStr}`);
+      }
+    });
+    if (historyList.length > 0) {
+      historySection = `\nRECENT WORKOUT HISTORY:\nThe user's recent weights and reps for exercises:\n${historyList.join('\n')}\n\nIMPORTANT: Use this history to understand progression patterns and set appropriate starting weights.\n`;
+    }
+  }
+
+  // Build PR section
+  let prSection = '';
+  if (personalRecords && personalRecords.size > 0) {
+    const prList: string[] = [];
+    personalRecords.forEach((pr, exerciseName) => {
+      const weightStr = formatWeight(pr.weight, useImperial);
+      if (pr.reps) {
+        prList.push(`${exerciseName}: ${weightStr} for ${pr.reps} reps`);
+      } else {
+        prList.push(`${exerciseName}: ${weightStr}`);
+      }
+    });
+    if (prList.length > 0) {
+      prSection = `\nPERSONAL RECORDS (PRs):\nThe user's current personal records:\n${prList.join('\n')}\n\nIMPORTANT: Use these PRs to understand strength levels. Starting weights should be conservative relative to PRs (typically 70-85% of PR weight for working sets).\n`;
+    }
+  }
+
+  // Build current plan section
+  let currentPlanSection = '';
+  if (currentWeekSchedule) {
+    const daysWithExercises: string[] = [];
+    Object.keys(currentWeekSchedule).forEach(dayKey => {
+      const dayData = currentWeekSchedule[dayKey];
+      if (dayData?.exercises && Array.isArray(dayData.exercises) && dayData.exercises.length > 0) {
+        const exerciseNames = dayData.exercises.map((ex: any) => ex.name).filter(Boolean).join(', ');
+        daysWithExercises.push(`${dayKey}: ${exerciseNames}`);
+      }
+    });
+    
+    if (daysWithExercises.length > 0) {
+      currentPlanSection = `\nCURRENT WEEK PLAN CONTEXT:\nThe user's current week schedule:\n${daysWithExercises.join('\n')}\n\nConsider this context when generating exercises to ensure balance across the week.\n`;
+    }
+  }
+
+  const remainingTimeMin = Math.round(remainingTimeSec / 60);
+
+  let prompt = `Generate supplementary exercises for ${day} workout in JSON format.
+
+USER PROFILE:
+- Age: ${profile.age || 'N/A'} years old
+- Gender: ${profile.gender || 'Not specified'}
+- Current Weight: ${weightStr}
+${goalWeightStr ? `- Goal Weight: ${goalWeightStr}` : ''}
+- Height: ${heightStr}
+- Training Goal: ${profile.goal || 'General fitness'}
+- Training Frequency: ${profile.days_per_week || 'N/A'} days per week
+- Equipment Access: ${equipmentStr}
+- Experience Level: ${profile.experience_level || 'Not specified'}
+
+TRAINING GUIDELINES:
+${experienceGuidelines}
+${goalConsiderations ? `\n${goalConsiderations}` : ''}
+
+WORKOUT COMPONENT PREFERENCES:
+${componentDescription}
+
+TIME CONSTRAINT:
+CRITICAL: Generate the best possible workout that fits within ${timeConstraintMin} minutes. This is a MAXIMUM constraint - prioritize quality over quantity. Do NOT add filler exercises just to fill time.
+${remainingTimeSec > 0 ? `- Remaining time budget: approximately ${remainingTimeMin} minutes\n` : ''}
+${remainingTimeSec <= 0 ? '- WARNING: Existing exercises already exceed or meet time constraint. Generate only essential complementary exercises if needed.\n' : ''}
+
+${gapAnalysisSection}
+
+${currentPlanSection}
+
+${prSection}
+
+${historySection}
+
+${profile.workout_feedback ? `\nUSER FEEDBACK TO CONSIDER:\n${profile.workout_feedback}\n` : ''}
+
+IMPORTANT: 
+- DO NOT duplicate or replace existing exercises: ${existingList}
+- Only add exercises that COMPLEMENT and work well with the existing exercises
+- CRITICAL EQUIPMENT REQUIREMENT: You MUST only use exercises that can be performed with the available equipment: ${equipmentStr}
+  - If the user has NO equipment selected (bodyweight only), you MUST only use bodyweight exercises (no dumbbells, barbells, machines, cables, etc.)
+  - If the user has specific equipment, you MUST verify that each exercise's required equipment is in the list above
+  - Exercises that require equipment NOT in the list above are FORBIDDEN
+- Follow experience level guidelines for volume and rep ranges
+${exerciseListSection}
+
+EXERCISE FORMAT REQUIREMENTS:
+Each exercise must have this EXACT structure:
+- "name": string (prefer from available exercises list)
+- "target_sets": number (typically 3-5 based on experience level)
+- "target_reps": number (not a string, e.g., 10 not "8-12")
+- "rest_time_sec": number (rest time in seconds between sets)
+- "notes": string (technique tips, can be empty string "")
+
+The response must be STRICTLY valid JSON array in this exact format:
+[
+  {
+    "name": "Exercise Name",
+    "target_sets": 3,
+    "target_reps": 10,
+    "rest_time_sec": 90,
+    "notes": "Form tips and technique focus"
+  }
+]
+
+Return ONLY the JSON array, no other text.`;
+
+  return prompt;
+};
+

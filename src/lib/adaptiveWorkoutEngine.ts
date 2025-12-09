@@ -1,13 +1,17 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { buildFullPlanPrompt } from './aiPrompts';
+import { buildFullPlanPrompt, buildDaySessionPrompt } from './aiPrompts';
 import { extractJSON, JSONParseError } from './jsonParser';
-import { ensureAllDays, validateWeekSchedule, normalizeExercise } from './workoutValidation';
+import { ensureAllDays, validateWeekSchedule, normalizeExercise, validateAndNormalizeExercises } from './workoutValidation';
 import { applyVolumeTemplate } from './volumeTemplates';
 import { getCachedModel, clearModelCache } from './geminiModels';
-import { applySmartCompression } from './smartCompression';
+import { applySmartCompression, estimateDayDuration } from './smartCompression';
 import { inferMovementPattern } from './movementPatterns';
 import { analyzeCoverage } from './coverageAnalysis';
 import { analyzeRecovery } from './recoveryHeuristics';
+import { computeProgressionSuggestion } from './progressionEngine';
+import { computeExerciseHistoryMetrics } from './progressionMetrics';
+import { estimateExerciseDuration } from './timeEstimation';
+import type { MuscleRecoveryState } from './muscleRecovery';
 
 type NamedExercise = { name: string; is_timed?: boolean | null };
 
@@ -334,5 +338,359 @@ function getCurrentWeekKey(): string {
   const day = String(weekStart.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+
+export interface GenerateDaySessionParams {
+  profile: any;
+  day: string;
+  existingExercises: any[]; // Manual exercises locked by user
+  timeConstraintMin: number; // Acts as CEILING only (not floor)
+  availableExercises: any[]; // Filtered by equipment (must include muscle_groups)
+  recentLogs: any[]; // From workout_logs (last 30 days) - may be empty for new users
+  personalRecords: Map<string, { weight: number; reps: number | null }>; // May be empty
+  muscleRecovery: Map<string, MuscleRecoveryState>; // From muscleRecovery.ts - may be empty
+  exerciseHistory?: Map<string, Array<{ weight: number; reps: number; performed_at: string }>>; // Optional exercise history
+  currentWeekSchedule?: any; // Optional current week schedule for context
+  apiKey: string;
+}
+
+export interface GenerateDaySessionResult {
+  session: {
+    exercises: any[];
+    target_duration_min?: number;
+  };
+  wasCompressed: boolean;
+  compressionActions?: string[];
+}
+
+/**
+ * Generate day session with AI - Hybrid Adaptive Engine
+ * Analyzes existing exercises, fills gaps intelligently, applies progression, and compresses if needed
+ */
+export const generateDaySessionWithAI = async (
+  params: GenerateDaySessionParams
+): Promise<GenerateDaySessionResult> => {
+  const {
+    profile,
+    day,
+    existingExercises = [],
+    timeConstraintMin,
+    availableExercises,
+    recentLogs = [],
+    personalRecords = new Map(),
+    muscleRecovery = new Map(),
+    exerciseHistory = new Map(),
+    currentWeekSchedule,
+    apiKey,
+  } = params;
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const modelName = await getCachedModel(apiKey);
+
+  if (__DEV__) {
+    console.log('[generateDaySessionWithAI] Starting generation', {
+      day,
+      existingExercisesCount: existingExercises.length,
+      recentLogsCount: recentLogs.length,
+      prsCount: personalRecords.size,
+      recoveryCount: muscleRecovery.size,
+      timeConstraintMin,
+    });
+  }
+
+  const model = genAI.getGenerativeModel({ model: modelName });
+
+  // Step 1: Layered Gap Analysis
+  // a. Movement Pattern Analysis
+  const coveredMovementPatterns = new Set<string>();
+  existingExercises.forEach((ex: any) => {
+    const pattern = ex.movement_pattern || inferMovementPattern(ex.name);
+    if (pattern) {
+      coveredMovementPatterns.add(pattern);
+    }
+  });
+
+  const essentialPatterns = ['squat', 'hinge', 'push_horiz', 'pull_horiz', 'push_vert', 'pull_vert'];
+  const missingMovementPatterns = essentialPatterns.filter(p => !coveredMovementPatterns.has(p));
+
+  // b. Muscle Group Analysis
+  // Note: muscle_groups might not be in existingExercises if not loaded
+  // This is okay - gap analysis will work with what's available
+  const coveredMuscleGroups = new Set<string>();
+  existingExercises.forEach((ex: any) => {
+    if (Array.isArray(ex.muscle_groups)) {
+      ex.muscle_groups.forEach((mg: string) => {
+        if (mg) coveredMuscleGroups.add(mg.toLowerCase());
+      });
+    }
+  });
+
+  // c. Recovery-Based Analysis
+  const recoveryReadyMuscles: string[] = [];
+  const recoveryFatiguedMuscles: string[] = [];
+  
+  if (muscleRecovery.size > 0) {
+    muscleRecovery.forEach((state, muscleGroup) => {
+      if (state.recoveryPercent > 80) {
+        recoveryReadyMuscles.push(muscleGroup);
+      } else if (state.recoveryPercent < 50) {
+        recoveryFatiguedMuscles.push(muscleGroup);
+      }
+    });
+  } else {
+    // Empty recovery map = all muscles 100% recovered (new user)
+    if (__DEV__) {
+      console.log('[generateDaySessionWithAI] Empty recovery map - treating all muscles as 100% recovered');
+    }
+  }
+
+  // d. Duration Calculation
+  let currentEstimatedDuration = 0;
+  if (existingExercises.length > 0) {
+    currentEstimatedDuration = estimateDayDuration(existingExercises);
+  }
+  const remainingTime = (timeConstraintMin * 60) - currentEstimatedDuration;
+
+  if (__DEV__) {
+    console.log('[generateDaySessionWithAI] Gap analysis', {
+      coveredPatterns: Array.from(coveredMovementPatterns),
+      missingPatterns: missingMovementPatterns,
+      coveredMuscleGroups: Array.from(coveredMuscleGroups),
+      recoveryReady: recoveryReadyMuscles,
+      recoveryFatigued: recoveryFatiguedMuscles,
+      currentDurationSec: currentEstimatedDuration,
+      remainingTimeSec: remainingTime,
+    });
+  }
+
+  // Step 2: Build Enhanced Prompt
+  const prompt = buildDaySessionPrompt({
+    profile,
+    day,
+    existingExercises,
+    availableExercises,
+    coveredMovementPatterns: Array.from(coveredMovementPatterns),
+    missingMovementPatterns,
+    coveredMuscleGroups: Array.from(coveredMuscleGroups),
+    recoveryReadyMuscles,
+    recoveryFatiguedMuscles,
+    remainingTimeSec: remainingTime,
+    timeConstraintMin,
+    exerciseHistory,
+    personalRecords,
+    currentWeekSchedule,
+  });
+
+  // Step 3: AI Generation & JSON Extraction
+  let newExercises: any[];
+  try {
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const text = response.text();
+
+    try {
+      newExercises = extractJSON(text);
+    } catch (error: any) {
+      if (error instanceof JSONParseError) {
+        if (__DEV__) {
+          console.error('[generateDaySessionWithAI] JSON extraction failed:', error.message);
+          console.error('[generateDaySessionWithAI] Original response:', error.originalText);
+        }
+        throw new Error('Failed to parse AI response. The response format was unexpected. Please try again.');
+      }
+      throw error;
+    }
+
+    // Validate array structure
+    if (!Array.isArray(newExercises)) {
+      throw new Error('Invalid response format: expected an array of exercises');
+    }
+  } catch (error: any) {
+    if (error?.message && (error.message.includes('not found') || error.message.includes('404'))) {
+      clearModelCache();
+      if (__DEV__) {
+        console.log('[generateDaySessionWithAI] Cleared model cache due to model not found error');
+      }
+    }
+    throw error;
+  }
+
+  // Validate and normalize exercises
+  const { valid, errors } = validateAndNormalizeExercises(newExercises);
+  if (errors.length > 0) {
+    if (__DEV__) {
+      console.warn('[generateDaySessionWithAI] Validation errors:', errors);
+    }
+    if (valid.length === 0) {
+      throw new Error('All generated exercises failed validation. Please try again.');
+    }
+    newExercises = valid;
+  } else {
+    newExercises = valid;
+  }
+
+  // Step 4: Exercise Processing (Correct Order)
+  const processedExercises = newExercises.map((ex: any, idx: number) => {
+    // 1. Normalize First
+    let processed = normalizeExercise(ex);
+    
+    // 2. Apply Volume Templates
+    processed = applyVolumeTemplate(processed);
+    
+    // 3. Infer Movement Patterns
+    if (!processed.movement_pattern) {
+      processed.movement_pattern = inferMovementPattern(processed.name);
+    }
+    
+    // Ensure target_reps is a number (not string)
+    if (typeof processed.target_reps === 'string') {
+      const match = processed.target_reps.match(/\d+/);
+      processed.target_reps = match ? parseInt(match[0], 10) : 10;
+    }
+    
+    // Create sets array matching manual format
+    const numSets = processed.target_sets || 3;
+    const targetReps = processed.target_reps || 10;
+    const restTime = processed.rest_time_sec || 60;
+    
+    // Check if exercise is bodyweight or timed
+    const exerciseName = (processed.name || '').toLowerCase();
+    const isBodyweight = [
+      'pull up', 'pull-up', 'pullup', 'chin up', 'chin-up',
+      'push up', 'push-up', 'pushup',
+      'dip', 'dips', 'sit up', 'sit-up', 'situp',
+      'crunch', 'crunches', 'plank', 'planks',
+      'burpee', 'burpees', 'mountain climber', 'mountain climbers',
+      'bodyweight squat', 'air squat', 'lunge', 'lunges',
+      'jumping jack', 'jumping jacks', 'pistol squat',
+      'handstand push up', 'handstand push-up', 'muscle up', 'muscle-up'
+    ].some(bw => exerciseName.includes(bw));
+    
+    // Check if it's a timed exercise (from availableExercises metadata if available)
+    // For now, we'll infer from name patterns
+    const isTimed = exerciseName.includes('stretch') || 
+                    exerciseName.includes('mobility') ||
+                    exerciseName.includes('plank') ||
+                    exerciseName.includes('hold') ||
+                    exerciseName.includes('cardio') ||
+                    exerciseName.includes('interval') ||
+                    processed.target_duration_sec != null;
+    
+    if (isTimed && processed.target_duration_sec) {
+      processed.sets = Array.from({ length: numSets }, (_, i) => ({
+        index: i + 1,
+        duration: processed.target_duration_sec,
+        rest_time_sec: restTime
+      }));
+    } else {
+      processed.sets = Array.from({ length: numSets }, (_, i) => ({
+        index: i + 1,
+        reps: targetReps,
+        weight: isBodyweight ? 0 : null,
+        rest_time_sec: restTime
+      }));
+    }
+    
+    return processed;
+  });
+
+  // Step 5: Progression Application (Handle Empty Logs)
+  const exercisesWithProgression = processedExercises.map((ex: any) => {
+    // Handle empty logs (new user case)
+    if (recentLogs.length === 0) {
+      // computeProgressionSuggestion already handles this gracefully
+      // It will use heuristic starting weights from progressionEngine.ts
+    }
+
+    // If logs exist, apply progression
+    const exerciseLogs = recentLogs.filter((log: any) => 
+      log.exercise_name && log.exercise_name.toLowerCase() === ex.name.toLowerCase()
+    );
+
+    const metrics = computeExerciseHistoryMetrics(exerciseLogs);
+    const pr = personalRecords.get(ex.name) || null;
+
+    const suggestion = computeProgressionSuggestion({
+      profile,
+      exercise: ex,
+      metrics,
+      personalRecord: pr,
+    });
+
+    // Override AI's weight/reps with calculated values
+    if (suggestion.suggestedWeight != null && suggestion.suggestedWeight > 0 && Array.isArray(ex.sets)) {
+      ex.sets = ex.sets.map((set: any) => {
+        const currentWeight = set.weight;
+        if (
+          currentWeight === null ||
+          currentWeight === undefined ||
+          Number.isNaN(currentWeight)
+        ) {
+          return { ...set, weight: suggestion.suggestedWeight };
+        }
+        return set;
+      });
+    }
+
+    if (suggestion.suggestedReps != null && suggestion.suggestedReps > 0 && Array.isArray(ex.sets)) {
+      ex.sets = ex.sets.map((set: any) => {
+        if (set.reps === null || set.reps === undefined || Number.isNaN(set.reps)) {
+          return { ...set, reps: suggestion.suggestedReps };
+        }
+        return set;
+      });
+      ex.target_reps = suggestion.suggestedReps;
+    }
+
+    return ex;
+  });
+
+  // Combine existing and new exercises
+  const allExercises = [...existingExercises, ...exercisesWithProgression];
+
+  // Step 6: Constraint-Based Duration Logic (De-Bloated)
+  const totalDurationSec = estimateDayDuration(allExercises);
+
+  if (totalDurationSec > timeConstraintMin * 60) {
+    // EXCEEDS constraint - compress it
+    const compressionResult = applySmartCompression({
+      exercises: allExercises,
+      durationTargetMin: timeConstraintMin,
+    });
+
+    if (__DEV__) {
+      console.log('[generateDaySessionWithAI] Compressed workout', {
+        beforeSec: totalDurationSec,
+        afterSec: compressionResult.estimatedDurationSec,
+        actions: compressionResult.compressionActions,
+      });
+    }
+
+    return {
+      session: {
+        exercises: compressionResult.exercises,
+        target_duration_min: timeConstraintMin,
+      },
+      wasCompressed: true,
+      compressionActions: compressionResult.compressionActions,
+    };
+  } else {
+    // WITHIN constraint - return as-is (don't bloat!)
+    if (__DEV__) {
+      console.log('[generateDaySessionWithAI] Workout within constraint', {
+        totalDurationSec,
+        timeConstraintSec: timeConstraintMin * 60,
+      });
+    }
+
+    return {
+      session: {
+        exercises: allExercises,
+        target_duration_min: timeConstraintMin,
+      },
+      wasCompressed: false,
+      compressionActions: [],
+    };
+  }
+};
 
 
