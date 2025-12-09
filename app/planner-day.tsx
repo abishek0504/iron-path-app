@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput, Modal, Platform, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput, Modal, Platform, FlatList, ScrollView } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import Slider from '@react-native-community/slider';
+import { Picker } from '@react-native-picker/picker';
 import { supabase } from '../src/lib/supabase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { X, Plus, ArrowLeft, GripVertical, Edit2 } from 'lucide-react-native';
@@ -91,7 +91,10 @@ export default function PlannerDayScreen() {
   const dragAllowedRef = React.useRef<number | null>(null);
   const saveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const [targetDurationMin, setTargetDurationMin] = useState<number | null>(null);
+  const [durationMode, setDurationMode] = useState<'target' | 'max'>('target');
   const [estimatedDurationSec, setEstimatedDurationSec] = useState<number | null>(null);
+  const [showDurationPicker, setShowDurationPicker] = useState(false);
+  const durationPickerScrollRef = React.useRef<ScrollView>(null);
   const [exercisePRs, setExercisePRs] = useState<Map<string, PersonalRecord | null>>(new Map());
   const [exerciseEstimatedTimes, setExerciseEstimatedTimes] = useState<Map<string, number>>(new Map());
   const [editingPR, setEditingPR] = useState<{ exerciseName: string; pr: PersonalRecord | null } | null>(null);
@@ -229,6 +232,12 @@ export default function PlannerDayScreen() {
       handleBack();
     } else if (data) {
       setPlan(data);
+      
+      // Load duration mode from plan
+      if (data.plan_data?.duration_mode === 'target' || data.plan_data?.duration_mode === 'max') {
+        setDurationMode(data.plan_data.duration_mode);
+      }
+      
       if (day) {
         let loadedDayData: any = null;
         
@@ -1493,23 +1502,60 @@ export default function PlannerDayScreen() {
       </View>
 
       <View style={styles.durationTargetRow}>
-        <Text style={styles.durationTargetLabel}>Target duration</Text>
-        <View style={styles.durationSliderContainer}>
-          <Text style={styles.durationSliderLabel}>15</Text>
-          <Slider
-            style={styles.durationSlider}
-            minimumValue={15}
-            maximumValue={150}
-            step={5}
-            value={targetDurationMin || 45}
-            onValueChange={(value) => updateTargetDuration(Math.round(value))}
-            minimumTrackTintColor="#a3e635"
-            maximumTrackTintColor="#27272a"
-            thumbTintColor="#a3e635"
-          />
-          <Text style={styles.durationSliderLabel}>150</Text>
+        <View style={styles.durationHeader}>
+          <Text style={styles.durationTargetLabel}>
+            {durationMode === 'target' ? 'Target duration' : 'Maximum duration'}
+          </Text>
+          <Text style={styles.durationTargetValue}>{targetDurationMin || 45} min</Text>
         </View>
-        <Text style={styles.durationTargetValue}>{targetDurationMin || 45} min</Text>
+        
+        {/* Mode Toggle */}
+        <View style={styles.durationModeToggle}>
+          <TouchableOpacity
+            style={[
+              styles.durationModeButton,
+              durationMode === 'target' && styles.durationModeButtonActive
+            ]}
+            onPress={() => setDurationMode('target')}
+          >
+            <Text style={[
+              styles.durationModeButtonText,
+              durationMode === 'target' && styles.durationModeButtonTextActive
+            ]}>
+              Target Duration
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.durationModeButton,
+              durationMode === 'max' && styles.durationModeButtonActive
+            ]}
+            onPress={() => setDurationMode('max')}
+          >
+            <Text style={[
+              styles.durationModeButtonText,
+              durationMode === 'max' && styles.durationModeButtonTextActive
+            ]}>
+              Max Time
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {/* Explanation Text */}
+        <Text style={styles.durationModeExplanation}>
+          {durationMode === 'target' 
+            ? 'Fill the slot as best as possible - the AI will aim to create a workout that matches this duration'
+            : 'Give the best possible workout within the time constraint - the AI will optimize for quality within this limit'}
+        </Text>
+        
+        <TouchableOpacity
+          style={styles.durationPickerButton}
+          onPress={() => setShowDurationPicker(true)}
+        >
+          <Text style={styles.durationPickerButtonText}>
+            {targetDurationMin || 45} min
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {estimatedDurationSec !== null && estimatedDurationSec > 0 && (
@@ -1520,7 +1566,7 @@ export default function PlannerDayScreen() {
         </Text>
       )}
     </View>
-  ), [day, dayData.exercises?.length, handleBack, addManualExercise, targetDurationMin, estimatedDurationSec, updateTargetDuration]);
+  ), [day, dayData.exercises?.length, handleBack, addManualExercise, targetDurationMin, estimatedDurationSec, updateTargetDuration, durationMode]);
 
   const renderFooter = useCallback(() => (
     <View style={styles.footerSection}>
@@ -1812,6 +1858,95 @@ export default function PlannerDayScreen() {
           </View>
         </View>
       </Modal>
+      {/* Duration Picker Modal */}
+      <Modal
+        visible={showDurationPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDurationPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDurationPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Duration</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowDurationPicker(false);
+                  if (targetDurationMin) {
+                    updateTargetDuration(targetDurationMin);
+                  }
+                }}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.nativePickerRow}>
+              {Platform.OS === 'web' ? (
+                <View style={styles.webPickerContainer}>
+                  <ScrollView
+                    ref={durationPickerScrollRef}
+                    style={styles.webPickerScrollView}
+                    contentContainerStyle={styles.webPickerContent}
+                    showsVerticalScrollIndicator={false}
+                    onLayout={() => {
+                      // Scroll to selected item when picker opens
+                      if (Platform.OS === 'web' && durationPickerScrollRef.current) {
+                        const currentValue = targetDurationMin || 45;
+                        const selectedIndex = Math.floor((currentValue - 15) / 5);
+                        const itemHeight = 40; // minHeight from webPickerItem
+                        const scrollOffset = selectedIndex * itemHeight - 88; // Center it (88 is paddingVertical)
+                        durationPickerScrollRef.current.scrollTo({
+                          y: Math.max(0, scrollOffset),
+                          animated: false,
+                        });
+                      }
+                    }}
+                  >
+                    {Array.from({ length: 28 }, (_, i) => 15 + (i * 5)).map((minValue) => (
+                      <TouchableOpacity
+                        key={minValue}
+                        style={[
+                          styles.webPickerItem,
+                          (targetDurationMin || 45) === minValue && styles.webPickerItemSelected,
+                        ]}
+                        onPress={() => setTargetDurationMin(minValue)}
+                      >
+                        <Text
+                          style={[
+                            styles.webPickerItemText,
+                            (targetDurationMin || 45) === minValue && styles.webPickerItemTextSelected,
+                          ]}
+                        >
+                          {minValue}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : (
+                <Picker
+                  selectedValue={(targetDurationMin || 45).toString()}
+                  onValueChange={(itemValue) => setTargetDurationMin(parseInt(itemValue, 10))}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: 28 }, (_, i) => 15 + (i * 5)).map((minValue) => (
+                    <Picker.Item key={minValue} label={minValue.toString()} value={minValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+              )}
+              <View style={styles.pickerUnitLabel}>
+                <Text style={styles.pickerUnitText}>min</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1910,31 +2045,151 @@ const styles = StyleSheet.create({
   modalButtonPrimary: { flex: 1, backgroundColor: '#a3e635', padding: 16, borderRadius: 24, alignItems: 'center', justifyContent: 'center', minHeight: 52 }, // lime-400, rounded-3xl
   modalButtonTextSecondary: { color: '#a1a1aa', fontWeight: 'bold' }, // zinc-400
   modalButtonTextPrimary: { color: '#09090b', fontWeight: 'bold' }, // zinc-950 for contrast
-  durationTargetLabel: { color: '#a1a1aa', fontSize: 12, marginBottom: 8, fontWeight: '600' },
-  durationSliderContainer: {
+  durationTargetLabel: { color: '#a1a1aa', fontSize: 12, fontWeight: '600' },
+  durationHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
-    alignSelf: 'flex-start',
-    width: 200,
-  },
-  durationSlider: {
-    flex: 1,
-    height: 40,
-  },
-  durationSliderLabel: {
-    color: '#71717a',
-    fontSize: 11,
-    fontWeight: '500',
-    minWidth: 25,
-    textAlign: 'center',
+    marginBottom: 12,
   },
   durationTargetValue: {
     color: '#a3e635',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
-    marginTop: 8,
+  },
+  durationModeToggle: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(39, 39, 42, 0.5)', // zinc-800/50
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 12,
+    gap: 4,
+  },
+  durationModeButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  durationModeButtonActive: {
+    backgroundColor: '#a3e635', // lime-400
+  },
+  durationModeButtonText: {
+    color: '#a1a1aa', // zinc-400
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  durationModeButtonTextActive: {
+    color: '#09090b', // zinc-950
+  },
+  durationModeExplanation: {
+    color: '#71717a', // zinc-500
+    fontSize: 10,
+    lineHeight: 14,
+    marginBottom: 12,
+    fontStyle: 'italic',
+  },
+  durationPickerButton: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  durationPickerButtonText: {
+    color: '#a3e635', // lime-400
+    fontSize: 18,
+    fontWeight: '700',
   },
   durationEstimateText: { color: '#a1a1aa', fontSize: 12, marginTop: 6 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(9, 9, 11, 0.8)', // zinc-950/80
+    justifyContent: 'flex-end',
+  },
+  nativePickerModal: {
+    backgroundColor: '#18181b', // zinc-900
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '50%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+  },
+  nativePicker: {
+    height: 216,
+    backgroundColor: '#18181b', // zinc-900
+  },
+  nativePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181b', // zinc-900
+  },
+  webPickerContainer: {
+    flex: 1,
+    height: 216,
+    backgroundColor: '#18181b',
+  },
+  webPickerScrollView: {
+    flex: 1,
+  },
+  webPickerContent: {
+    paddingVertical: 88,
+  },
+  webPickerItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  webPickerItemSelected: {
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+  },
+  webPickerItemText: {
+    color: '#71717a', // zinc-500
+    fontSize: 18,
+    fontWeight: '400',
+  },
+  webPickerItemTextSelected: {
+    color: '#a3e635', // lime-400
+    fontWeight: '700',
+  },
+  pickerUnitLabel: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerUnitText: {
+    fontSize: 18,
+    color: '#71717a', // zinc-500
+    fontWeight: '400',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a', // zinc-800
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  pickerDoneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  pickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#a3e635', // lime-400
+  },
 });
 

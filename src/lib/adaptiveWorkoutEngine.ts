@@ -17,6 +17,7 @@ export interface GenerateWeekScheduleParams {
   userExercises: NamedExercise[];
   apiKey: string;
   durationTargetMin?: number | null; // Week-level duration target in minutes
+  durationMode?: 'target' | 'max'; // 'target' = fill duration, 'max' = stay within duration
   recentLogs?: Array<{
     exercise_name: string;
     performed_at: string;
@@ -29,6 +30,9 @@ export interface GenerateWeekScheduleParams {
     exercises_planned: number;
     exercises_completed: number;
   }>; // Missed/incomplete workouts for AI awareness
+  currentPlan?: any; // Current active plan's week_schedule to analyze and build upon
+  personalRecords?: Map<string, { weight: number; reps: number | null }>; // PRs by exercise name
+  exerciseHistory?: Map<string, Array<{ weight: number; reps: number; performed_at: string }>>; // Previous weights/reps by exercise
 }
 
 export interface GeneratedWeekScheduleResult {
@@ -44,13 +48,30 @@ export interface GeneratedWeekScheduleResult {
 export const generateWeekScheduleWithAI = async (
   params: GenerateWeekScheduleParams,
 ): Promise<GeneratedWeekScheduleResult> => {
-  const { profile, masterExercises, userExercises, apiKey, recentLogs = [], missedWorkouts = [] } = params;
+  const { 
+    profile, 
+    masterExercises, 
+    userExercises, 
+    apiKey, 
+    recentLogs = [], 
+    missedWorkouts = [],
+    currentPlan,
+    personalRecords = new Map(),
+    exerciseHistory = new Map(),
+    durationMode = 'target',
+  } = params;
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const modelName = await getCachedModel(apiKey);
 
   if (__DEV__) {
     console.log('[adaptiveWorkoutEngine] Using Gemini model:', modelName);
+    console.log('[adaptiveWorkoutEngine] Input params:', {
+      hasCurrentPlan: !!currentPlan,
+      recentLogsCount: recentLogs.length,
+      prsCount: personalRecords.size,
+      historyCount: exerciseHistory.size,
+    });
   }
 
   const model = genAI.getGenerativeModel({ model: modelName });
@@ -60,20 +81,40 @@ export const generateWeekScheduleWithAI = async (
     ...(userExercises || []).map((ex) => ex.name),
   ].filter(Boolean);
 
-  // Analyze coverage and recovery from recent logs (if available)
+  // Extract current week schedule from plan if available
+  let currentWeekSchedule: any = null;
+  if (currentPlan?.plan_data) {
+    // Check for week-specific data first, then fallback to template
+    const weekKey = getCurrentWeekKey();
+    if (currentPlan.plan_data.weeks?.[weekKey]?.week_schedule) {
+      currentWeekSchedule = currentPlan.plan_data.weeks[weekKey].week_schedule;
+    } else if (currentPlan.plan_data.week_schedule) {
+      currentWeekSchedule = currentPlan.plan_data.week_schedule;
+    }
+  }
+
+  // Analyze coverage from current plan and recent logs
   let coverageAnalysis: { recommendations: string[] } | undefined;
+  if (currentWeekSchedule || recentLogs.length > 0) {
+    const coverageResult = analyzeCoverage(currentWeekSchedule || {}, recentLogs);
+    if (coverageResult.recommendations.length > 0) {
+      coverageAnalysis = {
+        recommendations: coverageResult.recommendations,
+      };
+    } else {
+      // Fallback to generic guidance if no specific recommendations
+      coverageAnalysis = {
+        recommendations: [
+          'Consider balancing movement patterns across the week: squat, hinge, push (vertical & horizontal), pull (vertical & horizontal), and single-leg movements.',
+        ],
+      };
+    }
+  }
+
+  // Analyze recovery from recent logs and current plan
   let recoveryAnalysis: { warnings: string[]; recommendations: string[] } | undefined;
-
-  if (recentLogs.length > 0) {
-    // Analyze coverage (we'll analyze the generated plan after, but can provide initial guidance)
-    coverageAnalysis = {
-      recommendations: [
-        'Consider balancing movement patterns across the week: squat, hinge, push (vertical & horizontal), pull (vertical & horizontal), and single-leg movements.',
-      ],
-    };
-
-    // Analyze recovery from recent logs
-    const recoveryResult = analyzeRecovery(recentLogs);
+  if (recentLogs.length > 0 || currentWeekSchedule) {
+    const recoveryResult = analyzeRecovery(recentLogs, currentWeekSchedule);
     if (recoveryResult.warnings.length > 0 || recoveryResult.recommendations.length > 0) {
       recoveryAnalysis = {
         warnings: recoveryResult.warnings,
@@ -82,7 +123,18 @@ export const generateWeekScheduleWithAI = async (
     }
   }
 
-  const prompt = buildFullPlanPrompt(profile, availableExerciseNames, coverageAnalysis, recoveryAnalysis, missedWorkouts);
+  const prompt = buildFullPlanPrompt(
+    profile, 
+    availableExerciseNames, 
+    coverageAnalysis, 
+    recoveryAnalysis, 
+    missedWorkouts,
+    currentWeekSchedule,
+    personalRecords,
+    exerciseHistory,
+    params.durationTargetMin,
+    durationMode
+  );
 
   try {
     const result = await model.generateContent(prompt);
@@ -182,10 +234,34 @@ export const generateWeekScheduleWithAI = async (
           );
           const isTimed = !!(masterTimed || userTimed);
 
-          if (isTimed && converted.target_duration_sec) {
+          // For timed exercises, ensure we have a duration
+          if (isTimed) {
+            // Preserve existing duration from current plan if available
+            let duration = converted.target_duration_sec;
+            
+            // If no duration from AI or current plan, check user_exercises default
+            if (!duration && userTimed && (userTimed as any).default_duration_sec) {
+              duration = (userTimed as any).default_duration_sec;
+            }
+            
+            // If still no duration, use a sensible default based on exercise type
+            if (!duration || duration <= 0) {
+              const nameLower = exerciseName;
+              if (nameLower.includes('stretch') || nameLower.includes('mobility')) {
+                duration = 60; // 1 minute for stretches
+              } else if (nameLower.includes('plank') || nameLower.includes('hold')) {
+                duration = 45; // 45 seconds for planks/holds
+              } else if (nameLower.includes('cardio') || nameLower.includes('interval')) {
+                duration = 300; // 5 minutes for cardio intervals
+              } else {
+                duration = 60; // Default 1 minute
+              }
+            }
+            
+            converted.target_duration_sec = duration;
             converted.sets = Array.from({ length: numSets }, (_, i) => ({
               index: i + 1,
-              duration: converted.target_duration_sec,
+              duration: duration,
               rest_time_sec: restTime,
             }));
           } else {
@@ -201,7 +277,8 @@ export const generateWeekScheduleWithAI = async (
         });
 
         // Apply Smart Compression if duration target is provided
-        if (params.durationTargetMin != null && params.durationTargetMin > 0) {
+        // Only compress if mode is 'max' (for 'target' mode, AI should fill the duration)
+        if (params.durationTargetMin != null && params.durationTargetMin > 0 && durationMode === 'max') {
           const compressionResult = applySmartCompression({
             exercises: dayExercises,
             durationTargetMin: params.durationTargetMin,
@@ -240,5 +317,22 @@ export const generateWeekScheduleWithAI = async (
     throw error;
   }
 };
+
+/**
+ * Get current week key (YYYY-MM-DD format for Sunday of current week)
+ */
+function getCurrentWeekKey(): string {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const diff = today.getDate() - dayOfWeek;
+  const weekStart = new Date(today);
+  weekStart.setDate(diff);
+  weekStart.setHours(0, 0, 0, 0);
+  
+  const year = weekStart.getFullYear();
+  const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+  const day = String(weekStart.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 

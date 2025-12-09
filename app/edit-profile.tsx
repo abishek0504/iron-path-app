@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, ActivityIndicator, Platform, Switch, InteractionManager } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Image } from 'expo-image';
@@ -313,6 +313,15 @@ export default function EditProfileScreen() {
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  
+  // Refs for web picker scroll views
+  const agePickerScrollRef = useRef<ScrollView>(null);
+  const genderPickerScrollRef = useRef<ScrollView>(null);
+  const weightPickerScrollRef = useRef<ScrollView>(null);
+  const goalWeightPickerScrollRef = useRef<ScrollView>(null);
+  const heightFeetPickerScrollRef = useRef<ScrollView>(null);
+  const heightInchesPickerScrollRef = useRef<ScrollView>(null);
+  const heightCmPickerScrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadProfile();
@@ -1624,16 +1633,58 @@ export default function EditProfileScreen() {
                 <Text style={styles.pickerDoneText}>Done</Text>
               </TouchableOpacity>
             </View>
-            <Picker
-              selectedValue={age}
-              onValueChange={(itemValue) => setAge(itemValue)}
-              style={styles.nativePicker}
-              itemStyle={{ color: '#ffffff' }}
-            >
-              {Array.from({ length: 150 }, (_, i) => i + 1).map((ageValue) => (
-                <Picker.Item key={ageValue} label={ageValue.toString()} value={ageValue.toString()} color="#ffffff" />
-              ))}
-            </Picker>
+            {Platform.OS === 'web' ? (
+              <View style={styles.webPickerContainer}>
+                <ScrollView
+                  ref={agePickerScrollRef}
+                  style={styles.webPickerScrollView}
+                  contentContainerStyle={styles.webPickerContent}
+                  showsVerticalScrollIndicator={false}
+                  onLayout={() => {
+                    if (Platform.OS === 'web' && agePickerScrollRef.current && age) {
+                      const selectedIndex = parseInt(age, 10) - 1;
+                      const itemHeight = 40;
+                      const scrollOffset = selectedIndex * itemHeight - 88;
+                      agePickerScrollRef.current.scrollTo({
+                        y: Math.max(0, scrollOffset),
+                        animated: false,
+                      });
+                    }
+                  }}
+                >
+                  {Array.from({ length: 150 }, (_, i) => i + 1).map((ageValue) => (
+                    <TouchableOpacity
+                      key={ageValue}
+                      style={[
+                        styles.webPickerItem,
+                        age === ageValue.toString() && styles.webPickerItemSelected,
+                      ]}
+                      onPress={() => setAge(ageValue.toString())}
+                    >
+                      <Text
+                        style={[
+                          styles.webPickerItemText,
+                          age === ageValue.toString() && styles.webPickerItemTextSelected,
+                        ]}
+                      >
+                        {ageValue}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : (
+              <Picker
+                selectedValue={age}
+                onValueChange={(itemValue) => setAge(itemValue)}
+                style={styles.nativePicker}
+                itemStyle={{ color: '#ffffff' }}
+              >
+                {Array.from({ length: 150 }, (_, i) => i + 1).map((ageValue) => (
+                  <Picker.Item key={ageValue} label={ageValue.toString()} value={ageValue.toString()} color="#ffffff" />
+                ))}
+              </Picker>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1660,16 +1711,60 @@ export default function EditProfileScreen() {
                 <Text style={styles.pickerDoneText}>Done</Text>
               </TouchableOpacity>
             </View>
-            <Picker
-              selectedValue={gender}
-              onValueChange={(itemValue) => setGender(itemValue)}
-              style={styles.nativePicker}
-              itemStyle={{ color: '#ffffff' }}
-            >
-              {GENDERS.map((genderOption) => (
-                <Picker.Item key={genderOption} label={genderOption} value={genderOption} color="#ffffff" />
-              ))}
-            </Picker>
+            {Platform.OS === 'web' ? (
+              <View style={styles.webPickerContainer}>
+                <ScrollView
+                  ref={genderPickerScrollRef}
+                  style={styles.webPickerScrollView}
+                  contentContainerStyle={styles.webPickerContent}
+                  showsVerticalScrollIndicator={false}
+                  onLayout={() => {
+                    if (Platform.OS === 'web' && genderPickerScrollRef.current && gender) {
+                      const selectedIndex = GENDERS.indexOf(gender);
+                      if (selectedIndex !== -1) {
+                        const itemHeight = 40;
+                        const scrollOffset = selectedIndex * itemHeight - 88;
+                        genderPickerScrollRef.current.scrollTo({
+                          y: Math.max(0, scrollOffset),
+                          animated: false,
+                        });
+                      }
+                    }
+                  }}
+                >
+                  {GENDERS.map((genderOption) => (
+                    <TouchableOpacity
+                      key={genderOption}
+                      style={[
+                        styles.webPickerItem,
+                        gender === genderOption && styles.webPickerItemSelected,
+                      ]}
+                      onPress={() => setGender(genderOption)}
+                    >
+                      <Text
+                        style={[
+                          styles.webPickerItemText,
+                          gender === genderOption && styles.webPickerItemTextSelected,
+                        ]}
+                      >
+                        {genderOption}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : (
+              <Picker
+                selectedValue={gender}
+                onValueChange={(itemValue) => setGender(itemValue)}
+                style={styles.nativePicker}
+                itemStyle={{ color: '#ffffff' }}
+              >
+                {GENDERS.map((genderOption) => (
+                  <Picker.Item key={genderOption} label={genderOption} value={genderOption} color="#ffffff" />
+                ))}
+              </Picker>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1697,16 +1792,58 @@ export default function EditProfileScreen() {
               </TouchableOpacity>
             </View>
             <View style={styles.nativePickerRow}>
-              <Picker
-                selectedValue={currentWeight}
-                onValueChange={(itemValue) => setCurrentWeight(itemValue)}
-                style={[styles.nativePicker, { flex: 1 }]}
-                itemStyle={{ color: '#ffffff' }}
-              >
-                {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
-                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
-                ))}
-              </Picker>
+              {Platform.OS === 'web' ? (
+                <View style={styles.webPickerContainer}>
+                  <ScrollView
+                    ref={weightPickerScrollRef}
+                    style={styles.webPickerScrollView}
+                    contentContainerStyle={styles.webPickerContent}
+                    showsVerticalScrollIndicator={false}
+                    onLayout={() => {
+                      if (Platform.OS === 'web' && weightPickerScrollRef.current && currentWeight) {
+                        const selectedIndex = parseInt(currentWeight, 10);
+                        const itemHeight = 40;
+                        const scrollOffset = selectedIndex * itemHeight - 88;
+                        weightPickerScrollRef.current.scrollTo({
+                          y: Math.max(0, scrollOffset),
+                          animated: false,
+                        });
+                      }
+                    }}
+                  >
+                    {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
+                      <TouchableOpacity
+                        key={weightValue}
+                        style={[
+                          styles.webPickerItem,
+                          currentWeight === weightValue.toString() && styles.webPickerItemSelected,
+                        ]}
+                        onPress={() => setCurrentWeight(weightValue.toString())}
+                      >
+                        <Text
+                          style={[
+                            styles.webPickerItemText,
+                            currentWeight === weightValue.toString() && styles.webPickerItemTextSelected,
+                          ]}
+                        >
+                          {weightValue}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : (
+                <Picker
+                  selectedValue={currentWeight}
+                  onValueChange={(itemValue) => setCurrentWeight(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
+                    <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+              )}
               <View style={styles.pickerUnitLabel}>
                 <Text style={styles.pickerUnitText}>{useImperial ? 'lbs' : 'kg'}</Text>
               </View>
@@ -1738,16 +1875,58 @@ export default function EditProfileScreen() {
               </TouchableOpacity>
             </View>
             <View style={styles.nativePickerRow}>
-              <Picker
-                selectedValue={goalWeight}
-                onValueChange={(itemValue) => setGoalWeight(itemValue)}
-                style={[styles.nativePicker, { flex: 1 }]}
-                itemStyle={{ color: '#ffffff' }}
-              >
-                {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
-                  <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
-                ))}
-              </Picker>
+              {Platform.OS === 'web' ? (
+                <View style={styles.webPickerContainer}>
+                  <ScrollView
+                    ref={goalWeightPickerScrollRef}
+                    style={styles.webPickerScrollView}
+                    contentContainerStyle={styles.webPickerContent}
+                    showsVerticalScrollIndicator={false}
+                    onLayout={() => {
+                      if (Platform.OS === 'web' && goalWeightPickerScrollRef.current && goalWeight) {
+                        const selectedIndex = parseInt(goalWeight, 10);
+                        const itemHeight = 40;
+                        const scrollOffset = selectedIndex * itemHeight - 88;
+                        goalWeightPickerScrollRef.current.scrollTo({
+                          y: Math.max(0, scrollOffset),
+                          animated: false,
+                        });
+                      }
+                    }}
+                  >
+                    {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
+                      <TouchableOpacity
+                        key={weightValue}
+                        style={[
+                          styles.webPickerItem,
+                          goalWeight === weightValue.toString() && styles.webPickerItemSelected,
+                        ]}
+                        onPress={() => setGoalWeight(weightValue.toString())}
+                      >
+                        <Text
+                          style={[
+                            styles.webPickerItemText,
+                            goalWeight === weightValue.toString() && styles.webPickerItemTextSelected,
+                          ]}
+                        >
+                          {weightValue}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : (
+                <Picker
+                  selectedValue={goalWeight}
+                  onValueChange={(itemValue) => setGoalWeight(itemValue)}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => i).map((weightValue) => (
+                    <Picker.Item key={weightValue} label={weightValue.toString()} value={weightValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+              )}
               <View style={styles.pickerUnitLabel}>
                 <Text style={styles.pickerUnitText}>{useImperial ? 'lbs' : 'kg'}</Text>
               </View>
@@ -1780,45 +1959,171 @@ export default function EditProfileScreen() {
             </View>
             {useImperial ? (
               <View style={styles.nativePickerRow}>
-                <Picker
-                  selectedValue={heightFeet}
-                  onValueChange={(itemValue) => setHeightFeet(itemValue)}
-                  style={[styles.nativePicker, { flex: 1 }]}
-                  itemStyle={{ color: '#ffffff' }}
-                >
-                  {Array.from({ length: 9 }, (_, i) => i).map((feetValue) => (
-                    <Picker.Item key={feetValue} label={feetValue.toString()} value={feetValue.toString()} color="#ffffff" />
-                  ))}
-                </Picker>
+                {Platform.OS === 'web' ? (
+                  <View style={styles.webPickerContainer}>
+                    <ScrollView
+                      ref={heightFeetPickerScrollRef}
+                      style={styles.webPickerScrollView}
+                      contentContainerStyle={styles.webPickerContent}
+                      showsVerticalScrollIndicator={false}
+                      onLayout={() => {
+                        if (Platform.OS === 'web' && heightFeetPickerScrollRef.current && heightFeet) {
+                          const selectedIndex = parseInt(heightFeet, 10);
+                          const itemHeight = 40;
+                          const scrollOffset = selectedIndex * itemHeight - 88;
+                          heightFeetPickerScrollRef.current.scrollTo({
+                            y: Math.max(0, scrollOffset),
+                            animated: false,
+                          });
+                        }
+                      }}
+                    >
+                      {Array.from({ length: 9 }, (_, i) => i).map((feetValue) => (
+                        <TouchableOpacity
+                          key={feetValue}
+                          style={[
+                            styles.webPickerItem,
+                            heightFeet === feetValue.toString() && styles.webPickerItemSelected,
+                          ]}
+                          onPress={() => setHeightFeet(feetValue.toString())}
+                        >
+                          <Text
+                            style={[
+                              styles.webPickerItemText,
+                              heightFeet === feetValue.toString() && styles.webPickerItemTextSelected,
+                            ]}
+                          >
+                            {feetValue}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : (
+                  <Picker
+                    selectedValue={heightFeet}
+                    onValueChange={(itemValue) => setHeightFeet(itemValue)}
+                    style={[styles.nativePicker, { flex: 1 }]}
+                    itemStyle={{ color: '#ffffff' }}
+                  >
+                    {Array.from({ length: 9 }, (_, i) => i).map((feetValue) => (
+                      <Picker.Item key={feetValue} label={feetValue.toString()} value={feetValue.toString()} color="#ffffff" />
+                    ))}
+                  </Picker>
+                )}
                 <View style={styles.pickerUnitLabel}>
                   <Text style={styles.pickerUnitText}>ft</Text>
                 </View>
-                <Picker
-                  selectedValue={heightInches}
-                  onValueChange={(itemValue) => setHeightInches(itemValue)}
-                  style={[styles.nativePicker, { flex: 1 }]}
-                  itemStyle={{ color: '#ffffff' }}
-                >
-                  {Array.from({ length: 12 }, (_, i) => i).map((inchesValue) => (
-                    <Picker.Item key={inchesValue} label={inchesValue.toString()} value={inchesValue.toString()} color="#ffffff" />
-                  ))}
-                </Picker>
+                {Platform.OS === 'web' ? (
+                  <View style={styles.webPickerContainer}>
+                    <ScrollView
+                      ref={heightInchesPickerScrollRef}
+                      style={styles.webPickerScrollView}
+                      contentContainerStyle={styles.webPickerContent}
+                      showsVerticalScrollIndicator={false}
+                      onLayout={() => {
+                        if (Platform.OS === 'web' && heightInchesPickerScrollRef.current && heightInches) {
+                          const selectedIndex = parseInt(heightInches, 10);
+                          const itemHeight = 40;
+                          const scrollOffset = selectedIndex * itemHeight - 88;
+                          heightInchesPickerScrollRef.current.scrollTo({
+                            y: Math.max(0, scrollOffset),
+                            animated: false,
+                          });
+                        }
+                      }}
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i).map((inchesValue) => (
+                        <TouchableOpacity
+                          key={inchesValue}
+                          style={[
+                            styles.webPickerItem,
+                            heightInches === inchesValue.toString() && styles.webPickerItemSelected,
+                          ]}
+                          onPress={() => setHeightInches(inchesValue.toString())}
+                        >
+                          <Text
+                            style={[
+                              styles.webPickerItemText,
+                              heightInches === inchesValue.toString() && styles.webPickerItemTextSelected,
+                            ]}
+                          >
+                            {inchesValue}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : (
+                  <Picker
+                    selectedValue={heightInches}
+                    onValueChange={(itemValue) => setHeightInches(itemValue)}
+                    style={[styles.nativePicker, { flex: 1 }]}
+                    itemStyle={{ color: '#ffffff' }}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i).map((inchesValue) => (
+                      <Picker.Item key={inchesValue} label={inchesValue.toString()} value={inchesValue.toString()} color="#ffffff" />
+                    ))}
+                  </Picker>
+                )}
                 <View style={styles.pickerUnitLabel}>
                   <Text style={styles.pickerUnitText}>in</Text>
                 </View>
               </View>
             ) : (
               <View style={styles.nativePickerRow}>
-                <Picker
-                  selectedValue={heightCm}
-                  onValueChange={(itemValue) => setHeightCm(itemValue)}
-                  style={[styles.nativePicker, { flex: 1 }]}
-                  itemStyle={{ color: '#ffffff' }}
-                >
-                  {Array.from({ length: 301 }, (_, i) => i).map((cmValue) => (
-                    <Picker.Item key={cmValue} label={cmValue.toString()} value={cmValue.toString()} color="#ffffff" />
-                  ))}
-                </Picker>
+                {Platform.OS === 'web' ? (
+                  <View style={styles.webPickerContainer}>
+                    <ScrollView
+                      ref={heightCmPickerScrollRef}
+                      style={styles.webPickerScrollView}
+                      contentContainerStyle={styles.webPickerContent}
+                      showsVerticalScrollIndicator={false}
+                      onLayout={() => {
+                        if (Platform.OS === 'web' && heightCmPickerScrollRef.current && heightCm) {
+                          const selectedIndex = parseInt(heightCm, 10);
+                          const itemHeight = 40;
+                          const scrollOffset = selectedIndex * itemHeight - 88;
+                          heightCmPickerScrollRef.current.scrollTo({
+                            y: Math.max(0, scrollOffset),
+                            animated: false,
+                          });
+                        }
+                      }}
+                    >
+                      {Array.from({ length: 301 }, (_, i) => i).map((cmValue) => (
+                        <TouchableOpacity
+                          key={cmValue}
+                          style={[
+                            styles.webPickerItem,
+                            heightCm === cmValue.toString() && styles.webPickerItemSelected,
+                          ]}
+                          onPress={() => setHeightCm(cmValue.toString())}
+                        >
+                          <Text
+                            style={[
+                              styles.webPickerItemText,
+                              heightCm === cmValue.toString() && styles.webPickerItemTextSelected,
+                            ]}
+                          >
+                            {cmValue}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : (
+                  <Picker
+                    selectedValue={heightCm}
+                    onValueChange={(itemValue) => setHeightCm(itemValue)}
+                    style={[styles.nativePicker, { flex: 1 }]}
+                    itemStyle={{ color: '#ffffff' }}
+                  >
+                    {Array.from({ length: 301 }, (_, i) => i).map((cmValue) => (
+                      <Picker.Item key={cmValue} label={cmValue.toString()} value={cmValue.toString()} color="#ffffff" />
+                    ))}
+                  </Picker>
+                )}
                 <View style={styles.pickerUnitLabel}>
                   <Text style={styles.pickerUnitText}>cm</Text>
                 </View>
@@ -2734,5 +3039,35 @@ const styles = StyleSheet.create({
     color: '#a1a1aa',
     marginBottom: 16,
     lineHeight: 20,
+  },
+  webPickerContainer: {
+    flex: 1,
+    height: 216,
+    backgroundColor: '#18181b',
+  },
+  webPickerScrollView: {
+    flex: 1,
+  },
+  webPickerContent: {
+    paddingVertical: 88,
+  },
+  webPickerItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  webPickerItemSelected: {
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+  },
+  webPickerItemText: {
+    color: '#71717a', // zinc-500
+    fontSize: 18,
+    fontWeight: '400',
+  },
+  webPickerItemTextSelected: {
+    color: '#a3e635', // lime-400
+    fontWeight: '700',
   },
 });

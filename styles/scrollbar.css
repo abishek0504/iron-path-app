@@ -1,0 +1,51 @@
+/* Custom scrollbar styling for web to match dark theme */
+
+/* Firefox - apply to root element */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 #18181b; /* thumb color, track color */
+}
+
+/* WebKit browsers (Chrome, Safari, Edge) - apply to root */
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: #18181b; /* zinc-900 - dark track */
+}
+
+html::-webkit-scrollbar-thumb {
+  background: #3f3f46; /* zinc-700 - visible but subtle thumb */
+  border-radius: 5px;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: #52525b; /* zinc-600 - slightly brighter on hover */
+}
+
+/* Apply to all scrollable elements */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 #18181b;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #18181b;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 5px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+

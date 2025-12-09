@@ -66,13 +66,22 @@ const getGoalConsiderations = (goal: string | null | undefined): string => {
  * @param availableExercises - List of available exercise names
  * @param coverageAnalysis - Optional coverage analysis results to include in prompt
  * @param recoveryAnalysis - Optional recovery analysis results to include in prompt
+ * @param missedWorkouts - Optional missed workouts data
+ * @param currentWeekSchedule - Optional current week schedule to build upon or replace
+ * @param personalRecords - Optional PRs by exercise name
+ * @param exerciseHistory - Optional previous weights/reps by exercise name
  */
 export const buildFullPlanPrompt = (
   profile: any,
   availableExercises: string[] = [],
   coverageAnalysis?: { recommendations: string[] },
   recoveryAnalysis?: { warnings: string[]; recommendations: string[] },
-  missedWorkouts?: Array<{ day: string; scheduled_at: string; exercises_planned: number; exercises_completed: number }>
+  missedWorkouts?: Array<{ day: string; scheduled_at: string; exercises_planned: number; exercises_completed: number }>,
+  currentWeekSchedule?: any,
+  personalRecords?: Map<string, { weight: number; reps: number | null }>,
+  exerciseHistory?: Map<string, Array<{ weight: number; reps: number; performed_at: string }>>,
+  durationTargetMin?: number | null,
+  durationMode?: 'target' | 'max'
 ): string => {
   const useImperial = profile.use_imperial !== false; // Default to true
   const weightStr = formatWeight(profile.current_weight, useImperial);
@@ -106,13 +115,76 @@ export const buildFullPlanPrompt = (
   const equipmentStr = formatEquipmentForPrompt(profile.equipment_access || []);
 
   const daysPerWeek = profile.days_per_week || 3;
-  const goldilocksText =
-    'If the user does not specify a time constraint, aim for a per-session duration in the 45–60 minute Goldilocks zone. Prefer closer to 45 minutes when in doubt, while preserving Tier 1 compounds.';
+  const durationTarget = durationTargetMin || 45;
+  const mode = durationMode || 'target';
   
+  let goldilocksText = '';
+  if (mode === 'target') {
+    goldilocksText = `CRITICAL: The user has set a TARGET duration of ${durationTarget} minutes per workout session. You MUST aim to fill this duration with appropriate exercises. This is a TARGET duration - if the workout is shorter than ${durationTarget} minutes, add more exercises or increase volume (sets/reps) to reach the target. The goal is to create a complete, full workout that matches this duration.`;
+  } else {
+    goldilocksText = `CRITICAL: The user has set a MAXIMUM duration of ${durationTarget} minutes per workout session. You MUST create the best possible workout that stays within this time limit. This is a MAXIMUM constraint - prioritize the most effective exercises and optimal volume that fits within ${durationTarget} minutes. Quality over quantity - focus on the most important exercises for the user's goals.`;
+  }
+
   // Build exercise list section
   let exerciseListSection = '';
   if (availableExercises.length > 0) {
     exerciseListSection = `\nAVAILABLE EXERCISES FROM DATABASE:\n${availableExercises.join(', ')}\n\nIMPORTANT: You MUST prefer exercises from this list. Only create custom exercises if none from the list are suitable for the specific muscle group or movement pattern needed.`;
+  }
+
+  // Build current plan section if it exists
+  let currentPlanSection = '';
+  if (currentWeekSchedule) {
+    const daysWithExercises: string[] = [];
+    Object.keys(currentWeekSchedule).forEach(day => {
+      const dayData = currentWeekSchedule[day];
+      if (dayData?.exercises && Array.isArray(dayData.exercises) && dayData.exercises.length > 0) {
+        const exerciseNames = dayData.exercises.map((ex: any) => ex.name).filter(Boolean).join(', ');
+        daysWithExercises.push(`${day}: ${exerciseNames}`);
+      }
+    });
+    
+    if (daysWithExercises.length > 0) {
+      currentPlanSection = `\nCURRENT WORKOUT PLAN:\nThe user currently has this week's plan:\n${daysWithExercises.join('\n')}\n\nIMPORTANT: When generating the new plan:\n- If exercises are already in the plan and working well, consider keeping them with their current durations/weights\n- For timed exercises, preserve their target_duration_sec values if they exist\n- You can adjust, add, or replace exercises as needed, but be mindful of what the user has already set up\n- The target duration is ${durationTarget} minutes - ensure the new plan fills this duration appropriately\n`;
+    }
+  }
+
+  // Build PR section
+  let prSection = '';
+  if (personalRecords && personalRecords.size > 0) {
+    const prList: string[] = [];
+    personalRecords.forEach((pr, exerciseName) => {
+      const useImperial = profile.use_imperial !== false;
+      const weightStr = formatWeight(pr.weight, useImperial);
+      if (pr.reps) {
+        prList.push(`${exerciseName}: ${weightStr} for ${pr.reps} reps`);
+      } else {
+        prList.push(`${exerciseName}: ${weightStr}`);
+      }
+    });
+    if (prList.length > 0) {
+      prSection = `\nPERSONAL RECORDS (PRs):\nThe user's current personal records:\n${prList.join('\n')}\n\nIMPORTANT: Use these PRs to understand the user's strength levels. When programming exercises, consider:\n- Starting weights should be conservative relative to PRs (typically 70-85% of PR weight for working sets)\n- Progression should aim to eventually challenge or exceed these PRs over time\n- PRs indicate the user's maximum capabilities, so program accordingly\n`;
+    }
+  }
+
+  // Build exercise history section
+  let historySection = '';
+  if (exerciseHistory && exerciseHistory.size > 0) {
+    const historyList: string[] = [];
+    exerciseHistory.forEach((logs, exerciseName) => {
+      if (logs.length > 0) {
+        // Get most recent 3-5 logs
+        const recent = logs.slice(0, Math.min(5, logs.length));
+        const useImperial = profile.use_imperial !== false;
+        const recentStr = recent.map(log => {
+          const weightStr = formatWeight(log.weight, useImperial);
+          return `${weightStr} x ${log.reps}`;
+        }).join(', ');
+        historyList.push(`${exerciseName}: ${recentStr}`);
+      }
+    });
+    if (historyList.length > 0) {
+      historySection = `\nRECENT WORKOUT HISTORY:\nThe user's recent weights and reps for exercises:\n${historyList.join('\n')}\n\nIMPORTANT: Use this history to:\n- Understand progression patterns (are they increasing, maintaining, or struggling?)\n- Set appropriate starting weights that build on recent performance\n- Identify exercises where the user may need deloading or progression\n- Maintain consistency with what the user has been doing successfully\n`;
+    }
   }
 
   let prompt = `Generate a comprehensive weekly workout plan in JSON format.
@@ -137,6 +209,9 @@ ${componentDescription}
 
 TIME GUIDELINES:
 - ${goldilocksText}
+${mode === 'target' 
+  ? `- Each workout session should aim to be approximately ${durationTarget} minutes long\n- If you generate a workout that's shorter than ${durationTarget} minutes, add more exercises or increase sets/reps to reach the target\n- Balance exercise selection to fill the duration while maintaining proper recovery and intensity`
+  : `- Each workout session must NOT exceed ${durationTarget} minutes\n- Prioritize the most effective exercises for the user's goals\n- Optimize volume and exercise selection to maximize results within the time constraint\n- Quality over quantity - focus on compound movements and essential exercises`}
 
 ${coverageAnalysis && coverageAnalysis.recommendations.length > 0
   ? `\nMOVEMENT PATTERN COVERAGE ANALYSIS:\n${coverageAnalysis.recommendations.join('\n')}\n`
@@ -145,6 +220,12 @@ ${coverageAnalysis && coverageAnalysis.recommendations.length > 0
 ${recoveryAnalysis && (recoveryAnalysis.warnings.length > 0 || recoveryAnalysis.recommendations.length > 0)
   ? `\nRECOVERY CONSIDERATIONS:\n${[...recoveryAnalysis.warnings, ...recoveryAnalysis.recommendations].join('\n')}\n`
   : ''}
+
+${currentPlanSection}
+
+${prSection}
+
+${historySection}
 
 ${missedWorkouts && missedWorkouts.length > 0
   ? `\nMISSED/INCOMPLETE WORKOUTS ANALYSIS:\nThe user has ${missedWorkouts.length} missed or incomplete workout(s) from recent weeks:\n${missedWorkouts.map(mw => `- ${mw.day}: Planned ${mw.exercises_planned} exercises, completed ${mw.exercises_completed} (${mw.exercises_planned - mw.exercises_completed} missed)`).join('\n')}\n\nIMPORTANT: Consider these patterns when generating the new plan:\n- If user consistently misses certain days, consider adjusting schedule or reducing volume on those days\n- If user completes partial workouts, consider breaking workouts into smaller, more manageable sessions\n- Account for any patterns in missed exercises (e.g., always skipping leg day, or struggling with long sessions)\n`

@@ -1,10 +1,10 @@
   import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Alert, FlatList, Modal, Platform } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { ChevronLeft, ChevronRight, Settings } from 'lucide-react-native';
-import Slider from '@react-native-community/slider';
+import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../src/lib/supabase';
 import { PlannerSkeleton } from '../../src/components/skeletons/PlannerSkeleton';
@@ -29,6 +29,9 @@ export default function PlannerScreen() {
   const [isLoadingPlan, setIsLoadingPlan] = useState<boolean>(true);
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
   const [durationTargetMin, setDurationTargetMin] = useState<number>(45); // Default 45 minutes (slider range: 15-150)
+  const [durationMode, setDurationMode] = useState<'target' | 'max'>('target'); // 'target' = fill duration, 'max' = stay within duration
+  const [showDurationPicker, setShowDurationPicker] = useState(false);
+  const durationPickerScrollRef = useRef<ScrollView>(null);
   
   // Load last duration preference on mount
   useEffect(() => {
@@ -40,6 +43,10 @@ export default function PlannerScreen() {
           if (parsed >= 15 && parsed <= 150) {
             setDurationTargetMin(parsed);
           }
+        }
+        const lastMode = await AsyncStorage.getItem('last_duration_mode');
+        if (lastMode === 'target' || lastMode === 'max') {
+          setDurationMode(lastMode);
         }
       } catch (error) {
         // Ignore storage errors, use default
@@ -90,11 +97,15 @@ export default function PlannerScreen() {
     } else if (data) {
       if (isMountedRef.current) {
         setActivePlan(data);
-        // Load duration target from plan_data if available, otherwise try AsyncStorage, otherwise default
+        // Load duration target and mode from plan_data if available, otherwise try AsyncStorage, otherwise default
         if (data.plan_data?.duration_target_min != null) {
           setDurationTargetMin(data.plan_data.duration_target_min);
           // Save to AsyncStorage for future use
           await AsyncStorage.setItem('last_duration_target_min', data.plan_data.duration_target_min.toString());
+        }
+        if (data.plan_data?.duration_mode === 'target' || data.plan_data?.duration_mode === 'max') {
+          setDurationMode(data.plan_data.duration_mode);
+          await AsyncStorage.setItem('last_duration_mode', data.plan_data.duration_mode);
         } else {
           // Try to load from AsyncStorage (user's last choice)
           try {
@@ -424,6 +435,64 @@ export default function PlannerScreen() {
         });
       }
 
+      // Fetch current active plan if it exists
+      const { data: currentActivePlan } = await supabase
+        .from('workout_plans')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      // Fetch all PRs (not just for specific exercises, since we don't know what will be generated yet)
+      const { data: allUserExercisesWithPR } = await supabase
+        .from('user_exercises')
+        .select('name, pr_weight, pr_reps')
+        .eq('user_id', user.id)
+        .not('pr_weight', 'is', null);
+
+      // Build PR map
+      const prsMap = new Map<string, { weight: number; reps: number | null }>();
+      if (allUserExercisesWithPR) {
+        allUserExercisesWithPR.forEach((ue: any) => {
+          if (ue.pr_weight && ue.pr_weight > 0) {
+            prsMap.set(ue.name, {
+              weight: ue.pr_weight,
+              reps: ue.pr_reps || null,
+            });
+          }
+        });
+      }
+
+      // Build exercise history map (previous weights/reps by exercise) from recent logs
+      const exerciseHistoryMap = new Map<string, Array<{ weight: number; reps: number; performed_at: string }>>();
+      if (recentLogs && recentLogs.length > 0) {
+        recentLogs.forEach(log => {
+          if (!log.exercise_name) return;
+          const history = exerciseHistoryMap.get(log.exercise_name) || [];
+          history.push({
+            weight: log.weight,
+            reps: log.reps,
+            performed_at: log.performed_at,
+          });
+          exerciseHistoryMap.set(log.exercise_name, history);
+        });
+        // Sort by date (most recent first) and limit to 10 per exercise
+        exerciseHistoryMap.forEach((history, exerciseName) => {
+          history.sort((a, b) => new Date(b.performed_at).getTime() - new Date(a.performed_at).getTime());
+          exerciseHistoryMap.set(exerciseName, history.slice(0, 10));
+        });
+      }
+
+      if (__DEV__) {
+        console.log('[planner] Passing to adaptive engine:', {
+          hasCurrentPlan: !!currentActivePlan,
+          recentLogsCount: recentLogs?.length || 0,
+          prsCount: prsMap.size,
+          historyCount: exerciseHistoryMap.size,
+          missedWorkoutsCount: missedWorkouts.length,
+        });
+      }
+
       // Generate week_schedule via adaptive engine
       const { week_schedule } = await generateWeekScheduleWithAI({
         profile: userProfile,
@@ -431,8 +500,12 @@ export default function PlannerScreen() {
         userExercises: filteredUserExercises as any,
         apiKey,
         durationTargetMin: durationTargetMin || 45,
+        durationMode: durationMode,
         recentLogs: (recentLogs || []) as any,
         missedWorkouts: missedWorkouts.length > 0 ? missedWorkouts : undefined,
+        currentPlan: currentActivePlan || undefined,
+        personalRecords: prsMap,
+        exerciseHistory: exerciseHistoryMap,
       });
 
       const planData = { week_schedule: ensureAllDays(week_schedule) };
@@ -513,7 +586,7 @@ export default function PlannerScreen() {
         }
       }
 
-      // Fetch PRs for all exercises
+      // Fetch PRs for all exercises in the generated plan (for progression suggestions)
       const { data: userExercisesWithPR } = await supabase
         .from('user_exercises')
         .select('name, pr_weight, pr_reps')
@@ -574,6 +647,7 @@ export default function PlannerScreen() {
       const weekKey = getWeekKey(currentWeekStart);
       const weekPlan = {
         duration_target_min: durationTargetMin || 45, // Week-level duration target
+        duration_mode: durationMode, // 'target' or 'max'
         weeks: {
           [weekKey]: {
             week_schedule: planData.week_schedule
@@ -824,28 +898,65 @@ export default function PlannerScreen() {
 
             <View style={styles.durationTargetCard}>
               <View style={styles.durationSliderHeader}>
-                <Text style={styles.durationTargetLabel}>Target workout duration</Text>
+                <Text style={styles.durationTargetLabel}>
+                  {durationMode === 'target' ? 'Target workout duration' : 'Maximum workout duration'}
+                </Text>
                 <Text style={styles.durationValue}>{durationTargetMin} min</Text>
               </View>
-              <View style={styles.durationSliderContainer}>
-                <Text style={styles.durationSliderLabel}>15 min</Text>
-                <Slider
-                  style={styles.durationSlider}
-                  minimumValue={15}
-                  maximumValue={150}
-                  step={5}
-                  value={durationTargetMin}
-                  onValueChange={async (value) => {
-                    setDurationTargetMin(Math.round(value));
-                    // Save to AsyncStorage for future use
-                    await AsyncStorage.setItem('last_duration_target_min', Math.round(value).toString());
+              
+              {/* Mode Toggle */}
+              <View style={styles.durationModeToggle}>
+                <TouchableOpacity
+                  style={[
+                    styles.durationModeButton,
+                    durationMode === 'target' && styles.durationModeButtonActive
+                  ]}
+                  onPress={async () => {
+                    setDurationMode('target');
+                    await AsyncStorage.setItem('last_duration_mode', 'target');
                   }}
-                  minimumTrackTintColor="#a3e635"
-                  maximumTrackTintColor="#27272a"
-                  thumbTintColor="#a3e635"
-                />
-                <Text style={styles.durationSliderLabel}>150 min</Text>
+                >
+                  <Text style={[
+                    styles.durationModeButtonText,
+                    durationMode === 'target' && styles.durationModeButtonTextActive
+                  ]}>
+                    Target Duration
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.durationModeButton,
+                    durationMode === 'max' && styles.durationModeButtonActive
+                  ]}
+                  onPress={async () => {
+                    setDurationMode('max');
+                    await AsyncStorage.setItem('last_duration_mode', 'max');
+                  }}
+                >
+                  <Text style={[
+                    styles.durationModeButtonText,
+                    durationMode === 'max' && styles.durationModeButtonTextActive
+                  ]}>
+                    Max Time
+                  </Text>
+                </TouchableOpacity>
               </View>
+              
+              {/* Explanation Text */}
+              <Text style={styles.durationModeExplanation}>
+                {durationMode === 'target' 
+                  ? 'Fill the slot as best as possible - the AI will aim to create a workout that matches this duration'
+                  : 'Give the best possible workout within the time constraint - the AI will optimize for quality within this limit'}
+              </Text>
+              
+              <TouchableOpacity
+                style={styles.durationPickerButton}
+                onPress={() => setShowDurationPicker(true)}
+              >
+                <Text style={styles.durationPickerButtonText}>
+                  {durationTargetMin} min
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <View style={styles.buttonColumn}>
@@ -964,6 +1075,92 @@ export default function PlannerScreen() {
           />
         </Animated.View>
       )}
+      {/* Duration Picker Modal */}
+      <Modal
+        visible={showDurationPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDurationPicker(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDurationPicker(false)}
+        >
+          <View style={styles.nativePickerModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Duration</Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  setShowDurationPicker(false);
+                  await AsyncStorage.setItem('last_duration_target_min', durationTargetMin.toString());
+                }}
+                style={styles.pickerDoneButton}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.nativePickerRow}>
+              {Platform.OS === 'web' ? (
+                <View style={styles.webPickerContainer}>
+                  <ScrollView
+                    ref={durationPickerScrollRef}
+                    style={styles.webPickerScrollView}
+                    contentContainerStyle={styles.webPickerContent}
+                    showsVerticalScrollIndicator={false}
+                    onLayout={() => {
+                      // Scroll to selected item when picker opens
+                      if (Platform.OS === 'web' && durationPickerScrollRef.current) {
+                        const selectedIndex = Math.floor((durationTargetMin - 15) / 5);
+                        const itemHeight = 40; // minHeight from webPickerItem
+                        const scrollOffset = selectedIndex * itemHeight - 88; // Center it (88 is paddingVertical)
+                        durationPickerScrollRef.current.scrollTo({
+                          y: Math.max(0, scrollOffset),
+                          animated: false,
+                        });
+                      }
+                    }}
+                  >
+                    {Array.from({ length: 28 }, (_, i) => 15 + (i * 5)).map((minValue) => (
+                      <TouchableOpacity
+                        key={minValue}
+                        style={[
+                          styles.webPickerItem,
+                          durationTargetMin === minValue && styles.webPickerItemSelected,
+                        ]}
+                        onPress={() => setDurationTargetMin(minValue)}
+                      >
+                        <Text
+                          style={[
+                            styles.webPickerItemText,
+                            durationTargetMin === minValue && styles.webPickerItemTextSelected,
+                          ]}
+                        >
+                          {minValue}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : (
+                <Picker
+                  selectedValue={durationTargetMin.toString()}
+                  onValueChange={(itemValue) => setDurationTargetMin(parseInt(itemValue, 10))}
+                  style={[styles.nativePicker, { flex: 1 }]}
+                  itemStyle={{ color: '#ffffff' }}
+                >
+                  {Array.from({ length: 28 }, (_, i) => 15 + (i * 5)).map((minValue) => (
+                    <Picker.Item key={minValue} label={minValue.toString()} value={minValue.toString()} color="#ffffff" />
+                  ))}
+                </Picker>
+              )}
+              <View style={styles.pickerUnitLabel}>
+                <Text style={styles.pickerUnitText}>min</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1146,6 +1343,139 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     minWidth: 50,
     textAlign: 'center',
+  },
+  durationModeToggle: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(39, 39, 42, 0.5)', // zinc-800/50
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 12,
+    gap: 4,
+  },
+  durationModeButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  durationModeButtonActive: {
+    backgroundColor: '#a3e635', // lime-400
+  },
+  durationModeButtonText: {
+    color: '#a1a1aa', // zinc-400
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  durationModeButtonTextActive: {
+    color: '#09090b', // zinc-950
+  },
+  durationModeExplanation: {
+    color: '#71717a', // zinc-500
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
+  durationPickerButton: {
+    backgroundColor: 'rgba(24, 24, 27, 0.9)', // zinc-900/90
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#27272a', // zinc-800
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+  durationPickerButtonText: {
+    color: '#a3e635', // lime-400
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(9, 9, 11, 0.8)', // zinc-950/80
+    justifyContent: 'flex-end',
+  },
+  nativePickerModal: {
+    backgroundColor: '#18181b', // zinc-900
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '50%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+  },
+  nativePicker: {
+    height: 216,
+    backgroundColor: '#18181b', // zinc-900
+  },
+  nativePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#18181b', // zinc-900
+  },
+  pickerUnitLabel: {
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  webPickerContainer: {
+    flex: 1,
+    height: 216,
+    backgroundColor: '#18181b',
+  },
+  webPickerScrollView: {
+    flex: 1,
+  },
+  webPickerContent: {
+    paddingVertical: 88,
+  },
+  webPickerItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  webPickerItemSelected: {
+    backgroundColor: 'rgba(163, 230, 53, 0.1)', // lime-400/10
+  },
+  webPickerItemText: {
+    color: '#71717a', // zinc-500
+    fontSize: 18,
+    fontWeight: '400',
+  },
+  webPickerItemTextSelected: {
+    color: '#a3e635', // lime-400
+    fontWeight: '700',
+  },
+  pickerUnitText: {
+    fontSize: 18,
+    color: '#71717a', // zinc-500
+    fontWeight: '400',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#27272a', // zinc-800
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  pickerDoneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  pickerDoneText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#a3e635', // lime-400
   },
 });
 
