@@ -246,7 +246,11 @@ export default function EditProfileScreen() {
       setShowDiscardDialog(true);
     } else {
       try {
-        router.replace('/(tabs)/profile');
+        if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace('/(tabs)/profile');
+        }
       } catch (error) {
         router.replace('/(tabs)/profile');
       }
@@ -256,7 +260,11 @@ export default function EditProfileScreen() {
   const handleDiscardConfirm = () => {
     setShowDiscardDialog(false);
     try {
-      router.replace('/(tabs)/profile');
+      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)/profile');
+      }
     } catch (error) {
       router.replace('/(tabs)/profile');
     }
@@ -1003,8 +1011,16 @@ export default function EditProfileScreen() {
     } else {
       setLoading(false);
       setOriginalProfile(JSON.parse(JSON.stringify(profile))); // Update original after save
-      // Navigate back immediately with saved parameter using replace to prevent stacking
-      router.replace('/(tabs)/profile?saved=true');
+      // Navigate back to previous screen
+      try {
+        if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace('/(tabs)/profile');
+        }
+      } catch (error) {
+        router.replace('/(tabs)/profile');
+      }
     }
   };
 
