@@ -899,10 +899,14 @@ export default function PlannerScreen() {
             contentContainerStyle={styles.listContainer}
             renderItem={({ item: date, index }) => {
               const dayData = getDayData(date);
-              const exerciseCount = dayData.exercises?.length || 0;
+              // Filter out invalid exercises (null, undefined, or missing name) before counting
+              const validExercises = Array.isArray(dayData.exercises) 
+                ? dayData.exercises.filter((ex: any) => ex && typeof ex === 'object' && ex.name && typeof ex.name === 'string')
+                : [];
+              const exerciseCount = validExercises.length;
               const dayName = DAYS_OF_WEEK[date.getDay()];
               const isToday = date.toDateString() === new Date().toDateString();
-              const estimatedMin = exerciseCount > 0 ? Math.round(estimateDayDuration(dayData.exercises || []) / 60) : 0;
+              const estimatedMin = exerciseCount > 0 ? Math.round(estimateDayDuration(validExercises) / 60) : 0;
               
               return (
                 <Animated.View entering={FadeIn.duration(400).delay(index * 50)}>
