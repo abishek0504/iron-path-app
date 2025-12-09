@@ -88,9 +88,22 @@ export const buildFullPlanPrompt = (
   const { style: trainingStyle, components } = deriveStyleAndComponentsFromProfile(profile);
   const componentDescription = describeComponentsForPrompt(trainingStyle, components);
   
-  const equipmentStr = profile.equipment_access?.length > 0 
-    ? profile.equipment_access.join(', ')
-    : 'Gym (full equipment access)';
+  // Format equipment list for prompt
+  const formatEquipmentForPrompt = (equipment: any[]): string => {
+    if (!equipment || equipment.length === 0) {
+      return 'Full gym access (all equipment available)';
+    }
+    return equipment.map((eq: any) => {
+      if (typeof eq === 'string') {
+        return eq;
+      } else if (eq && typeof eq === 'object' && 'name' in eq) {
+        return eq.name;
+      }
+      return '';
+    }).filter(Boolean).join(', ');
+  };
+
+  const equipmentStr = formatEquipmentForPrompt(profile.equipment_access || []);
 
   const daysPerWeek = profile.days_per_week || 3;
   const goldilocksText =
@@ -181,7 +194,11 @@ REQUIREMENTS:
 ${exerciseListSection}
 4. Follow the experience level guidelines for volume, intensity, and rep ranges.
 5. Consider the user's goal when selecting exercises and rep ranges.
-6. Only use exercises that match the available equipment: ${equipmentStr}
+6. CRITICAL EQUIPMENT REQUIREMENT: You MUST only use exercises that can be performed with the available equipment: ${equipmentStr}
+   - If the user has NO equipment selected (bodyweight only), you MUST only use bodyweight exercises (no dumbbells, barbells, machines, cables, etc.)
+   - If the user has specific equipment, you MUST verify that each exercise's required equipment is in the list above
+   - Exercises that require equipment NOT in the list above are FORBIDDEN
+   - When in doubt, prefer bodyweight alternatives
 7. Include technique tips and focus points in the "notes" field for each exercise.
 8. Ensure proper rest periods based on experience level and exercise intensity.
 9. Create a balanced program that targets all major muscle groups throughout the ${daysPerWeek} workout days.
@@ -222,9 +239,22 @@ export const buildSupplementaryPrompt = (
   const experienceGuidelines = getExperienceGuidelines(profile.experience_level);
   const goalConsiderations = getGoalConsiderations(profile.goal);
   
-  const equipmentStr = profile.equipment_access?.length > 0 
-    ? profile.equipment_access.join(', ')
-    : 'Gym (full equipment access)';
+  // Format equipment list for prompt
+  const formatEquipmentForPrompt = (equipment: any[]): string => {
+    if (!equipment || equipment.length === 0) {
+      return 'Full gym access (all equipment available)';
+    }
+    return equipment.map((eq: any) => {
+      if (typeof eq === 'string') {
+        return eq;
+      } else if (eq && typeof eq === 'object' && 'name' in eq) {
+        return eq.name;
+      }
+      return '';
+    }).filter(Boolean).join(', ');
+  };
+
+  const equipmentStr = formatEquipmentForPrompt(profile.equipment_access || []);
 
   const existingNames = existingExercises.map((e: any) => e.name).filter(Boolean);
   const existingList = existingNames.length > 0 ? existingNames.join(', ') : 'None';
@@ -268,7 +298,10 @@ ${profile.workout_feedback ? `\nUSER FEEDBACK TO CONSIDER:\n${profile.workout_fe
 IMPORTANT: 
 - DO NOT duplicate or replace existing exercises: ${existingList}
 - Only add exercises that COMPLEMENT and work well with the existing exercises
-- Ensure exercises match available equipment: ${equipmentStr}
+- CRITICAL EQUIPMENT REQUIREMENT: You MUST only use exercises that can be performed with the available equipment: ${equipmentStr}
+  - If the user has NO equipment selected (bodyweight only), you MUST only use bodyweight exercises (no dumbbells, barbells, machines, cables, etc.)
+  - If the user has specific equipment, you MUST verify that each exercise's required equipment is in the list above
+  - Exercises that require equipment NOT in the list above are FORBIDDEN
 - Follow experience level guidelines for volume and rep ranges
 ${exerciseListSection}
 

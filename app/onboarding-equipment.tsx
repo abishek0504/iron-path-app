@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { Check, ArrowLeft, Search, X, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { EQUIPMENT_PRESETS } from '../src/lib/equipmentFilter';
 
 interface EquipmentWeight {
   weight: string;
@@ -184,6 +185,7 @@ export default function OnboardingEquipmentScreen() {
   const [equipmentDetails, setEquipmentDetails] = useState<Map<string, EquipmentWeight[]>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedEquipment, setExpandedEquipment] = useState<string | null>(null);
+  const [expandedPresets, setExpandedPresets] = useState(false);
 
   const safeBack = () => {
     try {
@@ -294,6 +296,95 @@ export default function OnboardingEquipmentScreen() {
     return '';
   };
 
+  const handlePresetSelect = (presetName: string) => {
+    const preset = EQUIPMENT_PRESETS[presetName as keyof typeof EQUIPMENT_PRESETS];
+    if (!preset) return;
+
+    if (presetName === 'Full Gym') {
+      // Select all equipment
+      const allEquipment = new Set<string>();
+      const allDetails = new Map<string, EquipmentWeight[]>();
+      
+      EQUIPMENT_CATEGORIES.forEach(category => {
+        category.items.forEach(item => {
+          allEquipment.add(item.name);
+          if (item.hasEditableWeights && item.weightOptions && item.weightOptions.length > 0) {
+            // Initialize with first weight option
+            allDetails.set(item.name, [{ weight: item.weightOptions[0], quantity: 1 }]);
+          }
+        });
+      });
+      
+      setSelectedEquipment(allEquipment);
+      setEquipmentDetails(allDetails);
+    } else if (presetName === 'Bodyweight Only') {
+      // Clear all equipment
+      setSelectedEquipment(new Set());
+      setEquipmentDetails(new Map());
+    } else {
+      // Select preset equipment
+      const newSelected = new Set<string>();
+      const newDetails = new Map<string, EquipmentWeight[]>();
+      
+      // Check if equipment is an array (not the string 'all')
+      if (Array.isArray(preset.equipment)) {
+        preset.equipment.forEach((eqName: string) => {
+          // Find the equipment item
+          EQUIPMENT_CATEGORIES.forEach(category => {
+            const item = category.items.find(i => i.name === eqName);
+            if (item) {
+              newSelected.add(item.name);
+              if (item.hasEditableWeights && item.weightOptions && item.weightOptions.length > 0) {
+                newDetails.set(item.name, [{ weight: item.weightOptions[0], quantity: 1 }]);
+              }
+            }
+          });
+        });
+      }
+      
+      setSelectedEquipment(newSelected);
+      setEquipmentDetails(newDetails);
+    }
+  };
+
+  const handleCategorySelectAll = (category: EquipmentCategory) => {
+    const categoryItems = category.items;
+    const allSelected = categoryItems.every(item => selectedEquipment.has(item.name));
+    
+    const newSelected = new Set(selectedEquipment);
+    const newDetails = new Map(equipmentDetails);
+    
+    if (allSelected) {
+      // Deselect all in category
+      categoryItems.forEach(item => {
+        newSelected.delete(item.name);
+        newDetails.delete(item.name);
+        if (expandedEquipment === item.name) {
+          setExpandedEquipment(null);
+        }
+      });
+    } else {
+      // Select all in category
+      categoryItems.forEach(item => {
+        newSelected.add(item.name);
+        if (item.hasEditableWeights && item.weightOptions && item.weightOptions.length > 0) {
+          const existing = newDetails.get(item.name);
+          if (!existing || existing.length === 0) {
+            newDetails.set(item.name, [{ weight: item.weightOptions[0], quantity: 1 }]);
+          }
+        }
+      });
+    }
+    
+    setSelectedEquipment(newSelected);
+    setEquipmentDetails(newDetails);
+  };
+
+  const isCategoryAllSelected = (category: EquipmentCategory): boolean => {
+    if (category.items.length === 0) return false;
+    return category.items.every(item => selectedEquipment.has(item.name));
+  };
+
   const saveEquipment = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -374,10 +465,50 @@ export default function OnboardingEquipmentScreen() {
         <Text style={styles.title}>Select the equipment you have available.</Text>
         <Text style={styles.subtitle}>You can edit this now or adjust later.</Text>
 
+        {/* Quick Select Presets */}
+        <View style={styles.presetsSection}>
+          <TouchableOpacity
+            onPress={() => setExpandedPresets(!expandedPresets)}
+            style={styles.presetsHeader}
+          >
+            <Text style={styles.presetsHeaderText}>Quick Select</Text>
+            {expandedPresets ? (
+              <ChevronUp size={20} color="#a3e635" />
+            ) : (
+              <ChevronDown size={20} color="#a1a1aa" />
+            )}
+          </TouchableOpacity>
+          
+          {expandedPresets && (
+            <View style={styles.presetsContainer}>
+              {Object.entries(EQUIPMENT_PRESETS).map(([presetName, preset]) => (
+                <TouchableOpacity
+                  key={presetName}
+                  style={styles.presetButton}
+                  onPress={() => handlePresetSelect(presetName)}
+                >
+                  <Text style={styles.presetButtonText}>{presetName}</Text>
+                  <Text style={styles.presetButtonDescription}>{preset.description}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+
         {filteredCategories.map((category, categoryIndex) => (
           <View key={categoryIndex} style={styles.categorySection}>
             {category.title && (
-              <Text style={styles.categoryTitle}>{category.title}</Text>
+              <View style={styles.categoryHeader}>
+                <Text style={styles.categoryTitle}>{category.title}</Text>
+                <TouchableOpacity
+                  onPress={() => handleCategorySelectAll(category)}
+                  style={styles.selectAllButton}
+                >
+                  <Text style={styles.selectAllText}>
+                    {isCategoryAllSelected(category) ? 'Deselect All' : 'Select All'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             )}
             {category.items.map((item, itemIndex) => {
               const isSelected = selectedEquipment.has(item.name);
@@ -591,16 +722,73 @@ const styles = StyleSheet.create({
     color: '#a1a1aa', // zinc-400
     marginBottom: 32,
   },
+  presetsSection: {
+    marginBottom: 32,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    overflow: 'hidden',
+  },
+  presetsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+  },
+  presetsHeaderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.3,
+  },
+  presetsContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  presetButton: {
+    backgroundColor: 'rgba(39, 39, 42, 0.5)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  presetButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  presetButtonDescription: {
+    fontSize: 14,
+    color: '#a1a1aa',
+  },
   categorySection: {
     marginBottom: 32,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   categoryTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#ffffff',
     fontStyle: 'italic',
-    marginBottom: 16,
     letterSpacing: -0.3,
+    flex: 1,
+  },
+  selectAllButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  selectAllText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#a3e635',
   },
   equipmentItem: {
     flexDirection: 'row',

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, ActivityIndicator, Platform, Switch } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, ActivityIndicator, Platform, Switch, InteractionManager } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, Upload, X, Check, Search, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { ConfirmDialog } from '../src/components/ConfirmDialog';
+import { EQUIPMENT_PRESETS } from '../src/lib/equipmentFilter';
 
 // Equipment types and constants
 interface EquipmentWeight {
@@ -292,6 +293,7 @@ export default function EditProfileScreen() {
   const [equipmentDetails, setEquipmentDetails] = useState<Map<string, EquipmentWeight[]>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedEquipment, setExpandedEquipment] = useState<string | null>(null);
+  const [expandedPresets, setExpandedPresets] = useState(false);
 
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [showGoalPicker, setShowGoalPicker] = useState(false);
@@ -465,6 +467,96 @@ export default function EditProfileScreen() {
     return '';
   };
 
+  const handlePresetSelect = (presetName: string) => {
+    const preset = EQUIPMENT_PRESETS[presetName as keyof typeof EQUIPMENT_PRESETS];
+    if (!preset) return;
+
+    if (presetName === 'Full Gym') {
+      // Select all equipment
+      const allEquipment = new Set<string>();
+      const allDetails = new Map<string, EquipmentWeight[]>();
+      
+      EQUIPMENT_CATEGORIES.forEach(category => {
+        category.items.forEach(item => {
+          allEquipment.add(item.name);
+          if (item.hasEditableWeights && item.weightOptions && item.weightOptions.length > 0) {
+            // Initialize with first weight option
+            allDetails.set(item.name, [{ weight: item.weightOptions[0], quantity: 1 }]);
+          }
+        });
+      });
+      
+      setSelectedEquipment(allEquipment);
+      setEquipmentDetails(allDetails);
+    } else if (presetName === 'Bodyweight Only') {
+      // Clear all equipment
+      setSelectedEquipment(new Set());
+      setEquipmentDetails(new Map());
+      setExpandedEquipment(null);
+    } else {
+      // Select preset equipment
+      const newSelected = new Set<string>();
+      const newDetails = new Map<string, EquipmentWeight[]>();
+      
+      // Check if equipment is an array (not the string 'all')
+      if (Array.isArray(preset.equipment)) {
+        preset.equipment.forEach((eqName: string) => {
+          // Find the equipment item
+          EQUIPMENT_CATEGORIES.forEach(category => {
+            const item = category.items.find(i => i.name === eqName);
+            if (item) {
+              newSelected.add(item.name);
+              if (item.hasEditableWeights && item.weightOptions && item.weightOptions.length > 0) {
+                newDetails.set(item.name, [{ weight: item.weightOptions[0], quantity: 1 }]);
+              }
+            }
+          });
+        });
+      }
+      
+      setSelectedEquipment(newSelected);
+      setEquipmentDetails(newDetails);
+    }
+  };
+
+  const handleCategorySelectAll = (category: EquipmentCategory) => {
+    const categoryItems = category.items;
+    const allSelected = categoryItems.every(item => selectedEquipment.has(item.name));
+    
+    const newSelected = new Set(selectedEquipment);
+    const newDetails = new Map(equipmentDetails);
+    
+    if (allSelected) {
+      // Deselect all in category
+      categoryItems.forEach(item => {
+        newSelected.delete(item.name);
+        newDetails.delete(item.name);
+        if (expandedEquipment === item.name) {
+          setExpandedEquipment(null);
+        }
+      });
+    } else {
+      // Select all in category
+      categoryItems.forEach(item => {
+        newSelected.add(item.name);
+        if (item.hasEditableWeights && item.weightOptions && item.weightOptions.length > 0) {
+          const existing = newDetails.get(item.name);
+          if (!existing || existing.length === 0) {
+            newDetails.set(item.name, [{ weight: item.weightOptions[0], quantity: 1 }]);
+          }
+        }
+      });
+    }
+    
+    setSelectedEquipment(newSelected);
+    setEquipmentDetails(newDetails);
+  };
+
+  const isCategoryAllSelected = (category: EquipmentCategory): boolean => {
+    if (category.items.length === 0) return false;
+    return category.items.every(item => selectedEquipment.has(item.name));
+  };
+
   const loadProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -587,37 +679,72 @@ export default function EditProfileScreen() {
   };
 
   const pickImage = async (source: 'camera' | 'library') => {
-    setShowImagePicker(false);
-
-    let result;
-    if (source === 'camera') {
-      // Camera not available on web
-      if (Platform.OS === 'web') {
-        Alert.alert('Not Available', 'Camera is not available on web. Please use photo library instead.');
-        return;
+    console.log('[ImagePicker] pickImage called with source:', source);
+    
+    try {
+      let result;
+      if (source === 'camera') {
+        // Camera not available on web
+        if (Platform.OS === 'web') {
+          Alert.alert('Not Available', 'Camera is not available on web. Please use photo library instead.');
+          return;
+        }
+        // Close modal first
+        setShowImagePicker(false);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        console.log('[ImagePicker] Requesting camera permissions...');
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        console.log('[ImagePicker] Camera permission status:', status);
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'We need camera permission to take a photo.');
+          return;
+        }
+        console.log('[ImagePicker] Launching camera...');
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: 'images',
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+        console.log('[ImagePicker] Camera result:', result);
+      } else {
+        // Request media library permissions on mobile
+        if (Platform.OS !== 'web') {
+          console.log('[ImagePicker] Requesting media library permissions...');
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          console.log('[ImagePicker] Media library permission status:', status);
+          if (status !== 'granted') {
+            Alert.alert('Permission needed', 'We need permission to access your photos to set a profile picture.');
+            return;
+          }
+        }
+        
+        // Close modal and wait longer for iOS/Expo Go
+        setShowImagePicker(false);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log('[ImagePicker] Launching image library...');
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: 'images',
+          allowsEditing: false,
+          quality: 0.8,
+        });
+        console.log('[ImagePicker] Library result received:', result ? 'result exists' : 'result is null');
+        console.log('[ImagePicker] Result canceled:', result?.canceled);
+        console.log('[ImagePicker] Result assets:', result?.assets?.length || 0);
       }
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'We need camera permission to take a photo.');
-        return;
-      }
-      result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-    } else {
-      result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-    }
 
-    if (!result.canceled && result.assets[0]) {
-      await uploadImage(result.assets[0].uri);
+      if (!result.canceled && result.assets && result.assets[0]) {
+        console.log('[ImagePicker] Image selected, uploading...');
+        await uploadImage(result.assets[0].uri);
+      } else {
+        console.log('[ImagePicker] User canceled or no assets, canceled:', result.canceled);
+      }
+    } catch (error: any) {
+      console.error('[ImagePicker] Error picking image:', error);
+      console.error('[ImagePicker] Error stack:', error.stack);
+      Alert.alert('Error', error.message || 'Failed to open image picker. Please try again.');
     }
   };
 
@@ -902,24 +1029,26 @@ export default function EditProfileScreen() {
             ) : (
               <>
                 {profilePictureUri ? (
-                  <Image 
-                    source={{ uri: profilePictureUri }} 
-                    style={styles.profilePicture}
-                    contentFit="cover"
-                    transition={200}
-                  />
+                  <>
+                    <Image 
+                      source={{ uri: profilePictureUri }} 
+                      style={styles.profilePicture}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                    <TouchableOpacity
+                      style={styles.removeButton}
+                      onPress={removeImage}
+                      disabled={uploading}
+                    >
+                      <X size={18} color="#ffffff" strokeWidth={2.5} />
+                    </TouchableOpacity>
+                  </>
                 ) : (
                   <View style={styles.placeholderPicture}>
                     <Text style={styles.placeholderPictureText}>No Photo</Text>
                   </View>
                 )}
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={removeImage}
-                  disabled={!profilePictureUri || uploading}
-                >
-                  <X size={16} color="#ffffff" />
-                </TouchableOpacity>
               </>
             )}
           </View>
@@ -928,7 +1057,7 @@ export default function EditProfileScreen() {
             onPress={() => setShowImagePicker(true)}
             disabled={uploading}
           >
-            <Upload size={20} color="#3b82f6" />
+            <Upload size={20} color="#a3e635" />
             <Text style={styles.uploadButtonText}>Upload Photo</Text>
           </TouchableOpacity>
         </View>
@@ -1228,6 +1357,36 @@ export default function EditProfileScreen() {
               Select the equipment you have access to. This helps the AI generate workouts tailored to your setup.
             </Text>
             
+            {/* Quick Select Presets */}
+            <View style={styles.presetsSection}>
+              <TouchableOpacity
+                onPress={() => setExpandedPresets(!expandedPresets)}
+                style={styles.presetsHeader}
+              >
+                <Text style={styles.presetsHeaderText}>Quick Select</Text>
+                {expandedPresets ? (
+                  <ChevronUp size={20} color="#a3e635" />
+                ) : (
+                  <ChevronDown size={20} color="#a1a1aa" />
+                )}
+              </TouchableOpacity>
+              
+              {expandedPresets && (
+                <View style={styles.presetsContainer}>
+                  {Object.entries(EQUIPMENT_PRESETS).map(([presetName, preset]) => (
+                    <TouchableOpacity
+                      key={presetName}
+                      style={styles.presetButton}
+                      onPress={() => handlePresetSelect(presetName)}
+                    >
+                      <Text style={styles.presetButtonText}>{presetName}</Text>
+                      <Text style={styles.presetButtonDescription}>{preset.description}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+
             {/* Search Bar */}
             <View style={styles.equipmentSearchContainer}>
               <Search size={20} color="#71717a" style={styles.equipmentSearchIcon} />
@@ -1258,7 +1417,17 @@ export default function EditProfileScreen() {
               ).map((category) => (
                 <View key={category.title || 'other'} style={styles.equipmentCategorySection}>
                   {category.title && (
-                    <Text style={styles.equipmentCategoryTitle}>{category.title}</Text>
+                    <View style={styles.categoryHeader}>
+                      <Text style={styles.equipmentCategoryTitle}>{category.title}</Text>
+                      <TouchableOpacity
+                        onPress={() => handleCategorySelectAll(category)}
+                        style={styles.selectAllButton}
+                      >
+                        <Text style={styles.selectAllText}>
+                          {isCategoryAllSelected(category) ? 'Deselect All' : 'Select All'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   )}
                   {category.items.map((item) => {
                     const isSelected = selectedEquipment.has(item.name);
@@ -1365,7 +1534,7 @@ export default function EditProfileScreen() {
                                 </View>
                                 <TouchableOpacity
                                   onPress={() => handleRemoveWeight(item.name, weightIndex)}
-                                  style={styles.removeButton}
+                                  style={styles.removeWeightButton}
                                 >
                                   <X size={20} color="#ef4444" />
                                 </TouchableOpacity>
@@ -1737,7 +1906,10 @@ export default function EditProfileScreen() {
             <Text style={styles.modalTitle}>Select Photo</Text>
             <TouchableOpacity
               style={styles.imagePickerOption}
-              onPress={() => pickImage('library')}
+              onPress={() => {
+                console.log('[ImagePicker] Button pressed - Choose from Library');
+                pickImage('library');
+              }}
             >
               <Upload size={24} color="#a3e635" />
               <Text style={styles.imagePickerOptionText}>Choose from Library</Text>
@@ -1888,16 +2060,22 @@ const styles = StyleSheet.create({
   },
   removeButton: {
     position: 'absolute',
-    top: 0,
-    right: 0,
+    top: -8,
+    right: -8,
     backgroundColor: '#ef4444', // red-500
-    borderRadius: 20,
-    width: 32,
-    height: 32,
+    borderRadius: 18,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: '#09090b', // zinc-950
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 6,
+    zIndex: 10,
   },
   uploadButton: {
     flexDirection: 'row',
@@ -2339,15 +2517,72 @@ const styles = StyleSheet.create({
     maxHeight: 400,
     marginTop: 8,
   },
+  presetsSection: {
+    marginBottom: 24,
+    backgroundColor: 'rgba(24, 24, 27, 0.9)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    overflow: 'hidden',
+  },
+  presetsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+  },
+  presetsHeaderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: -0.3,
+  },
+  presetsContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  presetButton: {
+    backgroundColor: 'rgba(39, 39, 42, 0.5)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  presetButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  presetButtonDescription: {
+    fontSize: 14,
+    color: '#a1a1aa',
+  },
   equipmentCategorySection: {
     marginBottom: 24,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   equipmentCategoryTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
-    marginBottom: 12,
     letterSpacing: -0.3,
+    flex: 1,
+  },
+  selectAllButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  selectAllText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#a3e635',
   },
   equipmentItem: {
     flexDirection: 'row',
@@ -2392,20 +2627,6 @@ const styles = StyleSheet.create({
   },
   expandButton: {
     padding: 8,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#71717a',
-    backgroundColor: 'transparent',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxSelected: {
-    borderColor: '#a3e635',
-    backgroundColor: '#a3e635',
   },
   expandedContent: {
     backgroundColor: 'rgba(24, 24, 27, 0.9)',
@@ -2474,7 +2695,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#27272a',
   },
-  removeButton: {
+  removeWeightButton: {
     padding: 12,
     marginTop: 24,
   },

@@ -15,6 +15,7 @@ import { generateWeekScheduleWithAI } from '../../src/lib/adaptiveWorkoutEngine'
 import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../../src/lib/progressionMetrics';
 import { computeProgressionSuggestion } from '../../src/lib/progressionEngine';
 import { estimateExerciseDuration } from '../../src/lib/timeEstimation';
+import { filterExercisesByEquipment } from '../../src/lib/equipmentFilter';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -322,15 +323,15 @@ export default function PlannerScreen() {
         return;
       }
 
-      // Load available exercises from database
+      // Load available exercises from database with equipment_needed
       const { data: masterExercises } = await supabase
         .from('exercises')
-        .select('name, is_timed')
+        .select('name, is_timed, equipment_needed')
         .order('name', { ascending: true });
 
       const { data: userExercises } = await supabase
         .from('user_exercises')
-        .select('name, is_timed')
+        .select('name, is_timed, equipment_needed')
         .eq('user_id', user.id)
         .order('name', { ascending: true });
 
@@ -402,11 +403,32 @@ export default function PlannerScreen() {
         }
       }
 
+      // Filter exercises by user's available equipment
+      const userEquipment = userProfile.equipment_access || [];
+      const filteredMasterExercises = filterExercisesByEquipment(
+        (masterExercises || []) as any,
+        userEquipment
+      );
+      const filteredUserExercises = filterExercisesByEquipment(
+        (userExercises || []) as any,
+        userEquipment
+      );
+
+      if (__DEV__) {
+        console.log('[planner] Equipment filter:', {
+          totalMaster: (masterExercises || []).length,
+          filteredMaster: filteredMasterExercises.length,
+          totalUser: (userExercises || []).length,
+          filteredUser: filteredUserExercises.length,
+          userEquipment: userEquipment.length > 0 ? userEquipment.map((e: any) => typeof e === 'string' ? e : e.name).join(', ') : 'None (full gym)'
+        });
+      }
+
       // Generate week_schedule via adaptive engine
       const { week_schedule } = await generateWeekScheduleWithAI({
         profile: userProfile,
-        masterExercises: (masterExercises || []) as any,
-        userExercises: (userExercises || []) as any,
+        masterExercises: filteredMasterExercises as any,
+        userExercises: filteredUserExercises as any,
         apiKey,
         durationTargetMin: durationTargetMin || 45,
         recentLogs: (recentLogs || []) as any,

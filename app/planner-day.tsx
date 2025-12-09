@@ -18,6 +18,7 @@ import { estimateExerciseDuration } from '../src/lib/timeEstimation';
 import { computeExerciseHistoryMetrics, WorkoutLogLike } from '../src/lib/progressionMetrics';
 import { computeProgressionSuggestion } from '../src/lib/progressionEngine';
 import { applyVolumeTemplate } from '../src/lib/volumeTemplates';
+import { filterExercisesByEquipment } from '../src/lib/equipmentFilter';
 
 // Import draggable list for all platforms
 let DraggableFlatList: any = null;
@@ -723,21 +724,32 @@ export default function PlannerDayScreen() {
 
       const existingExercises = dayData.exercises || [];
 
-      // Load available exercises from database
+      // Load available exercises from database with equipment_needed
       const { data: masterExercises } = await supabase
         .from('exercises')
-        .select('name, is_timed')
+        .select('name, is_timed, equipment_needed')
         .order('name', { ascending: true });
 
       const { data: userExercises } = await supabase
         .from('user_exercises')
-        .select('name, is_timed')
+        .select('name, is_timed, equipment_needed')
         .eq('user_id', user.id)
         .order('name', { ascending: true });
 
+      // Filter exercises by user's available equipment
+      const userEquipment = userProfile.equipment_access || [];
+      const filteredMasterExercises = filterExercisesByEquipment(
+        (masterExercises || []) as any,
+        userEquipment
+      );
+      const filteredUserExercises = filterExercisesByEquipment(
+        (userExercises || []) as any,
+        userEquipment
+      );
+
       const availableExerciseNames = [
-        ...(masterExercises || []).map((ex: any) => ex.name),
-        ...(userExercises || []).map((ex: any) => ex.name)
+        ...(filteredMasterExercises || []).map((ex: any) => ex.name),
+        ...(filteredUserExercises || []).map((ex: any) => ex.name)
       ].filter(Boolean);
 
       // Build comprehensive prompt using all profile data and available exercises
