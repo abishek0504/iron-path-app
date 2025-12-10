@@ -118,17 +118,13 @@ export const buildFullPlanPrompt = (
   const durationTarget = durationTargetMin || 45;
   const mode = durationMode || 'target';
   
-  let goldilocksText = '';
-  if (mode === 'target') {
-    goldilocksText = `CRITICAL: The user has set a TARGET duration of ${durationTarget} minutes per workout session. You MUST aim to fill this duration with appropriate exercises. This is a TARGET duration - if the workout is shorter than ${durationTarget} minutes, add more exercises or increase volume (sets/reps) to reach the target. The goal is to create a complete, full workout that matches this duration.`;
-  } else {
-    goldilocksText = `CRITICAL: The user has set a MAXIMUM duration of ${durationTarget} minutes per workout session. You MUST create the best possible workout that stays within this time limit. This is a MAXIMUM constraint - prioritize the most effective exercises and optimal volume that fits within ${durationTarget} minutes. Quality over quantity - focus on the most important exercises for the user's goals.`;
-  }
+  // Time is a ceiling (no filler). Fill with high-density compounds, then compress if needed.
+  const goldilocksText = `CRITICAL: The user has set a TIME CEILING of ${durationTarget} minutes per workout session. Generate the best possible workout within this ceiling. Prefer high-density compounds; if short, add sets to Tier 1 compounds (no junk isolation). If over, compress intelligently (supersets/reduce sets), never add filler.`;
 
   // Build exercise list section
   let exerciseListSection = '';
   if (availableExercises.length > 0) {
-    exerciseListSection = `\nAVAILABLE EXERCISES FROM DATABASE:\n${availableExercises.join(', ')}\n\nIMPORTANT: You MUST prefer exercises from this list. Only create custom exercises if none from the list are suitable for the specific muscle group or movement pattern needed.`;
+    exerciseListSection = `\nAVAILABLE EXERCISES FROM DATABASE:\n${availableExercises.join(', ')}\n\nIMPORTANT: You MUST prefer exercises from this list. Only create custom exercises if none from the list are suitable for the specific muscle group or movement pattern needed.\nDENSITY GUARDRAIL: If density_score is missing, infer density:\n- Compound + Barbell/Dumbbell/Bodyweight => High Density (~9)\n- Machine/Isolation => Low Density (~4)\nSelect exercises with inferred or known density >= 8.`;
   }
 
   // Build current plan section if it exists
@@ -343,7 +339,7 @@ export const buildSupplementaryPrompt = (
   // Build exercise list section
   let exerciseListSection = '';
   if (availableExercises.length > 0) {
-    exerciseListSection = `\nAVAILABLE EXERCISES FROM DATABASE:\n${availableExercises.join(', ')}\n\nIMPORTANT: You MUST prefer exercises from this list. Only create custom exercises if none from the list are suitable.`;
+    exerciseListSection = `\nAVAILABLE EXERCISES FROM DATABASE:\n${availableExercises.join(', ')}\n\nIMPORTANT: You MUST prefer exercises from this list. Only create custom exercises if none from the list are suitable.\nDENSITY GUARDRAIL: If density_score is missing, infer density:\n- Compound + Barbell/Dumbbell/Bodyweight => High Density (~9)\n- Machine/Isolation => Low Density (~4)\nSelect exercises with inferred or known density >= 8.`;
   }
 
   // Analyze existing exercises for muscle groups and movement patterns

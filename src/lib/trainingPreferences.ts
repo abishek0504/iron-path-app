@@ -102,8 +102,8 @@ export const deriveStyleAndComponentsFromProfile = (
     (profile?.preferred_training_style as TrainingStyleId) ||
     deriveStyleFromGoal(profile?.goal);
 
-  const styleDefaults = getDefaultComponentsForStyle(style);
-  const components = coerceComponents(profile?.include_components, styleDefaults);
+  // Implicit components: ignore user-provided include_components; derive from style/goal
+  const components = getDefaultComponentsForStyle(style);
 
   return { style, components };
 };

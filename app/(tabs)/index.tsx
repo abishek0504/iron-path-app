@@ -339,124 +339,138 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // Always refresh workout state when screen gains focus (to detect saved progress)
-      if (activePlan && currentDay) {
-        const refresh = async () => {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
+      if (!activePlan || !currentDay) return;
 
-          // Check for active sessions from TODAY only (workouts are day-specific)
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const tomorrow = new Date(today);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          
-          // Also check AsyncStorage for saved progress (faster, more reliable for in-progress workouts)
-          const savedProgressKey = `workout_session_${activePlan.id}_${currentDay}`;
-          let hasSavedProgress = false;
-          try {
-            const savedProgress = await AsyncStorage.getItem(savedProgressKey);
-            if (savedProgress) {
-              const progress = JSON.parse(savedProgress);
-              // Check if there's actual progress (not just empty state)
-              if (progress && (progress.exercises?.length > 0 || progress.currentExerciseIndex > 0 || progress.currentSetIndex > 0)) {
-                hasSavedProgress = true;
-              }
-            }
-          } catch (error) {
-            // Ignore AsyncStorage errors
-          }
-          
-          const { data: activeSession } = await supabase
-            .from('workout_sessions')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('plan_id', activePlan.id)
-            .eq('day', currentDay)
-            .eq('status', 'active')
-            .gte('started_at', today.toISOString())
-            .lt('started_at', tomorrow.toISOString())
-            .maybeSingle();
-          
-          // Cleanup: Mark any old active sessions (from previous days) as abandoned
-          // This ensures workouts are day-specific and missed workouts are tracked
-          const { data: oldActiveSessions } = await supabase
-            .from('workout_sessions')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('plan_id', activePlan.id)
-            .eq('day', currentDay)
-            .eq('status', 'active')
-            .lt('started_at', today.toISOString());
-          
-          if (oldActiveSessions && oldActiveSessions.length > 0) {
-            // Mark old sessions as abandoned (they weren't completed on the scheduled day)
-            await supabase
-              .from('workout_sessions')
-              .update({ status: 'abandoned' })
-              .in('id', oldActiveSessions.map(s => s.id));
-          }
-          
-          // Check for completed sessions from today (for completion status)
-          const { data: completedSession } = await supabase
-            .from('workout_sessions')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('plan_id', activePlan.id)
-            .eq('day', currentDay)
-            .eq('status', 'completed')
-            .gte('completed_at', today.toISOString())
-            .lt('completed_at', tomorrow.toISOString())
-            .maybeSingle();
-          
-          // If there's a completed session, check if new exercises were added
-          let isTrulyCompleted = false;
-          if (completedSession && !activeSession) {
-            // Get current plan exercises count
-            const weekStart = new Date();
-            weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-            weekStart.setHours(0, 0, 0, 0);
-            const year = weekStart.getFullYear();
-            const month = String(weekStart.getMonth() + 1).padStart(2, '0');
-            const dayNum = String(weekStart.getDate()).padStart(2, '0');
-            const weekKey = `${year}-${month}-${dayNum}`;
-            
-            let dayData = null;
-            if (activePlan.plan_data?.weeks?.[weekKey]?.week_schedule?.[currentDay]) {
-              dayData = activePlan.plan_data.weeks[weekKey].week_schedule[currentDay];
-            } else if (activePlan.plan_data?.week_schedule?.[currentDay]) {
-              dayData = activePlan.plan_data.week_schedule[currentDay];
-            }
-            
-            const currentExerciseCount = dayData?.exercises?.length || 0;
-            
-            // Skip completion check for rest days (no exercises scheduled)
-            if (currentExerciseCount > 0) {
-              // Count how many unique exercises were logged for this session
-              const { data: loggedExercises } = await supabase
-                .from('workout_logs')
-                .select('exercise_name')
-                .eq('user_id', user.id)
-                .eq('session_id', completedSession.id)
-                .eq('day', currentDay);
-              
-              const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
-              const loggedExerciseCount = uniqueLoggedExercises.size;
-              
-              // Workout is truly completed only if all current exercises were logged
-              isTrulyCompleted = loggedExerciseCount >= currentExerciseCount;
-            } else {
-              // Rest days are automatically completed since there are no exercises to perform
-              isTrulyCompleted = true;
+      let isActive = true;
+
+      // Always refresh workout state when screen gains focus (to detect saved progress)
+      const refresh = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!isActive || !user) return;
+
+        // Check for active sessions from TODAY only (workouts are day-specific)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        // Also check AsyncStorage for saved progress (faster, more reliable for in-progress workouts)
+        const savedProgressKey = `workout_session_${activePlan.id}_${currentDay}`;
+        let hasSavedProgress = false;
+        try {
+          const savedProgress = await AsyncStorage.getItem(savedProgressKey);
+          if (!isActive) return;
+          if (savedProgress) {
+            const progress = JSON.parse(savedProgress);
+            // Check if there's actual progress (not just empty state)
+            if (progress && (progress.exercises?.length > 0 || progress.currentExerciseIndex > 0 || progress.currentSetIndex > 0)) {
+              hasSavedProgress = true;
             }
           }
+        } catch (error) {
+          // Ignore AsyncStorage errors
+        }
+        
+        const { data: activeSession } = await supabase
+          .from('workout_sessions')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('plan_id', activePlan.id)
+          .eq('day', currentDay)
+          .eq('status', 'active')
+          .gte('started_at', today.toISOString())
+          .lt('started_at', tomorrow.toISOString())
+          .maybeSingle();
+        if (!isActive) return;
+        
+        // Cleanup: Mark any old active sessions (from previous days) as abandoned
+        // This ensures workouts are day-specific and missed workouts are tracked
+        const { data: oldActiveSessions } = await supabase
+          .from('workout_sessions')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('plan_id', activePlan.id)
+          .eq('day', currentDay)
+          .eq('status', 'active')
+          .lt('started_at', today.toISOString());
+        if (!isActive) return;
+        
+        if (oldActiveSessions && oldActiveSessions.length > 0) {
+          // Mark old sessions as abandoned (they weren't completed on the scheduled day)
+          await supabase
+            .from('workout_sessions')
+            .update({ status: 'abandoned' })
+            .in('id', oldActiveSessions.map(s => s.id));
+          if (!isActive) return;
+        }
+        
+        // Check for completed sessions from today (for completion status)
+        const { data: completedSession } = await supabase
+          .from('workout_sessions')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('plan_id', activePlan.id)
+          .eq('day', currentDay)
+          .eq('status', 'completed')
+          .gte('completed_at', today.toISOString())
+          .lt('completed_at', tomorrow.toISOString())
+          .maybeSingle();
+        if (!isActive) return;
+        
+        // If there's a completed session, check if new exercises were added
+        let isTrulyCompleted = false;
+        if (completedSession && !activeSession) {
+          // Get current plan exercises count
+          const weekStart = new Date();
+          weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          const year = weekStart.getFullYear();
+          const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+          const dayNum = String(weekStart.getDate()).padStart(2, '0');
+          const weekKey = `${year}-${month}-${dayNum}`;
           
-          // Show Continue/Restart if there's an active session OR saved progress in AsyncStorage
-          setHasActiveWorkout(!!activeSession || hasSavedProgress);
-          setIsWorkoutCompleted(isTrulyCompleted);
-        };
-        refresh();
-      }
+          let dayData = null;
+          if (activePlan.plan_data?.weeks?.[weekKey]?.week_schedule?.[currentDay]) {
+            dayData = activePlan.plan_data.weeks[weekKey].week_schedule[currentDay];
+          } else if (activePlan.plan_data?.week_schedule?.[currentDay]) {
+            dayData = activePlan.plan_data.week_schedule[currentDay];
+          }
+          
+          const currentExerciseCount = dayData?.exercises?.length || 0;
+          
+          // Skip completion check for rest days (no exercises scheduled)
+          if (currentExerciseCount > 0) {
+            // Count how many unique exercises were logged for this session
+            const { data: loggedExercises } = await supabase
+              .from('workout_logs')
+              .select('exercise_name')
+              .eq('user_id', user.id)
+              .eq('session_id', completedSession.id)
+              .eq('day', currentDay);
+            if (!isActive) return;
+            
+            const uniqueLoggedExercises = new Set(loggedExercises?.map(log => log.exercise_name) || []);
+            const loggedExerciseCount = uniqueLoggedExercises.size;
+            
+            // Workout is truly completed only if all current exercises were logged
+            isTrulyCompleted = loggedExerciseCount >= currentExerciseCount;
+          } else {
+            // Rest days are automatically completed since there are no exercises to perform
+            isTrulyCompleted = true;
+          }
+        }
+        
+        if (!isActive) return;
+        // Show Continue/Restart if there's an active session OR saved progress in AsyncStorage
+        setHasActiveWorkout(!!activeSession || hasSavedProgress);
+        setIsWorkoutCompleted(isTrulyCompleted);
+      };
+
+      refresh();
+
+      return () => {
+        isActive = false;
+      };
     }, [activePlan, currentDay, hasInitiallyLoaded])
   );
 

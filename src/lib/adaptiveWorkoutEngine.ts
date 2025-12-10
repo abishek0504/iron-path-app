@@ -383,6 +383,192 @@ export const generateDaySessionWithAI = async (
     apiKey,
   } = params;
 
+  // Build lookup for available exercises (by lowercased name) to reuse metadata such as density, is_unilateral, is_timed.
+  const availableLookup = new Map<string, any>();
+  (availableExercises || []).forEach((ex: any) => {
+    if (ex?.name) {
+      availableLookup.set(String(ex.name).toLowerCase(), ex);
+    }
+  });
+
+  const isBodyweightExercise = (ex: any): boolean => {
+    const name = (ex?.name || '').toLowerCase();
+    const equip = (ex?.equipment_needed || ex?.equipment || []) as string[];
+    const lowerEquip = Array.isArray(equip) ? equip.map((e) => (e || '').toLowerCase()) : [];
+    // Treat typical calisthenics implements as bodyweight (rings, bars, parallettes)
+    const bwImplements = ['pull-up bar', 'pull up bar', 'bar', 'rings', 'parallettes', 'dip bar', 'doorframe bar'];
+    const hasBwImplementOnly = lowerEquip.length > 0 && lowerEquip.every((e) => bwImplements.some((b) => e.includes(b)));
+    if (lowerEquip.length === 0 || lowerEquip.includes('bodyweight') || lowerEquip.includes('bodyweight/weighted') || hasBwImplementOnly) return true;
+    const bwNames = [
+      'pull up','pull-up','pullup','chin up','chin-up',
+      'push up','push-up','pushup','dip','dips','sit up','sit-up','situp',
+      'crunch','crunches','plank','planks','burpee','burpees','mountain climber','mountain climbers',
+      'bodyweight squat','air squat','lunge','lunges','jumping jack','jumping jacks','pistol squat',
+      'handstand push up','handstand push-up','muscle up','muscle-up','handstand','planche','front lever'
+    ];
+    return bwNames.some((k) => name.includes(k));
+  };
+
+  const isBloatExercise = (ex: any): boolean => {
+    const name = (ex?.name || '').toLowerCase();
+    return (
+      name.includes('air squat') ||
+      name === 'squat (air)' ||
+      name.includes('wall sit') ||
+      name.includes('towel row') ||
+      name.includes('band pull-apart') ||
+      name.includes('band pull apart') ||
+      name.includes('arm circle')
+    );
+  };
+
+  const inferDensity = (ex: any): number => {
+    if (ex?.density_score != null) return Number(ex.density_score);
+    const equip = (ex?.equipment_needed || ex?.equipment || []) as string[];
+    const lowerEquip = Array.isArray(equip) ? equip.map((e) => (e || '').toLowerCase()) : [];
+    const mp = (ex?.movement_pattern || '').toLowerCase();
+    const name = (ex?.name || '').toLowerCase();
+    const isMachine = lowerEquip.some((e) => e.includes('machine')) || name.includes('machine');
+
+    const compoundNamePatterns = [
+      'squat','deadlift','rdl','hip thrust','hinge','lunge','split squat','step up','step-up','pistol',
+      'pull up','pull-up','chin up','chin-up','row','press','bench','ohp','overhead press','push up','push-up',
+      'dip','muscle up','muscle-up','snatch','clean','jerk','thruster','carry','farmer','suitcase','yoke','walk'
+    ];
+    const nameLooksCompound = compoundNamePatterns.some((k) => name.includes(k));
+    const isCompoundPattern = ['squat', 'hinge', 'push_vert', 'pull_vert', 'push_horiz', 'pull_horiz', 'lunge', 'carry'].includes(mp);
+
+    if ((isCompoundPattern || nameLooksCompound) && !isMachine) return 9;
+    if (isMachine) return 4;
+    return 6; // unknown defaults to mid so it can survive if needed
+  };
+
+  const isUnilateral = (ex: any): boolean => {
+    if (ex?.is_unilateral === true) return true;
+    const name = (ex?.name || '').toLowerCase();
+    return ['single', 'unilateral', 'pistol', 'split', 'one-arm', 'one arm', 'one-leg', 'one leg'].some((k) => name.includes(k));
+  };
+
+  const isSkill = (ex: any): boolean => {
+    const diff = (ex?.difficulty || '').toLowerCase();
+    const name = (ex?.name || '').toLowerCase();
+    return diff === 'hard' || diff === 'elite' || name.includes('handstand') || name.includes('planche') || name.includes('front lever') || name.includes('maltese');
+  };
+
+  const GOLDEN_STANDARDS = {
+    weighted_compound: { setsMin: 3, setsMax: 4, repsMin: 5, repsMax: 8, restMin: 90, restMax: 150 },
+    weighted_accessory: { setsMin: 2, setsMax: 3, repsMin: 8, repsMax: 15, restMin: 60, restMax: 90 },
+    bw_endurance: { setsMin: 3, setsMax: 4, repsMin: 15, repsMax: 25, restMin: 45, restMax: 60 },
+    bw_midrange: { setsMin: 3, setsMax: 4, repsMin: 6, repsMax: 12, restMin: 60, restMax: 90 },
+    bw_skill: { setsMin: 3, setsMax: 5, repsMin: 3, repsMax: 6, restMin: 60, restMax: 120 },
+  };
+
+  const clampToRange = (value: number, min: number, max: number): number => {
+    if (!Number.isFinite(value)) return min;
+    return Math.max(min, Math.min(max, Math.round(value)));
+  };
+
+  const applyGoldenStandard = (exercise: any): any => {
+    const ex = { ...exercise };
+    const name = (ex.name || '').toLowerCase();
+    const meta = availableLookup.get(name) || {};
+
+    const isTimed = Boolean(
+      ex.is_timed ||
+      ex.target_duration_sec != null ||
+      (Array.isArray(ex.sets) && ex.sets.some((s: any) => s.duration != null))
+    );
+
+    // If timed, only clamp rest modestly
+    if (isTimed) {
+      const restClamped = clampToRange(ex.rest_time_sec ?? 60, 30, 120);
+      ex.rest_time_sec = restClamped;
+      if (Array.isArray(ex.sets)) {
+        ex.sets = ex.sets.map((s: any, i: number) => ({
+          ...s,
+          index: i + 1,
+          rest_time_sec: clampToRange(s.rest_time_sec ?? restClamped, 30, 120),
+        }));
+      }
+      return ex;
+    }
+
+    const bodyweight = isBodyweightExercise(ex);
+    const skillMove = isSkill(ex);
+    const mp = (ex.movement_pattern || meta.movement_pattern || '').toLowerCase();
+    const isEnduranceBW =
+      bodyweight &&
+      (name.includes('lunge') ||
+        name.includes('squat') ||
+        name.includes('step up') ||
+        name.includes('step-up') ||
+        name.includes('split squat') ||
+        name.includes('rear foot'));
+
+    const isCompoundWeighted =
+      !bodyweight &&
+      (
+        ['squat', 'hinge', 'push', 'pull', 'lunge', 'carry'].some((p) => mp.includes(p)) ||
+        name.includes('squat') || name.includes('deadlift') || name.includes('rdl') ||
+        name.includes('press') || name.includes('row') || name.includes('pull up') || name.includes('pull-up') ||
+        name.includes('chin up') || name.includes('chin-up') || name.includes('dip')
+      );
+
+    let standard = GOLDEN_STANDARDS.weighted_accessory;
+    if (bodyweight) {
+      if (skillMove) {
+        standard = GOLDEN_STANDARDS.bw_skill;
+      } else if (isEnduranceBW) {
+        standard = GOLDEN_STANDARDS.bw_endurance;
+      } else {
+        standard = GOLDEN_STANDARDS.bw_midrange;
+      }
+    } else if (isCompoundWeighted) {
+      standard = GOLDEN_STANDARDS.weighted_compound;
+    }
+
+    const sets = clampToRange(
+      ex.target_sets || (Array.isArray(ex.sets) ? ex.sets.length : standard.setsMin),
+      standard.setsMin,
+      standard.setsMax,
+    );
+    const reps = clampToRange(ex.target_reps || standard.repsMin, standard.repsMin, standard.repsMax);
+    const rest = clampToRange(ex.rest_time_sec || standard.restMin, standard.restMin, standard.restMax);
+
+    ex.target_sets = sets;
+    ex.target_reps = reps;
+    ex.rest_time_sec = rest;
+
+    if (Array.isArray(ex.sets)) {
+      // trim or extend sets to match golden range
+      const trimmed = ex.sets.slice(0, sets).map((s: any, i: number) => ({
+        ...s,
+        index: i + 1,
+        reps: reps,
+        weight: s.weight ?? (bodyweight ? 0 : null),
+        rest_time_sec: clampToRange(s.rest_time_sec ?? rest, standard.restMin, standard.restMax),
+      }));
+      while (trimmed.length < sets) {
+        trimmed.push({
+          index: trimmed.length + 1,
+          reps,
+          weight: bodyweight ? 0 : null,
+          rest_time_sec: rest,
+        });
+      }
+      ex.sets = trimmed;
+    } else {
+      ex.sets = Array.from({ length: sets }, (_, i) => ({
+        index: i + 1,
+        reps,
+        weight: bodyweight ? 0 : null,
+        rest_time_sec: rest,
+      }));
+    }
+
+    return ex;
+  };
+
   const genAI = new GoogleGenerativeAI(apiKey);
   const modelName = await getCachedModel(apiKey);
 
@@ -529,12 +715,92 @@ export const generateDaySessionWithAI = async (
   }
 
   // Step 4: Exercise Processing (Correct Order)
-  const processedExercises = newExercises.map((ex: any, idx: number) => {
+  // Prune low-density junk before processing
+  const densityFiltered = newExercises.filter((ex: any) => {
+    if (isBloatExercise(ex)) return false;
+    const meta = availableLookup.get((ex?.name || '').toLowerCase());
+    const density = inferDensity({ ...meta, ...ex });
+    return density >= 8;
+  });
+
+  if (__DEV__) {
+    console.log('[generateDaySessionWithAI] AI returned', newExercises.length, 'exercises; kept high-density', densityFiltered.length);
+    if (densityFiltered.length === 0) {
+      const missingPattern = newExercises.filter((e: any) => !e?.movement_pattern).length;
+      const missingEquip = newExercises.filter((e: any) => !e?.equipment_needed && !e?.equipment).length;
+      const missingDensity = newExercises.filter((e: any) => e?.density_score == null).length;
+      console.warn('[generateDaySessionWithAI] Density filter removed all exercises.', {
+        sampleNames: newExercises.slice(0, 5).map((e: any) => e?.name),
+        missingMovementPattern: missingPattern,
+        missingEquipment: missingEquip,
+        missingDensityScore: missingDensity,
+        total: newExercises.length,
+      });
+    }
+  }
+
+  // Fallback: if everything was filtered out, keep top 4 by inferred density to avoid empty sessions
+  let filteredExercises = densityFiltered;
+  if (filteredExercises.length === 0) {
+    filteredExercises = [...newExercises]
+      .map((ex: any) => {
+        const meta = availableLookup.get((ex?.name || '').toLowerCase());
+        return { ex, density: inferDensity({ ...meta, ...ex }) };
+      })
+      .sort((a, b) => b.density - a.density)
+      .slice(0, 4)
+      .map((item) => item.ex);
+    if (__DEV__) {
+      console.warn('[generateDaySessionWithAI] Fallback engaged: retained top', filteredExercises.length, 'by inferred density.');
+    }
+  }
+
+  // Ensure minimum exercise count by pulling high-density fallbacks from available list (no bloat)
+  const minExercises = 6;
+  const maxExercises = 12;
+  const targetExercises = Math.min(
+    maxExercises,
+    Math.max(minExercises, Math.ceil((timeConstraintMin || 30) / 6))
+  );
+  if (filteredExercises.length < targetExercises) {
+    const existingNames = new Set<string>(
+      [...filteredExercises, ...existingExercises].map((e: any) => (e?.name || '').toLowerCase())
+    );
+    const candidates = (availableExercises || [])
+      .filter((ex: any) => {
+        const n = (ex?.name || '').toLowerCase();
+        if (!n || existingNames.has(n)) return false;
+        if (isBloatExercise(ex)) return false;
+        const density = inferDensity({ ...ex });
+        return density >= 8;
+      })
+      .map((ex: any) => ({ ex, density: inferDensity({ ...ex }) }))
+      .sort((a, b) => b.density - a.density);
+
+    for (const cand of candidates) {
+      if (filteredExercises.length >= targetExercises) break;
+      const n = (cand.ex?.name || '').toLowerCase();
+      if (existingNames.has(n)) continue;
+      filteredExercises.push(cand.ex);
+      existingNames.add(n);
+    }
+
+    if (__DEV__) {
+      console.warn('[generateDaySessionWithAI] Added high-density fallbacks to meet target count', {
+        finalCount: filteredExercises.length,
+        targetExercises,
+      });
+    }
+  }
+
+  const buildProcessedExercise = (ex: any): any => {
     // 1. Normalize First
     let processed = normalizeExercise(ex);
     
     // 2. Apply Volume Templates
     processed = applyVolumeTemplate(processed);
+    // 2b. Enforce Golden Standards
+    processed = applyGoldenStandard(processed);
     
     // 3. Infer Movement Patterns
     if (!processed.movement_pattern) {
@@ -547,13 +813,17 @@ export const generateDaySessionWithAI = async (
       processed.target_reps = match ? parseInt(match[0], 10) : 10;
     }
     
-    // Create sets array matching manual format
-    const numSets = processed.target_sets || 3;
-    const targetReps = processed.target_reps || 10;
-    const restTime = processed.rest_time_sec || 60;
+    // Prepare lookups
+    const exerciseName = (processed.name || '').toLowerCase();
+    const meta = availableLookup.get(exerciseName) || {};
+    const metaTimed = meta?.is_timed;
+    const metaDuration = meta?.target_duration_sec || meta?.default_duration_sec;
+    const metaRest = meta?.rest_time_sec;
+    const numSetsInitial = processed.target_sets || (Array.isArray(processed.sets) ? processed.sets.length : 0) || 3;
+    let targetReps = processed.target_reps || 10;
+    let restTime = processed.rest_time_sec || metaRest || 60;
     
     // Check if exercise is bodyweight or timed
-    const exerciseName = (processed.name || '').toLowerCase();
     const isBodyweight = [
       'pull up', 'pull-up', 'pullup', 'chin up', 'chin-up',
       'push up', 'push-up', 'pushup',
@@ -565,21 +835,38 @@ export const generateDaySessionWithAI = async (
       'handstand push up', 'handstand push-up', 'muscle up', 'muscle-up'
     ].some(bw => exerciseName.includes(bw));
     
-    // Check if it's a timed exercise (from availableExercises metadata if available)
-    // For now, we'll infer from name patterns
-    const isTimed = exerciseName.includes('stretch') || 
-                    exerciseName.includes('mobility') ||
-                    exerciseName.includes('plank') ||
-                    exerciseName.includes('hold') ||
-                    exerciseName.includes('cardio') ||
-                    exerciseName.includes('interval') ||
-                    processed.target_duration_sec != null;
+    // Check if it's a timed exercise (prefer metadata, then patterns)
+    const isTimed = Boolean(
+      metaTimed ||
+      processed.is_timed ||
+      processed.target_duration_sec != null ||
+      exerciseName.includes('stretch') || 
+      exerciseName.includes('mobility') ||
+      exerciseName.includes('plank') ||
+      exerciseName.includes('hold') ||
+      exerciseName.includes('cardio') ||
+      exerciseName.includes('interval')
+    );
+    // Ensure duration exists for timed
+    if (isTimed && (processed.target_duration_sec == null || Number.isNaN(processed.target_duration_sec))) {
+      processed.target_duration_sec = metaDuration || 60;
+    }
+
+    // Bodyweight volume guard (non-skill)
+    const isSkillMove = isSkill(processed);
+    let numSets = numSetsInitial;
+    if (isBodyweight && !isSkillMove) {
+      numSets = Math.min(numSetsInitial, 4);
+      targetReps = Math.max(targetReps, 10);
+      restTime = Math.min(Math.max(restTime, 60), 90);
+    }
     
-    if (isTimed && processed.target_duration_sec) {
+    if (isTimed) {
+      const duration = processed.target_duration_sec ?? metaDuration ?? 60;
       processed.sets = Array.from({ length: numSets }, (_, i) => ({
         index: i + 1,
-        duration: processed.target_duration_sec,
-        rest_time_sec: restTime
+        duration,
+        rest_time_sec: Math.min(restTime || 60, 90),
       }));
     } else {
       processed.sets = Array.from({ length: numSets }, (_, i) => ({
@@ -591,7 +878,9 @@ export const generateDaySessionWithAI = async (
     }
     
     return processed;
-  });
+  };
+
+  const processedExercises = filteredExercises.map(buildProcessedExercise);
 
   // Step 5: Progression Application (Handle Empty Logs)
   const exercisesWithProgression = processedExercises.map((ex: any) => {
@@ -645,12 +934,153 @@ export const generateDaySessionWithAI = async (
   });
 
   // Combine existing and new exercises
-  const allExercises = [...existingExercises, ...exercisesWithProgression];
+  let allExercises = [...existingExercises, ...exercisesWithProgression];
 
-  // Step 6: Constraint-Based Duration Logic (De-Bloated)
-  const totalDurationSec = estimateDayDuration(allExercises);
+  // Reorder skills/handstand to start
+  const skills = allExercises.filter((ex) => isSkill(ex));
+  const nonSkills = allExercises.filter((ex) => !isSkill(ex));
+  allExercises = [...skills, ...nonSkills];
 
-  if (totalDurationSec > timeConstraintMin * 60) {
+  // Ensure at least one unilateral
+  const hasUnilateral = allExercises.some((ex) => isUnilateral(ex));
+  if (!hasUnilateral) {
+    const candidate = (availableExercises || []).find(
+      (ex) => isUnilateral(ex) && inferDensity(ex) >= 8
+    );
+    if (candidate) {
+      const normalized = normalizeExercise(candidate);
+      normalized.target_sets = normalized.target_sets || 3;
+      normalized.target_reps = normalized.target_reps || 8;
+      normalized.rest_time_sec = normalized.rest_time_sec || 60;
+      normalized.sets = Array.from({ length: normalized.target_sets }, (_, i) => ({
+        index: i + 1,
+        reps: normalized.target_reps,
+        weight: isBodyweightExercise(candidate) ? 0 : null,
+        rest_time_sec: normalized.rest_time_sec,
+      }));
+      allExercises.push(normalized);
+    }
+  }
+
+  // Prune low-density items (unless user-locked existing)
+  allExercises = allExercises.filter((ex) => {
+    const meta = availableLookup.get((ex?.name || '').toLowerCase());
+    const density = inferDensity({ ...meta, ...ex });
+    if (existingExercises.includes(ex)) return true;
+    return density >= 8;
+  });
+
+  // Final sanity: if nothing remains, surface a hard failure with context
+  if (allExercises.length === 0) {
+    if (__DEV__) {
+      console.error('[generateDaySessionWithAI] No exercises after post-processing.', {
+        newExercisesCount: newExercises.length,
+        processedCount: processedExercises.length,
+        existingCount: existingExercises.length,
+      });
+    }
+    throw new Error('No exercises could be generated after filtering. Check density/metadata on exercises or relax filters.');
+  }
+
+  // Fill-to-ceiling: Add sets to Tier 1 compounds (no filler) until near ceiling, then compress if needed.
+  const isTier1Name = (name: string): boolean => {
+    const n = name.toLowerCase();
+    return (
+      n.includes('squat') ||
+      n.includes('deadlift') ||
+      n.includes('bench') ||
+      (n.includes('row') && !n.includes('upright')) ||
+      (n.includes('press') && (n.includes('overhead') || n.includes('shoulder') || n.includes('bench'))) ||
+      (n.includes('pull') && (n.includes('up') || n.includes('down'))) ||
+      n.includes('dip') ||
+      n.includes('muscle up') ||
+      n.includes('muscle-up') ||
+      n.includes('hinge') ||
+      n.includes('lunge')
+    );
+  };
+
+  const ceilingSec = timeConstraintMin * 60;
+  let totalDurationSec = estimateDayDuration(allExercises);
+
+  // If we're far below the ceiling, add more high-density candidates (processed) until we approach ~95% of the ceiling or hit 10 items
+  if (ceilingSec > 0 && totalDurationSec < ceilingSec * 0.9) {
+    const existingNames = new Set<string>(allExercises.map((e) => (e?.name || '').toLowerCase()));
+    const candidates = (availableExercises || [])
+      .filter((ex: any) => {
+        const n = (ex?.name || '').toLowerCase();
+        if (!n || existingNames.has(n)) return false;
+        if (isBloatExercise(ex)) return false;
+        const density = inferDensity({ ...ex });
+        return density >= 8;
+      })
+      .map((ex: any) => ({ ex, density: inferDensity({ ...ex }) }))
+      .sort((a, b) => b.density - a.density);
+
+    let added = 0;
+    for (const cand of candidates) {
+      if (allExercises.length >= maxExercises) break;
+      if (totalDurationSec >= ceilingSec * 0.95) break;
+      const processed = buildProcessedExercise(cand.ex);
+      allExercises.push(processed);
+      existingNames.add((cand.ex?.name || '').toLowerCase());
+      totalDurationSec = estimateDayDuration(allExercises);
+      added += 1;
+    }
+    if (__DEV__ && added > 0) {
+      console.warn('[generateDaySessionWithAI] Added extra high-density exercises to approach ceiling', {
+        added,
+        totalDurationSec,
+        ceilingSec,
+      });
+    }
+  }
+
+  if (totalDurationSec < ceilingSec && ceilingSec > 0) {
+    // Try to add sets to Tier 1 exercises, cap sets at 6, stop once within 95-100% of ceiling
+    let iterations = 0;
+    while (totalDurationSec < ceilingSec * 0.97 && iterations < 12) {
+      // Find first Tier 1 exercise with sets < 6
+      const idx = allExercises.findIndex(
+        (ex) =>
+          ex?.name &&
+          isTier1Name(ex.name) &&
+          inferDensity({ ...availableLookup.get((ex.name || '').toLowerCase()), ...ex }) >= 8 &&
+          // don't bloat bodyweight accessories
+          !(isBodyweightExercise(ex) && ['easy','beginner','medium','intermediate'].includes(String(ex.difficulty || '').toLowerCase())) &&
+          ((ex.target_sets || (Array.isArray(ex.sets) ? ex.sets.length : 0)) < 4),
+      );
+      if (idx === -1) break;
+      const ex = { ...allExercises[idx] };
+      const currentSets = ex.target_sets || (Array.isArray(ex.sets) ? ex.sets.length : 0) || 3;
+      const nextSets = Math.min(currentSets + 1, 4);
+      const rest = ex.rest_time_sec || (Array.isArray(ex.sets) && ex.sets[0]?.rest_time_sec) || 60;
+      const isTimed = Array.isArray(ex.sets) && ex.sets.some((s: any) => s.duration != null);
+      const lastSet = Array.isArray(ex.sets) && ex.sets.length > 0 ? ex.sets[ex.sets.length - 1] : null;
+      const newSet = isTimed
+        ? {
+            index: nextSets,
+            duration: lastSet?.duration ?? ex.target_duration_sec ?? 60,
+            rest_time_sec: rest,
+          }
+        : {
+            index: nextSets,
+            reps: lastSet?.reps ?? ex.target_reps ?? 8,
+            weight: lastSet?.weight ?? null,
+            rest_time_sec: rest,
+          };
+      ex.target_sets = nextSets;
+      ex.sets = Array.isArray(ex.sets) ? [...ex.sets, newSet] : [newSet];
+      allExercises[idx] = ex;
+
+      totalDurationSec = estimateDayDuration(allExercises);
+      iterations += 1;
+      if (totalDurationSec >= ceilingSec) break;
+    }
+  }
+
+  // Step 6: Constraint-Based Duration Logic (Fill then Compress)
+  if (totalDurationSec > ceilingSec) {
     // EXCEEDS constraint - compress it
     const compressionResult = applySmartCompression({
       exercises: allExercises,

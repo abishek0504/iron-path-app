@@ -878,23 +878,7 @@ export default function PlannerScreen() {
             <Text style={styles.title}>Workout Planner</Text>
             <Text style={styles.subtitle}>Create or generate your personalized weekly workout plan</Text>
 
-            {userProfile && (
-              <View style={styles.preferenceCard}>
-                <Text style={styles.preferenceTitle}>AI Workout Style</Text>
-                <Text style={styles.preferenceText}>
-                  {userProfile.preferred_training_style || 'Comprehensive'} ·{' '}
-                  {(() => {
-                    const comps = userProfile.include_components || {};
-                    const parts: string[] = [];
-                    if (comps.include_tier1_compounds) parts.push('Tier 1');
-                    if (comps.include_tier2_accessories) parts.push('Tier 2');
-                    if (comps.include_tier3_prehab_mobility) parts.push('Mobility');
-                    if (comps.include_cardio_conditioning) parts.push('Cardio');
-                    return parts.length ? parts.join(' · ') : 'No components selected';
-                  })()}
-                </Text>
-              </View>
-            )}
+            {/* Style/components display removed per spec (UI = time + equipment only) */}
 
             <View style={styles.durationTargetCard}>
               <View style={styles.durationSliderHeader}>

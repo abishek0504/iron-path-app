@@ -1412,7 +1412,7 @@ export default function PlannerDayScreen() {
           </View>
         )}
 
-        {hasSets && (
+            {hasSets && (
           <View style={styles.setsContainer}>
             <Text style={styles.setsTitle}>Sets Configuration</Text>
             {item.sets.map((set: any, setIdx: number) => (
@@ -1420,19 +1420,36 @@ export default function PlannerDayScreen() {
                 <Text style={styles.setNumber}>Set {set.index || setIdx + 1}:</Text>
                 {isTimed ? (
                   <>
-                    <Text style={styles.setValue}>
-                      {set.duration !== null && set.duration !== undefined
-                        ? `${getDurationMinutes(set.duration)}:${getDurationSeconds(set.duration).toString().padStart(2, '0')}`
-                        : '—'}
-                    </Text>
-                    {set.rest_time_sec !== null && set.rest_time_sec !== undefined && (
+                    {(() => {
+                      const displayDuration =
+                        set.duration ??
+                        item.target_duration_sec ??
+                        defaultDuration ??
+                        60;
+                      return (
+                        <Text style={styles.setValue}>
+                          {displayDuration !== null && displayDuration !== undefined
+                            ? `${getDurationMinutes(displayDuration)}:${getDurationSeconds(displayDuration)
+                                .toString()
+                                .padStart(2, '0')}`
+                            : '—'}
+                        </Text>
+                      );
+                    })()}
+                    {(() => {
+                      const restVal =
+                        set.rest_time_sec ??
+                        item.rest_time_sec ??
+                        null;
+                      return restVal !== null && restVal !== undefined ? (
                       <>
                         <Text style={styles.setValue}> | </Text>
                         <Text style={styles.setValue}>
-                          {set.rest_time_sec}s rest
+                            {restVal}s rest
                         </Text>
                       </>
-                    )}
+                      ) : null;
+                    })()}
                   </>
                 ) : (
                   <>

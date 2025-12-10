@@ -98,7 +98,7 @@ export const applyVolumeTemplate = (exercise: any): any => {
   const category = inferVolumeCategory(input.name);
 
   let minSets = 3;
-  let maxSets = 5;
+  let maxSets = 4; // cap to avoid 5x10 fatigue
   let defaultSets = 3;
   let minReps = 3;
   let maxReps = 15;
@@ -109,28 +109,28 @@ export const applyVolumeTemplate = (exercise: any): any => {
 
   if (category === 'upper_compound' || category === 'lower_compound') {
     minSets = 3;
-    maxSets = 5;
-    defaultSets = 4;
+    maxSets = 4;
+    defaultSets = 3; // leaner by default
     minReps = 3;
     maxReps = 8;
     defaultReps = 6;
     minRest = 90;
     maxRest = 210;
-    defaultRest = 150;
+    defaultRest = 135;
   } else if (category === 'accessory') {
     minSets = 2;
-    maxSets = 4;
+    maxSets = 3;
     defaultSets = 3;
     minReps = 8;
     maxReps = 15;
     defaultReps = 12;
     minRest = 45;
     maxRest = 90;
-    defaultRest = 60;
+    defaultRest = 75;
   } else if (category === 'calf_core') {
     minSets = 3;
-    maxSets = 5;
-    defaultSets = 4;
+    maxSets = 4;
+    defaultSets = 3;
     minReps = 10;
     maxReps = 20;
     defaultReps = 15;
