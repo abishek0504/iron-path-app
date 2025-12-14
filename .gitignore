@@ -60,3 +60,7 @@ schema/
 *.swp
 *.swo
 *~
+
+# Archive folder (old prototype - not part of V2)
+Archive/
+

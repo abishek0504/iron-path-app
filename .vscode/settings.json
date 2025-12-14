@@ -1,0 +1,13 @@
+{
+  "files.watcherExclude": {
+    "**/Archive/**": true
+  },
+  "search.exclude": {
+    "**/Archive/**": true
+  },
+  "typescript.preferences.excludePackageJsonAutoImports": "off",
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.validate.enable": true,
+  "typescript.disableAutomaticTypeAcquisition": false
+}
+
