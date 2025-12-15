@@ -2557,9 +2557,385 @@ export default function WorkoutTab() {
 ```
 
 **Key Point**: Same `ExercisePicker` component, same hook, but different callbacks based on context. The picker itself doesn't know or care which tab opened it.
+
+---
+
+## 22) Multi-Access Pages Pattern (Shared Routes)
+
+Some screens must be reachable from multiple tabs (Workout, Plan, Progress, Profile) and must not be duplicated under `app/(tabs)/...`.
+
+These are implemented as **shared Expo Router routes** (stack screens or modals), not bottom sheets.
+
+### Rule
+
+- If the user needs navigation history (back button) or the screen is "full experience": it is a **route**.
+- If it is a quick overlay action used across tabs: it is a **global bottom sheet**.
+- Never duplicate a page file under multiple tabs.
+
+### Where Shared Pages Live
+
+Use route groups to keep structure clean while keeping URLs simple:
+
+- `app/(tabs)/...` = tab roots only
+- `app/(stack)/...` = shared stack screens accessible from any tab
+- `app/(modals)/...` = shared modal routes (presentation: modal)
+
+**Note**: Route groups do not appear in the URL. For example, `app/(stack)/exercise/[id].tsx` is navigated to as `/exercise/123`.
+
+### Examples of Multi-Access Pages (Shared Routes)
+
+#### Exercise Detail
+
+- **File**: `app/(stack)/exercise/[id].tsx`
+- **Entry points**:
+  - Workout tab: tap an exercise row
+  - Plan tab: view slot exercise
+  - Progress tab: tap history item
+- **Navigation**: `router.push({ pathname: '/exercise/[id]', params: { id } })`
+
+#### Active Workout
+
+- **File**: `app/(stack)/workout/active.tsx`
+- **Entry points**:
+  - Workout tab: Start/Resume button
+  - Plan tab: Start today's plan
+- **Navigation**: `router.push('/workout/active')`
+
+#### Session Detail (History)
+
+- **File**: `app/(stack)/session/[id].tsx`
+- **Entry points**:
+  - Progress tab: tap session card
+  - Workout tab: post-workout summary
+- **Navigation**: `router.push({ pathname: '/session/[id]', params: { id } })`
+
+#### Edit Profile
+
+- **File**: `app/(modals)/edit-profile.tsx`
+- **Entry points**:
+  - Profile tab: primary access
+  - Settings menu from any tab (sheet → route)
+- **Navigation**: `router.push('/edit-profile')`
+- **Presentation**: Modal (slides up from bottom)
+
+### Navigation Usage Pattern (From Any Tab)
+
+**Prefer direct route navigation for shared pages**:
+
+```typescript
+// From any tab component
+import { useRouter } from 'expo-router'
+
+const router = useRouter()
+
+// Navigate to exercise detail
+router.push({ pathname: '/exercise/[id]', params: { id: exerciseId } })
+
+// Navigate to active workout
+router.push('/workout/active')
+
+// Navigate to session detail
+router.push({ pathname: '/session/[id]', params: { id: sessionId } })
 ```
 
+**Bottom sheets may navigate to routes, but must close immediately**:
 
+```typescript
+// In SettingsMenu bottom sheet component
+const router = useRouter()
+const { closeBottomSheet } = useModal()
+
+const handleEditProfile = () => {
+  // 1) User taps item in sheet
+  // 2) Navigate to route
+  router.push('/edit-profile')
+  // 3) Close bottom sheet immediately
+  closeBottomSheet()
+}
+```
+
+**Flow**:
+1. User taps item in bottom sheet
+2. `router.push(...)` navigates to route
+3. `uiStore.closeBottomSheet()` closes the sheet
+4. User sees the route screen
+
+### Route Group Structure
 
 ```
+app/
+  ├── (tabs)/              # Tab roots only
+  │   ├── _layout.tsx
+  │   ├── index.tsx       # Workout tab
+  │   ├── planner.tsx     # Plan tab
+  │   ├── progress.tsx     # Progress tab
+  │   └── profile.tsx      # Profile tab
+  │
+  ├── (stack)/            # Shared stack screens
+  │   ├── exercise/
+  │   │   └── [id].tsx    # Exercise detail
+  │   ├── workout/
+  │   │   └── active.tsx  # Active workout
+  │   └── session/
+  │       └── [id].tsx    # Session detail
+  │
+  └── (modals)/           # Shared modal routes
+      └── edit-profile.tsx # Edit profile
+```
+
+### Root Layout Configuration
+
+The root `app/_layout.tsx` must register all route groups:
+
+```typescript
+<Stack>
+  {/* Tab navigation */}
+  <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
+  
+  {/* Shared stack screens */}
+  <Stack.Screen 
+    name="exercise/[id]" 
+    options={{ 
+      gestureEnabled: true,
+      animation: 'slide_from_right'
+    }} 
+  />
+  <Stack.Screen 
+    name="workout/active" 
+    options={{ 
+      gestureEnabled: true,
+      animation: 'slide_from_right'
+    }} 
+  />
+  <Stack.Screen 
+    name="session/[id]" 
+    options={{ 
+      gestureEnabled: true,
+      animation: 'slide_from_right'
+    }} 
+  />
+  
+  {/* Shared modal routes */}
+  <Stack.Screen 
+    name="edit-profile" 
+    options={{ 
+      presentation: 'modal',
+      gestureEnabled: true
+    }} 
+  />
+</Stack>
+```
+
+### Decision Matrix
+
+| Component Type | Access Pattern | Implementation |
+|---------------|----------------|----------------|
+| Quick action (exercise picker) | Multiple tabs | Global bottom sheet |
+| Quick menu (settings) | Multiple tabs | Global bottom sheet |
+| Display component (heatmap) | Multiple tabs | Inline component |
+| Full-screen experience | Multiple tabs | Shared route (stack) |
+| Modal experience | Multiple tabs | Shared route (modal) |
+| Tab-specific screen | Single tab | Tab route file |
+
+### Benefits of This Pattern
+
+1. **No Duplication**: Each page exists once, accessed from any tab
+2. **Consistent Navigation**: Same route, same behavior, regardless of entry point
+3. **Clean URLs**: Route groups don't appear in URLs (`/exercise/123`, not `/(stack)/exercise/123`)
+4. **Type Safety**: Expo Router generates types for all routes
+5. **Back Navigation**: Works correctly from any entry point
+
+---
+
+## 23) Theme Extraction Contract
+
+**Purpose**: This section documents the exact theme tokens and components from the Archive that must be reused in V2. Do not recreate similar themes—use these exact values and locations.
+
+### Color Palette (Exact Values)
+
+**Archive Source**: Hardcoded in components (e.g., `Archive/app/(tabs)/_layout.tsx`, `Archive/src/components/Toast.tsx`)
+
+**V2 Location**: `src/lib/utils/theme.ts` → `colors` object
+
+| Token | Archive Value | V2 Location | Notes |
+|-------|--------------|-------------|-------|
+| Background | `#09090b` (zinc-950) | `colors.background` | Main app background |
+| Card Background | `rgba(24, 24, 27, 0.9)` (zinc-900/90) | `colors.card` | Card/overlay backgrounds |
+| Card Border | `#27272a` (zinc-800) | `colors.cardBorder` | Card borders |
+| Primary Accent | `#a3e635` (lime-400) | `colors.primary` | Active states, icons, highlights |
+| Primary Dark | `#84cc16` (lime-500) | `colors.primaryDark` | Hover/pressed states |
+| Text Primary | `#ffffff` | `colors.textPrimary` | Main text |
+| Text Secondary | `#a1a1aa` (zinc-400) | `colors.textSecondary` | Secondary text |
+| Text Muted | `#71717a` (zinc-500) | `colors.textMuted` | Muted/disabled text |
+| Error | `#ef4444` (red-500) | `colors.error` | Error states |
+| Error Background | `rgba(239, 68, 68, 0.1)` | `colors.errorBg` | Error background |
+| Error Text | `#fca5a5` (red-300) | `colors.errorText` | Error text |
+| Border | `#27272a` (zinc-800) | `colors.border` | Default borders |
+| Border Light | `#3f3f46` (zinc-700) | `colors.borderLight` | Lighter borders |
+
+**Tab Bar Specific Colors** (from `Archive/app/(tabs)/_layout.tsx`):
+- Tab Bar Active: `#a3e635` (lime-400) → Use `colors.primary`
+- Tab Bar Inactive: `#a1a1aa` (zinc-400) → Use `colors.textSecondary`
+- Tab Bar Background (web): `#09090b` (zinc-950) → Use `colors.background`
+- Tab Bar Capsule: `#18181b` (zinc-900) → Use `colors.card` (opacity adjusted)
+- Tab Bar Capsule Border: `#27272a` (zinc-800) → Use `colors.cardBorder`
+- Sliding Circle: `#27272a` (zinc-800) → Use `colors.cardBorder`
+- Tab Label Active: `#ffffff` → Use `colors.textPrimary`
+- Tab Label Inactive: `#a1a1aa` (zinc-400) → Use `colors.textSecondary`
+
+### Spacing Scale
+
+**Archive Source**: Hardcoded values in StyleSheet (e.g., `padding: 16`, `gap: 4`)
+
+**V2 Location**: `src/lib/utils/theme.ts` → `spacing` object
+
+| Token | Archive Examples | V2 Location | Usage |
+|-------|------------------|-------------|-------|
+| xs | `4` (gap, padding) | `spacing.xs` | Tight spacing |
+| sm | `8` (paddingVertical) | `spacing.sm` | Small spacing |
+| md | `16` (paddingHorizontal, paddingBottom) | `spacing.md` | Default spacing |
+| lg | `24` (borderRadius) | `spacing.lg` | Large spacing |
+| xl | `32` | `spacing.xl` | Extra large spacing |
+| xxl | `48` | `spacing.xxl` | Extra extra large spacing |
+
+**Tab Bar Specific Spacing**:
+- Tab Bar Padding Horizontal: `16` → Use `spacing.md`
+- Tab Bar Padding Bottom: `16` → Use `spacing.md`
+- Tab Bar Padding Top: `12` → Use `spacing.md` (slightly adjusted)
+- Tab Bar Capsule Padding: `4` → Use `spacing.xs`
+- Tab Bar Capsule Gap: `4` → Use `spacing.xs`
+- Tab Button Padding Vertical: `8` → Use `spacing.sm`
+- Tab Button Padding Horizontal: `4` → Use `spacing.xs`
+- Tab Label Margin Top: `4` → Use `spacing.xs`
+
+### Typography
+
+**Archive Source**: Hardcoded in StyleSheet (e.g., `fontSize: 12`, `fontWeight: '500'`)
+
+**V2 Location**: `src/lib/utils/theme.ts` → `typography` object
+
+| Token | Archive Examples | V2 Location | Usage |
+|-------|------------------|-------------|-------|
+| xs | `12` (tab labels) | `typography.sizes.xs` | Small text |
+| sm | `14` | `typography.sizes.sm` | Small body text |
+| base | `16` | `typography.sizes.base` | Default body text |
+| lg | `18` | `typography.sizes.lg` | Large body text |
+| xl | `24` | `typography.sizes.xl` | Headings |
+| 2xl | `32` | `typography.sizes['2xl']` | Large headings |
+| 3xl | `42` | `typography.sizes['3xl']` | Extra large headings |
+
+**Font Weights**:
+- Normal: `'400'` → `typography.weights.normal`
+- Medium: `'500'` (tab labels) → `typography.weights.medium`
+- Semibold: `'600'` (active tab label) → `typography.weights.semibold`
+- Bold: `'700'` → `typography.weights.bold`
+
+### Border Radius
+
+**Archive Source**: Hardcoded in StyleSheet (e.g., `borderRadius: 24`, `borderRadius: 36`)
+
+**V2 Location**: `src/lib/utils/theme.ts` → `borderRadius` object
+
+| Token | Archive Examples | V2 Location | Usage |
+|-------|------------------|-------------|-------|
+| sm | `8` | `borderRadius.sm` | Small rounded corners |
+| md | `16` | `borderRadius.md` | Default rounded corners |
+| lg | `24` (toast, cards) | `borderRadius.lg` | Large rounded corners |
+| xl | `32` | `borderRadius.xl` | Extra large rounded corners |
+| full | `9999` | `borderRadius.full` | Fully rounded (pills, circles) |
+
+**Tab Bar Specific**:
+- Icon Container: `20` (circle) → Use `borderRadius.full` with fixed size
+- Tab Bar Capsule: `36` (full capsule) → Use `borderRadius.xl` or custom `36`
+
+### Tab Bar Style Rules (Exact Specifications)
+
+**Archive Source**: `Archive/app/(tabs)/_layout.tsx` → `CustomTabBar` component and styles
+
+**V2 Location**: Must be implemented in `app/(tabs)/_layout.tsx` with exact same styling
+
+**Critical Rules**:
+1. **Capsule Design**: Tab bar uses a capsule shape (rounded pill) with sliding circle indicator
+2. **Height**: Tab bar height is `72` pixels
+3. **Capsule Background**: `#18181b` (zinc-900) with `1px` border `#27272a` (zinc-800)
+4. **Capsule Border Radius**: `36` pixels (full capsule)
+5. **Sliding Circle**: `40px × 40px` circle, `#27272a` (zinc-800) background, positioned absolutely
+6. **Icon Size**: `24px` with `40px × 40px` container
+7. **Icon Colors**: Active = `#a3e635` (lime-400), Inactive = `#a1a1aa` (zinc-400)
+8. **Label Font**: `12px`, weight `500` (inactive) / `600` (active)
+9. **Label Colors**: Active = `#ffffff`, Inactive = `#a1a1aa` (zinc-400)
+10. **Position**: Absolute bottom on native, relative on web
+11. **Web Background**: `#09090b` (zinc-950) wrapper to prevent white background
+12. **Shadow**: `shadowColor: '#000000'`, `shadowOffset: { width: 0, height: 4 }`, `shadowOpacity: 0.3`, `shadowRadius: 8`, `elevation: 10`
+
+**Animation**: Sliding circle animates with `react-native-reanimated` using `withTiming` (300ms duration)
+
+### Toast Component Styles (Exact Specifications)
+
+**Archive Source**: `Archive/src/components/Toast.tsx`
+
+**V2 Location**: `src/components/ui/Toast.tsx` (already updated to use theme)
+
+**Critical Rules**:
+1. **Background**: `rgba(24, 24, 27, 0.95)` (zinc-900/95) → Use `colors.card` with opacity
+2. **Border**: `1px solid #27272a` (zinc-800) → Use `colors.cardBorder`
+3. **Border Radius**: `24px` → Use `borderRadius.lg`
+4. **Padding**: `20px` horizontal, `14px` vertical → Use `spacing.md` and `spacing.sm`
+5. **Gap**: `12px` between icon and text → Use `spacing.md`
+6. **Icon Color**: `#a3e635` (lime-400) → Use `colors.primary`
+7. **Text Color**: `#ffffff` → Use `colors.textPrimary`
+8. **Position**: Absolute top `60px`, centered horizontally
+9. **Z-Index**: `9999`
+10. **Animation**: Fade + slide from top (`-100px`), `300ms` in, `250ms` out
+
+### Usage Pattern
+
+**DO**:
+```typescript
+import { colors, spacing, borderRadius, typography } from '@/lib/utils/theme'
+
+// Use theme tokens
+<View style={{ backgroundColor: colors.background, padding: spacing.md }}>
+  <Text style={{ color: colors.textPrimary, fontSize: typography.sizes.base }}>
+    Content
+  </Text>
+</View>
+```
+
+**DON'T**:
+```typescript
+// Don't hardcode colors
+<View style={{ backgroundColor: '#09090b' }}>  // ❌
+
+// Don't recreate similar values
+const myColors = { primary: '#a4e636' }  // ❌ (slightly different)
+
+// Don't use Tailwind classes for these exact values
+<View className="bg-zinc-950">  // ❌ (use theme.ts instead)
+```
+
+### Theme File Location
+
+**Single Source of Truth**: `src/lib/utils/theme.ts`
+
+All theme tokens must be imported from this file. No hardcoded color/spacing values in components.
+
+### Tab Bar Implementation
+
+The tab bar must be implemented exactly as in `Archive/app/(tabs)/_layout.tsx`:
+- Custom tab bar component with sliding circle indicator
+- Exact same colors, spacing, and dimensions
+- Same animation behavior
+- Same platform-specific handling (web vs native)
+
+**Reference**: See `Archive/app/(tabs)/_layout.tsx` lines 9-241 for complete implementation.
+
+### Migration Notes
+
+- All hardcoded colors in Archive → Use `colors.*` from theme.ts
+- All hardcoded spacing in Archive → Use `spacing.*` from theme.ts
+- All hardcoded font sizes → Use `typography.sizes.*` from theme.ts
+- All hardcoded border radius → Use `borderRadius.*` from theme.ts
+- Tab bar styling → Copy exact implementation from Archive
+- Toast styling → Use theme tokens (already done in V2 Toast.tsx)
 
