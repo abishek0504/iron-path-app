@@ -4,7 +4,7 @@
  * Prevents modal-in-modal issues by being managed globally
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -37,10 +37,24 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 }) => {
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const [isMounted, setIsMounted] = useState(visible);
 
+  // Mount when becoming visible
   useEffect(() => {
+    if (visible && !isMounted) {
+      setIsMounted(true);
+    }
+  }, [visible, isMounted]);
+
+  // Run enter/exit animations while mounted
+  useEffect(() => {
+    if (!isMounted) return;
+
     if (visible) {
-      // Animate in
+      // Reset starting positions for enter animation
+      slideAnim.setValue(SCREEN_HEIGHT);
+      backdropOpacity.setValue(0);
+
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
@@ -55,21 +69,22 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
         }),
       ]).start();
     } else {
-      // Animate out
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: SCREEN_HEIGHT,
-          duration: 250,
+          duration: 350,
           useNativeDriver: true,
         }),
         Animated.timing(backdropOpacity, {
           toValue: 0,
-          duration: 250,
+          duration: 350,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]).start(() => {
+        setIsMounted(false);
+      });
     }
-  }, [visible, slideAnim, backdropOpacity]);
+  }, [visible, isMounted, slideAnim, backdropOpacity]);
 
   const sheetHeight = typeof height === 'string' 
     ? SCREEN_HEIGHT * (parseFloat(height) / 100)
@@ -77,7 +92,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 
   return (
     <Modal
-      visible={visible}
+      visible={isMounted}
       transparent
       animationType="none"
       onRequestClose={onClose}

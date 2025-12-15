@@ -21,31 +21,27 @@ export const ModalManager: React.FC = () => {
 
   return (
     <>
-      {activeBottomSheet === 'exercisePicker' && (
-        <BottomSheet
-          visible={true}
-          onClose={closeBottomSheet}
-          title="Select Exercise"
-          {...bottomSheetProps}
-        >
-          <ExercisePicker
-            onSelect={bottomSheetProps.onSelect}
-            multiSelect={bottomSheetProps.multiSelect}
-          />
-        </BottomSheet>
-      )}
+      <BottomSheet
+        visible={activeBottomSheet === 'exercisePicker'}
+        onClose={closeBottomSheet}
+        title="Select Exercise"
+        {...bottomSheetProps}
+      >
+        <ExercisePicker
+          onSelect={bottomSheetProps.onSelect}
+          multiSelect={bottomSheetProps.multiSelect}
+        />
+      </BottomSheet>
 
-      {activeBottomSheet === 'settingsMenu' && (
-        <BottomSheet
-          visible={true}
-          onClose={closeBottomSheet}
-          title="Settings"
-          height="60%"
-          {...bottomSheetProps}
-        >
-          <SettingsMenu onClose={closeBottomSheet} />
-        </BottomSheet>
-      )}
+      <BottomSheet
+        visible={activeBottomSheet === 'settingsMenu'}
+        onClose={closeBottomSheet}
+        title="Settings"
+        height="60%"
+        {...bottomSheetProps}
+      >
+        <SettingsMenu onClose={closeBottomSheet} />
+      </BottomSheet>
     </>
   );
 };
