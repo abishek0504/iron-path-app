@@ -53,7 +53,7 @@ All todos from the V2 architecture plan have been completed.
 - `app/_layout.tsx` - Root layout with ToastProvider and ModalManager integration
 
 ### 10. Configuration Files ✅
-- `package.json` - Updated with Zustand dependency
+- `package.json` - Updated with Zustand dependency and `react-native-worklets` pinned to `0.5.1` to stay aligned with the archived Expo 54 native build
 - `tsconfig.json` - TypeScript configuration
 - `babel.config.js` - Babel configuration
 - `tailwind.config.js` - Tailwind configuration
