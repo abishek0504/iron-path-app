@@ -1,16 +1,16 @@
 /**
- * Workout tab
- * Placeholder for workout screen
+ * Progress tab
+ * Placeholder for progress screen
  */
 
 import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing } from '../../src/lib/utils/theme';
 
-export default function WorkoutTab() {
+export default function ProgressTab() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Workout</Text>
-      <Text style={styles.subtitle}>Workout tab placeholder</Text>
+      <Text style={styles.title}>Progress</Text>
+      <Text style={styles.subtitle}>Progress tab placeholder</Text>
     </View>
   );
 }
@@ -34,3 +34,4 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 });
+
