@@ -2332,6 +2332,231 @@ try {
   useStore.setState(previousState)
   toast.error('Update failed')
 }
+
+---
+
+## 21) Tab Structure and Multi-Access Components
+
+### Four Main Tabs
+
+The app has four main tabs accessible via bottom tab navigation:
+
+1. **Workout** (`app/(tabs)/index.tsx`)
+   - Home/workout screen
+   - Start/resume active workouts
+   - Quick access to today's workout
+
+2. **Plan** (`app/(tabs)/planner.tsx`)
+   - Weekly workout planning
+   - View/edit workout templates
+   - Generate AI workouts
+
+3. **Progress** (`app/(tabs)/progress.tsx`)
+   - Workout history
+   - Progress tracking
+   - Muscle stress heatmap
+   - Performance analytics
+
+4. **Profile** (`app/(tabs)/profile.tsx`)
+   - User profile
+   - Settings/preferences
+   - Equipment access
+   - Goals and experience level
+
+### Tab Layout Structure
+
+```
+app/(tabs)/
+  ├── _layout.tsx        # Tab navigator configuration
+  ├── index.tsx          # Workout tab (home)
+  ├── planner.tsx        # Plan tab
+  ├── progress.tsx       # Progress tab
+  └── profile.tsx        # Profile tab
+```
+
+**Tab Icons** (from Archive):
+- Workout: `Dumbbell`
+- Plan: `Calendar`
+- Progress: `TrendingUp`
+- Profile: `Trophy`
+
+### Multi-Access Components Pattern
+
+Certain components need to be accessible from multiple tabs without duplicating code or creating navigation issues. These are implemented as **global bottom sheets** managed by Zustand.
+
+#### Exercise Picker (Multi-Access)
+
+**Accessed from**:
+- Plan tab: Add exercise to workout template
+- Workout tab: Add exercise to active workout
+- Progress tab: Filter/search exercises in history
+- Any tab: Quick exercise lookup
+
+**Implementation**:
+```
+Any Tab Component:
+  const picker = useExercisePicker()
+  
+  onPressAddExercise = () => {
+    picker.open((exercise) => {
+      // Handle selection (context-specific)
+      addExerciseToTemplate(exercise)
+      // or
+      addExerciseToWorkout(exercise)
+    })
+  }
+```
+
+**Flow**:
+1. Component calls `useExercisePicker().open(callback)`
+2. `uiStore.openBottomSheet('exercisePicker', { onSelect: callback })`
+3. `ModalManager` renders `BottomSheet` with `ExercisePicker` inside
+4. User selects exercise
+5. Callback fires with selected exercise
+6. Bottom sheet closes automatically
+7. Component handles exercise (context-specific)
+
+#### Settings/Preferences Menu (Multi-Access)
+
+**Accessed from**:
+- Profile tab: Primary access point
+- Any tab: Quick settings access (gear icon in header)
+
+**Implementation**:
+```
+Any Tab Component:
+  const modal = useModal()
+  
+  onPressSettings = () => {
+    modal.openSheet('settingsMenu', { onClose: () => {} })
+  }
+```
+
+**Flow**:
+1. Component calls `useModal().openSheet('settingsMenu')`
+2. `uiStore.openBottomSheet('settingsMenu')`
+3. `ModalManager` renders `BottomSheet` with `SettingsMenu` inside
+4. User selects menu item (e.g., "Edit Profile")
+5. `SettingsMenu` navigates to route (e.g., `/edit-profile`)
+6. Bottom sheet closes
+7. User is on new route
+
+#### Muscle Stress Heatmap (Multi-Access)
+
+**Accessed from**:
+- Progress tab: Primary view
+- Plan tab: View recovery when planning
+- Workout tab: Quick recovery check
+
+**Implementation**:
+```
+Any Tab Component:
+  import { WorkoutHeatmap } from '@/components/workout/WorkoutHeatmap'
+  
+  <WorkoutHeatmap
+    userId={userId}
+    dateRange={{ start: startDate, end: endDate }}
+    onMuscleSelect={(muscleKey) => {
+      // Handle muscle selection (context-specific)
+    }}
+  />
+```
+
+**Note**: Heatmap is a regular component, not a bottom sheet, because it's typically displayed inline within a tab's content.
+
+### Multi-Access Pattern Rules
+
+**When to use Bottom Sheet**:
+- Quick actions (exercise picker, settings menu)
+- Contextual overlays that don't need full screen
+- Components accessed from 2+ tabs
+
+**When to use Route**:
+- Complex multi-step flows (edit profile, active workout)
+- Full-screen experiences
+- Components that need navigation history
+
+**When to use Inline Component**:
+- Display components (heatmap, charts)
+- Components that are part of tab's primary content
+- Components that don't need to overlay other content
+
+### Tab-Specific Access Patterns
+
+**Workout Tab**:
+- Exercise Picker: Add exercise to active workout
+- Settings: Quick access to preferences
+- Heatmap: Optional recovery view
+
+**Plan Tab**:
+- Exercise Picker: Add exercise to template
+- Settings: Quick access to preferences
+- Heatmap: View recovery when planning workouts
+
+**Progress Tab**:
+- Exercise Picker: Filter/search exercises
+- Settings: Quick access to preferences
+- Heatmap: Primary muscle stress visualization
+
+**Profile Tab**:
+- Settings: Primary access (full settings menu)
+- Exercise Picker: Not typically needed
+- Heatmap: Not typically needed
+
+### Implementation Example: Adding Exercise from Plan Tab
+
+```typescript
+// app/(tabs)/planner.tsx
+import { useExercisePicker } from '@/hooks/useExercisePicker'
+
+export default function PlannerTab() {
+  const picker = useExercisePicker()
+  
+  const handleAddExercise = () => {
+    picker.open((exercise) => {
+      // Context-specific: Add to template
+      addExerciseToTemplate(exercise)
+      toast.success('Exercise added to template')
+    })
+  }
+  
+  return (
+    <View>
+      <Button onPress={handleAddExercise}>Add Exercise</Button>
+      {/* ... rest of planner UI */}
+    </View>
+  )
+}
+```
+
+### Implementation Example: Adding Exercise from Workout Tab
+
+```typescript
+// app/(tabs)/index.tsx
+import { useExercisePicker } from '@/hooks/useExercisePicker'
+
+export default function WorkoutTab() {
+  const picker = useExercisePicker()
+  const { activeSession } = useWorkoutStore()
+  
+  const handleAddExercise = () => {
+    picker.open((exercise) => {
+      // Context-specific: Add to active session
+      addExerciseToSession(activeSession.id, exercise)
+      toast.success('Exercise added to workout')
+    })
+  }
+  
+  return (
+    <View>
+      <Button onPress={handleAddExercise}>Add Exercise</Button>
+      {/* ... rest of workout UI */}
+    </View>
+  )
+}
+```
+
+**Key Point**: Same `ExercisePicker` component, same hook, but different callbacks based on context. The picker itself doesn't know or care which tab opened it.
 ```
 
 
