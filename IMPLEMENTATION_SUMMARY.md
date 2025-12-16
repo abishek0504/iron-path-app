@@ -145,6 +145,7 @@ All query functions follow the same pattern:
 - `getTemplateWithDaysAndSlots(templateId)` - Gets full template with nested days and slots
 - `createTemplate(userId, name?)` - Creates new template (defaults to 'Weekly Plan')
 - `upsertTemplateDay(templateId, dayName, sortOrder)` - Creates/updates template day
+- `ensureTemplateHasWeekDays(templateId)` - Ensures template has all 7 weekdays (Sunday-Saturday) with sort_order 0-6 ✅ **NEW**
 - `createTemplateSlot(dayId, input)` - Adds exercise slot to day (accepts `exerciseId` OR `customExerciseId`, exactly one required)
 - `updateTemplateSlot(slotId, updates)` - Updates slot (supports `exercise_id`, `custom_exercise_id`, experience/notes) - goal removed
 - `deleteTemplateSlot(slotId)` - Removes slot
@@ -342,13 +343,16 @@ All hooks provide convenience wrappers around Zustand stores.
 #### `app/(tabs)/planner.tsx` - Weekly Planner Screen
 - **Features**:
   - Auto-creates default template if user has none
-  - Creates default days based on profile `workout_days` or safe default (Mon/Wed/Fri)
-  - Day selector (horizontal scrollable list)
+  - Always shows full week (Sunday-Saturday) with all 7 days
+  - Ensures all 7 template days exist via `ensureTemplateHasWeekDays()`
+  - Day selector defaults to today's weekday on first load
+  - Day selector (horizontal scrollable list) always shows all 7 days in fixed order
   - Selected day shows:
     - Exercise slots with names and calculated targets
     - "Add Exercise" button (opens ExercisePicker)
     - "Generate with AI" button
-    - "Start this day" button (creates workout session)
+    - "Start this day" button (creates workout session with selected day's `day_name`)
+  - Rest days (days with no slots) show "No exercises scheduled" but still allow Add/Generate
   - Empty states for no templates, no days, no slots
   - Loading states during template/slot operations
 

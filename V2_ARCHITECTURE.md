@@ -208,6 +208,10 @@ Hard rule:
 - `v2_template_days`
 - `v2_template_slots`
 
+**Template Days**: Templates always have all 7 weekdays (Sunday-Saturday). The `ensureTemplateHasWeekDays()` function ensures missing days are created with `sort_order` 0-6 (Sunday=0, Saturday=6). Days with no slots are rest days and display "No exercises scheduled".
+
+**Day Selection**: The Planner defaults to today's weekday on first load. Users can select any day to view or start that day's workout.
+
 Slots store intent (structure + intent only):
 
 - `exercise_id` (or constraint spec later)
@@ -911,7 +915,7 @@ use_imperial: true
 - `id` (uuid, PRIMARY KEY, default gen_random_uuid()): Unique session identifier.
 - `user_id` (uuid, NOT NULL, FK → auth.users.id): User who performed this session.
 - `template_id` (uuid, nullable, FK → v2_workout_templates.id): Template this session was based on (if any).
-- `day_name` (text, nullable): Day name from template (if any).
+- `day_name` (text, nullable): Planned day label from template (e.g., "Tuesday"). This is metadata only - Progress tracking must group by timestamps (`completed_at`, `performed_at`), not `day_name`. Can be displayed as subtitle (e.g., "Planned: Tuesday") when different from actual date.
 - `status` (text, NOT NULL, default 'active', CHECK 'active'|'completed'|'abandoned'): Session status.
 - `started_at` (timestamptz, default now()): When session started.
 - `completed_at` (timestamptz, nullable): When session was completed (if status='completed').

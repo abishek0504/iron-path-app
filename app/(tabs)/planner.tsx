@@ -27,6 +27,7 @@ import {
   getTemplateWithDaysAndSlots,
   createTemplate,
   upsertTemplateDay,
+  ensureTemplateHasWeekDays,
   createTemplateSlot,
   updateTemplateSlot,
   deleteTemplateSlot,
@@ -51,17 +52,17 @@ import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebal
 import { generateWeekForTemplate } from '../../src/lib/engine/weekGeneration';
 import type { Exercise } from '../../src/stores/exerciseStore';
 
-const DAYS_OF_WEEK = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
-];
+const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
-const SHORT_DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SHORT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * Get today's day name using Date.getDay() (0=Sunday, 6=Saturday)
+ */
+function getTodayDayName(): string {
+  const dayIndex = new Date().getDay();
+  return WEEK_DAYS[dayIndex];
+}
 
 export default function PlannerTab() {
   const router = useRouter();
@@ -75,6 +76,7 @@ export default function PlannerTab() {
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [templateData, setTemplateData] = useState<FullTemplate | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
+  const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
   const [slotTargets, setSlotTargets] = useState<Map<string, ExerciseTarget>>(new Map());
   const [isLoadingTargets, setIsLoadingTargets] = useState(false);
@@ -189,10 +191,23 @@ export default function PlannerTab() {
 
       setIsLoadingTemplate(true);
       try {
+        // Ensure all 7 weekdays exist
+        await ensureTemplateHasWeekDays(templateId);
+
         const fullTemplate = await getTemplateWithDaysAndSlots(templateId);
         if (fullTemplate) {
           setTemplateData(fullTemplate);
           setActiveTemplateId(templateId);
+
+          // Default selection to today's weekday (only on first load)
+          if (!hasInitializedSelection) {
+            const todayDayName = getTodayDayName();
+            const todayIndex = fullTemplate.days.findIndex((d) => d.day.day_name === todayDayName);
+            if (todayIndex >= 0) {
+              setSelectedDayIndex(todayIndex);
+            }
+            setHasInitializedSelection(true);
+          }
 
           // Fetch exercise names for all slots
           const userId = await getCurrentUserId();
@@ -266,13 +281,8 @@ export default function PlannerTab() {
             return;
           }
 
-          // Create default days based on profile or safe default
-          const workoutDays = profile?.workout_days || ['Monday', 'Wednesday', 'Friday'];
-          const daysToCreate = workoutDays.length > 0 ? workoutDays : ['Monday', 'Wednesday', 'Friday'];
-
-          for (let i = 0; i < daysToCreate.length; i++) {
-            await upsertTemplateDay(newTemplate.id, daysToCreate[i], i);
-          }
+          // Ensure all 7 weekdays exist (Sunday-Saturday)
+          await ensureTemplateHasWeekDays(newTemplate.id);
 
           if (isMounted) {
             await loadTemplate(newTemplate.id);
@@ -493,16 +503,25 @@ export default function PlannerTab() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Plan" tabId="plan" />
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Day selector */}
+        {/* Day selector - always show all 7 days in fixed order */}
         <View style={styles.daySelector}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {templateData.days.map((dayData, index) => {
-              const isSelected = index === selectedDayIndex;
+            {WEEK_DAYS.map((weekday, index) => {
+              // Find corresponding template_day record (should always exist after ensureTemplateHasWeekDays)
+              const dayData = templateData.days.find((d) => d.day.day_name === weekday);
+              const isSelected = selectedDay?.day.day_name === weekday;
+
               return (
                 <TouchableOpacity
-                  key={dayData.day.id}
+                  key={dayData?.day.id || weekday}
                   style={[styles.dayButton, isSelected && styles.dayButtonSelected]}
-                  onPress={() => setSelectedDayIndex(index)}
+                  onPress={() => {
+                    // Find index of this day in templateData.days array
+                    const dayIndex = templateData.days.findIndex((d) => d.day.day_name === weekday);
+                    if (dayIndex >= 0) {
+                      setSelectedDayIndex(dayIndex);
+                    }
+                  }}
                 >
                   <Text
                     style={[
@@ -510,7 +529,7 @@ export default function PlannerTab() {
                       isSelected && styles.dayButtonTextSelected,
                     ]}
                   >
-                    {dayData.day.day_name}
+                    {weekday}
                   </Text>
                 </TouchableOpacity>
               );

@@ -1,6 +1,11 @@
 /**
  * Progress tab
  * Placeholder for progress screen with global settings gear
+ * 
+ * TODO: When implementing Progress tracking:
+ * - Week charts must group sessions by `completed_at` date (NOT `day_name`)
+ * - Heatmaps must group by `performed_at` date (NOT `day_name`)
+ * - `day_name` is display-only metadata ("Planned: Tuesday"), never the grouping key
  */
 
 import { View, Text, StyleSheet } from 'react-native';

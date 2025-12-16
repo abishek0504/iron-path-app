@@ -306,6 +306,75 @@ export async function upsertTemplateDay(
 }
 
 /**
+ * Ensure template has all 7 weekdays (Sunday-Saturday)
+ * Creates missing days with sort_order 0-6 (Sunday=0, Saturday=6)
+ */
+export async function ensureTemplateHasWeekDays(templateId: string): Promise<TemplateDay[]> {
+  if (__DEV__) {
+    devLog('template-query', { action: 'ensureTemplateHasWeekDays', templateId });
+  }
+
+  const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  try {
+    // Fetch existing days for template
+    const { data: existingDays, error: fetchError } = await supabase
+      .from('v2_template_days')
+      .select('*')
+      .eq('template_id', templateId)
+      .order('sort_order', { ascending: true });
+
+    if (fetchError) {
+      if (__DEV__) {
+        devError('template-query', fetchError, { templateId });
+      }
+      return [];
+    }
+
+    // Build set of existing day_name values
+    const existingDayNames = new Set((existingDays || []).map((d) => d.day_name));
+
+    // Create missing days
+    for (let i = 0; i < WEEK_DAYS.length; i++) {
+      const dayName = WEEK_DAYS[i];
+      if (!existingDayNames.has(dayName)) {
+        // Insert missing day with sort_order = index (0-6)
+        const result = await upsertTemplateDay(templateId, dayName, i);
+        if (result && __DEV__) {
+          devLog('template-query', {
+            action: 'ensureTemplateHasWeekDays_created',
+            templateId,
+            dayName,
+            sortOrder: i,
+          });
+        }
+      }
+    }
+
+    // Fetch all days again (including newly created ones) and return sorted
+    const { data: allDays, error: finalError } = await supabase
+      .from('v2_template_days')
+      .select('*')
+      .eq('template_id', templateId)
+      .order('sort_order', { ascending: true });
+
+    if (finalError) {
+      if (__DEV__) {
+        devError('template-query', finalError, { templateId });
+      }
+      return existingDays || [];
+    }
+
+    return allDays || [];
+  } catch (error) {
+    if (__DEV__) {
+      devError('template-query', error, { templateId });
+    }
+    return [];
+  }
+}
+
+/**
  * Create a template slot
  * Accepts either exerciseId OR customExerciseId (exactly one required)
  */
