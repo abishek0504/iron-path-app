@@ -1,90 +1,515 @@
 # V2 Implementation Summary
 
-All todos from the V2 architecture plan have been completed.
+This document tracks all completed V2 implementation work. It serves as a reference for understanding what's been built, how components work together, and patterns for adding new features.
 
 ## Completed Components
 
 ### 1. Architecture Documentation ✅
 - `V2_ARCHITECTURE.md`: Complete system contract with schema, formulas, and rules
+  - Data layering (canonical → prescriptions → user → planning → performed)
+  - No modal-in-modal pattern
+  - Prescription-based targets
+  - RLS and immutability rules
+  - File structure and naming conventions
 
 ### 2. Database Migrations ✅
 - `supabase/migrations/20240101000000_create_v2_tables.sql`: All v2_* tables with constraints
+  - `v2_muscles` - Canonical muscle keys
+  - `v2_exercises` - Master exercise list (immutable from client)
+  - `v2_exercise_prescriptions` - Curated programming targets
+  - `v2_ai_recommended_exercises` - AI allow-list
+  - `v2_user_exercise_overrides` - User-specific overrides
+  - `v2_user_custom_exercises` - User-created exercises
+  - `v2_workout_templates`, `v2_template_days`, `v2_template_slots` - Planning layer
+  - `v2_workout_sessions`, `v2_session_exercises`, `v2_session_sets` - Performed truth
+  - `v2_muscle_freshness`, `v2_daily_muscle_stress` - Derived caches
+  - `v2_profiles` - User profiles and preferences
+
 - `supabase/migrations/20240101000001_create_v2_rls_policies.sql`: RLS policies for all tables
+  - Immutable tables: auth SELECT only
+  - User-owned tables: CRUD for owner only (`user_id = auth.uid()`)
 
 ### 3. Core Infrastructure ✅
-- **Logger**: `src/lib/utils/logger.ts` - Structured dev logging
-- **Theme**: `src/lib/utils/theme.ts` - Centralized colors and styling
-- **Validation**: `src/lib/utils/validation.ts` - Muscle key and implicit hits validation
-- **Supabase Client**: `src/lib/supabase/client.ts` - Configured with anon key + RLS
+
+#### Logger (`src/lib/utils/logger.ts`)
+- Structured dev logging with `devLog(module, payload)` and `devError(module, error, context)`
+- All logs wrapped in `__DEV__` checks (never run in production)
+- Logs only aggregates/state drivers, never per-item data in loops
+- Used throughout all query functions and components
+
+#### Theme (`src/lib/utils/theme.ts`)
+- Centralized color palette (zinc-950 background, lime-400 primary, etc.)
+- Spacing scale (xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48)
+- Typography sizes and weights
+- Border radius values
+- **All components must use theme tokens, no hardcoded values**
+
+#### Validation (`src/lib/utils/validation.ts`)
+- `validateMuscleKeys()` - Validates muscle keys exist in v2_muscles
+- `validateAndClampImplicitHits()` - Validates and clamps implicit_hits values (0-1)
+
+#### Supabase Client (`src/lib/supabase/client.ts`)
+- Configured with anon key + RLS (never service_role in app)
+- Uses AsyncStorage for native, localStorage for web
+- Auto-refreshes tokens and persists sessions
 
 ### 4. Zustand Stores ✅
-- `src/stores/uiStore.ts` - Bottom sheets, dialogs, toasts
-- `src/stores/userStore.ts` - Profile and preferences cache
-- `src/stores/exerciseStore.ts` - Exercise search and selection
-- `src/stores/workoutStore.ts` - Active workout/session state
+
+All stores follow the same pattern: state + actions, with dev logging on state changes.
+
+#### `src/stores/uiStore.ts` - Global UI State
+- **State**:
+  - `activeBottomSheet: string | null` - Currently open bottom sheet ID
+  - `bottomSheetProps: Record<string, any>` - Props for active sheet
+  - `toasts: Array<{id, message, type, duration}>` - Active toast notifications
+- **Actions**:
+  - `openBottomSheet(id, props)` - Opens a bottom sheet (prevents modal-in-modal)
+  - `closeBottomSheet()` - Closes current bottom sheet
+  - `showToast(message, type, duration)` - Shows a toast
+  - `removeToast(id)` - Removes a toast
+- **Usage**: All bottom sheets and toasts managed here globally
+
+#### `src/stores/userStore.ts` - User Profile Cache
+- **State**: `profile: UserProfile | null`, `isLoading: boolean`
+- **Actions**: `setProfile()`, `updateProfile()`, `clearProfile()`
+- **Usage**: Caches user profile to avoid repeated queries
+
+#### `src/stores/exerciseStore.ts` - Exercise Search/Selection
+- **State**: `searchQuery`, `selectedExercises[]`, `isLoading`
+- **Actions**: `setSearchQuery()`, `addSelectedExercise()`, `removeSelectedExercise()`, etc.
+- **Usage**: Used by ExercisePicker component
+
+#### `src/stores/workoutStore.ts` - Active Workout State
+- **State**: `activeSession: WorkoutSession | null`, `isLoading`
+- **Actions**: `setActiveSession()`, `completeSession()`, `abandonSession()`, `clearSession()`
+- **Usage**: Tracks current workout session state
 
 ### 5. Query Functions ✅
-- `src/lib/supabase/queries/exercises.ts` - Merged exercise view (getMergedExercise, listMergedExercises)
-- `src/lib/supabase/queries/prescriptions.ts` - Prescription fetching
-- `src/lib/supabase/queries/workouts.ts` - Workout sessions and sets
-- `src/lib/supabase/queries/users.ts` - User profile management
+
+All query functions follow the same pattern:
+- Use `devLog`/`devError` with `__DEV__` guards
+- Return `null` or `[]` on error (never throw)
+- Log aggregates only (counts, not per-item data)
+
+#### `src/lib/supabase/queries/exercises.ts`
+- `getMergedExercise(exerciseId, userId)` - Gets merged view (master ⊕ overrides)
+  - Checks custom exercises first
+  - Then master exercise + user overrides
+  - Returns source: 'custom' | 'override' | 'master'
+- `listMergedExercises(userId, exerciseIds?)` - Bulk version
+
+#### `src/lib/supabase/queries/prescriptions.ts`
+- `getExercisePrescription(exerciseId, goal, experience, mode)` - Single prescription lookup
+- `getPrescriptionsForExercises(exerciseIds, goal, experience, mode)` - Bulk lookup, returns Map
+
+#### `src/lib/supabase/queries/workouts.ts`
+- `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session
+- `getActiveSession(userId)` - Gets user's active session
+- `completeWorkoutSession(sessionId)` - Marks session as completed
+- `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
+
+#### `src/lib/supabase/queries/users.ts`
+- `getUserProfile(userId)` - Gets user profile
+- `updateUserProfile(userId, updates)` - Updates profile
+- `createUserProfile(userId, profile)` - Creates profile on signup
+
+#### `src/lib/supabase/queries/templates.ts` ✅ **NEW**
+- `getUserTemplates(userId)` - Gets all user templates (including system templates)
+- `getTemplateWithDaysAndSlots(templateId)` - Gets full template with nested days and slots
+- `createTemplate(userId, name?)` - Creates new template (defaults to 'Weekly Plan')
+- `upsertTemplateDay(templateId, dayName, sortOrder)` - Creates/updates template day
+- `createTemplateSlot(dayId, input)` - Adds exercise slot to day
+- `updateTemplateSlot(slotId, updates)` - Updates slot (goal/experience/notes)
+- `deleteTemplateSlot(slotId)` - Removes slot
+- `deleteTemplateDay(dayId)` - Removes day (cascades to slots)
 
 ### 6. UI Components ✅
-- `src/components/ui/Toast.tsx` - Toast notification component
-- `src/components/ui/ToastProvider.tsx` - Global toast provider
-- `src/components/ui/BottomSheet.tsx` - Reusable bottom sheet
-- `src/components/ui/ModalManager.tsx` - Global modal/sheet manager
-- `src/components/exercise/ExercisePicker.tsx` - Exercise selection bottom sheet
-- `src/components/settings/SettingsMenu.tsx` - Settings menu bottom sheet
-- `src/components/workout/WorkoutHeatmap.tsx` - Muscle stress heatmap
+
+#### Global UI Components (`src/components/ui/`)
+
+##### `Toast.tsx` - Individual Toast Notification
+- Props: `message`, `type: 'success' | 'error' | 'info'`, `onHide`, `duration`
+- Animates in/out, auto-hides after duration
+- Uses theme colors (primary for success, error for errors)
+
+##### `ToastProvider.tsx` - Global Toast Manager
+- Renders all active toasts from `uiStore.toasts`
+- Mounted once in root layout
+- Handles toast removal automatically
+
+##### `BottomSheet.tsx` - Reusable Bottom Sheet Component ✅ **NEW**
+- **Purpose**: Prevents modal-in-modal by being managed globally
+- **Props**:
+  - `visible: boolean` - Controls visibility
+  - `onClose: () => void` - Close handler
+  - `title?: string` - Optional header title
+  - `children: ReactNode` - Sheet content
+  - `height?: number | string` - Height in pixels or percentage (default: '80%')
+- **Features**:
+  - Slide-up/down animations using React Native Animated
+  - Backdrop overlay with tap-to-close
+  - Handle bar at top
+  - Close button in header (if title provided)
+  - Uses theme colors and spacing
+- **Usage**: Never instantiate directly. Use via `ModalManager` and `useModal()` hook.
+
+##### `ModalManager.tsx` - Global Modal/Sheet Manager ✅ **NEW**
+- **Purpose**: Single source of truth for all bottom sheets (prevents modal-in-modal)
+- **How it works**:
+  1. Watches `uiStore.activeBottomSheet` state
+  2. Conditionally renders appropriate sheet component based on ID
+  3. Only one sheet can be open at a time
+- **Registered Sheets**:
+  - `'exercisePicker'` → Renders `ExercisePicker` component
+  - `'settingsMenu'` → Renders `SettingsMenu` component
+- **Adding new sheets**: Add new conditional render block in `ModalManager.tsx`
+- **Mounted**: Once in root `app/_layout.tsx`
+
+##### `TabHeader.tsx` - Shared Tab Header Component ✅ **NEW**
+- **Purpose**: Consistent header across all tabs with settings gear
+- **Props**: `title: string`, `tabId: 'workout' | 'plan' | 'progress' | 'profile'`
+- **Features**:
+  - Title on left
+  - Settings gear icon on right (opens settings menu via `useModal()`)
+  - Uses theme typography and spacing
+- **Usage**: Used in all tab screens (`app/(tabs)/*.tsx`)
+
+#### Domain Components
+
+##### `src/components/exercise/ExercisePicker.tsx`
+- Exercise selection bottom sheet
+- Loads exercises from `v2_exercises`
+- Search/filter functionality
+- Single or multi-select modes
+- **Access**: Via `useExercisePicker()` hook, opens via `uiStore`
+
+##### `src/components/settings/SettingsMenu.tsx`
+- Settings menu bottom sheet
+- Menu items navigate to routes (e.g., Edit Profile)
+- **Access**: Via `useModal()` hook or TabHeader settings gear
+
+##### `src/components/workout/WorkoutHeatmap.tsx`
+- Muscle stress heatmap visualization
+- Loads from `v2_daily_muscle_stress`
+- Displays color-coded grid by muscle and date
 
 ### 7. Engine Logic ✅
-- `src/lib/engine/targetSelection.ts` - Prescription-based target selection
-  - `selectExerciseTargets()` - Single exercise target selection
-  - `selectExerciseTargetsBulk()` - Bulk target selection
-  - Never invents defaults when prescription is missing
+
+#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection
+- **`selectExerciseTargets(exerciseId, userId, context, historyCount)`**
+  - Gets merged exercise to determine mode (reps vs timed)
+  - Fetches prescription for exercise + context (goal, experience, mode)
+  - Returns `null` if no prescription (data error - never invents defaults)
+  - Selects targets within prescription band (lower-to-mid for new users, mid-to-upper for experienced)
+  - Clamps to prescription bounds
+- **`selectExerciseTargetsBulk(exerciseIds, userId, context, historyCounts)`**
+  - Bulk version that filters out exercises without prescriptions
+  - Returns array of `ExerciseTarget` objects
+- **Hard rule**: Never invents generic defaults (3x10, 60s). Missing prescription = exclude from generation.
 
 ### 8. Hooks ✅
-- `src/hooks/useToast.ts` - Toast convenience hook
-- `src/hooks/useExercisePicker.ts` - Exercise picker hook
-- `src/hooks/useModal.ts` - Modal/sheet management hook
 
-### 9. Root Layout ✅
-- `app/_layout.tsx` - Root layout with ToastProvider and ModalManager integration
+All hooks provide convenience wrappers around Zustand stores.
 
-### 10. Configuration Files ✅
-- `package.json` - Updated with Zustand dependency and `react-native-worklets` pinned to `0.5.1` to stay aligned with the archived Expo 54 native build
+#### `src/hooks/useToast.ts`
+- Returns: `{ show(), success(), error(), info() }`
+- Usage: `const toast = useToast(); toast.success('Saved!');`
+
+#### `src/hooks/useExercisePicker.ts`
+- Returns: `{ open(onSelect, multiSelect?), close() }`
+- Usage: `const picker = useExercisePicker(); picker.open((exercise) => { ... });`
+- Opens `ExercisePicker` bottom sheet via `uiStore`
+
+#### `src/hooks/useModal.ts`
+- Returns: `{ openSheet(id, props?), closeSheet(), isOpen }`
+- Usage: `const modal = useModal(); modal.openSheet('settingsMenu');`
+- Manages bottom sheets via `uiStore`
+
+### 9. Navigation & Layout ✅
+
+#### `app/_layout.tsx` - Root Layout
+- Sets up Expo Router Stack navigator
+- Registers all routes (tabs, modals, stack screens)
+- Mounts global UI components:
+  - `<ToastProvider />` - Renders all toasts
+  - `<ModalManager />` - Manages all bottom sheets
+- Platform-specific handling (web vs native)
+- Web scrollbar styles import
+
+#### `app/(tabs)/_layout.tsx` - Tab Navigator ✅ **NEW**
+- **Custom Tab Bar**: Implements capsule-style tab bar with sliding circle indicator
+- **Features**:
+  - Capsule background (`#18181b` zinc-900) with border
+  - Sliding circle indicator (40px) that animates between tabs
+  - Icons: Dumbbell (Workout), Calendar (Plan), TrendingUp (Progress), Trophy (Profile)
+  - Active tab: lime-400 icon + white text, semibold weight
+  - Inactive tab: zinc-400 icon + zinc-400 text, medium weight
+  - Height: 72px
+  - Uses `react-native-reanimated` for smooth animations
+  - Platform-specific positioning (absolute on native, relative on web)
+- **Tabs**:
+  - `index` - Workout tab
+  - `planner` - Plan tab
+  - `progress` - Progress tab
+  - `profile` - Profile tab
+
+### 10. Planner Implementation ✅ **NEW**
+
+#### `app/(tabs)/planner.tsx` - Weekly Planner Screen
+- **Features**:
+  - Auto-creates default template if user has none
+  - Creates default days based on profile `workout_days` or safe default (Mon/Wed/Fri)
+  - Day selector (horizontal scrollable list)
+  - Selected day shows:
+    - Exercise slots with names and calculated targets
+    - "Add Exercise" button (opens ExercisePicker)
+    - "Generate with AI" button
+    - "Start this day" button (creates workout session)
+  - Empty states for no templates, no days, no slots
+  - Loading states during template/slot operations
+
+#### Slot Management
+- **Adding Exercise**:
+  1. User taps "Add Exercise"
+  2. `ExercisePicker` opens via `useExercisePicker()` hook
+  3. User selects exercise
+  4. `createTemplateSlot()` creates slot in database
+  5. Optimistic UI update adds slot to local state
+  6. Fetches exercise name and calculates target
+  7. Shows success toast
+- **Removing Exercise**:
+  1. User taps "Remove" on slot
+  2. `deleteTemplateSlot()` removes from database
+  3. Optimistic UI update removes from local state and targets map
+  4. Shows success toast
+- **Target Calculation**:
+  - On template load, calculates targets for all slots
+  - Uses `selectExerciseTargets()` with slot context (goal/experience overrides or profile defaults)
+  - Displays as "X sets × Y reps" or "X sets × Y min"
+  - Shows "Missing targets" in red/italic if no prescription found
+  - Recalculates when slots are added/removed
+
+#### AI Generation
+- **"Generate with AI" Button**:
+  1. Fetches exercises from `v2_ai_recommended_exercises` (top 20 by priority)
+  2. Distributes exercises across days (2-3 per day, round-robin)
+  3. Creates slots for each exercise
+  4. Fetches exercise names and calculates targets
+  5. Updates template data and recalculates all targets
+  6. Shows success toast
+- **Future Enhancement**: Can integrate with AI service to intelligently select exercises based on muscle coverage, recovery, etc.
+
+#### Start Workout Integration
+- **"Start this day" Button**:
+  1. Creates workout session via `createWorkoutSession(userId, templateId, dayName)`
+  2. Navigates to `/workout-active` route
+  3. Shows success toast
+  4. Error handling with toast notifications
+
+### 11. Configuration Files ✅
+- `package.json` - Dependencies (Zustand, react-native-reanimated, etc.)
 - `tsconfig.json` - TypeScript configuration
 - `babel.config.js` - Babel configuration
-- `tailwind.config.js` - Tailwind configuration
+- `tailwind.config.js` - Tailwind configuration (for NativeWind)
 - `app.json` - Expo configuration
 - `styles/scrollbar.css` - Web scrollbar styles
 
-### 11. Documentation ✅
+### 12. Documentation ✅
 - `README_V2.md` - V2 project overview and setup instructions
 - `src/types/README.md` - Type generation instructions
+- `V2_ARCHITECTURE.md` - Complete system contract
 
 ## Key Features Implemented
 
-1. **No Modal-in-Modal**: All overlays managed globally via Zustand
+1. **No Modal-in-Modal**: All overlays managed globally via Zustand `uiStore`
+   - Single `ModalManager` component renders all bottom sheets
+   - Only one sheet can be open at a time
+   - Sheets are not routes (use `useModal()` hook, not `router.push()`)
+
 2. **Merged Exercise View**: Global defaults ⊕ user overrides
+   - `getMergedExercise()` checks custom → master + overrides
+   - Used everywhere (picker, engine, planner)
+
 3. **Prescription-Based Targets**: Never invents generic defaults
+   - All targets come from `v2_exercise_prescriptions`
+   - Missing prescription = data error (exclude from generation, show warning)
+   - History adjusts within prescription band
+
 4. **RLS & Immutability**: Client read-only for master data
+   - `v2_exercises`, `v2_exercise_prescriptions` are immutable from client
+   - User customization via `v2_user_exercise_overrides` and `v2_user_custom_exercises`
+   - All writes use anon key + RLS (never service_role)
+
 5. **Dev Logging**: Structured logging throughout
+   - All logs wrapped in `__DEV__` checks
+   - Logs aggregates only (counts, not per-item data)
+   - Module-based logging (`devLog('module-name', payload)`)
+
 6. **Validation Layer**: Shared validation helpers
+   - Muscle key validation against `v2_muscles`
+   - Implicit hits clamping (0-1)
+
 7. **Type Safety**: Instructions for type generation from DB schema
+   - Run `npx supabase gen types typescript` after schema changes
+
+8. **Theme System**: Centralized styling
+   - All colors, spacing, typography in `src/lib/utils/theme.ts`
+   - No hardcoded values in components
+   - Consistent design across app
+
+9. **Custom Tab Bar**: Capsule-style with sliding indicator
+   - Smooth animations with react-native-reanimated
+   - Platform-specific positioning
+   - Theme-based colors
+
+10. **Planner with Templates**: Full weekly planning system
+    - Normalized template schema (templates → days → slots)
+    - Prescription-based target calculation
+    - AI generation support
+    - Start workout integration
+
+## Patterns for Adding New Features
+
+### Adding a New Bottom Sheet
+
+1. **Create the component** (e.g., `src/components/myfeature/MySheet.tsx`)
+   - Component should accept props it needs
+   - Don't wrap in `BottomSheet` - that's handled by `ModalManager`
+
+2. **Register in `ModalManager.tsx`**:
+   ```typescript
+   <BottomSheet
+     visible={activeBottomSheet === 'mySheet'}
+     onClose={closeBottomSheet}
+     title="My Sheet"
+     {...bottomSheetProps}
+   >
+     <MySheet {...bottomSheetProps} />
+   </BottomSheet>
+   ```
+
+3. **Create a hook** (optional, for convenience):
+   ```typescript
+   // src/hooks/useMySheet.ts
+   export function useMySheet() {
+     const openBottomSheet = useUIStore((state) => state.openBottomSheet);
+     return {
+       open: (props) => openBottomSheet('mySheet', props),
+     };
+   }
+   ```
+
+4. **Use in components**:
+   ```typescript
+   const mySheet = useMySheet();
+   mySheet.open({ onSelect: (data) => { ... } });
+   ```
+
+### Adding a New Query Function
+
+1. **Create in appropriate file** (e.g., `src/lib/supabase/queries/myfeature.ts`)
+2. **Follow the pattern**:
+   ```typescript
+   export async function getMyData(userId: string): Promise<MyData[]> {
+     if (__DEV__) {
+       devLog('myfeature-query', { action: 'getMyData', userId });
+     }
+     
+     try {
+       const { data, error } = await supabase
+         .from('v2_my_table')
+         .select('*')
+         .eq('user_id', userId);
+       
+       if (error) {
+         if (__DEV__) {
+           devError('myfeature-query', error, { userId });
+         }
+         return [];
+       }
+       
+       return data || [];
+     } catch (error) {
+       if (__DEV__) {
+         devError('myfeature-query', error, { userId });
+       }
+       return [];
+     }
+   }
+   ```
+
+3. **Log aggregates only**: Counts, not per-item data
+
+### Adding a New Tab Screen
+
+1. **Create file**: `app/(tabs)/mytab.tsx`
+2. **Use `TabHeader`**:
+   ```typescript
+   import { TabHeader } from '../../src/components/ui/TabHeader';
+   
+   export default function MyTab() {
+     return (
+       <SafeAreaView style={styles.container} edges={['top']}>
+         <TabHeader title="My Tab" tabId="mytab" />
+         {/* Your content */}
+       </SafeAreaView>
+     );
+   }
+   ```
+
+3. **Register in `app/(tabs)/_layout.tsx`**:
+   ```typescript
+   <Tabs.Screen 
+     name="mytab" 
+     options={{ title: "My Tab" }} 
+   />
+   ```
+
+4. **Add icon** in `CustomTabBar` if needed
+
+### Adding a New Store
+
+1. **Create file**: `src/stores/myStore.ts`
+2. **Follow the pattern**:
+   ```typescript
+   import { create } from 'zustand';
+   import { devLog } from '../lib/utils/logger';
+   
+   interface MyState {
+     data: MyData | null;
+     setData: (data: MyData) => void;
+   }
+   
+   export const useMyStore = create<MyState>((set) => ({
+     data: null,
+     setData: (data) => {
+       if (__DEV__) {
+         devLog('my-store', { action: 'setData', hasData: !!data });
+       }
+       set({ data });
+     },
+   }));
+   ```
+
+3. **Use in components**: `const data = useMyStore((state) => state.data);`
 
 ## Next Steps
 
 1. **Apply Migrations**: Run the SQL migrations in Supabase
-2. **Generate Types**: Run `npx supabase gen types typescript` to generate TypeScript types
+2. **Generate Types**: Run `npx supabase gen types typescript --project-id <id> > src/types/supabase.ts`
 3. **Populate Master Data**: 
    - Add muscles to `v2_muscles`
    - Add exercises to `v2_exercises`
-   - Add prescriptions to `v2_exercise_prescriptions`
+   - Add prescriptions to `v2_exercise_prescriptions` (critical - planner won't work without these)
    - Add AI recommended exercises to `v2_ai_recommended_exercises`
-4. **Build Screens**: Create the actual app screens (home, planner, progress, profile)
-5. **Implement AI Generation**: Build the workout generation engine using the target selection logic
+4. **Build Remaining Screens**: 
+   - ✅ Planner tab - COMPLETED
+   - Home/workout tab (`app/(tabs)/index.tsx`) - Placeholder exists
+   - Progress tab (`app/(tabs)/progress.tsx`) - Placeholder exists
+   - Profile tab (`app/(tabs)/profile.tsx`) - Placeholder exists
+5. **Implement Active Workout Screen**: Build the workout execution screen at `app/workout-active.tsx`
+6. **Implement Session Detail Screen**: Build history detail at `app/session/[id].tsx`
+7. **Implement Exercise Detail Screen**: Build exercise detail at `app/exercise/[id].tsx`
 
 ## Architecture Compliance
 
@@ -97,4 +522,19 @@ All implementation follows the V2_ARCHITECTURE.md contract:
 - ✅ DB constraints (prevent invalid data)
 - ✅ Validation layer (muscle keys, implicit hits)
 - ✅ Dev logging (structured, conditional)
+- ✅ Theme system (centralized, no hardcoded values)
+- ✅ Custom tab bar (capsule design with sliding indicator)
+- ✅ Planner with normalized templates (templates → days → slots)
 
+## Important Notes for New Developers
+
+1. **Never create modals inside modals** - Use `useModal()` hook and `ModalManager`
+2. **Never hardcode colors/spacing** - Use theme tokens from `src/lib/utils/theme.ts`
+3. **Never invent exercise targets** - Always fetch from prescriptions, return null if missing
+4. **Always use merged exercise view** - Use `getMergedExercise()`, never query `v2_exercises` directly
+5. **Always log with `__DEV__` checks** - Use `devLog()`/`devError()`, log aggregates only
+6. **Always handle errors gracefully** - Return null/[] from queries, show toast to user
+7. **Always use Zustand for global state** - Don't use Context API or prop drilling
+8. **Always follow query patterns** - Try/catch, dev logging, null/[] returns on error
+9. **Always use TabHeader in tabs** - Provides consistent header with settings gear
+10. **Always use hooks for UI actions** - `useToast()`, `useExercisePicker()`, `useModal()`
