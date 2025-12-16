@@ -411,8 +411,130 @@ export async function updateTemplateSlot(
         if (__DEV__) {
           devError('template-query', new Error('Exactly one of exercise_id or custom_exercise_id must be non-null'), { slotId, updates });
         }
-      return false;
+        return false;
+      }
     }
+  }
+
+  // Perform the update
+  const { error } = await supabase
+    .from('v2_template_slots')
+    .update(updates)
+    .eq('id', slotId);
+
+  if (error) {
+    if (__DEV__) {
+      devError('template-query', error, { slotId, updates });
+    }
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Apply session structure to template
+ * Used for "Copy last week" feature
+ * Copies exercise structure from last 7 days of sessions into template
+ */
+export async function applySessionStructureToTemplate(
+  userId: string,
+  templateId: string,
+  structure: Array<{ dayName: string; exercises: Array<{ exerciseId?: string; customExerciseId?: string }> }>
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('template-query', {
+      action: 'applySessionStructureToTemplate',
+      userId,
+      templateId,
+      dayCount: structure.length,
+    });
+  }
+
+  try {
+    // Clear existing template slots first
+    const { data: templateDays } = await supabase
+      .from('v2_template_days')
+      .select('id')
+      .eq('template_id', templateId);
+
+    if (templateDays && templateDays.length > 0) {
+      const dayIds = templateDays.map((d) => d.id);
+      const { error: deleteError } = await supabase.from('v2_template_slots').delete().in('day_id', dayIds);
+
+      if (deleteError) {
+        if (__DEV__) {
+          devError('template-query', deleteError, { templateId, dayIds });
+        }
+        return false;
+      }
+    }
+
+    // Apply structure for each day
+    for (const dayStructure of structure) {
+      // Get or create template day
+      let dayId: string | null = null;
+
+      const { data: existingDay } = await supabase
+        .from('v2_template_days')
+        .select('id')
+        .eq('template_id', templateId)
+        .eq('day_name', dayStructure.dayName)
+        .maybeSingle();
+
+      if (existingDay) {
+        dayId = existingDay.id;
+      } else {
+        // Create new day
+        const { data: newDay, error: dayError } = await supabase
+          .from('v2_template_days')
+          .insert({
+            template_id: templateId,
+            day_name: dayStructure.dayName,
+            sort_order: structure.indexOf(dayStructure),
+          })
+          .select()
+          .single();
+
+        if (dayError || !newDay) {
+          if (__DEV__) {
+            devError('template-query', dayError || new Error('Failed to create day'), {
+              templateId,
+              dayName: dayStructure.dayName,
+            });
+          }
+          continue;
+        }
+
+        dayId = newDay.id;
+      }
+
+      // Create slots for exercises
+      for (let i = 0; i < dayStructure.exercises.length; i++) {
+        const exercise = dayStructure.exercises[i];
+        const result = await createTemplateSlot(dayId, {
+          exerciseId: exercise.exerciseId,
+          customExerciseId: exercise.customExerciseId,
+          sortOrder: i + 1,
+        });
+
+        if (!result) {
+          if (__DEV__) {
+            devError('template-query', new Error('Failed to create slot'), {
+              dayId,
+              exercise,
+            });
+          }
+        }
+      }
+    }
+
+    return true;
+  } catch (error) {
+    if (__DEV__) {
+      devError('template-query', error, { userId, templateId });
+    }
+    return false;
   }
 }
 
@@ -523,31 +645,6 @@ export async function applyStructureEditToTemplate(
   } catch (error) {
     if (__DEV__) {
       devError('template-query', error, { templateId, edit });
-    }
-    return false;
-  }
-}
-
-  try {
-    const { error } = await supabase
-      .from('v2_template_slots')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', slotId);
-
-    if (error) {
-      if (__DEV__) {
-        devError('template-query', error, { slotId, updates });
-      }
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    if (__DEV__) {
-      devError('template-query', error, { slotId, updates });
     }
     return false;
   }

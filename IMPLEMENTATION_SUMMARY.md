@@ -118,20 +118,29 @@ All query functions follow the same pattern:
 - `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
 - `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
-#### `src/lib/supabase/queries/workouts.ts`
+#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F)**
 - `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
 - `getExerciseHistory(exerciseId, userId, limit)` - Gets recent exercise history for progressive overload
 - `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
+- `getLast7DaysSessionStructure(userId)` - Gets last 7 days of completed session structure for "Copy last week" feature ✅ **NEW (Patch E)**
+
+#### `src/lib/supabase/queries/workouts_helpers.ts` ✅ **NEW (Patch B)**
+- `getOrCreateActiveSessionForToday(userId, dayName?)` - Gets in-progress session for today, or creates new session for today
+  - Used for "Today only" edit scope
+  - Returns active session if exists, otherwise creates new session
+- `applyStructureEditToSession(sessionId, edit)` - Applies structure edit to session (addSlot, removeSlot, swapExercise)
+  - Used for "Today only" edit scope
+  - Only updates structure (exercise_id, custom_exercise_id, sort_order), never weight/reps/duration
 
 #### `src/lib/supabase/queries/users.ts`
 - `getUserProfile(userId)` - Gets user profile
 - `updateUserProfile(userId, updates)` - Updates profile
 - `createUserProfile(userId, profile)` - Creates profile on signup
 
-#### `src/lib/supabase/queries/templates.ts` ✅ **UPDATED (Patch C, H)**
+#### `src/lib/supabase/queries/templates.ts` ✅ **UPDATED (Patch C, E, H)**
 - `getUserTemplates(userId)` - Gets all user templates (including system templates)
 - `getTemplateWithDaysAndSlots(templateId)` - Gets full template with nested days and slots
 - `createTemplate(userId, name?)` - Creates new template (defaults to 'Weekly Plan')
@@ -140,6 +149,8 @@ All query functions follow the same pattern:
 - `updateTemplateSlot(slotId, updates)` - Updates slot (supports `exercise_id`, `custom_exercise_id`, experience/notes) - goal removed
 - `deleteTemplateSlot(slotId)` - Removes slot
 - `deleteTemplateDay(dayId)` - Removes day (cascades to slots)
+- `applyStructureEditToTemplate(templateId, edit)` - Applies structure edit to template (for "From next week onward" scope) ✅ **NEW (Patch B)**
+- `applySessionStructureToTemplate(userId, templateId, structure)` - Copies session structure into template (for "Copy last week" feature) ✅ **NEW (Patch E)**
 
 ### 6. UI Components ✅
 
@@ -212,6 +223,31 @@ All query functions follow the same pattern:
 - Uses `validateCustomExerciseTargets()` helper
 - Fields: name, description, primary_muscles[], implicit_hits{}, mode, target bands
 
+##### `EditScopePrompt.tsx` - Edit Scope Selection ✅ **NEW (Patch B)**
+- **Purpose**: Prompts user to choose scope when making structure edits
+- **Props**:
+  - `visible: boolean` - Whether prompt is visible
+  - `onSelect: (scope: EditScope) => void` - Callback with selected scope ('today' | 'thisWeek' | 'nextWeek')
+  - `onCancel: () => void` - Cancel handler
+- **Behavior**: Shows modal with options:
+  - "Today only (default)" - Writes to active session or creates new session for today
+  - "This week only" - Disabled (TODO: not implemented yet)
+  - "From next week onward" - Updates template structure
+- **Usage**: Shown after structure edits (add/remove/swap/reorder slot) in planner
+
+##### `SmartAdjustPrompt.tsx` - Muscle Coverage Rebalancing Prompt ✅ **NEW (Patch G)**
+- **Purpose**: Prompts user when muscle coverage gaps are detected before starting workout
+- **Props**:
+  - `visible: boolean` - Whether prompt is visible
+  - `rebalanceResult: RebalanceResult | null` - Result from `needsRebalance()` check
+  - `onContinue: () => void` - Continue without changes handler
+  - `onSmartAdjust: () => void` - Smart adjust handler
+  - `onCancel: () => void` - Cancel handler
+- **Behavior**: Shows modal with detected gaps and options:
+  - "Smart Adjust (for today)" - Rebalances today's session to cover missed muscles
+  - "Continue Anyway" - Proceed with current plan without changes
+- **Usage**: Shown before starting workout if `needsRebalance()` detects gaps
+
 ##### `src/components/workout/WorkoutHeatmap.tsx`
 - Muscle stress heatmap visualization
 - Loads from `v2_daily_muscle_stress`
@@ -229,6 +265,13 @@ All query functions follow the same pattern:
   - Minimal V2: Avoids freshness dependency unless `v2_muscle_freshness` cache exists
   - Constants: `N_SESSIONS_LOOKBACK = 6`, `MIN_GAP_MUSCLES = 1`
 - **Hard rule**: Only detects gaps, does not automatically rebalance (user must choose via Smart Adjust prompt)
+
+#### `src/lib/engine/weekGeneration.ts` - AI Week Generation ✅ **NEW**
+- **`generateWeekForTemplate(template, userId, profile)`**
+  - Fetches exercises from `v2_ai_recommended_exercises` (top 20 by priority)
+  - Returns array of exercise IDs for AI generation
+  - TODO: Full AI logic integration (currently returns allow-list exercises)
+  - Used by "Generate with AI" button in planner
 
 #### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F)**
 - **`selectExerciseTargets(exerciseId, userId, context, historyCount)`**
@@ -309,20 +352,31 @@ All hooks provide convenience wrappers around Zustand stores.
   - Empty states for no templates, no days, no slots
   - Loading states during template/slot operations
 
-#### Slot Management
+#### Slot Management ✅ **UPDATED (Patch B)**
 - **Adding Exercise**:
   1. User taps "Add Exercise"
   2. `ExercisePicker` opens via `useExercisePicker()` hook
   3. User selects exercise
-  4. `createTemplateSlot()` creates slot in database
-  5. Optimistic UI update adds slot to local state
-  6. Fetches exercise name and calculates target
-  7. Shows success toast
+  4. **Edit scope prompt appears** (Patch B)
+  5. User chooses scope:
+     - **"Today only"**: Creates/gets active session for today, applies edit via `applyStructureEditToSession()`
+     - **"From next week onward"**: Creates slot in template via `createTemplateSlot()`, updates template structure
+  6. Optimistic UI update adds slot to local state
+  7. Fetches exercise name and calculates target
+  8. Shows success toast
 - **Removing Exercise**:
   1. User taps "Remove" on slot
-  2. `deleteTemplateSlot()` removes from database
-  3. Optimistic UI update removes from local state and targets map
-  4. Shows success toast
+  2. **Edit scope prompt appears** (Patch B)
+  3. User chooses scope:
+     - **"Today only"**: Applies edit to active session via `applyStructureEditToSession()`
+     - **"From next week onward"**: Removes from template via `deleteTemplateSlot()`
+  4. Optimistic UI update removes from local state and targets map
+  5. Shows success toast
+- **Edit Scoping Rules** (Patch B):
+  - Structure edits (add/remove/swap/reorder slot) always prompt for scope
+  - Load/performance edits (weight, reps, duration, RPE/RIR) never prompt (always apply to current session)
+  - Template changes require explicit user choice (never silent mutation)
+  - Progressive overload never writes into templates
 - **Target Calculation**:
   - On template load, calculates targets for all slots
   - Uses `selectExerciseTargets()` with slot context (experience overrides or profile defaults) - goal removed
@@ -330,15 +384,30 @@ All hooks provide convenience wrappers around Zustand stores.
   - Shows "Missing targets" in red/italic if no prescription found
   - Recalculates when slots are added/removed
 
-#### AI Generation
+#### AI Generation ✅ **UPDATED**
 - **"Generate with AI" Button**:
-  1. Fetches exercises from `v2_ai_recommended_exercises` (top 20 by priority)
+  1. Calls `generateWeekForTemplate()` to fetch exercise IDs from `v2_ai_recommended_exercises` (top 20 by priority)
   2. Distributes exercises across days (2-3 per day, round-robin)
-  3. Creates slots for each exercise
+  3. Creates slots for each exercise in template
   4. Fetches exercise names and calculates targets
   5. Updates template data and recalculates all targets
   6. Shows success toast
 - **Future Enhancement**: Can integrate with AI service to intelligently select exercises based on muscle coverage, recovery, etc.
+
+#### Copy Last Week Feature ✅ **NEW (Patch E)**
+- **"Copy last week" Button**:
+  1. User taps "Copy last week" button on selected day
+  2. Calls `getLast7DaysSessionStructure(userId)` to fetch last 7 days of completed session structure
+  3. If no sessions found: Shows error toast
+  4. Calls `applySessionStructureToTemplate(userId, templateId, structure)` to copy structure into template
+  5. Clears existing template slots and recreates from session structure
+  6. Reloads template to reflect changes
+  7. Shows success toast
+- **Behavior**: 
+  - Copies exercise structure (exercise_id, custom_exercise_id, order) from last 7 days
+  - Does NOT copy weights/reps/duration (structure only)
+  - Creates/updates template days based on session day_names
+  - Explicit button action, not automatic mutation
 
 #### Start Workout Integration ✅ **UPDATED (Patch F, G)**
 - **"Start this day" Button**:

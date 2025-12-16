@@ -40,8 +40,7 @@ import {
   type ExerciseTarget,
   type TargetSelectionContext,
 } from '../../src/lib/engine/targetSelection';
-import { createWorkoutSession, prefillSessionSets } from '../../src/lib/supabase/queries/workouts';
-import { supabase } from '../../src/lib/supabase/client';
+import { createWorkoutSession, prefillSessionSets, getLast7DaysSessionStructure } from '../../src/lib/supabase/queries/workouts';
 import { getOrCreateActiveSessionForToday, applyStructureEditToSession } from '../../src/lib/supabase/queries/workouts_helpers';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { isStructureEdit } from '../../src/lib/utils/editHelpers';
@@ -49,6 +48,7 @@ import { EditScopePrompt, type EditScope } from '../../src/components/ui/EditSco
 import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
 import { applyStructureEditToTemplate, applySessionStructureToTemplate } from '../../src/lib/supabase/queries/templates';
 import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
+import { generateWeekForTemplate } from '../../src/lib/engine/weekGeneration';
 import type { Exercise } from '../../src/stores/exerciseStore';
 
 const DAYS_OF_WEEK = [
@@ -101,6 +101,85 @@ export default function PlannerTab() {
     }
   }, []);
 
+  // Calculate targets for all slots
+  const calculateTargetsForSlots = useCallback(
+    async (fullTemplate: FullTemplate, userId: string) => {
+      if (__DEV__) {
+        devLog('planner', {
+          action: 'calculateTargetsForSlots',
+          templateId: fullTemplate.template.id,
+        });
+      }
+
+      setIsLoadingTargets(true);
+      try {
+        // Get effective context from profile
+        const effectiveExperience = profile?.experience_level || 'beginner';
+        const context: TargetSelectionContext = {
+          experience: effectiveExperience,
+        };
+
+        const targetsMap = new Map<string, ExerciseTarget>();
+        let slotsWithPrescriptions = 0;
+        let slotsWithoutPrescriptions = 0;
+
+        // Calculate targets for each slot
+        for (const day of fullTemplate.days) {
+          for (const slot of day.slots) {
+            if (!slot.exercise_id && !slot.custom_exercise_id) continue;
+
+            // Use slot overrides if available, else use profile defaults
+            const slotExperience = slot.experience || effectiveExperience;
+            const slotContext: TargetSelectionContext = {
+              experience: slotExperience,
+            };
+
+            const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+            if (!exerciseId) continue;
+
+            const target = await selectExerciseTargets(
+              exerciseId,
+              userId,
+              slotContext,
+              0 // historyCount = 0 for now (can be enhanced later)
+            );
+
+            if (target) {
+              targetsMap.set(slot.id, target);
+              slotsWithPrescriptions++;
+            } else {
+              slotsWithoutPrescriptions++;
+              if (__DEV__) {
+                devError('planner', new Error('No prescription found for exercise'), {
+                  exerciseId,
+                  slotId: slot.id,
+                });
+              }
+            }
+          }
+        }
+
+        setSlotTargets(targetsMap);
+
+        if (__DEV__) {
+          devLog('planner', {
+            action: 'calculateTargetsForSlots_result',
+            slotsWithPrescriptions,
+            slotsWithoutPrescriptions,
+            totalSlots: slotsWithPrescriptions + slotsWithoutPrescriptions,
+          });
+        }
+      } catch (error) {
+        if (__DEV__) {
+          devError('planner', error, { action: 'calculateTargetsForSlots' });
+        }
+      } finally {
+        setIsLoadingTargets(false);
+      }
+    },
+    [profile]
+  );
+
   // Load template data
   const loadTemplate = useCallback(
     async (templateId: string) => {
@@ -151,7 +230,7 @@ export default function PlannerTab() {
         setIsLoadingTemplate(false);
       }
     },
-    [toast, getCurrentUserId]
+    [toast, getCurrentUserId, calculateTargetsForSlots]
   );
 
   // Initialize: load or create template
@@ -220,90 +299,8 @@ export default function PlannerTab() {
     return () => {
       isMounted = false;
     };
-  }, [getCurrentUserId, loadTemplate, toast, profile]);
-
-  // Calculate targets for all slots
-  const calculateTargetsForSlots = useCallback(
-    async (fullTemplate: FullTemplate, userId: string) => {
-      if (__DEV__) {
-        devLog('planner', {
-          action: 'calculateTargetsForSlots',
-          templateId: fullTemplate.template.id,
-        });
-      }
-
-      setIsLoadingTargets(true);
-      try {
-        // Get effective context from profile
-        const effectiveExperience = profile?.experience_level || 'beginner';
-        const context: TargetSelectionContext = {
-          experience: effectiveExperience,
-        };
-
-        const targetsMap = new Map<string, ExerciseTarget>();
-        let slotsWithPrescriptions = 0;
-        let slotsWithoutPrescriptions = 0;
-
-        // Calculate targets for each slot
-        for (const day of fullTemplate.days) {
-          for (const slot of day.slots) {
-            if (!slot.exercise_id && !slot.custom_exercise_id) continue;
-
-            // Use slot overrides if available, else use profile defaults
-            const slotExperience = slot.experience || effectiveExperience;
-            const slotContext: TargetSelectionContext = {
-              experience: slotExperience,
-            };
-
-            const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-            if (!exerciseId) continue;
-
-            const target = await selectExerciseTargets(
-              exerciseId,
-              userId,
-              slotContext,
-              0 // historyCount = 0 for now (can be enhanced later)
-            );
-
-            if (target) {
-              targetsMap.set(slot.id, target);
-              slotsWithPrescriptions++;
-            } else {
-              slotsWithoutPrescriptions++;
-              if (__DEV__) {
-                devError(
-                  'planner-targets',
-                  new Error('Missing prescription'),
-                  {
-                    exerciseId: slot.exercise_id,
-                    experience: slotContext.experience,
-                  }
-                );
-              }
-            }
-          }
-        }
-
-        setSlotTargets(targetsMap);
-
-        if (__DEV__) {
-          devLog('planner', {
-            action: 'calculateTargetsForSlots_result',
-            slotsWithPrescriptions,
-            slotsWithoutPrescriptions,
-            totalSlots: slotsWithPrescriptions + slotsWithoutPrescriptions,
-          });
-        }
-      } catch (error) {
-        if (__DEV__) {
-          devError('planner', error, { action: 'calculateTargetsForSlots' });
-        }
-      } finally {
-        setIsLoadingTargets(false);
-      }
-    },
-    [profile]
-  );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   // Get selected day
   const selectedDay = templateData?.days[selectedDayIndex] || null;
@@ -526,66 +523,14 @@ export default function PlannerTab() {
           <View style={styles.dayContent}>
             <View style={styles.dayHeader}>
               <Text style={styles.dayTitle}>{selectedDay.day.day_name}</Text>
-              <View style={styles.dayHeaderActions}>
-                <TouchableOpacity
-                  style={styles.copyButton}
-                  onPress={async () => {
-                    if (!activeTemplateId) {
-                      toast.error('No active template');
-                      return;
-                    }
-
-                    setIsSaving(true);
-                    try {
-                      const userId = await getCurrentUserId();
-                      if (!userId) {
-                        toast.error('User not found');
-                        return;
-                      }
-
-                      // Get last 7 days structure
-                      const structure = await getLast7DaysSessionStructure(userId);
-                      if (structure.length === 0) {
-                        toast.error('No completed sessions found in last 7 days');
-                        return;
-                      }
-
-                      // Apply structure to template
-                      const success = await applySessionStructureToTemplate(
-                        userId,
-                        activeTemplateId,
-                        structure
-                      );
-
-                      if (success) {
-                        // Reload template to reflect changes
-                        await loadTemplate(activeTemplateId);
-                        toast.success('Copied last week\'s structure to template');
-                      } else {
-                        toast.error('Failed to copy structure');
-                      }
-                    } catch (error) {
-                      if (__DEV__) {
-                        devError('planner', error, { action: 'copyLastWeek' });
-                      }
-                      toast.error('Failed to copy structure');
-                    } finally {
-                      setIsSaving(false);
-                    }
-                  }}
-                  disabled={isSaving}
-                >
-                  <Text style={styles.copyButtonText}>Copy last week</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.addButton}
-                  onPress={() => handleAddExercise(selectedDay.day.id)}
-                  disabled={isSaving}
-                >
-                  <Plus size={20} color={colors.primary} />
-                  <Text style={styles.addButtonText}>Add Exercise</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => handleAddExercise(selectedDay.day.id)}
+                disabled={isSaving}
+              >
+                <Plus size={20} color={colors.primary} />
+                <Text style={styles.addButtonText}>Add Exercise</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Slots list */}
@@ -639,6 +584,58 @@ export default function PlannerTab() {
                 })}
               </View>
             )}
+
+            {/* Copy last week button */}
+            <TouchableOpacity
+              style={[styles.copyLastWeekButton, isSaving && styles.copyLastWeekButtonDisabled]}
+              onPress={async () => {
+                if (!activeTemplateId) {
+                  toast.error('No active template');
+                  return;
+                }
+
+                setIsSaving(true);
+                try {
+                  const userId = await getCurrentUserId();
+                  if (!userId) {
+                    toast.error('User not found');
+                    return;
+                  }
+
+                  // Get last 7 days structure
+                  const structure = await getLast7DaysSessionStructure(userId);
+                  if (structure.length === 0) {
+                    toast.error('No completed sessions found in last 7 days');
+                    return;
+                  }
+
+                  // Apply structure to template
+                  const success = await applySessionStructureToTemplate(
+                    userId,
+                    activeTemplateId,
+                    structure
+                  );
+
+                  if (success) {
+                    // Reload template to reflect changes
+                    await loadTemplate(activeTemplateId);
+                    toast.success('Copied last week\'s structure to template');
+                  } else {
+                    toast.error('Failed to copy structure');
+                  }
+                } catch (error) {
+                  if (__DEV__) {
+                    devError('planner', error, { action: 'copyLastWeek' });
+                  }
+                  toast.error('Failed to copy structure');
+                } finally {
+                  setIsSaving(false);
+                }
+              }}
+              disabled={isSaving}
+            >
+              <Text style={styles.copyLastWeekButtonText}>Copy last week</Text>
+            </TouchableOpacity>
 
             {/* Generate with AI button */}
             <TouchableOpacity
@@ -1114,22 +1111,24 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
   },
-  dayHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  copyButton: {
+  copyLastWeekButton: {
+    width: '100%',
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
     borderRadius: borderRadius.md,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.sm,
   },
-  copyButtonText: {
+  copyLastWeekButtonDisabled: {
+    opacity: 0.5,
+  },
+  copyLastWeekButtonText: {
     color: colors.textPrimary,
-    fontSize: typography.sizes.sm,
+    fontSize: typography.sizes.base,
     fontWeight: typography.weights.medium,
   },
   addButton: {

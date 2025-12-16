@@ -319,3 +319,100 @@ export async function prefillSessionSets(
   }
 }
 
+/**
+ * Get last 7 days of session structure
+ * Returns array of day structures with exercises
+ */
+export async function getLast7DaysSessionStructure(
+  userId: string
+): Promise<Array<{ dayName: string; exercises: Array<{ exerciseId?: string; customExerciseId?: string }> }>> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getLast7DaysSessionStructure', userId });
+  }
+
+  try {
+    // Get completed sessions from last 7 days
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const { data: sessions, error: sessionsError } = await supabase
+      .from('v2_workout_sessions')
+      .select('id, day_name, started_at')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .gte('started_at', sevenDaysAgo.toISOString())
+      .order('started_at', { ascending: true });
+
+    if (sessionsError) {
+      if (__DEV__) {
+        devError('workout-query', sessionsError, { userId });
+      }
+      return [];
+    }
+
+    if (!sessions || sessions.length === 0) {
+      return [];
+    }
+
+    const sessionIds = sessions.map((s) => s.id);
+
+    // Get all session exercises
+    const { data: sessionExercises, error: exercisesError } = await supabase
+      .from('v2_session_exercises')
+      .select('id, session_id, exercise_id, custom_exercise_id, sort_order')
+      .in('session_id', sessionIds)
+      .order('sort_order', { ascending: true });
+
+    if (exercisesError) {
+      if (__DEV__) {
+        devError('workout-query', exercisesError, { userId, sessionIds });
+      }
+      return [];
+    }
+
+    if (!sessionExercises || sessionExercises.length === 0) {
+      return [];
+    }
+
+    // Group by day_name and build structure
+    const dayMap = new Map<string, Array<{ exerciseId?: string; customExerciseId?: string }>>();
+
+    for (const session of sessions) {
+      const dayName = session.day_name || 'Unknown';
+      if (!dayMap.has(dayName)) {
+        dayMap.set(dayName, []);
+      }
+
+      const dayExercises = sessionExercises
+        .filter((se) => se.session_id === session.id)
+        .map((se) => ({
+          exerciseId: se.exercise_id || undefined,
+          customExerciseId: se.custom_exercise_id || undefined,
+        }));
+
+      // Merge exercises for the same day (avoid duplicates)
+      const existing = dayMap.get(dayName)!;
+      for (const ex of dayExercises) {
+        const exists = existing.some(
+          (e) => e.exerciseId === ex.exerciseId && e.customExerciseId === ex.customExerciseId
+        );
+        if (!exists) {
+          existing.push(ex);
+        }
+      }
+    }
+
+    // Convert to array format
+    const result: Array<{ dayName: string; exercises: Array<{ exerciseId?: string; customExerciseId?: string }> }> = [];
+    for (const [dayName, exercises] of dayMap.entries()) {
+      result.push({ dayName, exercises });
+    }
+
+    return result;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId });
+    }
+    return [];
+  }
+}
