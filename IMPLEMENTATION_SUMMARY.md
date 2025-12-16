@@ -430,7 +430,36 @@ All hooks provide convenience wrappers around Zustand stores.
      - Shows success toast
   4. Error handling with toast notifications
 
-### 11. Configuration Files ✅
+### 11. Workout Tab Implementation ✅ **NEW**
+
+#### `app/(tabs)/index.tsx` - Workout Tab Screen
+- **Features**:
+  - Shows today's workout from active template
+  - Pulsing circular button with ripple effect (every 5 seconds)
+  - Button states: "Start" (no session), "Continue" (active session), "Completed" (checkmark)
+  - Exercise preview showing first 3 exercises + "+X more" indicator
+  - Rest day handling with special UI
+  - Reset workout modal (appears when active workout exists)
+  - Ambient glow effects for visual appeal
+  - Greeting based on time of day (Good Morning/Afternoon/Evening)
+  - Auto-refreshes on tab focus
+- **Data Loading**:
+  - Gets user's active template via `getUserTemplates()`
+  - Gets today's day slots via `getTemplateWithDaysAndSlots()`
+  - Loads exercise names via `getMergedExercise()` for each slot
+  - Checks active session via `getActiveSession()`
+  - Checks completed session status from today
+- **Navigation**: Routes to `/workout/active` (placeholder route created)
+- **Theme**: Uses all theme tokens, no hardcoded values
+- **Dev Logging**: All operations wrapped in `__DEV__` checks
+
+#### Placeholder Active Workout Route ✅ **NEW**
+- **File**: `app/(stack)/workout/active.tsx`
+- **Purpose**: Placeholder screen for active workout feature (full implementation coming soon)
+- **Features**: Simple screen with back button, uses theme tokens, follows V2 patterns
+- **Route**: Registered in `app/_layout.tsx` as route group `(stack)/workout/active`
+
+### 12. Configuration Files ✅
 - `package.json` - Dependencies (Zustand, react-native-reanimated, etc.)
 - `tsconfig.json` - TypeScript configuration
 - `babel.config.js` - Babel configuration
@@ -438,7 +467,7 @@ All hooks provide convenience wrappers around Zustand stores.
 - `app.json` - Expo configuration
 - `styles/scrollbar.css` - Web scrollbar styles
 
-### 12. Documentation ✅
+### 13. Documentation ✅
 - `README_V2.md` - V2 project overview and setup instructions
 - `src/types/README.md` - Type generation instructions
 - `V2_ARCHITECTURE.md` - Complete system contract
@@ -491,6 +520,12 @@ All hooks provide convenience wrappers around Zustand stores.
     - Prescription-based target calculation
     - AI generation support
     - Start workout integration
+
+11. **Workout Tab with Pulsing Button**: Today's workout display
+    - Pulsing circular button with ripple animation
+    - Start/Continue/Completed states
+    - Exercise preview and rest day handling
+    - Reset workout functionality
 
 ## Patterns for Adding New Features
 
@@ -628,10 +663,10 @@ All hooks provide convenience wrappers around Zustand stores.
    - Add AI recommended exercises to `v2_ai_recommended_exercises`
 4. **Build Remaining Screens**: 
    - ✅ Planner tab - COMPLETED
-   - Home/workout tab (`app/(tabs)/index.tsx`) - Placeholder exists
+   - ✅ Home/workout tab (`app/(tabs)/index.tsx`) - COMPLETED
    - Progress tab (`app/(tabs)/progress.tsx`) - Placeholder exists
    - Profile tab (`app/(tabs)/profile.tsx`) - Placeholder exists
-5. **Implement Active Workout Screen**: Build the workout execution screen at `app/workout-active.tsx`
+5. **Implement Active Workout Screen**: Build the full workout execution screen at `app/(stack)/workout/active.tsx` (placeholder created)
 6. **Implement Session Detail Screen**: Build history detail at `app/session/[id].tsx`
 7. **Implement Exercise Detail Screen**: Build exercise detail at `app/exercise/[id].tsx`
 
