@@ -23,6 +23,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 interface BottomSheetProps {
   visible: boolean;
   onClose: () => void;
+  onClosed?: () => void; // Called after exit animation completes
   title?: string;
   children: React.ReactNode;
   height?: number | string; // number for pixels, string for percentage
@@ -31,6 +32,7 @@ interface BottomSheetProps {
 export const BottomSheet: React.FC<BottomSheetProps> = ({
   visible,
   onClose,
+  onClosed,
   title,
   children,
   height = '80%',
@@ -82,6 +84,10 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
         }),
       ]).start(() => {
         setIsMounted(false);
+        // Call onClosed callback after exit animation completes
+        if (onClosed) {
+          onClosed();
+        }
       });
     }
   }, [visible, isMounted, slideAnim, backdropOpacity]);

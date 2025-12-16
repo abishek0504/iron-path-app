@@ -13,35 +13,44 @@ import { SettingsMenu } from '../settings/SettingsMenu';
 export const ModalManager: React.FC = () => {
   const activeBottomSheet = useUIStore((state) => state.activeBottomSheet);
   const bottomSheetProps = useUIStore((state) => state.bottomSheetProps);
+  const isBottomSheetOpen = useUIStore((state) => state.isBottomSheetOpen);
   const closeBottomSheet = useUIStore((state) => state.closeBottomSheet);
+  const onBottomSheetClosed = useUIStore((state) => state.onBottomSheetClosed);
 
-  // Render bottom sheets based on active sheet ID
-  // Each sheet type will be rendered conditionally
-  // This prevents multiple sheets from being open simultaneously
+  // Keep sheet mounted while closing (isBottomSheetOpen === false but activeBottomSheet !== null)
+  // This allows exit animation to complete before unmounting
+  const shouldRenderExercisePicker = activeBottomSheet === 'exercisePicker';
+  const shouldRenderSettingsMenu = activeBottomSheet === 'settingsMenu';
 
   return (
     <>
-      <BottomSheet
-        visible={activeBottomSheet === 'exercisePicker'}
-        onClose={closeBottomSheet}
-        title="Select Exercise"
-        {...bottomSheetProps}
-      >
-        <ExercisePicker
-          onSelect={bottomSheetProps.onSelect}
-          multiSelect={bottomSheetProps.multiSelect}
-        />
-      </BottomSheet>
+      {shouldRenderExercisePicker && (
+        <BottomSheet
+          visible={isBottomSheetOpen && activeBottomSheet === 'exercisePicker'}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          title="Select Exercise"
+          {...bottomSheetProps}
+        >
+          <ExercisePicker
+            onSelect={bottomSheetProps.onSelect}
+            multiSelect={bottomSheetProps.multiSelect}
+          />
+        </BottomSheet>
+      )}
 
-      <BottomSheet
-        visible={activeBottomSheet === 'settingsMenu'}
-        onClose={closeBottomSheet}
-        title="Settings"
-        height="60%"
-        {...bottomSheetProps}
-      >
-        <SettingsMenu onClose={closeBottomSheet} />
-      </BottomSheet>
+      {shouldRenderSettingsMenu && (
+        <BottomSheet
+          visible={isBottomSheetOpen && activeBottomSheet === 'settingsMenu'}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          title="Settings"
+          height="60%"
+          {...bottomSheetProps}
+        >
+          <SettingsMenu onClose={closeBottomSheet} />
+        </BottomSheet>
+      )}
     </>
   );
 };

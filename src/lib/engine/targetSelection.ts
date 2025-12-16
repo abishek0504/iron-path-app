@@ -6,6 +6,7 @@
 
 import { getExercisePrescription, getPrescriptionsForExercises } from '../supabase/queries/prescriptions';
 import { getMergedExercise } from '../supabase/queries/exercises';
+import { getExerciseHistory } from '../supabase/queries/workouts';
 import { devLog, devError } from '../utils/logger';
 
 export interface ExerciseTarget {
@@ -13,11 +14,11 @@ export interface ExerciseTarget {
   sets: number;
   reps?: number;
   duration_sec?: number;
+  weight?: number; // Suggested weight for progressive overload (reps mode only)
   mode: 'reps' | 'timed';
 }
 
 export interface TargetSelectionContext {
-  goal: string;
   experience: string;
 }
 
@@ -42,7 +43,7 @@ export async function selectExerciseTargets(
   }
 
   // Get merged exercise to determine mode
-  const exercise = await getMergedExercise(exerciseId, userId);
+  const exercise = await getMergedExercise({ exerciseId }, userId);
   if (!exercise) {
     if (__DEV__) {
       devError('target-selection', new Error('Exercise not found'), { exerciseId, userId });
@@ -56,7 +57,6 @@ export async function selectExerciseTargets(
   // Fetch prescription
   const prescription = await getExercisePrescription(
     exerciseId,
-    context.goal,
     context.experience,
     mode
   );
@@ -73,10 +73,15 @@ export async function selectExerciseTargets(
     return null;
   }
 
-  // Select targets within prescription band
+  // Get exercise history for progressive overload
+  const history = await getExerciseHistory(exerciseId, userId, 5);
+  const hasHistory = history && history.sets.length > 0;
+
+  // Select targets within prescription band with progressive overload
   let sets: number;
   let reps: number | undefined;
   let duration_sec: number | undefined;
+  let weight: number | undefined;
 
   // Sets: choose lower-to-mid range for new users, mid-to-upper for experienced
   if (historyCount < 3) {
@@ -88,35 +93,62 @@ export async function selectExerciseTargets(
   }
   sets = Math.max(prescription.sets_min, Math.min(prescription.sets_max, sets));
 
-  // Reps or duration based on mode
+  // Reps or duration based on mode with progressive overload
   if (mode === 'reps') {
     if (prescription.reps_min && prescription.reps_max) {
-      if (historyCount < 3) {
-        // New user: lower-to-mid
-        reps = Math.floor((prescription.reps_min + prescription.reps_max) / 2);
+      if (hasHistory && history.lastReps && history.lastWeight !== undefined) {
+        // Progressive overload logic for reps mode
+        const lastReps = history.lastReps;
+        const lastWeight = history.lastWeight;
+        const avgRPE = history.avgRPE;
+
+        // If hit top of rep band with acceptable effort (RPE <= 7), increase weight
+        if (lastReps >= prescription.reps_max * 0.9 && (!avgRPE || avgRPE <= 7)) {
+          // Increase weight by small step (2.5-5% or 2.5-5 lbs)
+          const weightIncrease = Math.max(lastWeight * 0.025, 2.5);
+          weight = lastWeight + weightIncrease;
+          // Reset reps to lower end of band
+          reps = prescription.reps_min;
+        } else {
+          // Increase reps toward top of band (clamp within band)
+          reps = Math.min(lastReps + 1, prescription.reps_max);
+          reps = Math.max(prescription.reps_min, reps);
+          weight = lastWeight; // Keep same weight
+        }
       } else {
-        // Experienced: mid-to-upper
-        reps = Math.ceil((prescription.reps_min + prescription.reps_max) / 2);
+        // No history: use default selection
+        if (historyCount < 3) {
+          reps = Math.floor((prescription.reps_min + prescription.reps_max) / 2);
+        } else {
+          reps = Math.ceil((prescription.reps_min + prescription.reps_max) / 2);
+        }
+        reps = Math.max(prescription.reps_min, Math.min(prescription.reps_max, reps));
       }
-      reps = Math.max(prescription.reps_min, Math.min(prescription.reps_max, reps));
     }
   } else {
+    // Timed mode
     if (prescription.duration_sec_min && prescription.duration_sec_max) {
-      if (historyCount < 3) {
-        // New user: lower-to-mid
-        duration_sec = Math.floor(
-          (prescription.duration_sec_min + prescription.duration_sec_max) / 2
-        );
+      if (hasHistory && history.lastDuration !== undefined) {
+        // Progressive overload: increase duration toward top of band
+        const lastDuration = history.lastDuration;
+        duration_sec = Math.min(lastDuration + 5, prescription.duration_sec_max); // Increase by 5 seconds
+        duration_sec = Math.max(prescription.duration_sec_min, duration_sec);
       } else {
-        // Experienced: mid-to-upper
-        duration_sec = Math.ceil(
-          (prescription.duration_sec_min + prescription.duration_sec_max) / 2
+        // No history: use default selection
+        if (historyCount < 3) {
+          duration_sec = Math.floor(
+            (prescription.duration_sec_min + prescription.duration_sec_max) / 2
+          );
+        } else {
+          duration_sec = Math.ceil(
+            (prescription.duration_sec_min + prescription.duration_sec_max) / 2
+          );
+        }
+        duration_sec = Math.max(
+          prescription.duration_sec_min,
+          Math.min(prescription.duration_sec_max, duration_sec)
         );
       }
-      duration_sec = Math.max(
-        prescription.duration_sec_min,
-        Math.min(prescription.duration_sec_max, duration_sec)
-      );
     }
   }
 
@@ -126,6 +158,7 @@ export async function selectExerciseTargets(
     mode,
     reps,
     duration_sec,
+    weight, // Progressive overload suggested weight
   };
 
   if (__DEV__) {
@@ -169,7 +202,7 @@ export async function selectExerciseTargetsBulk(
 
   // Get all merged exercises to determine modes
   const exercises = await Promise.all(
-    exerciseIds.map((id) => getMergedExercise(id, userId))
+    exerciseIds.map((id) => getMergedExercise({ exerciseId: id }, userId))
   );
 
   const validExercises = exercises.filter((e): e is NonNullable<typeof e> => e !== null);
@@ -178,14 +211,12 @@ export async function selectExerciseTargetsBulk(
   // Bulk fetch prescriptions
   const repsPrescriptions = await getPrescriptionsForExercises(
     validExercises.filter((e) => !e.is_timed).map((e) => e.id),
-    context.goal,
     context.experience,
     'reps'
   );
 
   const timedPrescriptions = await getPrescriptionsForExercises(
     validExercises.filter((e) => e.is_timed).map((e) => e.id),
-    context.goal,
     context.experience,
     'timed'
   );

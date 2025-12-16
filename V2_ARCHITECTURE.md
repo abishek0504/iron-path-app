@@ -114,7 +114,6 @@ Minimal schema:
 
 - `id uuid primary key default gen_random_uuid()`
 - `exercise_id uuid not null references v2_exercises(id) on delete cascade`
-- `goal text not null`  (strength, hypertrophy, conditioning, mobility, skill)
 - `experience text not null` (beginner, intermediate, advanced)
 - `mode text not null` (reps | timed)
 - `sets_min int not null`
@@ -130,7 +129,7 @@ Minimal schema:
 
 Constraints:
 
-- UNIQUE `(exercise_id, goal, experience, mode)`
+- UNIQUE `(exercise_id, experience, mode)`
 - CHECK `sets_min >= 1 and sets_max >= sets_min and sets_max <= 10`
 - CHECK mode gating:
 - if mode = 'reps' then `reps_min` and `reps_max` are not null AND duration fields are null
@@ -183,14 +182,25 @@ User-created exercises not in master list.
 
 Validation:
 
-- muscle keys in `v2_muscles`
-- implicit hit values clamped 0..1
+- `primary_muscles` required (validated against `v2_muscles`)
+- `implicit_hits` optional (clamped 0..1)
+- `mode` required: 'reps' or 'timed'
+- Target band fields required:
+  - `sets_min`, `sets_max` (required, 1-10, sets_min <= sets_max)
+  - For 'reps' mode: `reps_min`, `reps_max` (required, 1-50, reps_min <= reps_max)
+  - For 'timed' mode: `duration_sec_min`, `duration_sec_max` (required, 5-3600, duration_sec_min <= duration_sec_max)
+- DB CHECK constraints mirror prescription constraints
 
 Hard rule:
 
 - AI/UI must never write to `v2_exercises`.
 
 ## 9) Planning vs performed truth (industry standard)
+
+**Concepts**:
+- **Template** = stable repeating weekly plan (structure only, never weight/reps/duration)
+- **Week plan instance** = user's current week generated from template (optional, implicit for now)
+- **Performed truth** = sessions + sets (what actually happened)
 
 ### Planning (templates)
 
@@ -201,17 +211,38 @@ Hard rule:
 Slots store intent (structure + intent only):
 
 - `exercise_id` (or constraint spec later)
-- optional: `goal` override (default from profile)
 - optional: `experience` override (default from profile)
 - optional: `notes`
 
 Templates must not hardcode universal targets like "10 reps" or "60 seconds". Targets are populated from `v2_exercise_prescriptions` unless the user explicitly edits that slot.
 
+**Edit Scoping Rules**:
+- **Structure edits** (swap exercise, add/remove/reorder slots, notes, set-count intent) require explicit user choice:
+  - "Today only": Write to active session if exists, else create new session for today (structure only, never weight/reps/duration)
+  - "This week only": TODO - not yet implemented
+  - "From next week onward": Update template structure (never weight/reps/duration)
+- **Load/performance edits** (weight, reps achieved, duration achieved, RPE/RIR) always write to performed truth (sessions)
+- **Hard rule**: Template changes require explicit user choice; progressive overload never writes into templates
+
+**Smart Adjust (Rebalancing)**:
+- Pre-start check: When user taps "Start Workout", system checks for muscle coverage gaps using `needsRebalance()`
+- Detection: Analyzes last `N_SESSIONS_LOOKBACK` (6) completed sessions to find muscles not hit
+- Minimal V2: Avoids freshness dependency unless `v2_muscle_freshness` cache exists; uses direct session analysis
+- Prompt: If gaps detected (≥ `MIN_GAP_MUSCLES` = 1), shows Smart Adjust prompt with reasons
+- Options: "Continue anyway" (proceed without changes) or "Smart adjust" (rebalance structure)
+- Smart Adjust rules:
+  - Prefer keeping existing plan structure
+  - Only add/replace minimum exercises needed to cover missed muscles
+  - Only use exercises from `v2_ai_recommended_exercises` + user custom exercises already in template
+  - Never add "fluff"
+  - Apply to session (today only) or template (next week onward) based on user choice
+- TODO: Full smart adjust implementation (currently shows info message)
+
 Context precedence for prescription lookup:
 
-- Slot goal/experience override (if set)
-- else profile goal/experience
-- else safe defaults (goal=`strength`, experience=`beginner`) + devLog
+- Slot experience override (if set)
+- else profile experience
+- else safe defaults (experience=`beginner`) + devLog
 
 ### Performed truth (sessions)
 
@@ -246,9 +277,9 @@ Implementation pattern (avoid multi-query drift):
 
 ## How targets are chosen (new users + personalization)
 
-For a given exercise + user context (goal, experience):
+For a given exercise + user context (experience):
 
-1. Fetch prescription: `p = v2_exercise_prescriptions(exercise_id, goal, experience, mode)`.
+1. Fetch prescription: `p = v2_exercise_prescriptions(exercise_id, experience, mode)`.
 
 Mode mapping:
 
@@ -257,6 +288,13 @@ Mode mapping:
 
 2. New user (low history): choose targets inside the band (lower-to-mid range). Never use generic defaults.
 3. Experienced user: use last performed sets + effort signal (rpe/rir) to adjust within the same band. Always clamp to bounds.
+
+**Progressive Overload Rules** (applied at session start):
+
+- **Reps mode**: If last session hit top of rep band with acceptable effort (RPE ≤ 7), increase weight by 2.5% and reset reps to bottom of band. Otherwise, increase reps toward top of band.
+- **Timed mode**: Increase duration toward top of duration band (5 second increments).
+- Progressive overload targets are computed at session start and prefilled into `v2_session_sets` rows as "starting targets" that the user edits. These become the performed truth when saved.
+- **Hard rule**: Progressive overload never writes into templates. It only adjusts the next session's suggested targets based on performed truth.
 
 Hard rule:
 
@@ -637,12 +675,11 @@ movement_pattern: "push"
 
 ### v2_exercise_prescriptions
 
-**Purpose**: Curated programming targets per exercise by context (goal, experience, mode). Prevents generic defaults (3x10, 60s).
+**Purpose**: Curated programming targets per exercise by context (experience, mode). Prevents generic defaults (3x10, 60s). Goal removed to maintain holistic approach - all goals (strength, hypertrophy, mobility) are implicitly met through comprehensive full-body workouts.
 
 **Fields**:
 - `id` (uuid, PRIMARY KEY, default gen_random_uuid()): Unique prescription identifier.
 - `exercise_id` (uuid, NOT NULL, FK → v2_exercises.id): Exercise this prescription applies to.
-- `goal` (text, NOT NULL): Training goal context. Values: "strength", "hypertrophy", "conditioning", "mobility", "skill".
 - `experience` (text, NOT NULL): Experience level context. Values: "beginner", "intermediate", "advanced".
 - `mode` (text, NOT NULL, CHECK 'reps' | 'timed'): Exercise mode. Determines which fields are populated.
 - `sets_min` (int, NOT NULL): Minimum recommended sets (1-10).
@@ -657,7 +694,7 @@ movement_pattern: "push"
 - `updated_at` (timestamptz, default now()): Last update timestamp.
 
 **Constraints**:
-- UNIQUE `(exercise_id, goal, experience, mode)`: One prescription per exercise/context/mode combination.
+- UNIQUE `(exercise_id, experience, mode)`: One prescription per exercise/experience/mode combination.
 - `sets_min >= 1 AND sets_max >= sets_min AND sets_max <= 10`
 - Mode gating: if mode='reps' then reps fields NOT NULL AND duration fields NULL; if mode='timed' then duration fields NOT NULL AND reps fields NULL.
 - `reps_min >= 1 AND reps_max >= reps_min AND reps_max <= 50` (when mode='reps')
@@ -666,12 +703,11 @@ movement_pattern: "push"
 **RLS**: Auth SELECT only (immutable from client)
 
 **Indexes**:
-- `idx_v2_exercise_prescriptions_lookup`: On `(exercise_id, goal, experience, mode, is_active)` for fast lookups
+- `idx_v2_exercise_prescriptions_lookup`: On `(exercise_id, experience, mode, is_active)` for fast lookups
 
 **Example Data**:
 ```
 exercise_id: "550e8400-e29b-41d4-a716-446655440000"
-goal: "hypertrophy"
 experience: "intermediate"
 mode: "reps"
 sets_min: 3
@@ -750,6 +786,19 @@ setup_buffer_sec_override: 45
 **Fields**: Same structure as `v2_exercises` plus:
 - `id` (uuid, PRIMARY KEY, default gen_random_uuid()): Unique custom exercise identifier.
 - `user_id` (uuid, NOT NULL, FK → auth.users.id): User who owns this exercise.
+- `mode` (text, NOT NULL, CHECK IN ('reps', 'timed')): Exercise mode (reps or timed).
+- `sets_min` (int, NOT NULL, CHECK >= 1): Minimum sets in target band.
+- `sets_max` (int, NOT NULL, CHECK >= sets_min AND <= 10): Maximum sets in target band.
+- `reps_min` (int, nullable, CHECK >= 1): Minimum reps (required if mode='reps').
+- `reps_max` (int, nullable, CHECK >= reps_min AND <= 50): Maximum reps (required if mode='reps').
+- `duration_sec_min` (int, nullable, CHECK >= 5): Minimum duration in seconds (required if mode='timed').
+- `duration_sec_max` (int, nullable, CHECK >= duration_sec_min AND <= 3600): Maximum duration in seconds (required if mode='timed').
+
+**Constraints**:
+- `custom_exercise_mode_check`: `mode IN ('reps', 'timed')`
+- `custom_exercise_target_bands_check`: Validates mode-specific target bands (mirrors prescription constraints)
+  - For 'reps' mode: requires reps_min/max, duration fields must be NULL
+  - For 'timed' mode: requires duration_sec_min/max, reps fields must be NULL
 
 **RLS**: Auth CRUD for owner only (`user_id = auth.uid()`)
 
@@ -771,7 +820,6 @@ setup_buffer_sec_override: 45
 - `current_weight` (numeric, nullable): Current weight (in kg or lbs).
 - `goal_weight` (numeric, nullable): Target weight (in kg or lbs).
 - `experience_level` (text, nullable): Experience level: "beginner", "intermediate", "advanced".
-- `goal` (text, nullable): Training goal: "strength", "hypertrophy", "conditioning", "mobility", "skill".
 - `equipment_access` (text[], nullable): Array of available equipment.
 - `days_per_week` (int, nullable): Target training days per week.
 - `workout_days` (text[], nullable): Specific days of week (e.g., ["Monday", "Wednesday", "Friday"]).
@@ -789,7 +837,6 @@ id: "user-uuid-123"
 full_name: "John Doe"
 age: 30
 experience_level: "intermediate"
-goal: "hypertrophy"
 days_per_week: 4
 use_imperial: true
 ```
@@ -839,10 +886,11 @@ use_imperial: true
 **Fields**:
 - `id` (uuid, PRIMARY KEY, default gen_random_uuid()): Unique slot identifier.
 - `day_id` (uuid, NOT NULL, FK → v2_template_days.id): Parent day.
-- `exercise_id` (uuid, nullable, FK → v2_exercises.id): Exercise for this slot. NULL = constraint spec (future).
-- `goal` (text, nullable): Goal override for prescription lookup (defaults from profile if null).
+- `exercise_id` (uuid, nullable, FK → v2_exercises.id): Master exercise for this slot.
+- `custom_exercise_id` (uuid, nullable, FK → v2_user_custom_exercises.id): User custom exercise for this slot.
 - `experience` (text, nullable): Experience override for prescription lookup (defaults from profile if null).
 - `notes` (text, nullable): User notes for this slot.
+- **CHECK constraint**: Exactly one of `exercise_id` or `custom_exercise_id` must be non-null.
 - `sort_order` (int, NOT NULL): Display ordering within day.
 - `created_at` (timestamptz, default now()): Record creation timestamp.
 - `updated_at` (timestamptz, default now()): Last update timestamp.
@@ -853,7 +901,7 @@ use_imperial: true
 - Belongs to: `v2_template_days`
 - References: `v2_exercises` (nullable)
 
-**Note**: Targets are NOT stored here. They are fetched from `v2_exercise_prescriptions` at render/generation time using context (slot goal/experience or profile defaults).
+**Note**: Targets are NOT stored here. They are fetched from `v2_exercise_prescriptions` at render/generation time using context (slot experience or profile defaults). Goal removed to maintain holistic approach - all goals are implicitly met through comprehensive full-body workouts.
 
 ### v2_workout_sessions
 
@@ -1147,19 +1195,29 @@ Step 2: Determine Mode
     └─ Otherwise → mode = 'reps'
     ↓
 Step 3: Fetch Prescription
-    └─ getExercisePrescription(exerciseId, goal, experience, mode)
+    └─ getExercisePrescription(exerciseId, experience, mode)
     ├─ Found? → Continue
     └─ Not found? → Return null (data error, exclude from generation)
     ↓
-Step 4: Select Targets Within Band
-    ├─ Sets: historyCount < 3? → lower-to-mid : mid-to-upper
-    ├─ Reps (if mode='reps'): historyCount < 3? → lower-to-mid : mid-to-upper
-    └─ Duration (if mode='timed'): historyCount < 3? → lower-to-mid : mid-to-upper
+Step 4: Get Exercise History (for progressive overload)
+    └─ getExerciseHistory(exerciseId, userId, limit=5)
+    ├─ Returns: { sets, lastRPE, lastRIR, lastWeight, lastReps, lastDuration }
+    └─ Used to determine progressive overload adjustments
     ↓
-Step 5: Clamp to Prescription Bounds
+Step 5: Select Targets Within Band (with progressive overload)
+    ├─ Sets: historyCount < 3? → lower-to-mid : mid-to-upper
+    ├─ Reps (if mode='reps'):
+    │   ├─ Has history and hit top of band with RPE ≤ 7? → Increase weight 2.5%, reset reps to min
+    │   └─ Otherwise: Increase reps toward top of band (or use mid-range if no history)
+    ├─ Duration (if mode='timed'):
+    │   ├─ Has history? → Increase duration by 5s toward top of band
+    │   └─ No history? → Use mid-range
+    └─ Weight (if mode='reps' and progressive overload applies): Suggested weight from history
+    ↓
+Step 6: Clamp to Prescription Bounds
     └─ Ensure targets are within [min, max] ranges
     ↓
-Return: ExerciseTarget { exercise_id, sets, reps/duration, mode }
+Return: ExerciseTarget { exercise_id, sets, reps/duration, weight?, mode }
 ```
 
 ### Workout Session Flow
@@ -1171,9 +1229,17 @@ Query Function: createWorkoutSession(userId, templateId, dayName)
     ↓
 Database: INSERT into v2_workout_sessions
     ↓
+Query Function: Create session exercises from template slots
+    └─ INSERT into v2_session_exercises for each template slot
+    ↓
+Query Function: prefillSessionSets(sessionId, sessionExercises, targets)
+    └─ For each exercise: Calculate progressive overload targets via selectExerciseTargets()
+    └─ INSERT into v2_session_sets with prefilled reps/weight/duration (starting targets)
+    └─ These are "starting targets" that user edits, NOT "already performed" values
+    ↓
 Zustand Store: workoutStore.setActiveSession(session)
     ↓
-UI Component: WorkoutActive screen
+UI Component: WorkoutActive screen (displays prefilled targets for editing)
     ↓
 User Action: Complete Set
     ↓
@@ -1239,22 +1305,20 @@ Context: Generating workout slot targets
 Input: exerciseId, user context
     ↓
 Step 1: Get User Profile
-    └─ getUserProfile(userId) → goal, experience
+    └─ getUserProfile(userId) → experience
     ↓
 Step 2: Check Slot Overrides
-    ├─ slot.goal exists? → use slot.goal
     └─ slot.experience exists? → use slot.experience
     ↓
 Step 3: Fallback to Profile
-    ├─ No slot goal? → use profile.goal
     ├─ No slot experience? → use profile.experience
-    └─ No profile values? → use defaults ('strength', 'beginner') + devLog
+    └─ No profile values? → use defaults ('beginner') + devLog
     ↓
 Step 4: Determine Mode
     └─ getMergedExercise(exerciseId, userId) → is_timed
     ↓
 Step 5: Fetch Prescription
-    └─ getExercisePrescription(exerciseId, goal, experience, mode)
+    └─ getExercisePrescription(exerciseId, experience, mode)
     ├─ Found? → Use prescription
     └─ Not found? → Data error (exclude exercise, devLog, user-facing error)
 ```
@@ -1290,12 +1354,14 @@ Trigger: Component needs to open bottom sheet
 Hook: useModal().openSheet('exercisePicker', { onSelect, multiSelect })
     ↓
 Zustand Store: uiStore.openBottomSheet(id, props)
+    ├─ If isBottomSheetOpen: set pendingBottomSheet, call closeBottomSheet()
+    └─ Else: set activeBottomSheet, bottomSheetProps, isBottomSheetOpen=true
     ↓
-Store State: activeBottomSheet = 'exercisePicker', bottomSheetProps = { onSelect, multiSelect }
+Store State: activeBottomSheet = 'exercisePicker', isBottomSheetOpen = true
     ↓
-UI Component: ModalManager (watches activeBottomSheet)
+UI Component: ModalManager (watches activeBottomSheet and isBottomSheetOpen)
     ↓
-Component: BottomSheet (renders based on activeBottomSheet)
+Component: BottomSheet (renders based on activeBottomSheet, visible based on isBottomSheetOpen)
     ├─ Renders ExercisePicker with props
     └─ Handles close gesture
     ↓
@@ -1303,9 +1369,17 @@ User Action: Close sheet
     ↓
 Zustand Store: uiStore.closeBottomSheet()
     ↓
-Store State: activeBottomSheet = null, bottomSheetProps = {}
+Store State: isBottomSheetOpen = false (activeBottomSheet kept for animation)
     ↓
-UI Component: BottomSheet animates out
+UI Component: BottomSheet animates out (kept mounted)
+    ↓
+Animation Complete: onClosed() callback fires
+    ↓
+Zustand Store: uiStore.onBottomSheetClosed()
+    ↓
+Store State: activeBottomSheet = null (or pendingBottomSheet if queued)
+    ├─ If pendingBottomSheet exists: open it immediately
+    └─ Else: clear all sheet state
 
 ---
 
@@ -1333,16 +1407,17 @@ UI Component: BottomSheet animates out
 **Purpose**: Reusable bottom sheet component with animations
 **Props**:
 - `visible` (boolean): Whether sheet is visible
-- `onClose` (function): Close handler
+- `onClose` (function): Close handler (triggers exit animation)
+- `onClosed` (function, optional): Called after exit animation completes
 - `title` (string, optional): Sheet title
 - `children` (ReactNode): Sheet content
 - `height` (number | string): Sheet height (pixels or percentage)
-**Behavior**: Animates slide-up/down, backdrop overlay, handle bar, close button
+**Behavior**: Animates slide-up/down, backdrop overlay, handle bar, close button. Calls `onClosed` after exit animation completes (not in useEffect cleanup).
 
 #### `ModalManager.tsx`
 **Location**: `src/components/ui/ModalManager.tsx`
 **Purpose**: Global manager for bottom sheets, prevents modal-in-modal
-**Behavior**: Watches `uiStore.activeBottomSheet`, conditionally renders appropriate sheet (ExercisePicker, SettingsMenu, etc.)
+**Behavior**: Keeps sheets mounted while `isBottomSheetOpen === false` but `activeBottomSheet !== null` to allow exit animation to complete. Passes `onClosed` callback that calls `uiStore.onBottomSheetClosed()`. Watches `uiStore.activeBottomSheet` and `isBottomSheetOpen`, conditionally renders appropriate sheet (ExercisePicker, SettingsMenu, etc.)
 
 #### `ExercisePicker.tsx`
 **Location**: `src/components/exercise/ExercisePicker.tsx`
@@ -1358,6 +1433,27 @@ UI Component: BottomSheet animates out
 **Props**:
 - `onClose` (function, optional): Close handler
 **Behavior**: Displays menu items (Edit Profile, Notifications, Help), navigates to routes on selection
+
+#### `EditScopePrompt.tsx`
+**Location**: `src/components/ui/EditScopePrompt.tsx`
+**Purpose**: Prompts user to choose scope when making structure edits
+**Props**:
+- `visible` (boolean): Whether prompt is visible
+- `onSelect` (function): Callback with selected scope ('today' | 'thisWeek' | 'nextWeek')
+- `onCancel` (function): Cancel handler
+**Behavior**: Shows modal with options: "Today only", "This week only" (disabled), "From next week onward"
+**Usage**: Shown after structure edits (add/remove/swap/reorder slot) in planner
+
+#### `SmartAdjustPrompt.tsx`
+**Location**: `src/components/ui/SmartAdjustPrompt.tsx`
+**Purpose**: Prompts user when muscle coverage gaps are detected before starting workout
+**Props**:
+- `visible` (boolean): Whether prompt is visible
+- `reasons` (string[]): Array of reasons why rebalancing is needed
+- `onContinue` (function): Continue without changes handler
+- `onSmartAdjust` (function): Smart adjust handler
+**Behavior**: Shows modal with detected gaps and options: "Continue anyway", "Smart adjust"
+**Usage**: Shown before starting workout if `needsRebalance()` detects gaps
 
 #### `WorkoutHeatmap.tsx`
 **Location**: `src/components/workout/WorkoutHeatmap.tsx`
@@ -1408,13 +1504,13 @@ UI Component: BottomSheet animates out
 **Returns**: `MergedExercise[]`
 **Logic**: Same as getMergedExercise but for multiple exercises, optimized with bulk queries
 
-#### `getExercisePrescription(exerciseId, goal, experience, mode)`
+#### `getExercisePrescription(exerciseId, experience, mode)`
 **Location**: `src/lib/supabase/queries/prescriptions.ts`
 **Purpose**: Fetch prescription for exercise given context
 **Returns**: `ExercisePrescription | null`
-**Logic**: Query `v2_exercise_prescriptions` with exact match on (exercise_id, goal, experience, mode, is_active=true)
+**Logic**: Query `v2_exercise_prescriptions` with exact match on (exercise_id, experience, mode, is_active=true)
 
-#### `getPrescriptionsForExercises(exerciseIds, goal, experience, mode)`
+#### `getPrescriptionsForExercises(exerciseIds, experience, mode)`
 **Location**: `src/lib/supabase/queries/prescriptions.ts`
 **Purpose**: Bulk prescription fetch
 **Returns**: `Map<string, ExercisePrescription>`
@@ -1438,6 +1534,18 @@ UI Component: BottomSheet animates out
 **Returns**: `SessionSet | null`
 **Logic**: Check if set exists, UPDATE if exists else INSERT
 
+#### `needsRebalance(userId, templateId?, dayName?)`
+**Location**: `src/lib/engine/rebalance.ts`
+**Purpose**: Check if workout needs rebalancing based on muscle coverage gaps
+**Returns**: `RebalanceResult { needsRebalance: boolean, reasons: string[], missedMuscles: string[] }`
+**Logic**:
+1. Get last `N_SESSIONS_LOOKBACK` (6) completed sessions
+2. Get all session exercises from those sessions
+3. Get merged exercises to determine primary muscles hit
+4. Compare against all canonical muscles from `v2_muscles`
+5. Return missed muscles and reasons if gaps detected (≥ `MIN_GAP_MUSCLES` = 1)
+**Constants**: `N_SESSIONS_LOOKBACK = 6`, `MIN_GAP_MUSCLES = 1`
+
 #### `getUserProfile(userId)`
 **Location**: `src/lib/supabase/queries/users.ts`
 **Purpose**: Get user profile
@@ -1454,15 +1562,18 @@ UI Component: BottomSheet animates out
 
 #### `selectExerciseTargets(exerciseId, userId, context, historyCount)`
 **Location**: `src/lib/engine/targetSelection.ts`
-**Purpose**: Select targets for single exercise using prescriptions
+**Purpose**: Select targets for single exercise using prescriptions with progressive overload
 **Returns**: `ExerciseTarget | null`
 **Logic**:
 1. Get merged exercise (determine mode)
-2. Fetch prescription (goal, experience, mode)
+2. Fetch prescription (experience, mode)
 3. If no prescription → return null (data error)
-4. Select targets within prescription band (historyCount determines lower-to-mid vs mid-to-upper)
-5. Clamp to bounds
-6. Return ExerciseTarget
+4. Get exercise history (for progressive overload)
+5. Select targets within prescription band:
+   - Sets: historyCount determines lower-to-mid vs mid-to-upper
+   - Reps/Timed: Apply progressive overload rules (increase weight if hit top of band, else increase reps/duration)
+6. Clamp to bounds
+7. Return ExerciseTarget (includes weight for reps mode if progressive overload applies)
 
 #### `selectExerciseTargetsBulk(exerciseIds, userId, context, historyCounts)`
 **Location**: `src/lib/engine/targetSelection.ts`
@@ -1499,12 +1610,16 @@ UI Component: BottomSheet animates out
 #### `uiStore`
 **Location**: `src/stores/uiStore.ts`
 **State**:
-- `activeBottomSheet`: Current bottom sheet ID or null
+- `activeBottomSheet`: Current bottom sheet ID or null (kept during closing animation)
 - `bottomSheetProps`: Props for current bottom sheet
+- `isBottomSheetOpen`: Whether sheet is currently open (false during closing animation)
+- `pendingBottomSheet`: Next sheet to open after current one closes
+- `pendingBottomSheetProps`: Props for pending sheet
 - `toasts`: Array of active toasts
 **Actions**:
-- `openBottomSheet(id, props)`: Open bottom sheet
-- `closeBottomSheet()`: Close bottom sheet
+- `openBottomSheet(id, props)`: Open bottom sheet (queues as pending if another is open)
+- `closeBottomSheet()`: Start closing animation (sets isBottomSheetOpen=false, keeps activeBottomSheet)
+- `onBottomSheetClosed()`: Called after exit animation completes; clears activeBottomSheet and opens pending if exists
 - `showToast(message, type, duration)`: Show toast
 - `removeToast(id)`: Remove toast
 
@@ -1562,7 +1677,7 @@ uiStore
 
 userStore
   ├─→ Profile Screen (reads profile, calls updateProfile)
-  ├─→ Workout Generation (reads goal, experience for context)
+  ├─→ Workout Generation (reads experience for context)
   └─→ Any Component (via useUserStore hook)
 
 exerciseStore
@@ -1589,6 +1704,8 @@ Query Functions (src/lib/supabase/queries/)
   ├─→ workouts.ts
   │   ├─→ createWorkoutSession() → Updates workoutStore
   │   ├─→ getActiveSession() → Updates workoutStore
+  │   ├─→ getExerciseHistory() → Used by target selection for progressive overload
+  │   ├─→ prefillSessionSets() → Prefills session sets with progressive overload targets
   │   └─→ saveSessionSet() → Called from workout screen
   └─→ users.ts
       ├─→ getUserProfile() → Updates userStore
@@ -1670,7 +1787,7 @@ Database (Supabase)
 
 ### Target Selection Algorithm (Detailed)
 
-**Input**: `exerciseId`, `userId`, `context: { goal, experience }`, `historyCount`
+**Input**: `exerciseId`, `userId`, `context: { experience }`, `historyCount`
 
 **Step-by-step**:
 
@@ -1692,7 +1809,7 @@ Database (Supabase)
 
 3. **Fetch Prescription**
    ```
-   prescription = getExercisePrescription(exerciseId, goal, experience, mode)
+   prescription = getExercisePrescription(exerciseId, experience, mode)
    If prescription === null:
      - devError('No prescription found')
      - Return null (data error - exercise excluded from generation)
@@ -1708,32 +1825,55 @@ Database (Supabase)
    sets = clamp(sets, prescription.sets_min, prescription.sets_max)
    ```
 
-5. **Select Reps or Duration**
+5. **Get Exercise History (for progressive overload)**
+   ```
+   history = getExerciseHistory(exerciseId, userId, limit=5)
+   hasHistory = history && history.sets.length > 0
+   lastPerformedSet = history?.sets[0]  // Most recent set
+   lastRPE = history?.lastRPE
+   lastRIR = history?.lastRIR
+   ```
+
+6. **Select Reps or Duration (with progressive overload)**
    ```
    If mode === 'reps':
-     If historyCount < 3:
-       reps = floor((prescription.reps_min + prescription.reps_max) / 2)
+     If hasHistory && lastPerformedSet.reps >= prescription.reps_max && lastRPE <= 7:
+       // Hit top of rep band with acceptable effort: increase weight, reset reps
+       weight = lastPerformedSet.weight * 1.025  // 2.5% increase
+       reps = prescription.reps_min  // Reset to bottom of band
+     Else if hasHistory:
+       // Increase reps toward top of band
+       reps = min(lastPerformedSet.reps + 1, prescription.reps_max)
+       weight = lastPerformedSet.weight
      Else:
-       reps = ceil((prescription.reps_min + prescription.reps_max) / 2)
+       // No history: use mid-range
+       reps = floor((prescription.reps_min + prescription.reps_max) / 2)
+       weight = undefined
+     
      reps = clamp(reps, prescription.reps_min, prescription.reps_max)
      duration_sec = null
    
    Else if mode === 'timed':
-     If historyCount < 3:
-       duration_sec = floor((prescription.duration_sec_min + prescription.duration_sec_max) / 2)
+     If hasHistory:
+       // Increase duration toward top of band (5 second increments)
+       duration_sec = min(lastPerformedSet.duration_sec + 5, prescription.duration_sec_max)
      Else:
-       duration_sec = ceil((prescription.duration_sec_min + prescription.duration_sec_max) / 2)
+       // No history: use mid-range
+       duration_sec = floor((prescription.duration_sec_min + prescription.duration_sec_max) / 2)
+     
      duration_sec = clamp(duration_sec, prescription.duration_sec_min, prescription.duration_sec_max)
      reps = null
+     weight = null
    ```
 
-6. **Return Target**
+7. **Return Target**
    ```
    Return {
      exercise_id: exerciseId,
      sets: sets,
      reps: reps (if mode='reps'),
      duration_sec: duration_sec (if mode='timed'),
+     weight: weight (if mode='reps' and progressive overload applies),
      mode: mode
    }
    ```
@@ -2034,12 +2174,12 @@ function validateSetInput(reps, duration_sec) {
 **Pattern**: Missing prescription = data error, exclude from generation
 
 ```typescript
-const prescription = await getExercisePrescription(exerciseId, goal, experience, mode)
+const prescription = await getExercisePrescription(exerciseId, experience, mode)
 if (!prescription) {
   // Hard rule: no prescription = exclude exercise
   if (__DEV__) {
     devError('target-selection', new Error('No prescription found'), {
-      exerciseId, goal, experience, mode
+      exerciseId, experience, mode
     })
   }
   return null  // Exercise excluded from generation
@@ -2267,7 +2407,6 @@ const { data } = await supabase
   .from('v2_exercise_prescriptions')
   .select('*')
   .eq('exercise_id', exerciseId)
-  .eq('goal', goal)
   .eq('experience', experience)
   .eq('mode', mode)
   .eq('is_active', true)

@@ -9,7 +9,6 @@ import { devLog, devError } from '../../utils/logger';
 export interface ExercisePrescription {
   id: string;
   exercise_id: string;
-  goal: string;
   experience: string;
   mode: 'reps' | 'timed';
   sets_min: number;
@@ -28,7 +27,6 @@ export interface ExercisePrescription {
  */
 export async function getExercisePrescription(
   exerciseId: string,
-  goal: string,
   experience: string,
   mode: 'reps' | 'timed'
 ): Promise<ExercisePrescription | null> {
@@ -36,7 +34,6 @@ export async function getExercisePrescription(
     devLog('prescription-query', { 
       action: 'getExercisePrescription', 
       exerciseId, 
-      goal, 
       experience, 
       mode 
     });
@@ -47,7 +44,6 @@ export async function getExercisePrescription(
       .from('v2_exercise_prescriptions')
       .select('*')
       .eq('exercise_id', exerciseId)
-      .eq('goal', goal)
       .eq('experience', experience)
       .eq('mode', mode)
       .eq('is_active', true)
@@ -55,7 +51,7 @@ export async function getExercisePrescription(
 
     if (error) {
       if (__DEV__) {
-        devError('prescription-query', error, { exerciseId, goal, experience, mode });
+        devError('prescription-query', error, { exerciseId, experience, mode });
       }
       return null;
     }
@@ -64,7 +60,6 @@ export async function getExercisePrescription(
       if (__DEV__) {
         devError('prescription-query', new Error('No prescription found'), { 
           exerciseId, 
-          goal, 
           experience, 
           mode 
         });
@@ -75,14 +70,14 @@ export async function getExercisePrescription(
     return data;
   } catch (error) {
     if (__DEV__) {
-      devError('prescription-query', error, { exerciseId, goal, experience, mode });
+      devError('prescription-query', error, { exerciseId, experience, mode });
     }
     return null;
   }
 }
 
 /**
- * Get all prescriptions for an exercise (all goals/experiences/modes)
+ * Get all prescriptions for an exercise (all experiences/modes)
  */
 export async function getExercisePrescriptions(
   exerciseId: string
@@ -100,8 +95,8 @@ export async function getExercisePrescriptions(
       .select('*')
       .eq('exercise_id', exerciseId)
       .eq('is_active', true)
-      .order('goal', { ascending: true })
-      .order('experience', { ascending: true });
+      .order('experience', { ascending: true })
+      .order('mode', { ascending: true });
 
     if (error) {
       if (__DEV__) {
@@ -124,7 +119,6 @@ export async function getExercisePrescriptions(
  */
 export async function getPrescriptionsForExercises(
   exerciseIds: string[],
-  goal: string,
   experience: string,
   mode: 'reps' | 'timed'
 ): Promise<Map<string, ExercisePrescription>> {
@@ -132,7 +126,6 @@ export async function getPrescriptionsForExercises(
     devLog('prescription-query', { 
       action: 'getPrescriptionsForExercises', 
       exerciseIdsCount: exerciseIds.length,
-      goal,
       experience,
       mode
     });
@@ -143,14 +136,13 @@ export async function getPrescriptionsForExercises(
       .from('v2_exercise_prescriptions')
       .select('*')
       .in('exercise_id', exerciseIds)
-      .eq('goal', goal)
       .eq('experience', experience)
       .eq('mode', mode)
       .eq('is_active', true);
 
     if (error) {
       if (__DEV__) {
-        devError('prescription-query', error, { exerciseIds, goal, experience, mode });
+        devError('prescription-query', error, { exerciseIds, experience, mode });
       }
       return new Map();
     }
@@ -171,7 +163,7 @@ export async function getPrescriptionsForExercises(
     return map;
   } catch (error) {
     if (__DEV__) {
-      devError('prescription-query', error, { exerciseIds, goal, experience, mode });
+      devError('prescription-query', error, { exerciseIds, experience, mode });
     }
     return new Map();
   }

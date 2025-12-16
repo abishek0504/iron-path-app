@@ -15,7 +15,6 @@ export interface UserProfile {
   current_weight?: number;
   goal_weight?: number;
   experience_level?: string;
-  goal?: string;
   equipment_access?: string[];
   days_per_week?: number;
   workout_days?: string[];

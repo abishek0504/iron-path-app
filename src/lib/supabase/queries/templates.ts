@@ -28,7 +28,7 @@ export interface TemplateSlot {
   id: string;
   day_id: string;
   exercise_id: string | null;
-  goal: string | null;
+  custom_exercise_id: string | null;
   experience: string | null;
   notes: string | null;
   sort_order: number;
@@ -307,12 +307,13 @@ export async function upsertTemplateDay(
 
 /**
  * Create a template slot
+ * Accepts either exerciseId OR customExerciseId (exactly one required)
  */
 export async function createTemplateSlot(
   dayId: string,
   input: {
     exerciseId?: string;
-    goal?: string | null;
+    customExerciseId?: string;
     experience?: string | null;
     notes?: string | null;
     sortOrder: number;
@@ -323,8 +324,20 @@ export async function createTemplateSlot(
       action: 'createTemplateSlot',
       dayId,
       exerciseId: input.exerciseId,
+      customExerciseId: input.customExerciseId,
       sortOrder: input.sortOrder,
     });
+  }
+
+  // Validate exactly one of exerciseId or customExerciseId is provided
+  const hasExerciseId = !!input.exerciseId;
+  const hasCustomExerciseId = !!input.customExerciseId;
+  
+  if (hasExerciseId === hasCustomExerciseId) {
+    if (__DEV__) {
+      devError('template-query', new Error('Exactly one of exerciseId or customExerciseId must be provided'), { dayId, input });
+    }
+    return null;
   }
 
   try {
@@ -333,7 +346,7 @@ export async function createTemplateSlot(
       .insert({
         day_id: dayId,
         exercise_id: input.exerciseId || null,
-        goal: input.goal || null,
+        custom_exercise_id: input.customExerciseId || null,
         experience: input.experience || null,
         notes: input.notes || null,
         sort_order: input.sortOrder,
@@ -364,7 +377,7 @@ export async function updateTemplateSlot(
   slotId: string,
   updates: Partial<{
     exercise_id: string | null;
-    goal: string | null;
+    custom_exercise_id: string | null;
     experience: string | null;
     notes: string | null;
     sort_order: number;
@@ -377,6 +390,143 @@ export async function updateTemplateSlot(
       updateKeys: Object.keys(updates),
     });
   }
+
+  // If updating exercise references, ensure exactly one is provided
+  if ('exercise_id' in updates || 'custom_exercise_id' in updates) {
+    // Get current slot to check existing values
+    const { data: currentSlot } = await supabase
+      .from('v2_template_slots')
+      .select('exercise_id, custom_exercise_id')
+      .eq('id', slotId)
+      .single();
+
+    if (currentSlot) {
+      const newExerciseId = 'exercise_id' in updates ? updates.exercise_id : currentSlot.exercise_id;
+      const newCustomExerciseId = 'custom_exercise_id' in updates ? updates.custom_exercise_id : currentSlot.custom_exercise_id;
+      
+      const hasExerciseId = !!newExerciseId;
+      const hasCustomExerciseId = !!newCustomExerciseId;
+      
+      if (hasExerciseId === hasCustomExerciseId) {
+        if (__DEV__) {
+          devError('template-query', new Error('Exactly one of exercise_id or custom_exercise_id must be non-null'), { slotId, updates });
+        }
+      return false;
+    }
+  }
+}
+
+/**
+ * Apply structure edit to template
+ * Used for "From next week onward" scope
+ * Only updates structure (exercise_id, custom_exercise_id, notes, sort_order)
+ * Never writes weight/reps/duration
+ */
+export async function applyStructureEditToTemplate(
+  templateId: string,
+  edit: {
+    type: 'addSlot' | 'removeSlot' | 'swapExercise' | 'reorderSlots' | 'updateNotes';
+    // Add slot
+    dayId?: string;
+    exerciseId?: string;
+    customExerciseId?: string;
+    sortOrder?: number;
+    notes?: string;
+    // Remove slot
+    slotId?: string;
+    // Swap exercise
+    targetSlotId?: string;
+    newExerciseId?: string;
+    newCustomExerciseId?: string;
+    // Update notes
+    newNotes?: string;
+  }
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('template-query', { action: 'applyStructureEditToTemplate', templateId, editType: edit.type });
+  }
+
+  try {
+    if (edit.type === 'addSlot') {
+      if (!edit.dayId || (!edit.exerciseId && !edit.customExerciseId)) {
+        if (__DEV__) {
+          devError('template-query', new Error('dayId and exerciseId/customExerciseId required for addSlot'), {
+            templateId,
+            edit,
+          });
+        }
+        return false;
+      }
+
+      // Get current max sort_order for the day
+      const { data: existing } = await supabase
+        .from('v2_template_slots')
+        .select('sort_order')
+        .eq('day_id', edit.dayId)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const sortOrder = edit.sortOrder ?? ((existing?.sort_order ?? 0) + 1);
+
+      const result = await createTemplateSlot(edit.dayId, {
+        exerciseId: edit.exerciseId,
+        customExerciseId: edit.customExerciseId,
+        notes: edit.notes || null,
+        sortOrder,
+      });
+
+      return !!result;
+    } else if (edit.type === 'removeSlot') {
+      if (!edit.slotId) {
+        if (__DEV__) {
+          devError('template-query', new Error('slotId required for removeSlot'), { templateId, edit });
+        }
+        return false;
+      }
+
+      return await deleteTemplateSlot(edit.slotId);
+    } else if (edit.type === 'swapExercise') {
+      if (!edit.targetSlotId || (!edit.newExerciseId && !edit.newCustomExerciseId)) {
+        if (__DEV__) {
+          devError('template-query', new Error('targetSlotId and newExerciseId/newCustomExerciseId required for swapExercise'), {
+            templateId,
+            edit,
+          });
+        }
+        return false;
+      }
+
+      return await updateTemplateSlot(edit.targetSlotId, {
+        exercise_id: edit.newExerciseId || null,
+        custom_exercise_id: edit.newCustomExerciseId || null,
+      });
+    } else if (edit.type === 'updateNotes') {
+      if (!edit.targetSlotId) {
+        if (__DEV__) {
+          devError('template-query', new Error('targetSlotId required for updateNotes'), { templateId, edit });
+        }
+        return false;
+      }
+
+      return await updateTemplateSlot(edit.targetSlotId, {
+        notes: edit.newNotes || null,
+      });
+    }
+
+    // TODO: Implement reorderSlots
+    if (__DEV__) {
+      devLog('template-query', { action: 'applyStructureEditToTemplate', note: `${edit.type} not yet implemented` });
+    }
+
+    return false;
+  } catch (error) {
+    if (__DEV__) {
+      devError('template-query', error, { templateId, edit });
+    }
+    return false;
+  }
+}
 
   try {
     const { error } = await supabase

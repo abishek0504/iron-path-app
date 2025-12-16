@@ -47,6 +47,17 @@ This document tracks all completed V2 implementation work. It serves as a refere
 #### Validation (`src/lib/utils/validation.ts`)
 - `validateMuscleKeys()` - Validates muscle keys exist in v2_muscles
 - `validateAndClampImplicitHits()` - Validates and clamps implicit_hits values (0-1)
+- `validateCustomExerciseTargets()` - Validates custom exercise target bands (mode, sets, reps/duration bounds)
+  - Validates mode is 'reps' or 'timed'
+  - Validates sets bounds (1-10, sets_min <= sets_max)
+  - Validates reps bounds for 'reps' mode (1-50, reps_min <= reps_max)
+  - Validates duration bounds for 'timed' mode (5-3600, duration_sec_min <= duration_sec_max)
+  - Validates primary_muscles against v2_muscles
+  - Returns { valid: boolean, errors: string[] }
+
+#### Edit Helpers (`src/lib/utils/editHelpers.ts`)
+- `isStructureEdit(editType)` - Checks if edit is a structure edit (swapExercise, addSlot, removeSlot, reorderSlots, updateNotes, updateSetCountIntent)
+- Defines structure vs load/performance edit types
 
 #### Supabase Client (`src/lib/supabase/client.ts`)
 - Configured with anon key + RLS (never service_role in app)
@@ -59,15 +70,19 @@ All stores follow the same pattern: state + actions, with dev logging on state c
 
 #### `src/stores/uiStore.ts` - Global UI State
 - **State**:
-  - `activeBottomSheet: string | null` - Currently open bottom sheet ID
+  - `activeBottomSheet: BottomSheetId | null` - Currently open bottom sheet ID (kept during closing animation)
   - `bottomSheetProps: Record<string, any>` - Props for active sheet
+  - `isBottomSheetOpen: boolean` - Whether sheet is currently open (false during closing animation)
+  - `pendingBottomSheet: BottomSheetId | null` - Next sheet to open after current one closes
+  - `pendingBottomSheetProps: Record<string, any>` - Props for pending sheet
   - `toasts: Array<{id, message, type, duration}>` - Active toast notifications
 - **Actions**:
-  - `openBottomSheet(id, props)` - Opens a bottom sheet (prevents modal-in-modal)
-  - `closeBottomSheet()` - Closes current bottom sheet
+  - `openBottomSheet(id, props)` - Opens a bottom sheet (queues as pending if another is open)
+  - `closeBottomSheet()` - Starts closing animation (sets isBottomSheetOpen=false, keeps activeBottomSheet)
+  - `onBottomSheetClosed()` - Called after exit animation completes; clears activeBottomSheet and opens pending if exists
   - `showToast(message, type, duration)` - Shows a toast
   - `removeToast(id)` - Removes a toast
-- **Usage**: All bottom sheets and toasts managed here globally
+- **Usage**: All bottom sheets and toasts managed here globally. State machine ensures proper exit animations and sequential sheet opening.
 
 #### `src/stores/userStore.ts` - User Profile Cache
 - **State**: `profile: UserProfile | null`, `isLoading: boolean`
@@ -92,20 +107,23 @@ All query functions follow the same pattern:
 - Log aggregates only (counts, not per-item data)
 
 #### `src/lib/supabase/queries/exercises.ts`
-- `getMergedExercise(exerciseId, userId)` - Gets merged view (master ⊕ overrides)
-  - Checks custom exercises first
-  - Then master exercise + user overrides
+- `getMergedExercise({ exerciseId?, customExerciseId? }, userId)` - Gets merged view (master ⊕ overrides)
+  - Accepts either `exerciseId` OR `customExerciseId` (exactly one required)
+  - If `customExerciseId` provided, fetches from `v2_user_custom_exercises` directly
+  - If `exerciseId` provided, checks custom exercises first, then master exercise + user overrides
   - Returns source: 'custom' | 'override' | 'master'
 - `listMergedExercises(userId, exerciseIds?)` - Bulk version
 
-#### `src/lib/supabase/queries/prescriptions.ts`
-- `getExercisePrescription(exerciseId, goal, experience, mode)` - Single prescription lookup
-- `getPrescriptionsForExercises(exerciseIds, goal, experience, mode)` - Bulk lookup, returns Map
+#### `src/lib/supabase/queries/prescriptions.ts` ✅ **UPDATED (Patch H)**
+- `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
+- `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
 #### `src/lib/supabase/queries/workouts.ts`
 - `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
+- `getExerciseHistory(exerciseId, userId, limit)` - Gets recent exercise history for progressive overload
+- `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
 
 #### `src/lib/supabase/queries/users.ts`
@@ -113,13 +131,13 @@ All query functions follow the same pattern:
 - `updateUserProfile(userId, updates)` - Updates profile
 - `createUserProfile(userId, profile)` - Creates profile on signup
 
-#### `src/lib/supabase/queries/templates.ts` ✅ **NEW**
+#### `src/lib/supabase/queries/templates.ts` ✅ **UPDATED (Patch C, H)**
 - `getUserTemplates(userId)` - Gets all user templates (including system templates)
 - `getTemplateWithDaysAndSlots(templateId)` - Gets full template with nested days and slots
 - `createTemplate(userId, name?)` - Creates new template (defaults to 'Weekly Plan')
 - `upsertTemplateDay(templateId, dayName, sortOrder)` - Creates/updates template day
-- `createTemplateSlot(dayId, input)` - Adds exercise slot to day
-- `updateTemplateSlot(slotId, updates)` - Updates slot (goal/experience/notes)
+- `createTemplateSlot(dayId, input)` - Adds exercise slot to day (accepts `exerciseId` OR `customExerciseId`, exactly one required)
+- `updateTemplateSlot(slotId, updates)` - Updates slot (supports `exercise_id`, `custom_exercise_id`, experience/notes) - goal removed
 - `deleteTemplateSlot(slotId)` - Removes slot
 - `deleteTemplateDay(dayId)` - Removes day (cascades to slots)
 
@@ -188,6 +206,12 @@ All query functions follow the same pattern:
 - Menu items navigate to routes (e.g., Edit Profile)
 - **Access**: Via `useModal()` hook or TabHeader settings gear
 
+##### `src/components/settings/CustomExerciseForm.tsx`
+- Scaffold for creating/editing custom exercises (minimal structure)
+- TODO: Full implementation with form fields and validation
+- Uses `validateCustomExerciseTargets()` helper
+- Fields: name, description, primary_muscles[], implicit_hits{}, mode, target bands
+
 ##### `src/components/workout/WorkoutHeatmap.tsx`
 - Muscle stress heatmap visualization
 - Loads from `v2_daily_muscle_stress`
@@ -195,17 +219,34 @@ All query functions follow the same pattern:
 
 ### 7. Engine Logic ✅
 
-#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection
+#### `src/lib/engine/rebalance.ts` - Muscle Coverage Rebalancing ✅ **NEW (Patch G)**
+- **`needsRebalance(userId, templateId?, dayName?)`**
+  - Checks for muscle coverage gaps by analyzing last `N_SESSIONS_LOOKBACK` (6) completed sessions
+  - Gets all session exercises from recent sessions
+  - Determines primary muscles hit via `getMergedExercise()`
+  - Compares against all canonical muscles from `v2_muscles`
+  - Returns `RebalanceResult` with `needsRebalance` boolean, `reasons` array, and `missedMuscles` array
+  - Minimal V2: Avoids freshness dependency unless `v2_muscle_freshness` cache exists
+  - Constants: `N_SESSIONS_LOOKBACK = 6`, `MIN_GAP_MUSCLES = 1`
+- **Hard rule**: Only detects gaps, does not automatically rebalance (user must choose via Smart Adjust prompt)
+
+#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F)**
 - **`selectExerciseTargets(exerciseId, userId, context, historyCount)`**
   - Gets merged exercise to determine mode (reps vs timed)
-  - Fetches prescription for exercise + context (goal, experience, mode)
+  - Fetches prescription for exercise + context (experience, mode) - goal removed for holistic approach
   - Returns `null` if no prescription (data error - never invents defaults)
-  - Selects targets within prescription band (lower-to-mid for new users, mid-to-upper for experienced)
+  - Gets exercise history via `getExerciseHistory()` for progressive overload
+  - Selects targets within prescription band with progressive overload:
+    - **Sets**: Lower-to-mid for new users (historyCount < 3), mid-to-upper for experienced
+    - **Reps mode**: If hit top of rep band with RPE ≤ 7, increase weight 2.5% and reset reps to min. Otherwise, increase reps toward top of band.
+    - **Timed mode**: Increase duration by 5s toward top of band (or use mid-range if no history)
+  - Returns `ExerciseTarget` with `weight` field for reps mode (if progressive overload applies)
   - Clamps to prescription bounds
 - **`selectExerciseTargetsBulk(exerciseIds, userId, context, historyCounts)`**
   - Bulk version that filters out exercises without prescriptions
   - Returns array of `ExerciseTarget` objects
 - **Hard rule**: Never invents generic defaults (3x10, 60s). Missing prescription = exclude from generation.
+- **Progressive overload rule**: Never writes into templates. Only adjusts next session's suggested targets based on performed truth.
 
 ### 8. Hooks ✅
 
@@ -284,7 +325,7 @@ All hooks provide convenience wrappers around Zustand stores.
   4. Shows success toast
 - **Target Calculation**:
   - On template load, calculates targets for all slots
-  - Uses `selectExerciseTargets()` with slot context (goal/experience overrides or profile defaults)
+  - Uses `selectExerciseTargets()` with slot context (experience overrides or profile defaults) - goal removed
   - Displays as "X sets × Y reps" or "X sets × Y min"
   - Shows "Missing targets" in red/italic if no prescription found
   - Recalculates when slots are added/removed
@@ -299,11 +340,21 @@ All hooks provide convenience wrappers around Zustand stores.
   6. Shows success toast
 - **Future Enhancement**: Can integrate with AI service to intelligently select exercises based on muscle coverage, recovery, etc.
 
-#### Start Workout Integration
+#### Start Workout Integration ✅ **UPDATED (Patch F, G)**
 - **"Start this day" Button**:
-  1. Creates workout session via `createWorkoutSession(userId, templateId, dayName)`
-  2. Navigates to `/workout-active` route
-  3. Shows success toast
+  1. **Pre-start check**: Calls `needsRebalance()` to detect muscle coverage gaps
+  2. If gaps detected: Shows `SmartAdjustPrompt` with reasons
+     - User can choose "Continue anyway" (proceed without changes)
+     - User can choose "Smart adjust" (TODO: full implementation coming soon)
+  3. If no gaps or user chooses "Continue anyway":
+     - Creates workout session via `createWorkoutSession(userId, templateId, dayName)`
+     - Creates session exercises from template slots (INSERT into `v2_session_exercises`)
+     - For each exercise, calculates progressive overload targets via `selectExerciseTargets()`
+     - Prefills session sets via `prefillSessionSets()` with starting targets (reps/weight/duration)
+       - These are "starting targets" that the user edits, NOT "already performed" values
+       - User edits these values during workout, and final saved values become the performed truth
+     - Navigates to `/workout-active` route
+     - Shows success toast
   4. Error handling with toast notifications
 
 ### 11. Configuration Files ✅

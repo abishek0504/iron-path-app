@@ -40,8 +40,15 @@ import {
   type ExerciseTarget,
   type TargetSelectionContext,
 } from '../../src/lib/engine/targetSelection';
-import { createWorkoutSession } from '../../src/lib/supabase/queries/workouts';
+import { createWorkoutSession, prefillSessionSets } from '../../src/lib/supabase/queries/workouts';
+import { supabase } from '../../src/lib/supabase/client';
+import { getOrCreateActiveSessionForToday, applyStructureEditToSession } from '../../src/lib/supabase/queries/workouts_helpers';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { isStructureEdit } from '../../src/lib/utils/editHelpers';
+import { EditScopePrompt, type EditScope } from '../../src/components/ui/EditScopePrompt';
+import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
+import { applyStructureEditToTemplate, applySessionStructureToTemplate } from '../../src/lib/supabase/queries/templates';
+import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
 import type { Exercise } from '../../src/stores/exerciseStore';
 
 const DAYS_OF_WEEK = [
@@ -71,6 +78,13 @@ export default function PlannerTab() {
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
   const [slotTargets, setSlotTargets] = useState<Map<string, ExerciseTarget>>(new Map());
   const [isLoadingTargets, setIsLoadingTargets] = useState(false);
+  const [showEditScopePrompt, setShowEditScopePrompt] = useState(false);
+  const [pendingEdit, setPendingEdit] = useState<{
+    type: 'addSlot' | 'removeSlot' | 'swapExercise';
+    data: any;
+  } | null>(null);
+  const [showSmartAdjustPrompt, setShowSmartAdjustPrompt] = useState(false);
+  const [rebalanceResult, setRebalanceResult] = useState<RebalanceResult | null>(null);
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -221,10 +235,8 @@ export default function PlannerTab() {
       setIsLoadingTargets(true);
       try {
         // Get effective context from profile
-        const effectiveGoal = profile?.goal || 'strength';
         const effectiveExperience = profile?.experience_level || 'beginner';
         const context: TargetSelectionContext = {
-          goal: effectiveGoal,
           experience: effectiveExperience,
         };
 
@@ -235,18 +247,19 @@ export default function PlannerTab() {
         // Calculate targets for each slot
         for (const day of fullTemplate.days) {
           for (const slot of day.slots) {
-            if (!slot.exercise_id) continue;
+            if (!slot.exercise_id && !slot.custom_exercise_id) continue;
 
             // Use slot overrides if available, else use profile defaults
-            const slotGoal = slot.goal || effectiveGoal;
             const slotExperience = slot.experience || effectiveExperience;
             const slotContext: TargetSelectionContext = {
-              goal: slotGoal,
               experience: slotExperience,
             };
 
+            const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+            if (!exerciseId) continue;
+
             const target = await selectExerciseTargets(
-              slot.exercise_id,
+              exerciseId,
               userId,
               slotContext,
               0 // historyCount = 0 for now (can be enhanced later)
@@ -263,7 +276,6 @@ export default function PlannerTab() {
                   new Error('Missing prescription'),
                   {
                     exerciseId: slot.exercise_id,
-                    goal: slotContext.goal,
                     experience: slotContext.experience,
                   }
                 );
@@ -306,93 +318,132 @@ export default function PlannerTab() {
       picker.open(async (exercise: Exercise) => {
         if (!templateData) return;
 
-        setIsSaving(true);
-        try {
-          // Find the day
-          const dayData = templateData.days.find((d) => d.day.id === dayId);
-          if (!dayData) {
-            toast.error('Day not found');
-            return;
-          }
-
-          // Calculate sort order
-          const sortOrder = dayData.slots.length + 1;
-
-          // Create slot
-          const newSlot = await createTemplateSlot(dayId, {
-            exerciseId: exercise.id,
-            goal: null,
-            experience: null,
-            notes: null,
-            sortOrder,
-          });
-
-          if (!newSlot) {
-            toast.error('Failed to add exercise');
-            return;
-          }
-
-          // Fetch exercise name and calculate target
-          const userId = await getCurrentUserId();
-          if (userId && exercise.id) {
-            const mergedExercise = await getMergedExercise(exercise.id, userId);
-            if (mergedExercise) {
-              setExerciseNames((prev) => {
-                const next = new Map(prev);
-                next.set(exercise.id, mergedExercise.name);
-                return next;
-              });
-
-              // Calculate target for new slot
-              const effectiveGoal = profile?.goal || 'strength';
-              const effectiveExperience = profile?.experience_level || 'beginner';
-              const context: TargetSelectionContext = {
-                goal: newSlot.goal || effectiveGoal,
-                experience: newSlot.experience || effectiveExperience,
-              };
-
-              const target = await selectExerciseTargets(
-                exercise.id,
-                userId,
-                context,
-                0
-              );
-
-              if (target) {
-                setSlotTargets((prev) => {
-                  const next = new Map(prev);
-                  next.set(newSlot.id, target);
-                  return next;
-                });
-              }
-            }
-          }
-
-          // Optimistic update: add slot to local state
-          setTemplateData((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              days: prev.days.map((day) =>
-                day.day.id === dayId
-                  ? { ...day, slots: [...day.slots, newSlot] }
-                  : day
-              ),
-            };
-          });
-
-          toast.success('Exercise added');
-        } catch (error) {
-          if (__DEV__) {
-            devError('planner', error, { action: 'handleAddExercise', dayId });
-          }
-          toast.error('Failed to add exercise');
-        } finally {
-          setIsSaving(false);
+        // Find the day
+        const dayData = templateData.days.find((d) => d.day.id === dayId);
+        if (!dayData) {
+          toast.error('Day not found');
+          return;
         }
+
+        // Calculate sort order
+        const sortOrder = dayData.slots.length + 1;
+
+        // Store pending edit and show prompt
+        setPendingEdit({
+          type: 'addSlot',
+          data: {
+            dayId,
+            exerciseId: exercise.id,
+            customExerciseId: undefined,
+            sortOrder,
+          },
+        });
+        setShowEditScopePrompt(true);
       });
     },
-    [picker, templateData, toast, getCurrentUserId, profile]
+    [picker, templateData, toast]
+  );
+
+  // Handle applying edit after scope selection
+  const handleApplyEdit = useCallback(
+    async (scope: EditScope) => {
+      if (!pendingEdit || !templateData) return;
+
+      setShowEditScopePrompt(false);
+      setIsSaving(true);
+
+      try {
+        const userId = await getCurrentUserId();
+        if (!userId) {
+          toast.error('User not found');
+          return;
+        }
+
+        if (scope === 'today') {
+          // Get or create active session for today
+          const session = await getOrCreateActiveSessionForToday(userId, selectedDay?.day.day_name);
+          if (!session) {
+            toast.error('Failed to create session');
+            return;
+          }
+
+          // Apply structure edit to session
+          if (pendingEdit.type === 'addSlot') {
+            const success = await applyStructureEditToSession(session.id, {
+              type: 'addSlot',
+              exerciseId: pendingEdit.data.exerciseId,
+              customExerciseId: pendingEdit.data.customExerciseId,
+              sortOrder: pendingEdit.data.sortOrder,
+            });
+
+            if (success) {
+              toast.success('Exercise added to today\'s session');
+            } else {
+              toast.error('Failed to add exercise');
+            }
+          } else if (pendingEdit.type === 'removeSlot') {
+            // TODO: Implement removeSlot for sessions
+            if (__DEV__) {
+              devLog('planner', { action: 'TODO', message: 'removeSlot for sessions not yet implemented' });
+            }
+            toast.error('Remove from session not yet implemented');
+          }
+        } else if (scope === 'thisWeek') {
+          // Stub: This week only not implemented
+          if (__DEV__) {
+            devLog('planner', { action: 'TODO', message: 'This week only not implemented' });
+          }
+          toast.error('This week only not implemented yet');
+        } else if (scope === 'nextWeek') {
+          // Apply structure edit to template
+          if (!activeTemplateId) {
+            toast.error('No active template');
+            return;
+          }
+
+          if (pendingEdit.type === 'addSlot') {
+            const success = await applyStructureEditToTemplate(activeTemplateId, {
+              type: 'addSlot',
+              dayId: pendingEdit.data.dayId,
+              exerciseId: pendingEdit.data.exerciseId,
+              customExerciseId: pendingEdit.data.customExerciseId,
+              sortOrder: pendingEdit.data.sortOrder,
+            });
+
+            if (success) {
+              // Reload template to reflect changes
+              await loadTemplate(activeTemplateId);
+              toast.success('Exercise added to template');
+            } else {
+              toast.error('Failed to add exercise');
+            }
+          } else if (pendingEdit.type === 'removeSlot') {
+            const success = await applyStructureEditToTemplate(activeTemplateId, {
+              type: 'removeSlot',
+              slotId: pendingEdit.data.slotId,
+            });
+
+            if (success) {
+              // Reload template to reflect changes
+              await loadTemplate(activeTemplateId);
+              toast.success('Exercise removed from template');
+            } else {
+              toast.error('Failed to remove exercise');
+            }
+          }
+        }
+
+        setPendingEdit(null);
+      } catch (error) {
+        if (__DEV__) {
+          devError('planner', error, { action: 'handleApplyEdit', scope });
+        }
+        toast.error('Failed to apply edit');
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [pendingEdit, templateData, activeTemplateId, selectedDay, getCurrentUserId, loadTemplate, toast]
   );
 
   // Handle removing slot
@@ -402,43 +453,16 @@ export default function PlannerTab() {
         devLog('planner', { action: 'handleRemoveSlot', slotId });
       }
 
-      setIsSaving(true);
-      try {
-        const success = await deleteTemplateSlot(slotId);
-        if (!success) {
-          toast.error('Failed to remove exercise');
-          return;
-        }
-
-        // Optimistic update: remove slot from local state and targets
-        setTemplateData((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            days: prev.days.map((day) => ({
-              ...day,
-              slots: day.slots.filter((slot) => slot.id !== slotId),
-            })),
-          };
-        });
-
-        setSlotTargets((prev) => {
-          const next = new Map(prev);
-          next.delete(slotId);
-          return next;
-        });
-
-        toast.success('Exercise removed');
-      } catch (error) {
-        if (__DEV__) {
-          devError('planner', error, { action: 'handleRemoveSlot', slotId });
-        }
-        toast.error('Failed to remove exercise');
-      } finally {
-        setIsSaving(false);
-      }
+      // Store pending edit and show prompt
+      setPendingEdit({
+        type: 'removeSlot',
+        data: {
+          slotId,
+        },
+      });
+      setShowEditScopePrompt(true);
     },
-    [toast]
+    []
   );
 
   // Render empty state
@@ -502,14 +526,66 @@ export default function PlannerTab() {
           <View style={styles.dayContent}>
             <View style={styles.dayHeader}>
               <Text style={styles.dayTitle}>{selectedDay.day.day_name}</Text>
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => handleAddExercise(selectedDay.day.id)}
-                disabled={isSaving}
-              >
-                <Plus size={20} color={colors.primary} />
-                <Text style={styles.addButtonText}>Add Exercise</Text>
-              </TouchableOpacity>
+              <View style={styles.dayHeaderActions}>
+                <TouchableOpacity
+                  style={styles.copyButton}
+                  onPress={async () => {
+                    if (!activeTemplateId) {
+                      toast.error('No active template');
+                      return;
+                    }
+
+                    setIsSaving(true);
+                    try {
+                      const userId = await getCurrentUserId();
+                      if (!userId) {
+                        toast.error('User not found');
+                        return;
+                      }
+
+                      // Get last 7 days structure
+                      const structure = await getLast7DaysSessionStructure(userId);
+                      if (structure.length === 0) {
+                        toast.error('No completed sessions found in last 7 days');
+                        return;
+                      }
+
+                      // Apply structure to template
+                      const success = await applySessionStructureToTemplate(
+                        userId,
+                        activeTemplateId,
+                        structure
+                      );
+
+                      if (success) {
+                        // Reload template to reflect changes
+                        await loadTemplate(activeTemplateId);
+                        toast.success('Copied last week\'s structure to template');
+                      } else {
+                        toast.error('Failed to copy structure');
+                      }
+                    } catch (error) {
+                      if (__DEV__) {
+                        devError('planner', error, { action: 'copyLastWeek' });
+                      }
+                      toast.error('Failed to copy structure');
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                  disabled={isSaving}
+                >
+                  <Text style={styles.copyButtonText}>Copy last week</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={() => handleAddExercise(selectedDay.day.id)}
+                  disabled={isSaving}
+                >
+                  <Plus size={20} color={colors.primary} />
+                  <Text style={styles.addButtonText}>Add Exercise</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Slots list */}
@@ -549,7 +625,7 @@ export default function PlannerTab() {
                           {targetText}
                         </Text>
                       </View>
-                      {slot.exercise_id && (
+                      {(slot.exercise_id || slot.custom_exercise_id) && (
                         <TouchableOpacity
                           style={styles.deleteButton}
                           onPress={() => handleRemoveSlot(slot.id)}
@@ -612,7 +688,6 @@ export default function PlannerTab() {
 
                       const newSlot = await createTemplateSlot(day.day.id, {
                         exerciseId,
-                        goal: null,
                         experience: null,
                         notes: null,
                         sortOrder,
@@ -620,7 +695,7 @@ export default function PlannerTab() {
 
                       if (newSlot) {
                         // Fetch exercise name
-                        const mergedExercise = await getMergedExercise(exerciseId, userId);
+                        const mergedExercise = await getMergedExercise({ exerciseId }, userId);
                         if (mergedExercise) {
                           setExerciseNames((prev) => {
                             const next = new Map(prev);
@@ -713,6 +788,16 @@ export default function PlannerTab() {
                       return;
                     }
 
+                    // Pre-start check: detect muscle coverage gaps
+                    const rebalanceCheck = await needsRebalance(userId, activeTemplateId, selectedDay.day.day_name);
+                    if (rebalanceCheck.needsRebalance) {
+                      setRebalanceResult(rebalanceCheck);
+                      setShowSmartAdjustPrompt(true);
+                      setIsSaving(false);
+                      return;
+                    }
+
+                    // No rebalancing needed, proceed with workout creation
                     const session = await createWorkoutSession(
                       userId,
                       activeTemplateId,
@@ -722,6 +807,84 @@ export default function PlannerTab() {
                     if (!session) {
                       toast.error('Failed to start workout');
                       return;
+                    }
+
+                    // Create session exercises from template slots and prefill sets with progressive overload targets
+                    const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+                    const targetsMap = new Map<string, {
+                      sets: number;
+                      reps?: number;
+                      duration_sec?: number;
+                      weight?: number;
+                    }>();
+
+
+                    for (const slot of selectedDay.slots) {
+                      const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+                      if (!exerciseId) continue;
+
+                      // Create session exercise
+                      const { data: sessionExercise, error: exerciseError } = await supabase
+                        .from('v2_session_exercises')
+                        .insert({
+                          session_id: session.id,
+                          exercise_id: slot.exercise_id || null,
+                          custom_exercise_id: slot.custom_exercise_id || null,
+                          sort_order: slot.sort_order,
+                        })
+                        .select()
+                        .single();
+
+                      if (exerciseError || !sessionExercise) {
+                        if (__DEV__) {
+                          devError('planner', exerciseError || new Error('Failed to create session exercise'), {
+                            sessionId: session.id,
+                            slotId: slot.id,
+                          });
+                        }
+                        continue;
+                      }
+
+                      sessionExercises.push(sessionExercise);
+
+                      // Get merged exercise to determine if it's custom or master
+                      const mergedExercise = await getMergedExercise(
+                        slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
+                        userId
+                      );
+
+                      if (!mergedExercise) {
+                        if (__DEV__) {
+                          devError('planner', new Error('Failed to get merged exercise'), {
+                            exerciseId: slot.exercise_id,
+                            customExerciseId: slot.custom_exercise_id,
+                          });
+                        }
+                        continue;
+                      }
+
+                      // Calculate target with progressive overload
+                      const effectiveExperience = profile?.experience_level || 'beginner';
+                      const context: TargetSelectionContext = {
+                        experience: slot.experience || effectiveExperience,
+                      };
+
+                      // Use the merged exercise ID for target selection
+                      const mergedExerciseId = mergedExercise.id;
+                      const target = await selectExerciseTargets(mergedExerciseId, userId, context, 0);
+                      if (target) {
+                        targetsMap.set(exerciseId, {
+                          sets: target.sets,
+                          reps: target.reps,
+                          duration_sec: target.duration_sec,
+                          weight: target.weight,
+                        });
+                      }
+                    }
+
+                    // Prefill session sets with progressive overload targets
+                    if (sessionExercises.length > 0 && targetsMap.size > 0) {
+                      await prefillSessionSets(session.id, sessionExercises, targetsMap);
                     }
 
                     // Navigate to active workout
@@ -756,6 +919,137 @@ export default function PlannerTab() {
           </View>
         )}
       </ScrollView>
+
+      <EditScopePrompt
+        visible={showEditScopePrompt}
+        onSelect={handleApplyEdit}
+        onCancel={() => {
+          setShowEditScopePrompt(false);
+          setPendingEdit(null);
+        }}
+      />
+
+      <SmartAdjustPrompt
+        visible={showSmartAdjustPrompt}
+        reasons={rebalanceResult?.reasons || []}
+        onContinue={async () => {
+          setShowSmartAdjustPrompt(false);
+          setRebalanceResult(null);
+          // Continue with workout creation
+          if (!activeTemplateId || !selectedDay) {
+            toast.error('No template or day selected');
+            return;
+          }
+
+          setIsSaving(true);
+          try {
+            const userId = await getCurrentUserId();
+            if (!userId) {
+              toast.error('Please log in');
+              return;
+            }
+
+            const session = await createWorkoutSession(
+              userId,
+              activeTemplateId,
+              selectedDay.day.day_name
+            );
+
+            if (!session) {
+              toast.error('Failed to start workout');
+              return;
+            }
+
+            // Create session exercises and prefill sets (same logic as before)
+            const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+            const targetsMap = new Map<string, {
+              sets: number;
+              reps?: number;
+              duration_sec?: number;
+              weight?: number;
+            }>();
+
+            for (const slot of selectedDay.slots) {
+              const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+              if (!exerciseId) continue;
+
+              const { data: sessionExercise, error: exerciseError } = await supabase
+                .from('v2_session_exercises')
+                .insert({
+                  session_id: session.id,
+                  exercise_id: slot.exercise_id || null,
+                  custom_exercise_id: slot.custom_exercise_id || null,
+                  sort_order: slot.sort_order,
+                })
+                .select()
+                .single();
+
+              if (exerciseError || !sessionExercise) {
+                if (__DEV__) {
+                  devError('planner', exerciseError || new Error('Failed to create session exercise'), {
+                    sessionId: session.id,
+                    slotId: slot.id,
+                  });
+                }
+                continue;
+              }
+
+              sessionExercises.push(sessionExercise);
+
+              const mergedExercise = await getMergedExercise(
+                slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
+                userId
+              );
+
+              if (!mergedExercise) continue;
+
+              const effectiveExperience = profile?.experience_level || 'beginner';
+              const context: TargetSelectionContext = {
+                experience: slot.experience || effectiveExperience,
+              };
+
+              const mergedExerciseId = mergedExercise.id;
+              const target = await selectExerciseTargets(mergedExerciseId, userId, context, 0);
+              if (target) {
+                targetsMap.set(exerciseId, {
+                  sets: target.sets,
+                  reps: target.reps,
+                  duration_sec: target.duration_sec,
+                  weight: target.weight,
+                });
+              }
+            }
+
+            if (sessionExercises.length > 0 && targetsMap.size > 0) {
+              await prefillSessionSets(session.id, sessionExercises, targetsMap);
+            }
+
+            toast.success('Workout started');
+            router.push('/workout-active');
+          } catch (error) {
+            if (__DEV__) {
+              devError('planner', error, { action: 'startWorkout_continue' });
+            }
+            toast.error('Failed to start workout');
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+        onSmartAdjust={async () => {
+          setShowSmartAdjustPrompt(false);
+          // TODO: Implement smart adjust logic
+          // For now, just show a message
+          toast.info('Smart adjust feature coming soon. For now, please manually add exercises to cover missed muscles.');
+          if (__DEV__) {
+            devLog('planner', {
+              action: 'smartAdjust',
+              missedMuscles: rebalanceResult?.missedMuscles || [],
+              message: 'Smart adjust not yet implemented',
+            });
+          }
+          setRebalanceResult(null);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -819,6 +1113,24 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
+  },
+  dayHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  copyButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  copyButtonText: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
   },
   addButton: {
     flexDirection: 'row',

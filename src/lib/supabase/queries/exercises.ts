@@ -27,29 +27,50 @@ export interface MergedExercise {
 
 /**
  * Get merged exercise view for a single exercise
+ * Accepts either exercise_id OR custom_exercise_id (not both)
  * Implements: v2_exercises defaults ⊕ non-null overrides
- * If user custom exercise exists, use that instead
+ * If custom_exercise_id provided, fetch from v2_user_custom_exercises directly
  */
 export async function getMergedExercise(
-  exerciseId: string,
+  input: { exerciseId?: string; customExerciseId?: string },
   userId: string
 ): Promise<MergedExercise | null> {
+  const { exerciseId, customExerciseId } = input;
+  
   if (__DEV__) {
-    devLog('exercise-query', { action: 'getMergedExercise', exerciseId, userId });
+    devLog('exercise-query', { action: 'getMergedExercise', exerciseId, customExerciseId, userId });
+  }
+
+  // Validate exactly one is provided
+  const hasExerciseId = !!exerciseId;
+  const hasCustomExerciseId = !!customExerciseId;
+  
+  if (hasExerciseId === hasCustomExerciseId) {
+    if (__DEV__) {
+      devError('exercise-query', new Error('Exactly one of exerciseId or customExerciseId must be provided'), { input, userId });
+    }
+    return null;
   }
 
   try {
-    // First check if user has a custom exercise with this ID
-    const { data: customExercise, error: customError } = await supabase
-      .from('v2_user_custom_exercises')
-      .select('*')
-      .eq('id', exerciseId)
-      .eq('user_id', userId)
-      .single();
+    // If custom_exercise_id provided, fetch from v2_user_custom_exercises directly
+    if (customExerciseId) {
+      const { data: customExercise, error: customError } = await supabase
+        .from('v2_user_custom_exercises')
+        .select('*')
+        .eq('id', customExerciseId)
+        .eq('user_id', userId)
+        .single();
 
-    if (customExercise) {
+      if (customError || !customExercise) {
+        if (__DEV__) {
+          devError('exercise-query', customError || new Error('Custom exercise not found'), { customExerciseId, userId });
+        }
+        return null;
+      }
+
       if (__DEV__) {
-        devLog('exercise-query', { action: 'found_custom', exerciseId });
+        devLog('exercise-query', { action: 'found_custom', customExerciseId });
       }
       return {
         id: customExercise.id,
@@ -70,7 +91,14 @@ export async function getMergedExercise(
       };
     }
 
-    // Get master exercise
+    // Get master exercise (exerciseId provided)
+    if (!exerciseId) {
+      if (__DEV__) {
+        devError('exercise-query', new Error('exerciseId required when customExerciseId not provided'), { input, userId });
+      }
+      return null;
+    }
+
     const { data: masterExercise, error: masterError } = await supabase
       .from('v2_exercises')
       .select('*')
