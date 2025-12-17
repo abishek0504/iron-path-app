@@ -537,11 +537,13 @@ Patch 09 findings:
 
 Patch 10 findings:
 
-- **Week range definition** (`app/(tabs)/dashboard.tsx`): computes local Sunday-start week boundaries and converts to ISO strings for querying.
-- **Query timestamp mismatch**:
-  - Dashboard labels metric as “This week completed workouts”, but `getSessionsInRange(...)` filters on `v2_workout_sessions.started_at` (not `completed_at`).
-- **PRs implementation bias**:
+- **Week range definition** (`app/(tabs)/dashboard.tsx`): computes local Sunday-start week boundaries and converts to ISO strings for querying. **Fixed**: Verified and documented Sunday-Saturday week calculation logic.
+- **Query timestamp mismatch**: **Fixed**
+  - Dashboard labels metric as "This week completed workouts", but `getSessionsInRange(...)` filters on `v2_workout_sessions.started_at` (not `completed_at`).
+  - **Resolution**: Updated `getSessionsInRange` to filter by `completed_at` instead of `started_at`, and added `.not('completed_at', 'is', null)` to ensure only sessions with completion timestamps are included.
+- **PRs implementation bias**: **Fixed**
   - `getTopPRs(...)` currently filters sets with `weight IS NOT NULL` and orders by `weight desc`, so timed PRs (`duration_sec`) are not discoverable by this query path.
+  - **Resolution**: Refactored `getTopPRs` to fetch both weight-based and duration-based PRs in parallel, then merge and return top results sorted by recency. Now supports hybrid PR ranking for both rep-based and timed exercises.
 
 ---
 

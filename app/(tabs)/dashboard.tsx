@@ -39,13 +39,22 @@ export default function DashboardTab() {
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
 
+  /**
+   * Calculate Sunday-Saturday week range for the current week
+   * Returns start (Sunday 00:00:00) and end (Saturday 23:59:59.999) as Date objects
+   * 
+   * Logic:
+   * - If today is Sunday (getDay() === 0), start stays on Sunday
+   * - If today is Monday (getDay() === 1), start goes back 1 day to Sunday
+   * - End is always 6 days after start (Saturday)
+   */
   const getWeekRange = () => {
     const start = new Date(today);
     start.setHours(0, 0, 0, 0);
-    // Sunday = 0
+    // Sunday = 0, so subtracting getDay() moves to the start of the week (Sunday)
     start.setDate(start.getDate() - start.getDay());
     const end = new Date(start);
-    end.setDate(start.getDate() + 6);
+    end.setDate(start.getDate() + 6); // Saturday (6 days after Sunday)
     end.setHours(23, 59, 59, 999);
     return { start, end };
   };

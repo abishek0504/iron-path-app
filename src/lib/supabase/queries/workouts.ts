@@ -233,6 +233,7 @@ export async function saveSessionSet(
 
 /**
  * Get completed sessions in a date range (inclusive)
+ * Filters by completed_at timestamp to accurately count completed workouts
  */
 export async function getSessionsInRange(
   userId: string,
@@ -249,9 +250,10 @@ export async function getSessionsInRange(
       .select('*')
       .eq('user_id', userId)
       .eq('status', 'completed')
-      .gte('started_at', startIso)
-      .lte('started_at', endIso)
-      .order('started_at', { ascending: false });
+      .not('completed_at', 'is', null)
+      .gte('completed_at', startIso)
+      .lte('completed_at', endIso)
+      .order('completed_at', { ascending: false });
 
     if (error) {
       if (__DEV__) {
@@ -338,7 +340,8 @@ export interface ExerciseHistory {
 }
 
 /**
- * Get top PR sets by weight for a user's recent sessions
+ * Get top PR sets (weight-based and duration-based) for a user's recent sessions
+ * Returns hybrid PRs: both weight-based (reps exercises) and duration-based (timed exercises)
  */
 export async function getTopPRs(
   userId: string,
@@ -384,31 +387,58 @@ export async function getTopPRs(
     const sessionExerciseIds = (sessionExercises || []).map((e) => e.id);
     if (!sessionExerciseIds.length) return [];
 
-    // Step 3: top sets by weight
-    const { data: sets, error: setsError } = await supabase
-      .from('v2_session_sets')
-      .select('id, session_exercise_id, weight, reps, duration_sec, performed_at')
-      .in('session_exercise_id', sessionExerciseIds)
-      .not('weight', 'is', null)
-      .order('weight', { ascending: false, nullsFirst: false })
-      .limit(limit * 3); // fetch a few extra to handle missing exercise names
-
-    if (setsError) {
-      if (__DEV__) {
-        devError('workout-query', setsError, { userId, limit, step: 'sets' });
-      }
-      return [];
-    }
-
     const exerciseMap = new Map(
       (sessionExercises || []).map((e) => [e.id, e])
     );
 
-    const prs: TopPR[] = [];
-    for (const set of sets || []) {
+    // Step 3: Fetch weight-based PRs and duration-based PRs in parallel
+    const [weightSetsResult, durationSetsResult] = await Promise.all([
+      // Weight-based PRs: top sets by weight
+      supabase
+        .from('v2_session_sets')
+        .select('id, session_exercise_id, weight, reps, duration_sec, performed_at')
+        .in('session_exercise_id', sessionExerciseIds)
+        .not('weight', 'is', null)
+        .order('weight', { ascending: false, nullsFirst: false })
+        .limit(limit * 2),
+      // Duration-based PRs: top sets by duration
+      supabase
+        .from('v2_session_sets')
+        .select('id, session_exercise_id, weight, reps, duration_sec, performed_at')
+        .in('session_exercise_id', sessionExerciseIds)
+        .not('duration_sec', 'is', null)
+        .order('duration_sec', { ascending: false, nullsFirst: false })
+        .limit(limit * 2),
+    ]);
+
+    if (weightSetsResult.error) {
+      if (__DEV__) {
+        devError('workout-query', weightSetsResult.error, { userId, limit, step: 'weight-sets' });
+      }
+    }
+
+    if (durationSetsResult.error) {
+      if (__DEV__) {
+        devError('workout-query', durationSetsResult.error, { userId, limit, step: 'duration-sets' });
+      }
+    }
+
+    // Combine both result sets
+    const allSets = [
+      ...(weightSetsResult.data || []),
+      ...(durationSetsResult.data || []),
+    ];
+
+    // Convert to TopPR format and deduplicate by set_id
+    const prMap = new Map<string, TopPR>();
+    for (const set of allSets) {
       const ex = exerciseMap.get(set.session_exercise_id);
       if (!ex) continue;
-      prs.push({
+
+      // Skip if we already have this set (deduplication)
+      if (prMap.has(set.id)) continue;
+
+      prMap.set(set.id, {
         set_id: set.id,
         session_exercise_id: set.session_exercise_id,
         session_id: ex.session_id,
@@ -419,10 +449,18 @@ export async function getTopPRs(
         duration_sec: set.duration_sec || undefined,
         performed_at: set.performed_at,
       });
-      if (prs.length >= limit) break;
     }
 
-    return prs;
+    // Convert to array and sort by performed_at (most recent first) as tiebreaker
+    // Since we can't directly compare weight vs duration, we prioritize by recency
+    const prs = Array.from(prMap.values()).sort((a, b) => {
+      const aTime = a.performed_at ? new Date(a.performed_at).getTime() : 0;
+      const bTime = b.performed_at ? new Date(b.performed_at).getTime() : 0;
+      return bTime - aTime; // Most recent first
+    });
+
+    // Return top limit items
+    return prs.slice(0, limit);
   } catch (error) {
     if (__DEV__) {
       devError('workout-query', error, { userId, limit, step: 'top-prs' });

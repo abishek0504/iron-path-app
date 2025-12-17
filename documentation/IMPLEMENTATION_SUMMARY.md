@@ -118,7 +118,7 @@ All query functions follow the same pattern:
 - `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
 - `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
-#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08)**
+#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08, 10)**
 - `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session (structure preserved for XOR exercise/custom downstream)
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
@@ -126,6 +126,9 @@ All query functions follow the same pattern:
 - `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start; targets map is keyed by XOR exercise/custom IDs and writes sets for the matching session exercise
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
 - `getLast7DaysSessionStructure(userId)` - Gets last 7 days of completed session structure for "Copy last week" feature ✅ **NEW (Patch E)**
+- `getSessionsInRange(userId, startIso, endIso)` - Gets completed sessions in date range (filters by `completed_at` timestamp, not `started_at`) ✅ **FIXED (Patch 10)**
+- `getRecentSessions(userId, limit)` - Gets recent completed sessions ordered by `completed_at`
+- `getTopPRs(userId, limit)` - Gets top PR sets (hybrid: both weight-based and duration-based PRs) ✅ **FIXED (Patch 10)**
 
 #### `src/lib/supabase/queries/workouts_helpers.ts` ✅ **NEW (Patch B)**
 - `getOrCreateActiveSessionForToday(userId, dayName?)` - Gets in-progress session for today, or creates new session for today
