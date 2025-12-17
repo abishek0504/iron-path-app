@@ -418,7 +418,7 @@ Patch 04 notes:
 Patch 05 notes:
 
 - **Error-return contract is not uniform across modules**: some functions return `null`, others `[]`, others `false`, others an empty `Map`. Within each module it’s mostly consistent, but cross-module callers must handle different failure shapes.
-- **Missing implementation**: `src/lib/engine/targetSelection.ts` imports and calls `getExerciseHistory` from `queries/workouts.ts`, but `queries/workouts.ts` does not export it.
+- **Resolved**: `getExerciseHistory` is implemented in `queries/workouts.ts` (completed sessions only, exercise OR custom exercise match, safe empty object when no history) so `targetSelection` no longer crashes.
 
 ---
 

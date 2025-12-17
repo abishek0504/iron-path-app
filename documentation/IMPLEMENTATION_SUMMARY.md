@@ -122,7 +122,7 @@ All query functions follow the same pattern:
 - `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
-- `getExerciseHistory(exerciseId, userId, limit)` - Gets recent exercise history for progressive overload
+- `getExerciseHistory(exerciseId, userId, limit)` - Gets recent history (completed sessions, exercise OR custom exercise) and returns safe empty `{ sets: [], lastRPE/RIR/Weight/Reps/Duration: null, avgRPE: null }` when none
 - `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
 - `getLast7DaysSessionStructure(userId)` - Gets last 7 days of completed session structure for "Copy last week" feature ✅ **NEW (Patch E)**
