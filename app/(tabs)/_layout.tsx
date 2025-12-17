@@ -91,7 +91,7 @@ const CustomTabBar = (props: BottomTabBarProps) => {
           let IconComponent = Dumbbell;
           if (route.name === 'planner') IconComponent = Calendar;
           else if (route.name === 'progress') IconComponent = TrendingUp;
-          else if (route.name === 'profile') IconComponent = Trophy;
+          else if (route.name === 'dashboard') IconComponent = Trophy;
           
           return (
             <TouchableOpacity
@@ -167,9 +167,9 @@ export default function TabLayout() {
         }} 
       />
       <Tabs.Screen 
-        name="profile" 
+        name="dashboard" 
         options={{ 
-          title: "Profile",
+          title: "Dashboard",
         }} 
       />
     </Tabs>

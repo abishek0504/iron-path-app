@@ -17,9 +17,15 @@ See [V2_ARCHITECTURE.md](./V2_ARCHITECTURE.md) for complete system contract, sch
 
 ## Onboarding (Post-Auth)
 - Runs after login/sign-up if required profile fields are missing.
-- Required fields: `experience_level`, `days_per_week`, `equipment_access` (multi-select).
+- Required fields: `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access` (multi-select).
 - Saves to `v2_profiles`, updates `userStore`.
 - Auto-creates a user template if none exists and ensures all 7 weekdays, then routes to Plan tab.
+
+## Profile Tab
+- Location: `app/(tabs)/dashboard.tsx` (read-only dashboard).
+- Widgets: weekly completion vs `days_per_week`, streak, top PRs (from performed sets), recent sessions, connect health placeholder.
+- Link to Edit Profile for changes; data loads via Supabase queries with dev logs (`profile-dashboard`).
+- Edit modal returns to the originating tab/stack via `router.back()` with a `/(tabs)` fallback when no history exists.
 
 ## Setup
 

@@ -536,6 +536,11 @@ All hooks provide convenience wrappers around Zustand stores.
     - Start/Continue/Completed states
     - Exercise preview and rest day handling
     - Reset workout functionality
+12. **Profile Tab Dashboard**: Read-only widgets
+    - Location: `app/(tabs)/dashboard.tsx`
+    - Widgets: weekly completion vs `days_per_week`, streak, top PRs, recent sessions, connect health placeholder
+    - Edit link routes to existing edit-profile modal; dev logs under `profile-dashboard`
+    - Edit modal exits back to the originating tab/stack via `router.back()` with `/(tabs)` fallback when no history is present
 
 ## Patterns for Adding New Features
 

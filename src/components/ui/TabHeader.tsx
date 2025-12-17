@@ -12,7 +12,7 @@ import { devLog } from '../../lib/utils/logger';
 
 interface TabHeaderProps {
   title: string;
-  tabId: 'workout' | 'plan' | 'progress' | 'profile';
+  tabId: 'workout' | 'plan' | 'progress' | 'dashboard';
 }
 
 export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId }) => {

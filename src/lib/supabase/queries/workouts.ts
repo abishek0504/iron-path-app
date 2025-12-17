@@ -232,6 +232,186 @@ export async function saveSessionSet(
 }
 
 /**
+ * Get completed sessions in a date range (inclusive)
+ */
+export async function getSessionsInRange(
+  userId: string,
+  startIso: string,
+  endIso: string
+): Promise<WorkoutSession[]> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getSessionsInRange', userId, startIso, endIso });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .gte('started_at', startIso)
+      .lte('started_at', endIso)
+      .order('started_at', { ascending: false });
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { userId, startIso, endIso });
+      }
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, startIso, endIso });
+    }
+    return [];
+  }
+}
+
+/**
+ * Get recent completed sessions
+ */
+export async function getRecentSessions(
+  userId: string,
+  limit = 5
+): Promise<WorkoutSession[]> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getRecentSessions', userId, limit });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false, nullsFirst: false })
+      .limit(limit);
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { userId, limit });
+      }
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, limit });
+    }
+    return [];
+  }
+}
+
+export interface TopPR {
+  set_id: string;
+  session_id: string;
+  session_exercise_id: string;
+  exercise_id?: string;
+  custom_exercise_id?: string;
+  weight?: number;
+  reps?: number;
+  duration_sec?: number;
+  performed_at?: string;
+}
+
+/**
+ * Get top PR sets by weight for a user's recent sessions
+ */
+export async function getTopPRs(
+  userId: string,
+  limit = 3
+): Promise<TopPR[]> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getTopPRs', userId, limit });
+  }
+
+  try {
+    // Step 1: recent session ids (completed)
+    const { data: sessions, error: sessionsError } = await supabase
+      .from('v2_workout_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false, nullsFirst: false })
+      .limit(50);
+
+    if (sessionsError) {
+      if (__DEV__) {
+        devError('workout-query', sessionsError, { userId, limit, step: 'sessions' });
+      }
+      return [];
+    }
+
+    const sessionIds = (sessions || []).map((s) => s.id);
+    if (!sessionIds.length) return [];
+
+    // Step 2: session exercises for those sessions
+    const { data: sessionExercises, error: exercisesError } = await supabase
+      .from('v2_session_exercises')
+      .select('id, exercise_id, custom_exercise_id, session_id')
+      .in('session_id', sessionIds);
+
+    if (exercisesError) {
+      if (__DEV__) {
+        devError('workout-query', exercisesError, { userId, limit, step: 'session-exercises' });
+      }
+      return [];
+    }
+
+    const sessionExerciseIds = (sessionExercises || []).map((e) => e.id);
+    if (!sessionExerciseIds.length) return [];
+
+    // Step 3: top sets by weight
+    const { data: sets, error: setsError } = await supabase
+      .from('v2_session_sets')
+      .select('id, session_exercise_id, weight, reps, duration_sec, performed_at')
+      .in('session_exercise_id', sessionExerciseIds)
+      .not('weight', 'is', null)
+      .order('weight', { ascending: false, nullsFirst: false })
+      .limit(limit * 3); // fetch a few extra to handle missing exercise names
+
+    if (setsError) {
+      if (__DEV__) {
+        devError('workout-query', setsError, { userId, limit, step: 'sets' });
+      }
+      return [];
+    }
+
+    const exerciseMap = new Map(
+      (sessionExercises || []).map((e) => [e.id, e])
+    );
+
+    const prs: TopPR[] = [];
+    for (const set of sets || []) {
+      const ex = exerciseMap.get(set.session_exercise_id);
+      if (!ex) continue;
+      prs.push({
+        set_id: set.id,
+        session_exercise_id: set.session_exercise_id,
+        session_id: ex.session_id,
+        exercise_id: ex.exercise_id || undefined,
+        custom_exercise_id: ex.custom_exercise_id || undefined,
+        weight: set.weight || undefined,
+        reps: set.reps || undefined,
+        duration_sec: set.duration_sec || undefined,
+        performed_at: set.performed_at,
+      });
+      if (prs.length >= limit) break;
+    }
+
+    return prs;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, limit, step: 'top-prs' });
+    }
+    return [];
+  }
+}
+
+/**
  * Prefill session sets with progressive overload targets
  * Creates v2_session_sets rows for planned set count with prefilled reps/weight/duration
  * These are "starting targets" that the user edits, NOT "already performed" values

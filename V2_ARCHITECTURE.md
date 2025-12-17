@@ -2506,11 +2506,15 @@ The app has four main tabs accessible via bottom tab navigation:
    - Muscle stress heatmap
    - Performance analytics
 
-4. **Profile** (`app/(tabs)/profile.tsx`)
-   - User profile
-   - Settings/preferences
-   - Equipment access
-   - Goals and experience level
+4. **Profile** (`app/(tabs)/dashboard.tsx`)
+   - Profile dashboard (read-only): this week progress, streak, top PRs, recent sessions, connect health placeholder
+   - Link to edit profile screen for edits
+
+#### Profile tab behavior
+- Dashboard widgets only; editing happens in the existing edit-profile modal.
+- Widgets: weekly completion vs `days_per_week`, streak (consecutive days), top PRs (from `v2_session_sets`), recent sessions, connect health placeholder.
+- Uses `getSessionsInRange`, `getRecentSessions`, `getTopPRs` helpers; merges exercise names for PRs via `listMergedExercises`.
+- Dev-only logs (`profile-dashboard`) wrap data loads (counts only, no per-row logs).
 
 ### Tab Layout Structure
 
@@ -2766,6 +2770,7 @@ Use route groups to keep structure clean while keeping URLs simple:
   - Settings menu from any tab (sheet → route)
 - **Navigation**: `router.push('/edit-profile')`
 - **Presentation**: Modal (slides up from bottom)
+- **Exit behavior**: `router.back()` returns to the originating tab/stack; when no history is available (e.g., direct link), fall back to `router.replace('/(tabs)')`.
 
 ### Navigation Usage Pattern (From Any Tab)
 
@@ -2818,7 +2823,7 @@ app/
   │   ├── index.tsx       # Workout tab
   │   ├── planner.tsx     # Plan tab
   │   ├── progress.tsx     # Progress tab
-  │   └── profile.tsx      # Profile tab
+  │   └── dashboard.tsx    # Profile dashboard tab
   │
   ├── (stack)/            # Shared stack screens
   │   ├── exercise/
