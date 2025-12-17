@@ -58,10 +58,6 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
-          name="workout-active"
-          options={{ presentation: 'modal', gestureEnabled: true }}
-        />
-        <Stack.Screen
           name="(stack)/workout/active"
           options={{ 
             presentation: 'modal', 

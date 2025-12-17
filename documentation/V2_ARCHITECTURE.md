@@ -1195,22 +1195,23 @@ Step 4: Merge Logic
 ### Target Selection Flow
 
 ```
-Request: selectExerciseTargets(exerciseId, userId, context, historyCount)
+Request: selectExerciseTargets({ exerciseId? , customExerciseId? }, userId, context, historyCount)
     ↓
 Step 1: Get Merged Exercise
-    └─ getMergedExercise(exerciseId, userId)
+    └─ getMergedExercise({ exerciseId? , customExerciseId? }, userId)  // XOR enforced
     ↓
 Step 2: Determine Mode
     ├─ exercise.is_timed = true? → mode = 'timed'
     └─ Otherwise → mode = 'reps'
     ↓
 Step 3: Fetch Prescription
-    └─ getExercisePrescription(exerciseId, experience, mode)
+    ├─ If source = 'custom': use target bands on v2_user_custom_exercises (mode/sets/reps/duration)  
+    ├─ Else: getExercisePrescription(exerciseId, experience, mode)
     ├─ Found? → Continue
     └─ Not found? → Return null (data error, exclude from generation)
     ↓
 Step 4: Get Exercise History (for progressive overload)
-    └─ getExerciseHistory(exerciseId, userId, limit=5)
+    └─ getExerciseHistory(exerciseId OR customExerciseId, userId, limit=5)
     ├─ Returns: { sets, lastRPE, lastRIR, lastWeight, lastReps, lastDuration }
     └─ Used to determine progressive overload adjustments
     ↓

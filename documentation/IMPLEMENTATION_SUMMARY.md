@@ -118,12 +118,12 @@ All query functions follow the same pattern:
 - `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
 - `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
-#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F)**
-- `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session
+#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08)**
+- `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session (structure preserved for XOR exercise/custom downstream)
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
-- `getExerciseHistory(exerciseId, userId, limit)` - Gets recent exercise history for progressive overload
-- `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start
+- `getExerciseHistory(exerciseId, userId, limit)` - Gets recent history (completed sessions, exercise OR custom exercise) and returns safe empty `{ sets: [], lastRPE/RIR/Weight/Reps/Duration: null, avgRPE: null }` when none
+- `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start; targets map is keyed by XOR exercise/custom IDs and writes sets for the matching session exercise
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
 - `getLast7DaysSessionStructure(userId)` - Gets last 7 days of completed session structure for "Copy last week" feature ✅ **NEW (Patch E)**
 
@@ -274,21 +274,15 @@ All query functions follow the same pattern:
   - TODO: Full AI logic integration (currently returns allow-list exercises)
   - Used by "Generate with AI" button in planner
 
-#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F)**
-- **`selectExerciseTargets(exerciseId, userId, context, historyCount)`**
-  - Gets merged exercise to determine mode (reps vs timed)
-  - Fetches prescription for exercise + context (experience, mode) - goal removed for holistic approach
-  - Returns `null` if no prescription (data error - never invents defaults)
-  - Gets exercise history via `getExerciseHistory()` for progressive overload
-  - Selects targets within prescription band with progressive overload:
-    - **Sets**: Lower-to-mid for new users (historyCount < 3), mid-to-upper for experienced
-    - **Reps mode**: If hit top of rep band with RPE ≤ 7, increase weight 2.5% and reset reps to min. Otherwise, increase reps toward top of band.
-    - **Timed mode**: Increase duration by 5s toward top of band (or use mid-range if no history)
-  - Returns `ExerciseTarget` with `weight` field for reps mode (if progressive overload applies)
-  - Clamps to prescription bounds
-- **`selectExerciseTargetsBulk(exerciseIds, userId, context, historyCounts)`**
-  - Bulk version that filters out exercises without prescriptions
-  - Returns array of `ExerciseTarget` objects
+#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F, Patch 07)**
+- **`selectExerciseTargets({ exerciseId?, customExerciseId? }, userId, context, historyCount)`**
+  - XOR input enforced; merged exercise lookup handles master/custom
+  - Custom exercises use their own target bands (mode/sets/reps/duration) from `v2_user_custom_exercises`; masters fetch prescriptions
+  - Returns `null` if bands/prescription missing (never invent defaults)
+  - Uses `getExerciseHistory` keyed by the provided exercise/custom id for progressive overload
+  - Progressive overload rules unchanged; clamps to band
+- **`selectExerciseTargetsBulk(exercises[], userId, context, historyCounts)`**
+  - Accepts array of `{ exerciseId?, customExerciseId? }`, delegates to single-path for mixed master/custom support
 - **Hard rule**: Never invents generic defaults (3x10, 60s). Missing prescription = exclude from generation.
 - **Progressive overload rule**: Never writes into templates. Only adjusts next session's suggested targets based on performed truth.
 
@@ -419,7 +413,7 @@ All hooks provide convenience wrappers around Zustand stores.
   - Creates/updates template days based on session day_names
   - Explicit button action, not automatic mutation
 
-#### Start Workout Integration ✅ **UPDATED (Patch F, G)**
+#### Start Workout Integration ✅ **UPDATED (Patch F, G, 08, 09)**
 - **"Start this day" Button**:
   1. **Pre-start check**: Calls `needsRebalance()` to detect muscle coverage gaps
   2. If gaps detected: Shows `SmartAdjustPrompt` with reasons
@@ -427,12 +421,12 @@ All hooks provide convenience wrappers around Zustand stores.
      - User can choose "Smart adjust" (TODO: full implementation coming soon)
   3. If no gaps or user chooses "Continue anyway":
      - Creates workout session via `createWorkoutSession(userId, templateId, dayName)`
-     - Creates session exercises from template slots (INSERT into `v2_session_exercises`)
-     - For each exercise, calculates progressive overload targets via `selectExerciseTargets()`
-     - Prefills session sets via `prefillSessionSets()` with starting targets (reps/weight/duration)
+     - Creates session exercises from template slots (INSERT into `v2_session_exercises`) preserving XOR `exercise_id`/`custom_exercise_id`
+     - For each exercise/custom exercise, calculates progressive overload targets via `selectExerciseTargets({ exerciseId?, customExerciseId? }, userId, context)`
+     - Prefills session sets via `prefillSessionSets()` with starting targets keyed by the same XOR ID (reps/weight/duration)
        - These are "starting targets" that the user edits, NOT "already performed" values
        - User edits these values during workout, and final saved values become the performed truth
-     - Navigates to `/workout-active` route
+     - Navigates to `/workout/active` route (canonical stack screen)
      - Shows success toast
   4. Error handling with toast notifications
 
