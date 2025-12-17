@@ -1,0 +1,14 @@
+# Archive folder (old prototype - not part of V2)
+Archive/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+.expo/
+dist/
+web-build/
+
+# Generated files
+.expo/types/
+

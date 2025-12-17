@@ -1,101 +1,106 @@
-import { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, Image } from 'react-native';
+import { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '../src/lib/supabase';
+import { supabase } from '../src/lib/supabase/client';
+import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 
-export default function LoginScreen() {
+export default function Login() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isCheckingSession, setIsCheckingSession] = useState(true);
-  const router = useRouter();
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        router.replace('/(tabs)/home');
-      }
-      setIsCheckingSession(false);
-    }).catch(() => {
-      setIsCheckingSession(false);
-    });
-  }, []);
+  const handleLogin = async () => {
+    setErrorText(null);
 
-  const signIn = async () => {
-    setErrorMessage('');
-    if (!email || !password) {
-      setErrorMessage("Please enter both email and password.");
+    if (!email.trim() || !password) {
+      setErrorText('Email and password are required.');
       return;
     }
+
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setErrorMessage(error.message);
-      } else {
-        router.replace('/(tabs)/home');
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || "Network failed");
-    }
-    setLoading(false);
-  };
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-  if (isCheckingSession) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#2563eb" />
-        <Text style={styles.text}>Loading IronPath...</Text>
-      </View>
-    );
-  }
+      if (error) {
+        setErrorText(error.message);
+        return;
+      }
+
+      router.replace('/');
+    } catch (error: any) {
+      setErrorText(error?.message || 'Unable to sign in right now.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <Image 
-        source={require('../assets/splash-icon.png')} 
-        style={styles.logo}
-      />
-      <Text style={styles.title}>IronPath</Text>
-      <Text style={styles.subtitle}>Track your progress. Build your path.</Text>
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#999"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#999"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
+      <View style={styles.card}>
+        <Text style={styles.title}>Welcome back</Text>
+        <Text style={styles.subtitle}>Log in to continue</Text>
 
-      {errorMessage ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Email</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="you@example.com"
+            placeholderTextColor={colors.textMuted}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            textContentType="emailAddress"
+          />
         </View>
-      ) : null}
 
-      <TouchableOpacity style={styles.buttonPrimary} onPress={signIn} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? "Loading..." : "Sign In"}</Text>
-      </TouchableOpacity>
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor={colors.textMuted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType="password"
+          />
+        </View>
 
-      <TouchableOpacity 
-        style={styles.buttonSecondary} 
-        onPress={() => router.push('/signup')}
-        disabled={loading}
-      >
-        <Text style={styles.buttonTextSecondary}>Create Account</Text>
-      </TouchableOpacity>
+        {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleLogin}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.textPrimary} />
+          ) : (
+            <Text style={styles.buttonText}>Log In</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
+          <Text style={styles.linkText}>Forgot password?</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.replace('/signup')}>
+          <Text style={styles.linkText}>Need an account? Sign up</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -103,78 +108,68 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
     justifyContent: 'center',
-    padding: 24,
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    padding: spacing.lg,
   },
-  logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 24,
-    alignSelf: 'center',
-    marginBottom: 24,
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#3b82f6',
-    textAlign: 'center',
-    marginBottom: 8,
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
   },
   subtitle: {
-    color: '#9ca3af',
-    textAlign: 'center',
-    marginBottom: 32,
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
   },
-  text: {
-    color: 'white',
-    marginTop: 10,
+  fieldGroup: {
+    gap: spacing.xs,
+  },
+  label: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
   },
   input: {
-    backgroundColor: '#1f2937',
-    color: 'white',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    color: colors.textPrimary,
+    backgroundColor: colors.background,
+    fontSize: typography.sizes.base,
   },
-  buttonPrimary: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
+  button: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
   },
-  buttonSecondary: {
-    borderWidth: 1,
-    borderColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
+  buttonDisabled: {
+    opacity: 0.6,
   },
   buttonText: {
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  buttonTextSecondary: {
-    color: '#60a5fa',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  errorContainer: {
-    backgroundColor: 'rgba(127, 29, 29, 0.5)',
-    padding: 12,
-    borderRadius: 4,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#ef4444',
+    color: colors.background,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
   },
   errorText: {
-    color: '#fecaca',
+    color: colors.error,
+    fontSize: typography.sizes.sm,
+  },
+  linkText: {
+    color: colors.textSecondary,
     textAlign: 'center',
-    fontWeight: 'bold',
+    marginTop: spacing.sm,
   },
 });
-

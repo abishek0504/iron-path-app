@@ -1,90 +1,89 @@
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+/**
+ * Root index route
+ * Handles initial app entry and routing to login/home
+ */
 
-export default function WelcomeScreen() {
+import { useEffect, useState } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { supabase } from '../src/lib/supabase/client';
+import { colors, spacing } from '../src/lib/utils/theme';
+import { getUserProfile } from '../src/lib/supabase/queries/users';
+import { useUserStore } from '../src/stores/userStore';
+
+export default function Index() {
   const router = useRouter();
+  const setProfile = useUserStore((state) => state.setProfile);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  useEffect(() => {
+    checkAuthAndRedirect();
+  }, []);
+
+  const checkAuthAndRedirect = async () => {
+    setErrorText(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session) {
+        const userId = session.user.id;
+        const profile = await getUserProfile(userId);
+
+        if (profile) {
+          setProfile(profile);
+        }
+
+        const hasRequired =
+          !!profile?.experience_level &&
+          !!profile?.days_per_week &&
+          Array.isArray(profile?.equipment_access) &&
+          (profile?.equipment_access?.length || 0) > 0;
+
+        if (hasRequired) {
+          router.replace('/(tabs)');
+        } else {
+          router.replace('/onboarding');
+        }
+      } else {
+        // User is not authenticated, redirect to login
+        router.replace('/login');
+      }
+    } catch (error) {
+      // If there's an error (e.g., missing env vars), redirect to login
+      if (__DEV__) {
+        console.error('Auth check error:', error);
+      }
+      setErrorText('Unable to check session. Please log in again.');
+      router.replace('/login');
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Image 
-          source={require('../assets/splash-icon.png')} 
-          style={styles.logo}
-        />
-        <Text style={styles.title}>IronPath</Text>
-        <Text style={styles.subtitle}>Track your progress. Build your path.</Text>
-        
-        <TouchableOpacity 
-          style={styles.buttonPrimary}
-          onPress={() => router.push('/login')}
-        >
-          <Text style={styles.buttonText}>Sign In</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.buttonSecondary}
-          onPress={() => router.push('/signup')}
-        >
-          <Text style={styles.buttonTextSecondary}>Create Account</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+    <View style={styles.container}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={styles.text}>Loading...</Text>
+      {errorText ? <Text style={styles.error}>{errorText}</Text> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
-  },
-  content: {
-    flex: 1,
     justifyContent: 'center',
-    padding: 24,
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    gap: spacing.md,
   },
-  logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 24,
-    alignSelf: 'center',
-    marginBottom: 24,
+  text: {
+    color: colors.textSecondary,
+    fontSize: 16,
   },
-  title: {
-    fontSize: 42,
-    fontWeight: 'bold',
-    color: '#3b82f6',
+  error: {
+    color: colors.error,
+    fontSize: 14,
     textAlign: 'center',
-    marginBottom: 12,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#9ca3af',
-    textAlign: 'center',
-    marginBottom: 48,
-  },
-  buttonPrimary: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  buttonSecondary: {
-    borderWidth: 1,
-    borderColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
-  },
-  buttonText: {
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  buttonTextSecondary: {
-    color: '#60a5fa',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 18,
+    paddingHorizontal: spacing.md,
   },
 });
+

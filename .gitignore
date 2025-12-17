@@ -30,6 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# vscode
+.cursor/
+
 # local env files
 .env*.local
 
@@ -49,3 +52,15 @@ node_modules/
 
 # supabase schema
 schema/
+
+# cursor rules
+.cursor/
+
+# editor swap files
+*.swp
+*.swo
+*~
+
+# Archive folder (old prototype - not part of V2)
+Archive/
+

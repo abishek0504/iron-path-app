@@ -1,75 +1,67 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 
-export default function SignupSuccessScreen() {
+export default function SignupSuccess() {
   const router = useRouter();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Thank You for Signing Up!</Text>
-        <Text style={styles.message}>
-          Please check your email to confirm your account before logging in.
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.title}>Check your email</Text>
+        <Text style={styles.subtitle}>
+          We just sent a confirmation link. After confirming, log in to continue onboarding.
         </Text>
-        <Text style={styles.subMessage}>
-          We've sent a confirmation email to your inbox. Click the link in the email to verify your account.
-        </Text>
-        
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.button}
-          onPress={() => router.replace('/onboarding')}
+          onPress={() => router.replace('/login')}
         >
-          <Text style={styles.buttonText}>Continue to Onboarding</Text>
+          <Text style={styles.buttonText}>Back to login</Text>
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111827',
-  },
-  content: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    backgroundColor: colors.background,
+    padding: spacing.lg,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#3b82f6',
-    textAlign: 'center',
-    marginBottom: 20,
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
   },
-  message: {
-    fontSize: 18,
-    color: 'white',
-    textAlign: 'center',
-    marginBottom: 16,
-    lineHeight: 26,
-  },
-  subMessage: {
-    fontSize: 14,
-    color: '#9ca3af',
-    textAlign: 'center',
-    marginBottom: 40,
-    lineHeight: 20,
+  subtitle: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
   },
   button: {
-    backgroundColor: '#2563eb',
-    padding: 16,
-    borderRadius: 8,
-    minWidth: 200,
+    marginTop: spacing.md,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
   },
   buttonText: {
-    color: 'white',
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 18,
+    color: colors.background,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
   },
 });
+
 

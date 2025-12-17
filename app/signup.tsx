@@ -1,166 +1,201 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Image } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '../src/lib/supabase';
+import { supabase } from '../src/lib/supabase/client';
+import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 
-export default function SignupScreen() {
-  const [name, setName] = useState('');
+export default function Signup() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const router = useRouter();
 
-  const safeBack = () => {
-    try {
-      if (router.canGoBack && typeof router.canGoBack === 'function' && router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/');
-      }
-    } catch (error) {
-      router.push('/');
-    }
-  };
+  const handleSignup = async () => {
+    setErrorText(null);
 
-  const validatePasswords = (): boolean => {
-    if (password !== confirmPassword) {
-      setErrorMessage("Passwords do not match.");
-      return false;
-    }
-    if (password.length < 6) {
-      setErrorMessage("Password must be at least 6 characters.");
-      return false;
-    }
-    return true;
-  };
-
-  const signUp = async () => {
-    setErrorMessage('');
-    
-    if (!name || !email || !password || !confirmPassword) {
-      setErrorMessage("Please fill in all fields.");
+    if (!email.trim() || !password || !confirmPassword) {
+      setErrorText('All fields are required.');
       return;
     }
 
-    if (!validatePasswords()) return;
-    
+    if (password !== confirmPassword) {
+      setErrorText('Passwords do not match.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorText('Password must be at least 6 characters.');
+      return;
+    }
+
     setLoading(true);
-    
     try {
-      // 1. Create Auth User
-      const { data: authData, error: authError } = await supabase.auth.signUp({ 
-        email, 
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
         password,
-        options: {
-          data: { full_name: name } // Save name to metadata as backup
-        }
       });
-      
-      if (authError) throw authError;
-      if (!authData.user) throw new Error("No user created");
 
-      // 2. Update the Profile Row (Created automatically by our SQL Trigger)
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          full_name: name,
-          // We leave age/gender/weight/height/goal for the Onboarding screen
-        })
-        .eq('id', authData.user.id);
+      if (error) {
+        setErrorText(error.message);
+        return;
+      }
 
-      if (profileError) throw profileError;
-
-      router.replace('/signup-success');
-    } catch (err: any) {
-      console.error('Signup error:', err);
-      setErrorMessage(err.message || "An unexpected error occurred.");
+      if (data.session) {
+        router.replace('/onboarding');
+      } else {
+        router.replace('/signup-success');
+      }
+    } catch (error: any) {
+      setErrorText(error?.message || 'Unable to sign up right now.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <Image 
-        source={require('../assets/splash-icon.png')} 
-        style={styles.logo}
-      />
-      <Text style={styles.title}>Create Account</Text>
-      <Text style={styles.subtitle}>Join IronPath</Text>
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Full Name"
-        placeholderTextColor="#999"
-        value={name}
-        onChangeText={setName}
-        autoCapitalize="words"
-      />
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#999"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#999"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      
-      <TextInput
-        style={styles.input}
-        placeholder="Confirm Password"
-        placeholderTextColor="#999"
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-        secureTextEntry
-      />
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.title}>Create your account</Text>
+        <Text style={styles.subtitle}>Sign up to get started</Text>
 
-      {errorMessage ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Email</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="you@example.com"
+            placeholderTextColor={colors.textMuted}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            textContentType="emailAddress"
+          />
         </View>
-      ) : null}
 
-      <TouchableOpacity style={styles.buttonPrimary} onPress={signUp} disabled={loading}>
-        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>Create Account</Text>}
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.buttonSecondary} onPress={safeBack}>
-        <Text style={styles.buttonTextSecondary}>Back to Login</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor={colors.textMuted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType="newPassword"
+          />
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Confirm Password</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor={colors.textMuted}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            textContentType="newPassword"
+          />
+        </View>
+
+        {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleSignup}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.textPrimary} />
+          ) : (
+            <Text style={styles.buttonText}>Sign Up</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.replace('/login')}>
+          <Text style={styles.linkText}>Already have an account? Log in</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827' },
-  contentContainer: { padding: 24, paddingTop: 60 },
-  logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 24,
-    alignSelf: 'center',
-    marginBottom: 24,
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    padding: spacing.lg,
   },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', marginBottom: 8 },
-  subtitle: { color: '#9ca3af', textAlign: 'center', marginBottom: 32 },
-  input: { backgroundColor: '#1f2937', color: 'white', padding: 16, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#374151', justifyContent: 'center' },
-  buttonPrimary: { backgroundColor: '#2563eb', padding: 16, borderRadius: 8, marginBottom: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
-  buttonSecondary: { borderWidth: 1, borderColor: '#2563eb', padding: 16, borderRadius: 8 },
-  buttonText: { color: 'white', textAlign: 'center', fontWeight: 'bold', fontSize: 18 },
-  buttonTextSecondary: { color: '#60a5fa', textAlign: 'center', fontWeight: 'bold', fontSize: 16 },
-  errorContainer: { backgroundColor: 'rgba(127, 29, 29, 0.5)', padding: 12, borderRadius: 4, marginBottom: 16, borderWidth: 1, borderColor: '#ef4444' },
-  errorText: { color: '#fecaca', textAlign: 'center', fontWeight: 'bold' },
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  title: {
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
+  },
+  subtitle: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+  },
+  fieldGroup: {
+    gap: spacing.xs,
+  },
+  label: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    color: colors.textPrimary,
+    backgroundColor: colors.background,
+    fontSize: typography.sizes.base,
+  },
+  button: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: colors.background,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+  },
+  errorText: {
+    color: colors.error,
+    fontSize: typography.sizes.sm,
+  },
+  linkText: {
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
 });
+
+
