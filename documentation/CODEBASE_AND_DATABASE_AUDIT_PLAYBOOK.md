@@ -497,8 +497,9 @@ Patch 08 findings:
     - Inserts target `reps`/`weight`/`duration_sec` with `rpe/rir/rest_sec/notes` as `null`.
 - **Prefill semantics vs schema**:
   - The schema defaults `v2_session_sets.performed_at` to `now()`. Prefilling targets therefore creates rows that look “performed” by timestamp, even though they are intended as editable starting targets.
-- **Custom exercise handling**:
-  - Session structure supports custom exercises (`custom_exercise_id`), but target selection currently passes IDs into `selectExerciseTargets(...)` in a way that does not distinguish master vs custom IDs.
+- **Custom exercise handling**: **Fixed (Patch 07 + Patch 08)**:
+  - Session structure and start flow carry `exercise_id` XOR `custom_exercise_id`.
+  - Prefill uses targets keyed by XOR IDs; engine calls expect `{ exerciseId?, customExerciseId? }`.
 - **Completion wiring**:
   - Planner navigates to `/workout-active` after creating the session; there is no completion/abandon path wired from the placeholder active-workout screens yet.
 

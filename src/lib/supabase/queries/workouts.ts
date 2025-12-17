@@ -584,10 +584,15 @@ export async function prefillSessionSets(
   try {
     // Create sets for each session exercise
     for (const sessionExercise of sessionExercises) {
-      const exerciseId = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
-      if (!exerciseId) continue;
+      const exerciseRef = {
+        exerciseId: sessionExercise.exercise_id || undefined,
+        customExerciseId: sessionExercise.custom_exercise_id || undefined,
+      };
 
-      const target = targets.get(exerciseId);
+      const exerciseKey = exerciseRef.exerciseId || exerciseRef.customExerciseId;
+      if (!exerciseKey) continue;
+
+      const target = targets.get(exerciseKey);
       if (!target) continue;
 
       // Create sets for the planned set count

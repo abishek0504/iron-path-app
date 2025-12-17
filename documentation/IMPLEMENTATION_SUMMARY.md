@@ -118,12 +118,12 @@ All query functions follow the same pattern:
 - `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
 - `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
-#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F)**
-- `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session
+#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08)**
+- `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session (structure preserved for XOR exercise/custom downstream)
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
 - `getExerciseHistory(exerciseId, userId, limit)` - Gets recent history (completed sessions, exercise OR custom exercise) and returns safe empty `{ sets: [], lastRPE/RIR/Weight/Reps/Duration: null, avgRPE: null }` when none
-- `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start
+- `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start; targets map is keyed by XOR exercise/custom IDs and writes sets for the matching session exercise
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
 - `getLast7DaysSessionStructure(userId)` - Gets last 7 days of completed session structure for "Copy last week" feature ✅ **NEW (Patch E)**
 
@@ -413,7 +413,7 @@ All hooks provide convenience wrappers around Zustand stores.
   - Creates/updates template days based on session day_names
   - Explicit button action, not automatic mutation
 
-#### Start Workout Integration ✅ **UPDATED (Patch F, G)**
+#### Start Workout Integration ✅ **UPDATED (Patch F, G, 08)**
 - **"Start this day" Button**:
   1. **Pre-start check**: Calls `needsRebalance()` to detect muscle coverage gaps
   2. If gaps detected: Shows `SmartAdjustPrompt` with reasons
@@ -421,9 +421,9 @@ All hooks provide convenience wrappers around Zustand stores.
      - User can choose "Smart adjust" (TODO: full implementation coming soon)
   3. If no gaps or user chooses "Continue anyway":
      - Creates workout session via `createWorkoutSession(userId, templateId, dayName)`
-     - Creates session exercises from template slots (INSERT into `v2_session_exercises`)
-     - For each exercise, calculates progressive overload targets via `selectExerciseTargets()`
-     - Prefills session sets via `prefillSessionSets()` with starting targets (reps/weight/duration)
+     - Creates session exercises from template slots (INSERT into `v2_session_exercises`) preserving XOR `exercise_id`/`custom_exercise_id`
+     - For each exercise/custom exercise, calculates progressive overload targets via `selectExerciseTargets({ exerciseId?, customExerciseId? }, userId, context)`
+     - Prefills session sets via `prefillSessionSets()` with starting targets keyed by the same XOR ID (reps/weight/duration)
        - These are "starting targets" that the user edits, NOT "already performed" values
        - User edits these values during workout, and final saved values become the performed truth
      - Navigates to `/workout-active` route
