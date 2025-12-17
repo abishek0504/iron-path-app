@@ -30,22 +30,22 @@ This file is a **living plan + execution log** for auditing the entire app and d
 
 - [x] **Research**: Read core docs + migrations (`IMPLEMENTATION_SUMMARY.md`, `V2_ARCHITECTURE.md`, `README_V2.md`, Supabase migrations)
 - [x] **Research**: Read runtime entrypoints (router layouts, Supabase client, key screens, core queries/engine)
-- [ ] **Audit Patch 00**: Baseline tooling + repo inventory
-- [ ] **Audit Patch 01**: Navigation + route map + labels/icons correctness
-- [ ] **Audit Patch 02**: Global UI overlay system (bottom sheets, toasts) and state machine
-- [ ] **Audit Patch 03**: Auth/session bootstrap + onboarding gating
-- [ ] **Audit Patch 04**: Database schema + migrations + RLS policies verification
-- [ ] **Audit Patch 05**: Query layer inventory + contracts + error/return conventions
-- [ ] **Audit Patch 06**: Stores + hooks wiring (Zustand ↔ screens ↔ UI components)
-- [ ] **Audit Patch 07**: Planner flow (template→days→slots) + edit scoping
-- [ ] **Audit Patch 08**: Workout start flow (session creation + session_exercises + prefill sets)
-- [ ] **Audit Patch 09**: Workout execution UI (what exists vs placeholder) + save semantics
-- [ ] **Audit Patch 10**: Dashboard metrics + date range correctness + performance
-- [ ] **Audit Patch 11**: Progress tab + derived caches (heatmap/freshness)
-- [ ] **Audit Patch 12**: Engine: target selection, AI week generation, rebalance detection
-- [ ] **Audit Patch 13**: Unused code/variables/components + safe removal plan
-- [ ] **Audit Patch 14**: Types + schema drift control (Supabase generated types)
-- [ ] **Audit Patch 15**: Security + privacy review (RLS, env handling, dev logging)
+- [x] **Audit Patch 00**: Baseline tooling + repo inventory
+- [x] **Audit Patch 01**: Navigation + route map + labels/icons correctness
+- [x] **Audit Patch 02**: Global UI overlay system (bottom sheets, toasts) and state machine
+- [x] **Audit Patch 03**: Auth/session bootstrap + onboarding gating
+- [x] **Audit Patch 04**: Database schema + migrations + RLS policies verification
+- [x] **Audit Patch 05**: Query layer inventory + contracts + error/return conventions
+- [x] **Audit Patch 06**: Stores + hooks wiring (Zustand ↔ screens ↔ UI components)
+- [x] **Audit Patch 07**: Planner flow (template→days→slots) + edit scoping
+- [x] **Audit Patch 08**: Workout start flow (session creation + session_exercises + prefill sets)
+- [x] **Audit Patch 09**: Workout execution UI (what exists vs placeholder) + save semantics
+- [x] **Audit Patch 10**: Dashboard metrics + date range correctness + performance
+- [x] **Audit Patch 11**: Progress tab + derived caches (heatmap/freshness)
+- [x] **Audit Patch 12**: Engine: target selection, AI week generation, rebalance detection
+- [x] **Audit Patch 13**: Unused code/variables/components + safe removal plan
+- [x] **Audit Patch 14**: Types + schema drift control (Supabase generated types)
+- [x] **Audit Patch 15**: Security + privacy review (RLS, env handling, dev logging)
 
 ---
 
@@ -201,11 +201,19 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Item | Value | Notes |
 |---|---|---|
-| Node version |  |  |
+| Node version | `v22.21.1` | Local toolchain version |
 | Package manager | npm | `package-lock.json` exists |
-| Typecheck command |  |  |
-| Lint command |  |  |
-| Test command |  |  |
+| Typecheck command | Not defined | No `typecheck` script in `package.json` |
+| Lint command | Not defined | No `lint` script in `package.json` |
+| Test command | Not defined | No `test` script in `package.json` |
+
+Additional Patch 00 notes (baseline):
+
+- **npm scripts present**: `start`, `web`, `android`, `ios`, `ios:simulator`
+- **TypeScript**: `strict: true`, `skipLibCheck: true`, path alias `@/*` → `./src/*` (`tsconfig.json`)
+- **Babel plugins**: `nativewind/babel`, `react-native-reanimated/plugin` (`babel.config.js`)
+- **Metro**: excludes `Archive/` via resolver blocklist (`metro.config.js`)
+- **Expo config**: scheme `ironpath`, plugin `expo-router` (`app.json`)
 
 ---
 
@@ -224,13 +232,29 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Route | Type | Presentation | Entry points that navigate here | Status (implemented/placeholder) |
 |---|---|---|---|---|
-| `/` | bootstrap | stack | `app/index.tsx` |  |
-| `/login` | auth | stack | `app/index.tsx` |  |
-| `/onboarding` | flow | stack | `app/index.tsx` |  |
-| `/(tabs)/index` | tab | tab | `/(tabs)/_layout.tsx` |  |
-| `/(tabs)/planner` | tab | tab | `/(tabs)/_layout.tsx` |  |
-| `/(tabs)/progress` | tab | tab | `/(tabs)/_layout.tsx` |  |
-| `/(tabs)/dashboard` | tab | tab | `/(tabs)/_layout.tsx` |  |
+| `/` | bootstrap | stack | `app/index.tsx` | implemented |
+| `/login` | auth | stack | `app/index.tsx`, `app/signup-success.tsx`, `app/signup.tsx`, `app/auth/callback.tsx`, `app/edit-profile.tsx`, `app/onboarding.tsx` | implemented |
+| `/signup` | auth | stack | `app/login.tsx` | implemented |
+| `/signup-success` | auth | stack | `app/signup.tsx` | implemented |
+| `/onboarding` | flow | stack | `app/index.tsx`, `app/signup.tsx` | implemented |
+| `/(tabs)` | tabs group | stack→tabs | `app/index.tsx`, `app/auth/callback.tsx`, `app/edit-profile.tsx` | implemented |
+| `/(tabs)/index` | tab | tab | `app/(tabs)/_layout.tsx` | implemented |
+| `/(tabs)/planner` | tab | tab | `app/(tabs)/_layout.tsx`, `app/onboarding.tsx` | implemented |
+| `/(tabs)/progress` | tab | tab | `app/(tabs)/_layout.tsx` | placeholder |
+| `/(tabs)/dashboard` | tab | tab | `app/(tabs)/_layout.tsx` | implemented |
+| `/auth/forgot-password` | auth | modal | `app/login.tsx`, `app/edit-profile.tsx` | implemented |
+| `/auth/change-email` | auth | modal | `src/components/settings/SettingsMenu.tsx` | implemented |
+| `/auth/callback` | auth | modal | deep link redirect target | implemented |
+| `/edit-profile` | modal | modal | `src/components/settings/SettingsMenu.tsx` | implemented |
+| `/workout-active` | workout | modal | `app/(tabs)/planner.tsx` | placeholder |
+| `/workout/active` | workout | modal | `app/(tabs)/index.tsx` | placeholder |
+| `/planner-day` | (registered screen) | stack (slide_from_right) | (no in-app navigation found yet) | **missing route file** |
+| `/exercise-detail` | (registered screen) | modal | (no in-app navigation found yet) | **missing route file** |
+
+Patch 01 notes:
+
+- **Active workout route ambiguity**: both `/workout-active` (`app/workout-active.tsx`) and `/workout/active` (`app/(stack)/workout/active.tsx`) exist and are used by different entrypoints.
+- **Registered-but-missing routes**: `app/_layout.tsx` registers `planner-day` and `exercise-detail`, but there are no corresponding route files under `app/` today.
 
 ---
 
@@ -251,9 +275,14 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | BottomSheetId | Component rendered | Opened from (files) | Props contract |
 |---|---|---|---|
-| `exercisePicker` |  |  |  |
-| `settingsMenu` |  |  |  |
-| `planDayPicker` |  |  |  |
+| `exercisePicker` | `src/components/exercise/ExercisePicker.tsx` | `src/hooks/useExercisePicker.ts` (used by `app/(tabs)/planner.tsx`) | `{ onSelect: (exercise) => void; multiSelect?: boolean }` |
+| `settingsMenu` | `src/components/settings/SettingsMenu.tsx` | `src/components/ui/TabHeader.tsx` (settings gear → `openSheet('settingsMenu')`) | `{ onClose?: () => void }` |
+| `planDayPicker` | `src/components/ui/PlanDayPicker.tsx` | `app/(tabs)/index.tsx` (`openSheet('planDayPicker', ...)`) | `{ selectedDayName: string; todayDayName: string; days: {dayName; hasWorkout}[]; onSelect(dayName); onResetToToday() }` |
+
+Patch 02 notes:
+
+- **Single-host overlay**: `ModalManager` is mounted once in `app/_layout.tsx` and renders at most one `BottomSheet` at a time based on `uiStore.activeBottomSheet`.
+- **Queueing behavior**: `uiStore.openBottomSheet()` queues `pendingBottomSheet` when another sheet is open, triggers `closeBottomSheet()`, and `onBottomSheetClosed()` opens the pending sheet after the exit animation completes.
 
 ---
 
@@ -274,6 +303,31 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 - **Dev-only diagnostics to add (if needed)**:
   - On bootstrap: log `{ hasSession, hasProfile, hasRequiredFields }`.
 
+Patch 03 findings:
+
+- **Session persistence** (`src/lib/supabase/client.ts`):
+  - Web: `localStorage` + `detectSessionInUrl: true`
+  - Native: `AsyncStorage` + `detectSessionInUrl: false`
+- **Onboarding “required fields” mismatch**:
+
+| Source | Required fields for “done onboarding” |
+|---|---|
+| `README_V2.md` | `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` |
+| `app/index.tsx` bootstrap gate | `experience_level`, `days_per_week`, `equipment_access[]` (non-empty) |
+| `app/onboarding.tsx` validation | `fullName`, `age` (13–120), `weight` (>0), `experience`, `daysPerWeek` (1–7), `equipment[]` (non-empty), `useImperial` (toggle stored) |
+
+- **Auth flows**:
+  - Signup (`app/signup.tsx`): if Supabase returns `data.session`, route → `/onboarding`; else → `/signup-success` (email confirmation flow).
+  - Forgot password (`app/auth/forgot-password.tsx`): uses `redirectTo = EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback')`.
+  - Change email (`app/auth/change-email.tsx`): uses `emailRedirectTo = EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback')`.
+  - Callback (`app/auth/callback.tsx`): exchanges `code` for session; `type=email_change` routes to `/(tabs)`; password reset routes to `/login` after setting password.
+
+- **Error surfacing patterns (by screen)**:
+  - `login.tsx`, `signup.tsx`: inline `errorText` (no toast).
+  - `forgot-password.tsx`, `change-email.tsx`: inline info + toast via `uiStore.showToast`.
+  - `auth/callback.tsx`: inline status + toast via `uiStore.showToast`.
+  - Missing Supabase env vars: dev-only `console.warn` in `src/lib/supabase/client.ts`.
+
 ---
 
 ### Patch 04 — Database schema + migrations + RLS
@@ -289,9 +343,29 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Table | Owned by | RLS policy summary | App reads? | App writes? | Notes |
 |---|---|---|---|---|---|
-| `v2_exercises` | system | auth SELECT only |  | no |  |
-| `v2_user_custom_exercises` | user | owner CRUD |  |  |  |
-| `v2_workout_sessions` | user | owner CRUD |  |  |  |
+| `v2_muscles` | system | auth SELECT only | yes | no | Used by rebalance (`v2_muscles.key`) |
+| `v2_exercises` | system | auth SELECT only | yes | no | Used by exercise picker + merged view |
+| `v2_exercise_prescriptions` | system | auth SELECT only | yes | no | Patch H removes `goal`; code queries `(exercise_id, experience, mode)` |
+| `v2_ai_recommended_exercises` | system | auth SELECT only | yes | no | Used by AI week generation allow-list |
+| `v2_user_exercise_overrides` | user | owner CRUD (`user_id = auth.uid()`) | yes | no (no UI write path found) | Read during merged exercise lookup |
+| `v2_user_custom_exercises` | user | owner CRUD (`user_id = auth.uid()`) | yes | no (no UI write path found) | Patch D adds target-band columns + constraints |
+| `v2_profiles` | user | owner CRUD (`id = auth.uid()`) | yes | yes | Onboarding + edit-profile update this table |
+| `v2_workout_templates` | user/system | owner OR `user_id IS NULL` | yes | yes | RLS allows writes when `user_id IS NULL` |
+| `v2_template_days` | user/system | owner via template (includes `user_id IS NULL`) | yes | yes | Created/ensured by `ensureTemplateHasWeekDays()` |
+| `v2_template_slots` | user/system | owner via template (includes `user_id IS NULL`) | yes | yes | Patch C1 adds `custom_exercise_id` + XOR check |
+| `v2_workout_sessions` | user | owner CRUD (`user_id = auth.uid()`) | yes | yes | Created by planner; deleted by workout reset; completed by complete flow |
+| `v2_session_exercises` | user | owner via session | yes | yes | XOR constraint for exercise vs custom exercise (Patch C2 reinforces) |
+| `v2_session_sets` | user | owner via session | yes | yes | Prefill creates rows; save updates/upserts rows |
+| `v2_muscle_freshness` | user | owner CRUD | no (not referenced) | no | Intended derived cache; no app rebuild job found yet |
+| `v2_daily_muscle_stress` | user | owner CRUD | no (not referenced) | no | `WorkoutHeatmap` component exists but is not imported by any current route |
+
+Patch 04 notes:
+
+- **Schema evolution checkpoints**:
+  - Patch C1: `v2_template_slots.custom_exercise_id` + XOR constraint with `exercise_id`.
+  - Patch C2: reinforces `v2_session_exercises.custom_exercise_id` + XOR constraint (table already had it in base migration).
+  - Patch D: adds target-band fields (`mode`, `sets_min/max`, `reps_min/max`, `duration_sec_min/max`) + CHECK constraints to `v2_user_custom_exercises` and **backfills existing rows** with `mode='reps'`, `3–4` sets, `8–12` reps when `mode IS NULL`.
+  - Patch H: removes `goal` from `v2_profiles`, `v2_exercise_prescriptions`, and `v2_template_slots`; consolidates prescriptions before dropping the column.
 
 ---
 
@@ -308,9 +382,43 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Module | Function | Inputs | Output | On error | Used by (files) |
 |---|---|---|---|---|---|
-| `queries/exercises.ts` | `getMergedExercise` |  |  |  |  |
-| `queries/templates.ts` | `ensureTemplateHasWeekDays` |  |  |  |  |
-| `queries/workouts.ts` | `getSessionsInRange` |  |  |  |  |
+| `queries/exercises.ts` | `getMergedExercise` | `{ exerciseId?; customExerciseId? }`, `userId` | `MergedExercise \u007c null` | returns `null` | `app/(tabs)/planner.tsx`, `app/(tabs)/index.tsx`, `src/lib/engine/rebalance.ts`, `src/lib/engine/targetSelection.ts` |
+| `queries/exercises.ts` | `listMergedExercises` | `userId`, `exerciseIds?` | `MergedExercise[]` | returns `[]` | `app/(tabs)/planner.tsx`, `app/(tabs)/dashboard.tsx` |
+| `queries/prescriptions.ts` | `getExercisePrescription` | `exerciseId`, `experience`, `mode` | `ExercisePrescription \u007c null` | returns `null` | `src/lib/engine/targetSelection.ts` |
+| `queries/prescriptions.ts` | `getExercisePrescriptions` | `exerciseId` | `ExercisePrescription[]` | returns `[]` | (no runtime usage found) |
+| `queries/prescriptions.ts` | `getPrescriptionsForExercises` | `exerciseIds[]`, `experience`, `mode` | `Map<exercise_id, ExercisePrescription>` | returns empty `Map` | `src/lib/engine/targetSelection.ts` |
+| `queries/users.ts` | `getUserProfile` | `userId` | `UserProfile \u007c null` | returns `null` | `app/index.tsx`, `app/onboarding.tsx`, `app/edit-profile.tsx`, `app/(tabs)/dashboard.tsx` |
+| `queries/users.ts` | `updateUserProfile` | `userId`, `updates` | `boolean` | returns `false` | `app/onboarding.tsx`, `app/edit-profile.tsx` |
+| `queries/users.ts` | `createUserProfile` | `userId`, `profile` | `boolean` | returns `false` | `app/onboarding.tsx` |
+| `queries/templates.ts` | `getUserTemplates` | `userId` | `TemplateSummary[]` | returns `[]` | `app/onboarding.tsx`, `app/(tabs)/planner.tsx`, `app/(tabs)/index.tsx` |
+| `queries/templates.ts` | `getTemplateWithDaysAndSlots` | `templateId` | `FullTemplate \u007c null` | returns `null` | `app/(tabs)/planner.tsx`, `app/(tabs)/index.tsx` |
+| `queries/templates.ts` | `createTemplate` | `userId`, `name?` | `Template \u007c null` | returns `null` | `app/onboarding.tsx`, `app/(tabs)/planner.tsx` |
+| `queries/templates.ts` | `upsertTemplateDay` | `templateId`, `dayName`, `sortOrder` | `TemplateDay \u007c null` | returns `null` | `src/lib/supabase/queries/templates.ts` (`ensureTemplateHasWeekDays`) |
+| `queries/templates.ts` | `ensureTemplateHasWeekDays` | `templateId` | `TemplateDay[]` | returns `[]` | `app/onboarding.tsx`, `app/(tabs)/planner.tsx` |
+| `queries/templates.ts` | `createTemplateSlot` | `dayId`, `{ exerciseId?; customExerciseId?; experience?; notes?; sortOrder }` | `TemplateSlot \u007c null` | returns `null` | `app/(tabs)/planner.tsx`, `src/lib/supabase/queries/templates.ts` (helpers) |
+| `queries/templates.ts` | `updateTemplateSlot` | `slotId`, `updates` | `boolean` | returns `false` | `src/lib/supabase/queries/templates.ts` (`applyStructureEditToTemplate`) |
+| `queries/templates.ts` | `applySessionStructureToTemplate` | `userId`, `templateId`, `structure[]` | `boolean` | returns `false` | `app/(tabs)/planner.tsx` |
+| `queries/templates.ts` | `applyStructureEditToTemplate` | `templateId`, `edit` | `boolean` | returns `false` | `app/(tabs)/planner.tsx` |
+| `queries/templates.ts` | `deleteTemplateSlot` | `slotId` | `boolean` | returns `false` | `src/lib/supabase/queries/templates.ts` (`applyStructureEditToTemplate`) |
+| `queries/templates.ts` | `deleteTemplateDay` | `dayId` | `boolean` | returns `false` | (no runtime usage found) |
+| `queries/workouts.ts` | `createWorkoutSession` | `userId`, `templateId?`, `dayName?` | `WorkoutSession \u007c null` | returns `null` | `app/(tabs)/planner.tsx`, `src/lib/supabase/queries/workouts_helpers.ts` |
+| `queries/workouts.ts` | `getActiveSession` | `userId` | `WorkoutSession \u007c null` | returns `null` | `app/(tabs)/index.tsx` |
+| `queries/workouts.ts` | `completeWorkoutSession` | `sessionId` | `boolean` | returns `false` | (no runtime usage found) |
+| `queries/workouts.ts` | `saveSessionSet` | `sessionExerciseId`, `setNumber`, `setData` | `SessionSet \u007c null` | returns `null` | (no runtime usage found) |
+| `queries/workouts.ts` | `getSessionsInRange` | `userId`, `startIso`, `endIso` | `WorkoutSession[]` | returns `[]` | `app/(tabs)/dashboard.tsx` |
+| `queries/workouts.ts` | `getRecentSessions` | `userId`, `limit=5` | `WorkoutSession[]` | returns `[]` | `app/(tabs)/dashboard.tsx` |
+| `queries/workouts.ts` | `getTopPRs` | `userId`, `limit=3` | `TopPR[]` | returns `[]` | `app/(tabs)/dashboard.tsx` |
+| `queries/workouts.ts` | `prefillSessionSets` | `sessionId`, `sessionExercises[]`, `targets Map` | `boolean` | returns `false` | `app/(tabs)/planner.tsx` |
+| `queries/workouts.ts` | `getLast7DaysSessionStructure` | `userId` | `{ dayName; exercises[] }[]` | returns `[]` | `app/(tabs)/planner.tsx` |
+| `queries/workouts.ts` | `getExerciseHistory` | `exerciseId`, `userId`, `limit` | **missing export** | n/a | referenced by `src/lib/engine/targetSelection.ts` |
+| `queries/workouts_helpers.ts` | `getOrCreateActiveSessionForToday` | `userId`, `dayName?` | `WorkoutSession \u007c null` | returns `null` | `app/(tabs)/planner.tsx` |
+| `queries/workouts_helpers.ts` | `createSessionExercise` | `sessionId`, `{ exerciseId?; customExerciseId?; sortOrder }` | `SessionExercise \u007c null` | returns `null` | `src/lib/supabase/queries/workouts_helpers.ts` (`applyStructureEditToSession`) |
+| `queries/workouts_helpers.ts` | `applyStructureEditToSession` | `sessionId`, `edit` | `boolean` | returns `false` | `app/(tabs)/planner.tsx` |
+
+Patch 05 notes:
+
+- **Error-return contract is not uniform across modules**: some functions return `null`, others `[]`, others `false`, others an empty `Map`. Within each module it’s mostly consistent, but cross-module callers must handle different failure shapes.
+- **Missing implementation**: `src/lib/engine/targetSelection.ts` imports and calls `getExerciseHistory` from `queries/workouts.ts`, but `queries/workouts.ts` does not export it.
 
 ---
 
@@ -328,9 +436,14 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Store | State fields | Actions | Used by (files) | Notes |
 |---|---|---|---|---|
-| `uiStore` |  |  |  |  |
-| `userStore` |  |  |  |  |
-| `workoutStore` |  |  |  |  |
+| `uiStore` | `activeBottomSheet`, `bottomSheetProps`, `isBottomSheetOpen`, `pendingBottomSheet`, `pendingBottomSheetProps`, `toasts[]` | `openBottomSheet`, `closeBottomSheet`, `onBottomSheetClosed`, `showToast`, `removeToast` | `src/components/ui/ModalManager.tsx`, `src/components/ui/ToastProvider.tsx`, `src/hooks/useModal.ts`, `src/hooks/useToast.ts`, `src/hooks/useExercisePicker.ts`, `app/(tabs)/dashboard.tsx`, `app/auth/*`, `src/components/*` | Bottom sheet queueing state machine lives here |
+| `userStore` | `profile`, `isLoading` | `setProfile`, `updateProfile`, `clearProfile` | `app/index.tsx`, `app/onboarding.tsx`, `app/(tabs)/planner.tsx`, `app/(tabs)/dashboard.tsx`, `app/edit-profile.tsx` | Cache only; DB writes happen via `queries/users.ts` |
+| `exerciseStore` | `searchQuery`, `selectedExercises[]`, `isLoading` | `setSearchQuery`, `setSelectedExercises`, `addSelectedExercise`, `removeSelectedExercise`, `clearSelection` | `src/components/exercise/ExercisePicker.tsx` | `selectedExercises` not used outside picker currently |
+| `workoutStore` | `activeSession`, `isLoading` | `setActiveSession`, `updateSessionProgress`, `completeSession`, `abandonSession`, `clearSession` | (no runtime usage found) | Likely intended for active workout execution screen (currently placeholder) |
+
+Patch 06 notes:
+
+- `workoutStore` exists but is not imported by any current route/component; state is currently derived directly from Supabase queries in the tab screens.
 
 ---
 
@@ -350,6 +463,15 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
   - On load: selected weekday, templateId, dayCount, slotCount.
   - On target calc: effective experience, slotCounts (with/without prescription).
 
+Patch 07 findings:
+
+- **Scope prompt wiring**: planner stores a `pendingEdit` then shows `EditScopePrompt`; scope routes writes to either `workouts_helpers` (“today”) or `templates` (“nextWeek”).
+- **Scope coverage**:
+  - `today`: supports `addSlot` only; `removeSlot` is explicitly TODO and surfaces a toast.
+  - `thisWeek`: disabled (TODO).
+  - `nextWeek`: supports `addSlot`/`removeSlot` via `applyStructureEditToTemplate`; `reorderSlots` TODO.
+- **Target computation**: Planner computes targets per slot via `selectExerciseTargets(...)`, but the current plumbing does not correctly distinguish `exercise_id` vs `custom_exercise_id` when passing IDs into target selection.
+
 ---
 
 ### Patch 08 — Start workout flow (session creation + prefill)
@@ -365,6 +487,21 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
   - Are prefilled sets considered “planned targets” (not performed) and how does that reconcile with `performed_at` defaults?
   - Are custom exercises handled consistently end-to-end?
 
+Patch 08 findings:
+
+- **DB writes on “Start this day”** (`app/(tabs)/planner.tsx`):
+  - Inserts `v2_workout_sessions` via `createWorkoutSession(userId, templateId, dayName)` with `status='active'`.
+  - For each template slot: inserts `v2_session_exercises` (structure only) with `exercise_id` XOR `custom_exercise_id`, plus `sort_order`.
+  - Prefills `v2_session_sets` via `prefillSessionSets(...)`:
+    - Creates `set_number = 1..target.sets` rows.
+    - Inserts target `reps`/`weight`/`duration_sec` with `rpe/rir/rest_sec/notes` as `null`.
+- **Prefill semantics vs schema**:
+  - The schema defaults `v2_session_sets.performed_at` to `now()`. Prefilling targets therefore creates rows that look “performed” by timestamp, even though they are intended as editable starting targets.
+- **Custom exercise handling**:
+  - Session structure supports custom exercises (`custom_exercise_id`), but target selection currently passes IDs into `selectExerciseTargets(...)` in a way that does not distinguish master vs custom IDs.
+- **Completion wiring**:
+  - Planner navigates to `/workout-active` after creating the session; there is no completion/abandon path wired from the placeholder active-workout screens yet.
+
 ---
 
 ### Patch 09 — Active workout execution UI + save semantics
@@ -378,6 +515,15 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
   - Which route is the real one the app uses today?
   - Is session completion wired (`completeWorkoutSession`) and where?
   - Is `saveSessionSet` used anywhere yet?
+
+Patch 09 findings:
+
+- **Two active-workout routes exist and both are placeholders**:
+  - `/workout-active` → `app/workout-active.tsx` (planner navigates here after creating a session).
+  - `/workout/active` → `app/(stack)/workout/active.tsx` (workout tab navigates here without creating a session in that handler).
+- **No execution flow wired yet**:
+  - No call sites for `saveSessionSet(...)` or `completeWorkoutSession(...)` were found outside the query module/docs.
+  - Placeholder screens only render UI and call `router.back()`.
 
 ---
 
@@ -394,6 +540,14 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 - **Dev-only diagnostics to add (if needed)**:
   - Log `{ weekStartLocal, weekEndLocal, startIso, endIso, thisWeekCount, recentCount, prsCount }` once per load.
 
+Patch 10 findings:
+
+- **Week range definition** (`app/(tabs)/dashboard.tsx`): computes local Sunday-start week boundaries and converts to ISO strings for querying.
+- **Query timestamp mismatch**:
+  - Dashboard labels metric as “This week completed workouts”, but `getSessionsInRange(...)` filters on `v2_workout_sessions.started_at` (not `completed_at`).
+- **PRs implementation bias**:
+  - `getTopPRs(...)` currently filters sets with `weight IS NOT NULL` and orders by `weight desc`, so timed PRs (`duration_sec`) are not discoverable by this query path.
+
 ---
 
 ### Patch 11 — Progress tab + derived caches (heatmap/freshness)
@@ -406,6 +560,12 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 - **Questions to answer**:
   - Is heatmap wired to real data today?
   - What jobs/process rebuild derived caches (if any)?
+
+Patch 11 findings:
+
+- `app/(tabs)/progress.tsx` is a placeholder with TODO guidance about grouping by `completed_at` / `performed_at` and not `day_name`.
+- `src/components/workout/WorkoutHeatmap.tsx` queries `v2_daily_muscle_stress` and aggregates client-side; it is **not imported by any current route**, and `onMuscleSelect` is currently unused in the component.
+- No in-repo jobs/processes were found that rebuild `v2_daily_muscle_stress` or `v2_muscle_freshness` from performed truth.
 
 ---
 
@@ -421,6 +581,19 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
   - Does target selection correctly treat missing prescriptions as a hard failure?
   - Does AI generation only use the allow-list?
   - Rebalance: is it detection-only and does it avoid per-item logging?
+
+Patch 12 findings:
+
+- **Target selection** (`src/lib/engine/targetSelection.ts`):
+  - Missing prescription → returns `null` (hard failure path), with dev error logs.
+  - Progressive overload is designed to use performed history, but `getExerciseHistory` is currently missing from `queries/workouts.ts` (see Patch 05).
+  - Custom exercises are not handled by the current `selectExerciseTargets(...)` API shape because it always calls `getMergedExercise({ exerciseId })`.
+- **AI week generation** (`src/lib/engine/weekGeneration.ts`):
+  - Uses `v2_ai_recommended_exercises` allow-list only and returns up to 20 `exercise_id` values ordered by `priority_order`.
+  - Does not yet use `profile` or template content (parameter currently unused).
+- **Rebalance detection** (`src/lib/engine/rebalance.ts`):
+  - Detection-only (returns reasons + missed muscles; does not apply edits).
+  - Aggregates muscles hit from `primary_muscles` and the keys of `implicit_hits`.
 
 ---
 
@@ -438,8 +611,14 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Item | Type | Why unused | Where referenced (should be none) | Removal patch ID |
 |---|---|---|---|---|
-|  | component |  |  |  |
-|  | function |  |  |  |
+| `src/stores/workoutStore.ts` | module | Store is not imported by any current route/component | `V2_ARCHITECTURE.md` (docs only) |  |
+| `src/components/workout/WorkoutHeatmap.tsx` | component | Not imported by any current route | `V2_ARCHITECTURE.md`, `IMPLEMENTATION_SUMMARY.md` (docs only) |  |
+| `src/lib/supabase/queries/workouts.ts::completeWorkoutSession` | function | No call sites found outside query module/docs | `IMPLEMENTATION_SUMMARY.md`, `V2_ARCHITECTURE.md` (docs only) |  |
+| `src/lib/supabase/queries/workouts.ts::saveSessionSet` | function | No call sites found outside query module/docs | `IMPLEMENTATION_SUMMARY.md`, `V2_ARCHITECTURE.md` (docs only) |  |
+| `src/lib/supabase/queries/templates.ts::deleteTemplateDay` | function | No call sites found outside query module/docs | `IMPLEMENTATION_SUMMARY.md` (docs only) |  |
+| `src/lib/supabase/queries/prescriptions.ts::getExercisePrescriptions` | function | No call sites found outside query module/docs | `V2_ARCHITECTURE.md` (docs only) |  |
+| `app/_layout.tsx` screen name `planner-day` | route registration | Screen registered but route file does not exist | (no route file under `app/`) |  |
+| `app/_layout.tsx` screen name `exercise-detail` | route registration | Screen registered but route file does not exist | (no route file under `app/`) |  |
 
 ---
 
@@ -453,6 +632,12 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
   - Are the generated types aligned with current migrations?
   - Is `supabase.ts` checked in and used anywhere (or are query modules hand-typing)?
 
+Patch 14 findings:
+
+- `src/types/supabase.ts` is currently a **placeholder** (not generated types), so there is no enforced schema/type contract in the repo yet.
+- Supabase query modules define their own interfaces (hand-typed) and do not reference `Database` types today.
+- The documented generation command exists (`src/types/README.md`), but there is no repo script/CI check that ensures it was run after migrations.
+
 ---
 
 ### Patch 15 — Security + privacy review
@@ -464,6 +649,12 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
   - Confirm no secrets are logged.
   - Confirm dev logging is aggregate-only.
 
+Patch 15 findings:
+
+- **Client keying**: app uses `EXPO_PUBLIC_SUPABASE_ANON_KEY` via `src/lib/supabase/client.ts` (no `service_role` usage found).
+- **RLS risk (system templates)**: `v2_workout_templates` policy allows `user_id IS NULL` for `FOR ALL` with `WITH CHECK`, meaning authenticated clients can potentially write to “system” templates (and by extension days/slots via “owner via template” policies).
+- **Dev logging**: logging is consistently wrapped in `if (__DEV__)`; most logs are state drivers + aggregates. No env secrets are logged by the app code paths reviewed.
+
 ---
 
 ## Findings (fill as you execute patches)
@@ -472,14 +663,14 @@ To get meaningful UI behavior (planner targets, AI generation), the DB needs see
 
 | Feature | Intended behavior | Implementation status | Files | Notes |
 |---|---|---|---|---|
-| Planner weekly template |  |  | `app/(tabs)/planner.tsx` |  |
-| Edit scoping: Today only |  |  |  |  |
-| Edit scoping: This week only |  |  |  |  |
-| Edit scoping: Next week onward |  |  |  |  |
-| Active workout execution UI |  |  |  |  |
-| Progress tab |  |  |  |  |
-| Heatmap |  |  |  |  |
-| Smart Adjust (rebalance apply) |  |  |  |  |
+| Planner weekly template | Always show 7 days, manage slots, compute targets from prescriptions, start a day into a session | implemented (with TODOs) | `app/(tabs)/planner.tsx` | Target selection depends on missing `getExerciseHistory` export; custom-exercise target selection path is inconsistent with `getMergedExercise({ customExerciseId })` contract |
+| Edit scoping: Today only | Structure edits apply to an active “today” session (create if missing) | partially implemented | `app/(tabs)/planner.tsx`, `src/lib/supabase/queries/workouts_helpers.ts`, `src/components/ui/EditScopePrompt.tsx` | `addSlot` supported; `removeSlot`/`swapExercise`/`reorderSlots` are not implemented for sessions |
+| Edit scoping: This week only | Structure edits apply only for current week instance | not implemented | `src/components/ui/EditScopePrompt.tsx`, `app/(tabs)/planner.tsx` | Disabled/stubbed with TODO |
+| Edit scoping: Next week onward | Structure edits apply to template | partially implemented | `src/lib/supabase/queries/templates.ts`, `app/(tabs)/planner.tsx` | `addSlot`/`removeSlot`/`swapExercise` supported; `reorderSlots` TODO |
+| Active workout execution UI | Execute a session: track sets, save, complete | placeholder | `app/workout-active.tsx`, `app/(stack)/workout/active.tsx` | Two different placeholder routes exist (`/workout-active` and `/workout/active`) |
+| Progress tab | Charts/analytics over performed truth | placeholder | `app/(tabs)/progress.tsx` | Contains TODO guidance about grouping keys |
+| Heatmap | Show daily muscle stress grid | not wired | `src/components/workout/WorkoutHeatmap.tsx` | Component exists; not imported by any route |
+| Smart Adjust (rebalance apply) | If gaps detected, propose minimal changes and optionally apply | partially implemented | `src/lib/engine/rebalance.ts`, `src/components/ui/SmartAdjustPrompt.tsx`, `app/(tabs)/planner.tsx` | Detection + prompt exist; “Smart adjust” apply is TODO |
 
 ---
 
