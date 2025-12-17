@@ -70,15 +70,15 @@ All stores follow the same pattern: state + actions, with dev logging on state c
 
 #### `src/stores/uiStore.ts` - Global UI State
 - **State**:
-  - `activeBottomSheet: BottomSheetId | null` - Currently open bottom sheet ID (kept during closing animation)
+   - `activeBottomSheet: BottomSheetId | null` - Currently open bottom sheet ID (kept during closing animation)
   - `bottomSheetProps: Record<string, any>` - Props for active sheet
   - `isBottomSheetOpen: boolean` - Whether sheet is currently open (false during closing animation)
   - `pendingBottomSheet: BottomSheetId | null` - Next sheet to open after current one closes
   - `pendingBottomSheetProps: Record<string, any>` - Props for pending sheet
   - `toasts: Array<{id, message, type, duration}>` - Active toast notifications
 - **Actions**:
-  - `openBottomSheet(id, props)` - Opens a bottom sheet (queues as pending if another is open)
-  - `closeBottomSheet()` - Starts closing animation (sets isBottomSheetOpen=false, keeps activeBottomSheet)
+   - `openBottomSheet(id, props)` - Opens a bottom sheet (queues as pending if another is open); only triggers close when a sheet was already open to avoid instant close
+   - `closeBottomSheet()` - Starts closing animation (sets isBottomSheetOpen=false, keeps activeBottomSheet)
   - `onBottomSheetClosed()` - Called after exit animation completes; clears activeBottomSheet and opens pending if exists
   - `showToast(message, type, duration)` - Shows a toast
   - `removeToast(id)` - Removes a toast
@@ -321,6 +321,12 @@ All hooks provide convenience wrappers around Zustand stores.
 - Platform-specific handling (web vs native)
 - Web scrollbar styles import
 
+#### Onboarding (post-auth, minimal) ✅ **NEW**
+- Trigger: after login/sign-up, index route checks session → loads `v2_profiles`; missing required fields routes to `/onboarding`.
+- Required fields: `experience_level`, `days_per_week`, `equipment_access[]` (multi-select).
+- Submit: saves via `createUserProfile`/`updateUserProfile`, updates `userStore`, auto-creates user template if none and runs `ensureTemplateHasWeekDays`, then routes to Plan tab.
+- Validation: required fields block continue, inline red error text, Supabase errors surfaced (no silent failures).
+
 #### `app/(tabs)/_layout.tsx` - Tab Navigator ✅ **NEW**
 - **Custom Tab Bar**: Implements capsule-style tab bar with sliding circle indicator
 - **Features**:
@@ -437,8 +443,10 @@ All hooks provide convenience wrappers around Zustand stores.
   - Shows today's workout from active template
   - Pulsing circular button with ripple effect (every 5 seconds)
   - Button states: "Start" (no session), "Continue" (active session), "Completed" (checkmark)
+  - Plan day selector with bottom sheet; defaults to current weekday; can borrow another plan day
   - Exercise preview showing first 3 exercises + "+X more" indicator
   - Rest day handling with special UI
+  - Rest day CTA switches to "Choose a workout day" and opens the plan day picker
   - Reset workout modal (appears when active workout exists)
   - Ambient glow effects for visual appeal
   - Greeting based on time of day (Good Morning/Afternoon/Evening)
@@ -446,6 +454,7 @@ All hooks provide convenience wrappers around Zustand stores.
 - **Data Loading**:
   - Gets user's active template via `getUserTemplates()`
   - Gets today's day slots via `getTemplateWithDaysAndSlots()`
+  - Allows selecting any template day for today's session (borrowing plan day)
   - Loads exercise names via `getMergedExercise()` for each slot
   - Checks active session via `getActiveSession()`
   - Checks completed session status from today
@@ -514,6 +523,7 @@ All hooks provide convenience wrappers around Zustand stores.
    - Smooth animations with react-native-reanimated
    - Platform-specific positioning
    - Theme-based colors
+    - **Mobile touch safety**: Decorative overlay views (e.g., glow backgrounds) must set `pointerEvents="none"` so they do not intercept taps on header/actions.
 
 10. **Planner with Templates**: Full weekly planning system
     - Normalized template schema (templates → days → slots)

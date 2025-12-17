@@ -10,6 +10,7 @@ import { devLog } from '../lib/utils/logger';
 export type BottomSheetId = 
   | 'exercisePicker'
   | 'settingsMenu'
+  | 'planDayPicker'
   | null;
 
 export type Toast = {
@@ -51,8 +52,12 @@ export const useUIStore = create<UIState>((set) => ({
     if (__DEV__) {
       devLog('ui-store', { action: 'openBottomSheet', id, hasProps: Object.keys(props).length > 0 });
     }
+
+    // Snapshot current state to decide whether to queue or open
+    const wasOpen = useUIStore.getState().isBottomSheetOpen;
+
     set((state) => {
-      if (state.isBottomSheetOpen) {
+      if (wasOpen) {
         // Sheet is open, queue this one as pending
         return { 
           pendingBottomSheet: id,
@@ -64,13 +69,14 @@ export const useUIStore = create<UIState>((set) => ({
           activeBottomSheet: id,
           bottomSheetProps: props,
           isBottomSheetOpen: true,
+          pendingBottomSheet: null,
+          pendingBottomSheetProps: {},
         };
       }
     });
     
     // If there was a sheet open, close it (which will trigger animation and then open pending)
-    const currentState = useUIStore.getState();
-    if (currentState.isBottomSheetOpen) {
+    if (wasOpen) {
       useUIStore.getState().closeBottomSheet();
     }
   },

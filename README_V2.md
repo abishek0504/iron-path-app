@@ -15,6 +15,12 @@ See [V2_ARCHITECTURE.md](./V2_ARCHITECTURE.md) for complete system contract, sch
 - **Dev Logging**: Structured logging for auto-diagnosis
 - **RLS & Immutability**: Client read-only for master data, user-owned for customization
 
+## Onboarding (Post-Auth)
+- Runs after login/sign-up if required profile fields are missing.
+- Required fields: `experience_level`, `days_per_week`, `equipment_access` (multi-select).
+- Saves to `v2_profiles`, updates `userStore`.
+- Auto-creates a user template if none exists and ensures all 7 weekdays, then routes to Plan tab.
+
 ## Setup
 
 1. Install dependencies:

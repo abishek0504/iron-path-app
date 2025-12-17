@@ -23,13 +23,24 @@ import { supabase } from '../../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useToast } from '../../src/hooks/useToast';
+import { useModal } from '../../src/hooks/useModal';
 import { getActiveSession } from '../../src/lib/supabase/queries/workouts';
 import { getTemplateWithDaysAndSlots } from '../../src/lib/supabase/queries/templates';
 import { getUserTemplates } from '../../src/lib/supabase/queries/templates';
 import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
 
 const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_ORDER: Record<string, number> = {
+  Sunday: 0,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+};
 
 function getTodayDayName(): string {
   const dayIndex = new Date().getDay();
@@ -91,7 +102,7 @@ const CircularButton = ({
     <View style={styles.circularButtonContainer}>
       {/* Ripple ring */}
       {!isCompleted && !disabled && (
-        <Animated.View style={[styles.rippleRing, rippleStyle]}>
+        <Animated.View style={[styles.rippleRing, rippleStyle]} pointerEvents="none">
           <Svg width={160} height={160} style={styles.rippleSvg}>
             <Defs>
               <LinearGradient id="rippleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -108,7 +119,7 @@ const CircularButton = ({
       {/* Main button with gradient border */}
       <View style={styles.circularButtonWrapper}>
         {!isCompleted && !disabled && (
-          <Svg width={164} height={164} style={styles.gradientBorderSvg}>
+          <Svg width={164} height={164} style={styles.gradientBorderSvg} pointerEvents="none">
             <Defs>
               <LinearGradient id="buttonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                 <Stop offset="0%" stopColor="#06b6d4" stopOpacity="1" />
@@ -120,7 +131,7 @@ const CircularButton = ({
           </Svg>
         )}
         {disabled && !isCompleted && (
-          <Svg width={164} height={164} style={styles.gradientBorderSvg}>
+          <Svg width={164} height={164} style={styles.gradientBorderSvg} pointerEvents="none">
             <Circle cx="82" cy="82" r="80" fill="none" stroke={colors.borderLight} strokeWidth="2" />
           </Svg>
         )}
@@ -159,8 +170,11 @@ const CircularButton = ({
 export default function WorkoutTab() {
   const router = useRouter();
   const toast = useToast();
+  const modal = useModal();
   const [activeTemplate, setActiveTemplate] = useState<any>(null);
-  const [todayData, setTodayData] = useState<any>(null);
+  const [templateDays, setTemplateDays] = useState<Array<{ day: { day_name: string }; slots: TemplateSlot[] }>>([]);
+  const [selectedPlanDayName, setSelectedPlanDayName] = useState<string>(getTodayDayName());
+  const [selectedDayExercises, setSelectedDayExercises] = useState<Array<{ id: string; name: string }>>([]);
   const [currentDay, setCurrentDay] = useState<string>('');
   const [hasActiveWorkout, setHasActiveWorkout] = useState<boolean>(false);
   const [isWorkoutCompleted, setIsWorkoutCompleted] = useState<boolean>(false);
@@ -189,7 +203,7 @@ export default function WorkoutTab() {
     setCurrentDay(getTodayDayName());
   }, []);
 
-  // Load today's workout data
+  // Load workout data (template + sessions) and populate selected plan day
   const loadTodayWorkout = useCallback(async () => {
     if (!hasInitiallyLoaded) {
       setIsLoading(true);
@@ -213,7 +227,8 @@ export default function WorkoutTab() {
 
       if (!template) {
         setActiveTemplate(null);
-        setTodayData(null);
+        setTemplateDays([]);
+        setSelectedDayExercises([]);
         setHasActiveWorkout(false);
         setIsWorkoutCompleted(false);
         setIsLoading(false);
@@ -226,50 +241,54 @@ export default function WorkoutTab() {
       // Get full template with days and slots
       const fullTemplate = await getTemplateWithDaysAndSlots(template.id);
       if (!fullTemplate) {
-        setTodayData(null);
+        setTemplateDays([]);
+        setSelectedDayExercises([]);
         setIsLoading(false);
         setHasInitiallyLoaded(true);
         return;
       }
 
-      // Find today's day
-      const todayDayName = getTodayDayName();
-      const todayDay = fullTemplate.days.find((d) => d.day.day_name === todayDayName);
+      const sortedDays = [...fullTemplate.days].sort(
+        (a, b) => (DAY_ORDER[a.day.day_name] ?? 0) - (DAY_ORDER[b.day.day_name] ?? 0)
+      );
+      setTemplateDays(sortedDays);
 
-      if (!todayDay) {
-        setTodayData({ exercises: [] });
-        setIsLoading(false);
-        setHasInitiallyLoaded(true);
-        return;
+      // Default selected plan day to today on first load
+      const planDayName = hasInitiallyLoaded ? selectedPlanDayName : getTodayDayName();
+      if (!hasInitiallyLoaded) {
+        setSelectedPlanDayName(planDayName);
       }
 
-      // Load exercise names for slots
-      const namesMap = new Map<string, string>();
-      for (const slot of todayDay.slots) {
-        if (slot.exercise_id || slot.custom_exercise_id) {
-          const exercise = await getMergedExercise(
-            slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
-            userId
-          );
-          if (exercise) {
-            namesMap.set(slot.id, exercise.name);
+      // Load exercise names for selected plan day
+      const selectedDay = sortedDays.find((d) => d.day.day_name === planDayName);
+      if (selectedDay) {
+        const namesMap = new Map<string, string>();
+        for (const slot of selectedDay.slots) {
+          if (slot.exercise_id || slot.custom_exercise_id) {
+            const exercise = await getMergedExercise(
+              slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
+              userId
+            );
+            if (exercise) {
+              namesMap.set(slot.id, exercise.name);
+            }
           }
         }
+        setExerciseNames(namesMap);
+        setSelectedDayExercises(
+          selectedDay.slots.map((slot) => ({
+            id: slot.id,
+            name: namesMap.get(slot.id) || 'Unknown Exercise',
+          }))
+        );
+      } else {
+        setSelectedDayExercises([]);
       }
-      setExerciseNames(namesMap);
-
-      // Set today's data
-      setTodayData({
-        exercises: todayDay.slots.map((slot) => ({
-          id: slot.id,
-          name: namesMap.get(slot.id) || 'Unknown Exercise',
-        })),
-      });
 
       // Check for active session
       const activeSession = await getActiveSession(userId);
       if (activeSession) {
-        // Check if session is from today
+        // Check if session is from today (performed date)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const sessionDate = new Date(activeSession.started_at);
@@ -295,7 +314,7 @@ export default function WorkoutTab() {
         .select('id')
         .eq('user_id', userId)
         .eq('template_id', template.id)
-        .eq('day_name', todayDayName)
+        .eq('day_name', planDayName)
         .eq('status', 'completed')
         .gte('completed_at', today.toISOString())
         .lt('completed_at', tomorrow.toISOString())
@@ -310,7 +329,8 @@ export default function WorkoutTab() {
           .select('id')
           .eq('session_id', completedSession.id);
 
-        const currentExerciseCount = todayDay.slots.length;
+        const currentExerciseCount =
+          fullTemplate.days.find((d) => d.day.day_name === planDayName)?.slots.length || 0;
         const loggedExerciseCount = sessionExercises?.length || 0;
 
         // Workout is truly completed if all exercises were logged
@@ -323,9 +343,10 @@ export default function WorkoutTab() {
         devLog('workout-tab', {
           action: 'loadTodayWorkout:done',
           hasTemplate: !!template,
-          exerciseCount: todayDay.slots.length,
+          exerciseCount: fullTemplate.days?.reduce((acc, d) => acc + d.slots.length, 0) || 0,
           hasActiveWorkout,
           isWorkoutCompleted: isTrulyCompleted,
+          selectedPlanDayName: planDayName,
         });
       }
     } catch (error) {
@@ -337,7 +358,7 @@ export default function WorkoutTab() {
       setIsLoading(false);
       setHasInitiallyLoaded(true);
     }
-  }, [getCurrentUserId, toast]);
+  }, [getCurrentUserId, toast, selectedPlanDayName, hasInitiallyLoaded]);
 
   useEffect(() => {
     loadTodayWorkout();
@@ -354,9 +375,41 @@ export default function WorkoutTab() {
     }, [hasInitiallyLoaded]) // Only depend on hasInitiallyLoaded, not loadTodayWorkout
   );
 
+  const openPlanDayPicker = useCallback(() => {
+    if (!templateDays.length) return;
+    modal.openSheet('planDayPicker', {
+      selectedDayName: selectedPlanDayName,
+      todayDayName: currentDay || getTodayDayName(),
+      days: templateDays
+        .slice()
+        .sort((a, b) => (DAY_ORDER[a.day.day_name] ?? 0) - (DAY_ORDER[b.day.day_name] ?? 0))
+        .map((d) => ({
+          dayName: d.day.day_name,
+          hasWorkout: d.slots.length > 0,
+        })),
+      onSelect: (dayName: string) => {
+        setSelectedPlanDayName(dayName);
+        modal.closeSheet();
+      },
+      onResetToToday: () => {
+        setSelectedPlanDayName(getTodayDayName());
+        modal.closeSheet();
+      },
+    });
+  }, [modal, templateDays, selectedPlanDayName, currentDay]);
+
   const handleStartWorkout = () => {
     if (!activeTemplate || !currentDay) return;
-    // Navigate to workout execution
+
+    const selectedSlots =
+      templateDays.find((d) => d.day.day_name === selectedPlanDayName)?.slots || [];
+
+    if (selectedSlots.length === 0) {
+      openPlanDayPicker();
+      return;
+    }
+
+    // Navigate to workout execution; plan day stored when creating session (future screen)
     router.push('/workout/active');
   };
 
@@ -408,7 +461,8 @@ export default function WorkoutTab() {
     }
   };
 
-  const isRestDay = !todayData?.exercises || todayData.exercises.length === 0;
+  const isRestDay = selectedDayExercises.length === 0;
+  const isBorrowingPlanDay = selectedPlanDayName !== currentDay;
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -433,8 +487,8 @@ export default function WorkoutTab() {
       <TabHeader title="Workout" tabId="workout" />
 
       {/* Background Ambient Glows */}
-      <View style={styles.glowTop} />
-      <View style={styles.glowBottom} />
+      <View style={styles.glowTop} pointerEvents="none" />
+      <View style={styles.glowBottom} pointerEvents="none" />
 
       {/* Header */}
       <Animated.View entering={FadeIn.duration(400)} style={styles.header}>
@@ -457,95 +511,113 @@ export default function WorkoutTab() {
             <Text style={styles.cardTitle}>No Active Workout Plan</Text>
             <Text style={styles.cardSubtext}>Create a plan in the Planner tab to get started!</Text>
           </Animated.View>
-        ) : isRestDay ? (
-          <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
-            <View style={styles.restDayIconContainer}>
-              <Timer size={40} color="#22d3ee" />
-            </View>
-            <Text style={styles.restDayTitle}>Rest Day</Text>
-            <Text style={styles.restDayText}>Take it easy!</Text>
-            <Text style={styles.cardSubtext}>Not the plan? Check the Planner tab!</Text>
-          </Animated.View>
         ) : (
           <>
-            {/* Hero Workout Card */}
-            <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.workoutCard}>
-              <View style={styles.workoutCardContent}>
-                <View style={styles.badgeContainer}>
-                  <View style={styles.badgeLeft}>
-                    <View style={styles.badgePrimary}>
-                      <Text style={styles.badgePrimaryText}>Active Plan</Text>
-                    </View>
-                    <View style={styles.badgeSecondary}>
-                      <Text style={styles.badgeSecondaryText}>
-                        {todayData?.exercises?.length || 0} Exercises
-                      </Text>
-                    </View>
-                  </View>
-                  {hasActiveWorkout && (
-                    <Pressable onPress={() => setShowResetModal(true)} style={styles.resetButton}>
-                      <RotateCcw size={20} color={colors.textMuted} />
-                    </Pressable>
-                  )}
+            {isRestDay ? (
+              <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
+                <View style={styles.restDayIconContainer}>
+                  <Timer size={40} color="#22d3ee" />
                 </View>
-
-                <Text style={styles.workoutTitle}>Today's Workout</Text>
-                <Text style={styles.workoutSubtitle}>
-                  {currentDay} • {todayData?.exercises?.length || 0} exercise
-                  {todayData?.exercises?.length !== 1 ? 's' : ''} scheduled
-                </Text>
-
-                {todayData?.exercises && todayData.exercises.length > 0 && (
-                  <View style={styles.exercisesContainer}>
-                    {todayData.exercises.slice(0, 3).map((exercise: any, index: number) => (
-                      <Animated.View
-                        key={exercise.id || index}
-                        entering={FadeIn.duration(300).delay(100 + index * 50)}
-                        style={styles.exerciseItem}
-                      >
-                        <View style={styles.exerciseIcon}>
-                          <Dumbbell size={12} color={colors.primary} />
-                        </View>
-                        <Text style={styles.exerciseName}>{exercise.name}</Text>
-                      </Animated.View>
-                    ))}
-                    {todayData.exercises.length > 3 && (
-                      <Animated.View
-                        entering={FadeIn.duration(300).delay(250)}
-                        style={styles.exerciseItem}
-                      >
-                        <View style={styles.exerciseIconPlaceholder} />
-                        <Text style={styles.moreExercisesText}>
-                          +{todayData.exercises.length - 3} more exercises
+                <Text style={styles.restDayTitle}>Rest Day</Text>
+                <Text style={styles.restDayText}>Take it easy!</Text>
+                <Text style={styles.cardSubtext}>You can pick another plan day to train today.</Text>
+              </Animated.View>
+            ) : (
+              <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.workoutCard}>
+                <View style={styles.workoutCardContent}>
+                  <View style={styles.badgeContainer}>
+                    <View style={styles.badgeLeft}>
+                      <View style={styles.badgePrimary}>
+                        <Text style={styles.badgePrimaryText}>Active Plan</Text>
+                      </View>
+                      <View style={styles.badgeSecondary}>
+                        <Text style={styles.badgeSecondaryText}>
+                          {selectedDayExercises.length} Exercises
                         </Text>
-                      </Animated.View>
+                      </View>
+                    </View>
+                    {hasActiveWorkout && (
+                      <Pressable onPress={() => setShowResetModal(true)} style={styles.resetButton}>
+                        <RotateCcw size={20} color={colors.textMuted} />
+                      </Pressable>
                     )}
                   </View>
-                )}
-              </View>
+
+                  <Text style={styles.workoutTitle}>Today's Workout</Text>
+                  <Text style={styles.workoutSubtitle}>
+                    Plan day: {selectedPlanDayName} • {selectedDayExercises.length} exercise
+                    {selectedDayExercises.length !== 1 ? 's' : ''} scheduled
+                  </Text>
+
+                  {isBorrowingPlanDay && (
+                    <Text style={styles.helperText}>
+                      Doing {selectedPlanDayName}'s workout today
+                    </Text>
+                  )}
+
+                  {selectedDayExercises.length > 0 && (
+                    <View style={styles.exercisesContainer}>
+                      {selectedDayExercises.slice(0, 3).map((exercise: any, index: number) => (
+                        <Animated.View
+                          key={exercise.id || index}
+                          entering={FadeIn.duration(300).delay(100 + index * 50)}
+                          style={styles.exerciseItem}
+                        >
+                          <View style={styles.exerciseIcon}>
+                            <Dumbbell size={12} color={colors.primary} />
+                          </View>
+                          <Text style={styles.exerciseName}>{exercise.name}</Text>
+                        </Animated.View>
+                      ))}
+                      {selectedDayExercises.length > 3 && (
+                        <Animated.View
+                          entering={FadeIn.duration(300).delay(250)}
+                          style={styles.exerciseItem}
+                        >
+                          <View style={styles.exerciseIconPlaceholder} />
+                          <Text style={styles.moreExercisesText}>
+                            +{selectedDayExercises.length - 3} more exercises
+                          </Text>
+                        </Animated.View>
+                      )}
+                    </View>
+                  )}
+                </View>
+              </Animated.View>
+            )}
+
+            {/* Start/Continue Workout Button - Always visible */}
+            <Animated.View entering={FadeIn.duration(400).delay(150)} style={styles.buttonContainer}>
+              {isWorkoutCompleted ? (
+                <CircularButton
+                  onPress={handleStartWorkout}
+                  disabled={isRestDay}
+                  text="Completed"
+                  isCompleted={true}
+                />
+              ) : (
+                <CircularButton
+                  onPress={handleStartWorkout}
+                  disabled={isRestDay}
+                  text={hasActiveWorkout ? 'Continue' : 'Start'}
+                  isCompleted={false}
+                />
+              )}
+              {templateDays.length > 0 && (
+                <View style={styles.planDayRow}>
+                  <Text style={styles.planDayLabel}>Plan day: {selectedPlanDayName}</Text>
+                  <Pressable onPress={openPlanDayPicker} style={styles.planDayChangeButton}>
+                    <Text style={styles.planDayChangeText}>Change</Text>
+                  </Pressable>
+                </View>
+              )}
+              {isBorrowingPlanDay && (
+                <Text style={styles.helperTextSmall}>
+                  Doing {selectedPlanDayName}'s workout today
+                </Text>
+              )}
             </Animated.View>
           </>
-        )}
-
-        {/* Start/Continue Workout Button - Always visible */}
-        {activeTemplate && (
-          <Animated.View entering={FadeIn.duration(400).delay(150)} style={styles.buttonContainer}>
-            {isWorkoutCompleted ? (
-              <CircularButton
-                onPress={handleStartWorkout}
-                disabled={isRestDay}
-                text="Completed"
-                isCompleted={true}
-              />
-            ) : (
-              <CircularButton
-                onPress={handleStartWorkout}
-                disabled={isRestDay}
-                text={hasActiveWorkout ? 'Continue' : 'Start'}
-                isCompleted={false}
-              />
-            )}
-          </Animated.View>
         )}
       </ScrollView>
 
@@ -629,8 +701,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: 120,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl * 3, // keep CTA above tab bar with less scroll
   },
   header: {
     flexDirection: 'row',
@@ -660,7 +732,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.cardBorder,
     borderRadius: borderRadius.lg,
-    padding: spacing.xl,
+    padding: spacing.lg,
     alignItems: 'center',
   },
   iconContainer: {
@@ -702,19 +774,19 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: 'rgba(39, 39, 42, 0.5)',
   },
   workoutCardContent: {
     backgroundColor: colors.card,
-    padding: spacing.xl,
+    padding: spacing.md,
   },
   badgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   badgeLeft: {
     flexDirection: 'row',
@@ -772,11 +844,11 @@ const styles = StyleSheet.create({
   workoutSubtitle: {
     color: colors.textSecondary,
     fontSize: typography.sizes.sm,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
     lineHeight: 20,
   },
   exercisesContainer: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   exerciseItem: {
     flexDirection: 'row',
@@ -811,7 +883,44 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     alignItems: 'center',
-    marginTop: spacing.xl,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg, // breathing room above tab bar with less scroll
+  },
+  planDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  planDayLabel: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.medium,
+  },
+  planDayChangeButton: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.card,
+  },
+  planDayChangeText: {
+    color: colors.primary,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+  },
+  helperText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+    marginTop: spacing.xs,
+  },
+  helperTextSmall: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.xs,
+    marginTop: spacing.xs,
+    textAlign: 'center',
   },
   circularButtonContainer: {
     alignItems: 'center',
@@ -971,5 +1080,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: typography.sizes.base,
     fontWeight: '700',
+  },
+  chooseWorkoutButton: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.primary,
+  },
+  chooseWorkoutText: {
+    color: '#000',
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+    textAlign: 'center',
   },
 });

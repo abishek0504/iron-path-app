@@ -263,6 +263,12 @@ Context precedence for prescription lookup:
 - optional rest_sec
 - constraints prevent impossible combinations
 
+### Onboarding (post-auth, minimal) ✅ **NEW**
+- Trigger: After login/sign-up, index route checks session then loads `v2_profiles`. Missing required fields routes to `/onboarding`; otherwise goes to tabs.
+- Required fields: `experience_level`, `days_per_week`, `equipment_access[]` (multi-select).
+- Submit flow: Save via Supabase (`createUserProfile`/`updateUserProfile`), update `userStore`, then ensure a user template exists (create if missing, ensure all 7 weekdays) and navigate to Plan tab.
+- Validation: required fields block continue; inline red error text for missing/invalid; surface Supabase errors (no silent failures).
+
 ## 10) The merged per-user exercise view (used everywhere)
 
 Definition:

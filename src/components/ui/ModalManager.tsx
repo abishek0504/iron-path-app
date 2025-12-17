@@ -9,6 +9,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { BottomSheet } from './BottomSheet';
 import { ExercisePicker } from '../exercise/ExercisePicker';
 import { SettingsMenu } from '../settings/SettingsMenu';
+import { PlanDayPicker } from './PlanDayPicker';
 
 export const ModalManager: React.FC = () => {
   const activeBottomSheet = useUIStore((state) => state.activeBottomSheet);
@@ -21,6 +22,7 @@ export const ModalManager: React.FC = () => {
   // This allows exit animation to complete before unmounting
   const shouldRenderExercisePicker = activeBottomSheet === 'exercisePicker';
   const shouldRenderSettingsMenu = activeBottomSheet === 'settingsMenu';
+  const shouldRenderPlanDayPicker = activeBottomSheet === 'planDayPicker';
 
   return (
     <>
@@ -49,6 +51,25 @@ export const ModalManager: React.FC = () => {
           {...bottomSheetProps}
         >
           <SettingsMenu onClose={closeBottomSheet} />
+        </BottomSheet>
+      )}
+
+      {shouldRenderPlanDayPicker && (
+        <BottomSheet
+          visible={isBottomSheetOpen && activeBottomSheet === 'planDayPicker'}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          title="Choose plan day"
+          height="45%"
+          {...bottomSheetProps}
+        >
+          <PlanDayPicker
+            selectedDayName={bottomSheetProps.selectedDayName}
+            todayDayName={bottomSheetProps.todayDayName}
+            days={bottomSheetProps.days}
+            onSelect={bottomSheetProps.onSelect}
+            onResetToToday={bottomSheetProps.onResetToToday}
+          />
         </BottomSheet>
       )}
     </>

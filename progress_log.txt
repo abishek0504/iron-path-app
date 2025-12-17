@@ -1,0 +1,8 @@
+Progress Log
+------------
+2025-12-16:
+- Added functional signup/login screens (Supabase email/password) with inline errors.
+- Added onboarding flow collecting experience_level, days_per_week, equipment_access; saves to v2_profiles, updates userStore, and bootstraps template + 7 days before routing to Plan tab.
+- Added auth gate in index route: session check -> onboarding when required fields missing, tabs otherwise.
+- Documented onboarding in README_V2.md, V2_ARCHITECTURE.md, and IMPLEMENTATION_SUMMARY.md.
+

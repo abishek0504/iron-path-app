@@ -11,24 +11,35 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 
-export default function Login() {
+export default function Signup() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleSignup = async () => {
     setErrorText(null);
 
-    if (!email.trim() || !password) {
-      setErrorText('Email and password are required.');
+    if (!email.trim() || !password || !confirmPassword) {
+      setErrorText('All fields are required.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setErrorText('Passwords do not match.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorText('Password must be at least 6 characters.');
       return;
     }
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
       });
@@ -38,9 +49,13 @@ export default function Login() {
         return;
       }
 
-      router.replace('/');
+      if (data.session) {
+        router.replace('/onboarding');
+      } else {
+        router.replace('/signup-success');
+      }
     } catch (error: any) {
-      setErrorText(error?.message || 'Unable to sign in right now.');
+      setErrorText(error?.message || 'Unable to sign up right now.');
     } finally {
       setLoading(false);
     }
@@ -49,8 +64,8 @@ export default function Login() {
   return (
     <View style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>Welcome back</Text>
-        <Text style={styles.subtitle}>Log in to continue</Text>
+        <Text style={styles.title}>Create your account</Text>
+        <Text style={styles.subtitle}>Sign up to get started</Text>
 
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email</Text>
@@ -75,7 +90,20 @@ export default function Login() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
-            textContentType="password"
+            textContentType="newPassword"
+          />
+        </View>
+
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>Confirm Password</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor={colors.textMuted}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            textContentType="newPassword"
           />
         </View>
 
@@ -83,18 +111,18 @@ export default function Login() {
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
+          onPress={handleSignup}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color={colors.textPrimary} />
           ) : (
-            <Text style={styles.buttonText}>Log In</Text>
+            <Text style={styles.buttonText}>Sign Up</Text>
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => router.replace('/signup')}>
-          <Text style={styles.linkText}>Need an account? Sign up</Text>
+        <TouchableOpacity onPress={() => router.replace('/login')}>
+          <Text style={styles.linkText}>Already have an account? Log in</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -169,3 +197,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
 });
+
