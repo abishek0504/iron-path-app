@@ -2772,6 +2772,12 @@ Use route groups to keep structure clean while keeping URLs simple:
 - **Presentation**: Modal (slides up from bottom)
 - **Exit behavior**: `router.back()` returns to the originating tab/stack; when no history is available (e.g., direct link), fall back to `router.replace('/(tabs)')`.
 
+#### Auth Flows (Email Links)
+
+- **Forgot password**: `app/auth/forgot-password.tsx` sends Supabase reset email with `redirectTo` → `/auth/callback`.
+- **Change email**: `app/auth/change-email.tsx` sends verification to new email with `emailRedirectTo` → `/auth/callback`.
+- **Callback handler**: `app/auth/callback.tsx` exchanges `code` via `exchangeCodeForSession`; handles `type=recovery` (set new password) and `type=email_change` (confirm email), then routes back to login or tabs. Dev logs wrapped in `__DEV__`.
+
 ### Navigation Usage Pattern (From Any Tab)
 
 **Prefer direct route navigation for shared pages**:

@@ -541,6 +541,10 @@ All hooks provide convenience wrappers around Zustand stores.
     - Widgets: weekly completion vs `days_per_week`, streak, top PRs, recent sessions, connect health placeholder
     - Edit link routes to existing edit-profile modal; dev logs under `profile-dashboard`
     - Edit modal exits back to the originating tab/stack via `router.back()` with `/(tabs)` fallback when no history is present
+13. **Auth Email Flows**
+    - Forgot password: `app/auth/forgot-password.tsx` sends reset email with redirect to `/auth/callback`
+    - Change email: `app/auth/change-email.tsx` sends verification to new email with redirect to `/auth/callback`
+    - Callback handler: `app/auth/callback.tsx` exchanges code, finalizes password reset or email confirmation, then routes to login/tabs; dev logs wrapped in `__DEV__`
 
 ## Patterns for Adding New Features
 

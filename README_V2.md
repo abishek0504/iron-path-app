@@ -27,6 +27,11 @@ See [V2_ARCHITECTURE.md](./V2_ARCHITECTURE.md) for complete system contract, sch
 - Link to Edit Profile for changes; data loads via Supabase queries with dev logs (`profile-dashboard`).
 - Edit modal returns to the originating tab/stack via `router.back()` with a `/(tabs)` fallback when no history exists.
 
+## Auth Flows
+- Forgot password: `app/auth/forgot-password.tsx` sends reset email using Supabase `resetPasswordForEmail` with redirect to `/auth/callback`.
+- Change email: `app/auth/change-email.tsx` sends verification to the new email with redirect to `/auth/callback`.
+- Callback: `app/auth/callback.tsx` exchanges the code (`exchangeCodeForSession`), finalizes password updates or email confirmation, then routes to login or tabs.
+
 ## Setup
 
 1. Install dependencies:

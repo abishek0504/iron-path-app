@@ -12,9 +12,11 @@ import {
   StyleSheet,
   ScrollView,
 } from 'react-native';
-import { Settings, User, Bell, HelpCircle } from 'lucide-react-native';
+import { Settings, User, Bell, HelpCircle, LogOut, Mail, Shield } from 'lucide-react-native';
 import { colors, spacing, borderRadius } from '../../lib/utils/theme';
 import { useRouter } from 'expo-router';
+import { supabase } from '../../lib/supabase/client';
+import { useUIStore } from '../../stores/uiStore';
 
 interface SettingsMenuProps {
   onClose?: () => void;
@@ -22,12 +24,26 @@ interface SettingsMenuProps {
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const router = useRouter();
+  const showToast = useUIStore((state) => state.showToast);
 
   const handleNavigate = (path: string) => {
     if (onClose) {
       onClose();
     }
     router.push(path as any);
+  };
+
+  const handleLogout = async () => {
+    if (onClose) {
+      onClose();
+    }
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      showToast('Unable to log out', 'error');
+      return;
+    }
+    showToast('Logged out', 'success');
+    router.replace('/login');
   };
 
   const menuItems = [
@@ -52,6 +68,24 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       onPress: () => {
         // TODO: Implement help screen
       },
+    },
+    {
+      id: 'change-password',
+      label: 'Change Password',
+      icon: Shield,
+      onPress: () => handleNavigate('/auth/forgot-password'),
+    },
+    {
+      id: 'change-email',
+      label: 'Change Email',
+      icon: Mail,
+      onPress: () => handleNavigate('/auth/change-email'),
+    },
+    {
+      id: 'logout',
+      label: 'Log Out',
+      icon: LogOut,
+      onPress: handleLogout,
     },
   ];
 

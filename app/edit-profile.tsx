@@ -45,8 +45,6 @@ export default function EditProfileScreen() {
   const [daysPerWeek, setDaysPerWeek] = useState('');
   const [useImperial, setUseImperial] = useState(true);
   const [equipment, setEquipment] = useState<string[]>([]);
-  const [newPassword, setNewPassword] = useState('');
-  const [changingPassword, setChangingPassword] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   useEffect(() => {
@@ -192,26 +190,10 @@ export default function EditProfileScreen() {
   };
 
   const handleChangePassword = async () => {
-    if (!newPassword || newPassword.length < 6) {
-      Alert.alert('Password too short', 'Password must be at least 6 characters.');
-      return;
-    }
-    setChangingPassword(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) {
-        if (__DEV__) devError('edit-profile', error, { action: 'change-password' });
-        Alert.alert('Error', 'Failed to change password.');
-        return;
-      }
-      setNewPassword('');
-      if (__DEV__) devLog('edit-profile', { action: 'change-password:done' });
-      Alert.alert('Success', 'Password updated.');
-    } catch (error) {
-      if (__DEV__) devError('edit-profile', error, { action: 'change-password' });
-      Alert.alert('Error', 'An error occurred while changing password.');
-    } finally {
-      setChangingPassword(false);
+      router.push('/auth/forgot-password');
+    } catch {
+      router.replace('/auth/forgot-password');
     }
   };
 
@@ -328,24 +310,9 @@ export default function EditProfileScreen() {
         {/* Change password */}
         <View style={styles.card}>
           <Text style={styles.label}>Change Password</Text>
-          <TextInput
-            value={newPassword}
-            onChangeText={setNewPassword}
-            placeholder="New password"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            secureTextEntry
-          />
-          <TouchableOpacity
-            style={[styles.saveButton, changingPassword && styles.saveButtonDisabled]}
-            onPress={handleChangePassword}
-            disabled={changingPassword}
-          >
-            {changingPassword ? (
-              <ActivityIndicator color={colors.background} />
-            ) : (
-              <Text style={styles.saveButtonText}>Update Password</Text>
-            )}
+          <Text style={styles.helperText}>We’ll email you a reset link to set a new password.</Text>
+          <TouchableOpacity style={styles.saveButton} onPress={handleChangePassword} activeOpacity={0.85}>
+            <Text style={styles.saveButtonText}>Send reset link</Text>
           </TouchableOpacity>
         </View>
 

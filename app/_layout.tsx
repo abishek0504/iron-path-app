@@ -45,6 +45,9 @@ export default function RootLayout() {
         <Stack.Screen name="signup-success" options={{ gestureEnabled: false }} />
         <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
         <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="auth/forgot-password" options={{ presentation: 'modal', gestureEnabled: true }} />
+        <Stack.Screen name="auth/change-email" options={{ presentation: 'modal', gestureEnabled: true }} />
+        <Stack.Screen name="auth/callback" options={{ presentation: 'modal', gestureEnabled: true }} />
         <Stack.Screen
           name="planner-day"
           options={{
