@@ -226,7 +226,7 @@ Additional Patch 00 notes (baseline):
   - All `./app/**/*.tsx` route files
 - **Questions to answer**:
   - What routes exist (tabs vs stack vs modal presentation)?
-  - Which route is considered the “active workout” route (there are multiple: `/workout-active`, `/(stack)/workout/active`, `/workout/active`)?
+  - Which route is considered the “active workout” route (canonical: `/workout/active`)?
   - Are tab labels/icons consistent with route purpose?
 - **Artifacts to fill in**:
 
@@ -246,14 +246,13 @@ Additional Patch 00 notes (baseline):
 | `/auth/change-email` | auth | modal | `src/components/settings/SettingsMenu.tsx` | implemented |
 | `/auth/callback` | auth | modal | deep link redirect target | implemented |
 | `/edit-profile` | modal | modal | `src/components/settings/SettingsMenu.tsx` | implemented |
-| `/workout-active` | workout | modal | `app/(tabs)/planner.tsx` | placeholder |
-| `/workout/active` | workout | modal | `app/(tabs)/index.tsx` | placeholder |
+| `/workout/active` | workout | modal | `app/(tabs)/index.tsx`, `app/(tabs)/planner.tsx` | placeholder |
 | `/planner-day` | (registered screen) | stack (slide_from_right) | (no in-app navigation found yet) | **missing route file** |
 | `/exercise-detail` | (registered screen) | modal | (no in-app navigation found yet) | **missing route file** |
 
 Patch 01 notes:
 
-- **Active workout route ambiguity**: both `/workout-active` (`app/workout-active.tsx`) and `/workout/active` (`app/(stack)/workout/active.tsx`) exist and are used by different entrypoints.
+- **Active workout route**: consolidated to `/workout/active` (`app/(stack)/workout/active.tsx`); stale `/workout-active` route removed.
 - **Registered-but-missing routes**: `app/_layout.tsx` registers `planner-day` and `exercise-detail`, but there are no corresponding route files under `app/` today.
 
 ---
@@ -501,7 +500,7 @@ Patch 08 findings:
   - Session structure and start flow carry `exercise_id` XOR `custom_exercise_id`.
   - Prefill uses targets keyed by XOR IDs; engine calls expect `{ exerciseId?, customExerciseId? }`.
 - **Completion wiring**:
-  - Planner navigates to `/workout-active` after creating the session; there is no completion/abandon path wired from the placeholder active-workout screens yet.
+  - Planner navigates to `/workout/active` after creating the session; there is no completion/abandon path wired from the placeholder active-workout screens yet.
 
 ---
 
@@ -509,7 +508,6 @@ Patch 08 findings:
 
 - **Purpose**: Determine what the “active workout” UI currently is (placeholder vs full), and document the intended save/complete lifecycle.
 - **Files (read-only)**:
-  - `./app/workout-active.tsx`
   - `./app/(stack)/workout/active.tsx`
   - Any `saveSessionSet` call sites
 - **Questions to answer**:
@@ -519,12 +517,8 @@ Patch 08 findings:
 
 Patch 09 findings:
 
-- **Two active-workout routes exist and both are placeholders**:
-  - `/workout-active` → `app/workout-active.tsx` (planner navigates here after creating a session).
-  - `/workout/active` → `app/(stack)/workout/active.tsx` (workout tab navigates here without creating a session in that handler).
-- **No execution flow wired yet**:
-  - No call sites for `saveSessionSet(...)` or `completeWorkoutSession(...)` were found outside the query module/docs.
-  - Placeholder screens only render UI and call `router.back()`.
+- **Active workout route**: Consolidated to `/workout/active` (`app/(stack)/workout/active.tsx`); planner updated to use this route and stale `app/workout-active.tsx` removed.
+- **Execution flow**: Still placeholder; no `saveSessionSet(...)`/`completeWorkoutSession(...)` call sites yet.
 
 ---
 
@@ -668,7 +662,7 @@ Patch 15 findings:
 | Edit scoping: Today only | Structure edits apply to an active “today” session (create if missing) | partially implemented | `app/(tabs)/planner.tsx`, `src/lib/supabase/queries/workouts_helpers.ts`, `src/components/ui/EditScopePrompt.tsx` | `addSlot` supported; `removeSlot`/`swapExercise`/`reorderSlots` are not implemented for sessions |
 | Edit scoping: This week only | Structure edits apply only for current week instance | not implemented | `src/components/ui/EditScopePrompt.tsx`, `app/(tabs)/planner.tsx` | Disabled/stubbed with TODO |
 | Edit scoping: Next week onward | Structure edits apply to template | partially implemented | `src/lib/supabase/queries/templates.ts`, `app/(tabs)/planner.tsx` | `addSlot`/`removeSlot`/`swapExercise` supported; `reorderSlots` TODO |
-| Active workout execution UI | Execute a session: track sets, save, complete | placeholder | `app/workout-active.tsx`, `app/(stack)/workout/active.tsx` | Two different placeholder routes exist (`/workout-active` and `/workout/active`) |
+| Active workout execution UI | Execute a session: track sets, save, complete | placeholder | `app/(stack)/workout/active.tsx` | Consolidated: `/workout/active` canonical; `app/workout-active.tsx` removed |
 | Progress tab | Charts/analytics over performed truth | placeholder | `app/(tabs)/progress.tsx` | Contains TODO guidance about grouping keys |
 | Heatmap | Show daily muscle stress grid | not wired | `src/components/workout/WorkoutHeatmap.tsx` | Component exists; not imported by any route |
 | Smart Adjust (rebalance apply) | If gaps detected, propose minimal changes and optionally apply | partially implemented | `src/lib/engine/rebalance.ts`, `src/components/ui/SmartAdjustPrompt.tsx`, `app/(tabs)/planner.tsx` | Detection + prompt exist; “Smart adjust” apply is TODO |

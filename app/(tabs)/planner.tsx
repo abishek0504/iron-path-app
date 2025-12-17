@@ -246,7 +246,7 @@ export default function PlannerTab() {
         setIsLoadingTemplate(false);
       }
     },
-    [toast, getCurrentUserId, calculateTargetsForSlots]
+    [toast, getCurrentUserId, calculateTargetsForSlots, hasInitializedSelection]
   );
 
   // Initialize: load or create template
@@ -913,7 +913,7 @@ export default function PlannerTab() {
 
                     // Navigate to active workout
                     toast.success('Workout started');
-                    router.push('/workout-active');
+                    router.push('/workout/active');
                   } catch (error) {
                     if (__DEV__) {
                       devError('planner', error, {
@@ -1056,7 +1056,7 @@ export default function PlannerTab() {
             }
 
             toast.success('Workout started');
-            router.push('/workout-active');
+            router.push('/workout/active');
           } catch (error) {
             if (__DEV__) {
               devError('planner', error, { action: 'startWorkout_continue' });

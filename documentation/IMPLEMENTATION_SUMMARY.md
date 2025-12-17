@@ -413,7 +413,7 @@ All hooks provide convenience wrappers around Zustand stores.
   - Creates/updates template days based on session day_names
   - Explicit button action, not automatic mutation
 
-#### Start Workout Integration ✅ **UPDATED (Patch F, G, 08)**
+#### Start Workout Integration ✅ **UPDATED (Patch F, G, 08, 09)**
 - **"Start this day" Button**:
   1. **Pre-start check**: Calls `needsRebalance()` to detect muscle coverage gaps
   2. If gaps detected: Shows `SmartAdjustPrompt` with reasons
@@ -426,7 +426,7 @@ All hooks provide convenience wrappers around Zustand stores.
      - Prefills session sets via `prefillSessionSets()` with starting targets keyed by the same XOR ID (reps/weight/duration)
        - These are "starting targets" that the user edits, NOT "already performed" values
        - User edits these values during workout, and final saved values become the performed truth
-     - Navigates to `/workout-active` route
+     - Navigates to `/workout/active` route (canonical stack screen)
      - Shows success toast
   4. Error handling with toast notifications
 

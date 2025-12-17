@@ -287,24 +287,19 @@ export default function WorkoutTab() {
 
       // Check for active session
       const activeSession = await getActiveSession(userId);
-      if (activeSession) {
-        // Check if session is from today (performed date)
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const sessionDate = new Date(activeSession.started_at);
-        sessionDate.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const hasActiveForToday =
+        !!activeSession &&
+        (() => {
+          const sessionDate = new Date(activeSession.started_at);
+          sessionDate.setHours(0, 0, 0, 0);
+          return sessionDate.getTime() === today.getTime();
+        })();
 
-        if (sessionDate.getTime() === today.getTime()) {
-          setHasActiveWorkout(true);
-        } else {
-          setHasActiveWorkout(false);
-        }
-      } else {
-        setHasActiveWorkout(false);
-      }
+      setHasActiveWorkout(hasActiveForToday);
 
       // Check for completed session from today
-      const today = new Date();
       today.setHours(0, 0, 0, 0);
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -344,7 +339,7 @@ export default function WorkoutTab() {
           action: 'loadTodayWorkout:done',
           hasTemplate: !!template,
           exerciseCount: fullTemplate.days?.reduce((acc, d) => acc + d.slots.length, 0) || 0,
-          hasActiveWorkout,
+          hasActiveWorkout: hasActiveForToday,
           isWorkoutCompleted: isTrulyCompleted,
           selectedPlanDayName: planDayName,
         });
