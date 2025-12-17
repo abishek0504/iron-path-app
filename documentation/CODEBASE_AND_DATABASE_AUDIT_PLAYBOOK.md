@@ -470,7 +470,7 @@ Patch 07 findings:
   - `today`: supports `addSlot` only; `removeSlot` is explicitly TODO and surfaces a toast.
   - `thisWeek`: disabled (TODO).
   - `nextWeek`: supports `addSlot`/`removeSlot` via `applyStructureEditToTemplate`; `reorderSlots` TODO.
-- **Target computation**: Planner computes targets per slot via `selectExerciseTargets(...)`, but the current plumbing does not correctly distinguish `exercise_id` vs `custom_exercise_id` when passing IDs into target selection.
+- **Target computation**: Fixed — `selectExerciseTargets` now accepts `{ exerciseId?, customExerciseId? }` (XOR) and planner passes both, so custom exercises use the merged view and custom target bands; missing bands fail safely.
 
 ---
 

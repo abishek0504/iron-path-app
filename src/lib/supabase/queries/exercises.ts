@@ -23,6 +23,14 @@ export interface MergedExercise {
   tempo_category?: string;
   // Source tracking
   source: 'master' | 'custom' | 'override';
+  // Target bands (custom exercises only; optional for master)
+  mode?: 'reps' | 'timed';
+  sets_min?: number;
+  sets_max?: number;
+  reps_min?: number;
+  reps_max?: number;
+  duration_sec_min?: number;
+  duration_sec_max?: number;
 }
 
 /**
@@ -88,6 +96,13 @@ export async function getMergedExercise(
         movement_pattern: customExercise.movement_pattern,
         tempo_category: customExercise.tempo_category,
         source: 'custom',
+        mode: customExercise.mode ?? (customExercise.is_timed ? 'timed' : 'reps'),
+        sets_min: customExercise.sets_min,
+        sets_max: customExercise.sets_max,
+        reps_min: customExercise.reps_min,
+        reps_max: customExercise.reps_max,
+        duration_sec_min: customExercise.duration_sec_min,
+        duration_sec_max: customExercise.duration_sec_max,
       };
     }
 

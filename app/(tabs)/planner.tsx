@@ -136,11 +136,11 @@ export default function PlannerTab() {
               experience: slotExperience,
             };
 
-            const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-            if (!exerciseId) continue;
-
             const target = await selectExerciseTargets(
-              exerciseId,
+              {
+                exerciseId: slot.exercise_id || undefined,
+                customExerciseId: slot.custom_exercise_id || undefined,
+              },
               userId,
               slotContext,
               0 // historyCount = 0 for now (can be enhanced later)
@@ -153,7 +153,8 @@ export default function PlannerTab() {
               slotsWithoutPrescriptions++;
               if (__DEV__) {
                 devError('planner', new Error('No prescription found for exercise'), {
-                  exerciseId,
+                  exerciseId: slot.exercise_id,
+                  customExerciseId: slot.custom_exercise_id,
                   slotId: slot.id,
                 });
               }
@@ -886,8 +887,15 @@ export default function PlannerTab() {
                       };
 
                       // Use the merged exercise ID for target selection
-                      const mergedExerciseId = mergedExercise.id;
-                      const target = await selectExerciseTargets(mergedExerciseId, userId, context, 0);
+                      const target = await selectExerciseTargets(
+                        {
+                          exerciseId: slot.exercise_id || undefined,
+                          customExerciseId: slot.custom_exercise_id || undefined,
+                        },
+                        userId,
+                        context,
+                        0
+                      );
                       if (target) {
                         targetsMap.set(exerciseId, {
                           sets: target.sets,
@@ -1024,8 +1032,15 @@ export default function PlannerTab() {
                 experience: slot.experience || effectiveExperience,
               };
 
-              const mergedExerciseId = mergedExercise.id;
-              const target = await selectExerciseTargets(mergedExerciseId, userId, context, 0);
+              const target = await selectExerciseTargets(
+                {
+                  exerciseId: slot.exercise_id || undefined,
+                  customExerciseId: slot.custom_exercise_id || undefined,
+                },
+                userId,
+                context,
+                0
+              );
               if (target) {
                 targetsMap.set(exerciseId, {
                   sets: target.sets,

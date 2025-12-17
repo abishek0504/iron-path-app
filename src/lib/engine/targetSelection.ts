@@ -4,7 +4,7 @@
  * Never invents defaults when prescription is missing
  */
 
-import { getExercisePrescription, getPrescriptionsForExercises } from '../supabase/queries/prescriptions';
+import { getExercisePrescription } from '../supabase/queries/prescriptions';
 import { getMergedExercise } from '../supabase/queries/exercises';
 import { getExerciseHistory } from '../supabase/queries/workouts';
 import { devLog, devError } from '../utils/logger';
@@ -22,20 +22,42 @@ export interface TargetSelectionContext {
   experience: string;
 }
 
+export interface ExerciseIdentifier {
+  exerciseId?: string;
+  customExerciseId?: string;
+}
+
 /**
  * Select targets for a single exercise
  * Returns null if prescription is missing (data error)
  */
 export async function selectExerciseTargets(
-  exerciseId: string,
+  exerciseRef: ExerciseIdentifier,
   userId: string,
   context: TargetSelectionContext,
   historyCount: number = 0
 ): Promise<ExerciseTarget | null> {
+  const hasExerciseId = !!exerciseRef.exerciseId;
+  const hasCustomExerciseId = !!exerciseRef.customExerciseId;
+
+  if (hasExerciseId === hasCustomExerciseId) {
+    if (__DEV__) {
+      devError(
+        'target-selection',
+        new Error('Exactly one of exerciseId or customExerciseId must be provided'),
+        { exerciseRef, userId }
+      );
+    }
+    return null;
+  }
+
+  const exerciseKey = exerciseRef.exerciseId || exerciseRef.customExerciseId!;
+
   if (__DEV__) {
     devLog('target-selection', {
       action: 'selectExerciseTargets',
-      exerciseId,
+      exerciseId: exerciseRef.exerciseId,
+      customExerciseId: exerciseRef.customExerciseId,
       userId,
       context,
       historyCount,
@@ -43,10 +65,13 @@ export async function selectExerciseTargets(
   }
 
   // Get merged exercise to determine mode
-  const exercise = await getMergedExercise({ exerciseId }, userId);
+  const exercise = await getMergedExercise(exerciseRef, userId);
   if (!exercise) {
     if (__DEV__) {
-      devError('target-selection', new Error('Exercise not found'), { exerciseId, userId });
+      devError('target-selection', new Error('Exercise not found'), {
+        exerciseRef,
+        userId,
+      });
     }
     return null;
   }
@@ -54,18 +79,50 @@ export async function selectExerciseTargets(
   // Determine mode
   const mode: 'reps' | 'timed' = exercise.is_timed ? 'timed' : 'reps';
 
-  // Fetch prescription
-  const prescription = await getExercisePrescription(
-    exerciseId,
-    context.experience,
-    mode
-  );
+  // Fetch prescription (custom exercises fall back to their own target bands)
+  const prescription =
+    exercise.source === 'custom'
+      ? (() => {
+          const setsMin = exercise.sets_min;
+          const setsMax = exercise.sets_max;
+          if (setsMin === undefined || setsMax === undefined) {
+            return null;
+          }
+          if (mode === 'reps') {
+            if (
+              exercise.reps_min === undefined ||
+              exercise.reps_max === undefined
+            ) {
+              return null;
+            }
+          } else {
+            if (
+              exercise.duration_sec_min === undefined ||
+              exercise.duration_sec_max === undefined
+            ) {
+              return null;
+            }
+          }
+          return {
+            sets_min: setsMin,
+            sets_max: setsMax,
+            reps_min: exercise.reps_min,
+            reps_max: exercise.reps_max,
+            duration_sec_min: exercise.duration_sec_min,
+            duration_sec_max: exercise.duration_sec_max,
+          };
+        })()
+      : await getExercisePrescription(
+          exerciseRef.exerciseId || exercise.id,
+          context.experience,
+          mode
+        );
 
   if (!prescription) {
     // Hard rule: no prescription = data error, exclude from generation
     if (__DEV__) {
       devError('target-selection', new Error('No prescription found'), {
-        exerciseId,
+        exerciseRef,
         context,
         mode,
       });
@@ -74,7 +131,7 @@ export async function selectExerciseTargets(
   }
 
   // Get exercise history for progressive overload
-  const history = await getExerciseHistory(exerciseId, userId, 5);
+  const history = await getExerciseHistory(exerciseKey, userId, 5);
   const hasHistory = history && history.sets.length > 0;
 
   // Select targets within prescription band with progressive overload
@@ -96,7 +153,11 @@ export async function selectExerciseTargets(
   // Reps or duration based on mode with progressive overload
   if (mode === 'reps') {
     if (prescription.reps_min && prescription.reps_max) {
-      if (hasHistory && history.lastReps && history.lastWeight !== undefined) {
+      if (
+        hasHistory &&
+        history.lastReps !== null &&
+        history.lastWeight !== null
+      ) {
         // Progressive overload logic for reps mode
         const lastReps = history.lastReps;
         const lastWeight = history.lastWeight;
@@ -128,7 +189,7 @@ export async function selectExerciseTargets(
   } else {
     // Timed mode
     if (prescription.duration_sec_min && prescription.duration_sec_max) {
-      if (hasHistory && history.lastDuration !== undefined) {
+      if (hasHistory && history.lastDuration !== null) {
         // Progressive overload: increase duration toward top of band
         const lastDuration = history.lastDuration;
         duration_sec = Math.min(lastDuration + 5, prescription.duration_sec_max); // Increase by 5 seconds
@@ -153,7 +214,7 @@ export async function selectExerciseTargets(
   }
 
   const target: ExerciseTarget = {
-    exercise_id: exerciseId,
+    exercise_id: exercise.id,
     sets,
     mode,
     reps,
@@ -184,7 +245,7 @@ export async function selectExerciseTargets(
  * Filters out exercises without prescriptions
  */
 export async function selectExerciseTargetsBulk(
-  exerciseIds: string[],
+  exercises: ExerciseIdentifier[],
   userId: string,
   context: TargetSelectionContext,
   historyCounts: Map<string, number> = new Map()
@@ -192,7 +253,7 @@ export async function selectExerciseTargetsBulk(
   if (__DEV__) {
     devLog('target-selection', {
       action: 'selectExerciseTargetsBulk',
-      exerciseIdsCount: exerciseIds.length,
+      exerciseIdsCount: exercises.length,
       userId,
       context,
     });
@@ -200,101 +261,21 @@ export async function selectExerciseTargetsBulk(
 
   const targets: ExerciseTarget[] = [];
 
-  // Get all merged exercises to determine modes
-  const exercises = await Promise.all(
-    exerciseIds.map((id) => getMergedExercise({ exerciseId: id }, userId))
-  );
-
-  const validExercises = exercises.filter((e): e is NonNullable<typeof e> => e !== null);
-  const modes = validExercises.map((e) => (e.is_timed ? 'timed' : 'reps'));
-
-  // Bulk fetch prescriptions
-  const repsPrescriptions = await getPrescriptionsForExercises(
-    validExercises.filter((e) => !e.is_timed).map((e) => e.id),
-    context.experience,
-    'reps'
-  );
-
-  const timedPrescriptions = await getPrescriptionsForExercises(
-    validExercises.filter((e) => e.is_timed).map((e) => e.id),
-    context.experience,
-    'timed'
-  );
-
-  // Select targets for each exercise
-  for (let i = 0; i < validExercises.length; i++) {
-    const exercise = validExercises[i];
-    const mode = modes[i];
-    const historyCount = historyCounts.get(exercise.id) || 0;
-
-    const prescription =
-      mode === 'reps'
-        ? repsPrescriptions.get(exercise.id)
-        : timedPrescriptions.get(exercise.id);
-
-    if (!prescription) {
-      // Exclude from generation (data error)
-      if (__DEV__) {
-        devError('target-selection', new Error('No prescription found'), {
-          exerciseId: exercise.id,
-          context,
-          mode,
-        });
-      }
-      continue;
+  for (const ref of exercises) {
+    const key = ref.exerciseId || ref.customExerciseId;
+    const historyCount = key ? historyCounts.get(key) || 0 : 0;
+    const target = await selectExerciseTargets(ref, userId, context, historyCount);
+    if (target) {
+      targets.push(target);
     }
-
-    // Select targets (same logic as single exercise)
-    let sets: number;
-    if (historyCount < 3) {
-      sets = Math.floor((prescription.sets_min + prescription.sets_max) / 2);
-    } else {
-      sets = Math.ceil((prescription.sets_min + prescription.sets_max) / 2);
-    }
-    sets = Math.max(prescription.sets_min, Math.min(prescription.sets_max, sets));
-
-    let reps: number | undefined;
-    let duration_sec: number | undefined;
-
-    if (mode === 'reps' && prescription.reps_min && prescription.reps_max) {
-      if (historyCount < 3) {
-        reps = Math.floor((prescription.reps_min + prescription.reps_max) / 2);
-      } else {
-        reps = Math.ceil((prescription.reps_min + prescription.reps_max) / 2);
-      }
-      reps = Math.max(prescription.reps_min, Math.min(prescription.reps_max, reps));
-    } else if (mode === 'timed' && prescription.duration_sec_min && prescription.duration_sec_max) {
-      if (historyCount < 3) {
-        duration_sec = Math.floor(
-          (prescription.duration_sec_min + prescription.duration_sec_max) / 2
-        );
-      } else {
-        duration_sec = Math.ceil(
-          (prescription.duration_sec_min + prescription.duration_sec_max) / 2
-        );
-      }
-      duration_sec = Math.max(
-        prescription.duration_sec_min,
-        Math.min(prescription.duration_sec_max, duration_sec)
-      );
-    }
-
-    targets.push({
-      exercise_id: exercise.id,
-      sets,
-      mode,
-      reps,
-      duration_sec,
-    });
   }
 
   if (__DEV__) {
     devLog('target-selection', {
       action: 'selectExerciseTargetsBulk_result',
-      requestedCount: exerciseIds.length,
-      validCount: validExercises.length,
+      requestedCount: exercises.length,
       targetCount: targets.length,
-      excludedCount: exerciseIds.length - targets.length,
+      excludedCount: exercises.length - targets.length,
     });
   }
 

@@ -274,21 +274,15 @@ All query functions follow the same pattern:
   - TODO: Full AI logic integration (currently returns allow-list exercises)
   - Used by "Generate with AI" button in planner
 
-#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F)**
-- **`selectExerciseTargets(exerciseId, userId, context, historyCount)`**
-  - Gets merged exercise to determine mode (reps vs timed)
-  - Fetches prescription for exercise + context (experience, mode) - goal removed for holistic approach
-  - Returns `null` if no prescription (data error - never invents defaults)
-  - Gets exercise history via `getExerciseHistory()` for progressive overload
-  - Selects targets within prescription band with progressive overload:
-    - **Sets**: Lower-to-mid for new users (historyCount < 3), mid-to-upper for experienced
-    - **Reps mode**: If hit top of rep band with RPE ≤ 7, increase weight 2.5% and reset reps to min. Otherwise, increase reps toward top of band.
-    - **Timed mode**: Increase duration by 5s toward top of band (or use mid-range if no history)
-  - Returns `ExerciseTarget` with `weight` field for reps mode (if progressive overload applies)
-  - Clamps to prescription bounds
-- **`selectExerciseTargetsBulk(exerciseIds, userId, context, historyCounts)`**
-  - Bulk version that filters out exercises without prescriptions
-  - Returns array of `ExerciseTarget` objects
+#### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F, Patch 07)**
+- **`selectExerciseTargets({ exerciseId?, customExerciseId? }, userId, context, historyCount)`**
+  - XOR input enforced; merged exercise lookup handles master/custom
+  - Custom exercises use their own target bands (mode/sets/reps/duration) from `v2_user_custom_exercises`; masters fetch prescriptions
+  - Returns `null` if bands/prescription missing (never invent defaults)
+  - Uses `getExerciseHistory` keyed by the provided exercise/custom id for progressive overload
+  - Progressive overload rules unchanged; clamps to band
+- **`selectExerciseTargetsBulk(exercises[], userId, context, historyCounts)`**
+  - Accepts array of `{ exerciseId?, customExerciseId? }`, delegates to single-path for mixed master/custom support
 - **Hard rule**: Never invents generic defaults (3x10, 60s). Missing prescription = exclude from generation.
 - **Progressive overload rule**: Never writes into templates. Only adjusts next session's suggested targets based on performed truth.
 
