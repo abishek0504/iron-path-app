@@ -576,21 +576,40 @@ Patch 11 findings:
   - `./src/lib/supabase/queries/prescriptions.ts`
 - **Questions to answer**:
   - Does target selection correctly treat missing prescriptions as a hard failure?
-  - Does AI generation only use the allow-list?
+  - Does AI generation only use the allow-list, and how does it respect current fatigue?
   - Rebalance: is it detection-only and does it avoid per-item logging?
 
 Patch 12 findings:
 
 - **Target selection** (`src/lib/engine/targetSelection.ts`):
   - Missing prescription → returns `null` (hard failure path), with dev error logs.
-  - Progressive overload is designed to use performed history, but `getExerciseHistory` is currently missing from `queries/workouts.ts` (see Patch 05).
-  - Custom exercises are not handled by the current `selectExerciseTargets(...)` API shape because it always calls `getMergedExercise({ exerciseId })`.
-- **AI week generation** (`src/lib/engine/weekGeneration.ts`):
-  - Uses `v2_ai_recommended_exercises` allow-list only and returns up to 20 `exercise_id` values ordered by `priority_order`.
-  - Does not yet use `profile` or template content (parameter currently unused).
+  - Progressive overload uses performed history via `getExerciseHistory` (completed sessions only, keyed by master/custom id) and always clamps inside the prescription/custom band.
+  - Custom exercises are handled via their own target-band fields on `v2_user_custom_exercises`; masters read from `v2_exercise_prescriptions`.
+- **AI week generation — biomechanical simulator** (`src/lib/engine/weekGeneration.ts`):
+  - Uses `v2_ai_recommended_exercises` as an allow-list of candidate exercises (with `priority_order` as base priority).
+  - Front-loads all data in one go (no SQL in the selection loop):
+    - Merged exercise metadata from `listMergedExercises(userId, exerciseIds)` for `primary_muscles` + `implicit_hits`.
+    - Prescription bands from `getPrescriptionsForExercises(exerciseIds, experience, mode)` (same bands used by `selectExerciseTargets`).
+    - Real fatigue from last 48h performed truth via `getMuscleStressStats(userId, startIso, endIso)` as the initial `MuscleStressMap`.
+  - For each candidate builds an `ExerciseStressProfile`:
+    - `TargetSets = round((sets_min + sets_max) / 2)` from the prescription/custom band.
+    - `perMuscleWeights` from `primary_muscles` (1.0 each) plus `implicit_hits` weights, then normalized so the sum is 1.0 (this is `NormalizedMuscleWeight`).
+    - `basePriority` derived from `priority_order` (lower order → higher base priority).
+  - Initializes a `SimulatedFatigueState` with `getMuscleStressStats` output and then runs a greedy, slot-by-slot loop:
+    - For each candidate, computes the worst normalized fatigue fraction across its muscles:
+      - `fraction_m = clamp(stress_m / MAX_FATIGUE_PER_MUSCLE, 0, 1)`.
+      - `worstFraction = max_m fraction_m`.
+    - Applies zone scoring:
+      - Green zone (`worstFraction <= 0.5`): `FatiguePenalty = 0`.
+      - Yellow zone (`0.5 < worstFraction <= 0.85`): `FatiguePenalty = 0.5 * basePriority`.
+      - Red zone (`worstFraction > 0.85`): `FatiguePenalty = ∞` (exercise is hard-blocked for this run).
+    - Computes `Score = basePriority - FatiguePenalty` and picks the highest-scoring exercise; after each pick, calls `registerExercise(profile)` to add:
+      - `EstimatedStress_per_muscle = TargetSets * 0.7 * NormalizedMuscleWeight_m`.
+    - Stops when either all remaining candidates are in the red zone or the candidate set is exhausted.
+  - Returns an ordered list of `exercise_id`s that naturally pivots away from already-fatigued muscles while still honoring the allow-list and prescription bands.
 - **Rebalance detection** (`src/lib/engine/rebalance.ts`):
   - Detection-only (returns reasons + missed muscles; does not apply edits).
-  - Aggregates muscles hit from `primary_muscles` and the keys of `implicit_hits`.
+  - Aggregates muscles hit from `primary_muscles` and the keys of `implicit_hits`, and is used as a pre-start safety net (`needsRebalance`) before starting a session from the planner.
 
 ---
 
