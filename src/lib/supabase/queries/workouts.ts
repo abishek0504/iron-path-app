@@ -339,6 +339,8 @@ export interface ExerciseHistory {
   avgRPE: number | null;
 }
 
+export type MuscleStressMap = Record<string, number>;
+
 /**
  * Get top PR sets (weight-based and duration-based) for a user's recent sessions
  * Returns hybrid PRs: both weight-based (reps exercises) and duration-based (timed exercises)
@@ -588,6 +590,227 @@ export async function getExerciseHistory(
       devError('workout-query', error, { exerciseId, userId, limit });
     }
     return empty;
+  }
+}
+
+/**
+ * Get muscle stress stats for a user over a date range
+ * Aggregates stress per muscle using V2 stimulus * normalized muscle weight
+ */
+export async function getMuscleStressStats(
+  userId: string,
+  startIso: string,
+  endIso: string
+): Promise<MuscleStressMap> {
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'getMuscleStressStats',
+      userId,
+      startIso,
+      endIso,
+    });
+  }
+
+  const stress: MuscleStressMap = {};
+
+  try {
+    // Step A: fetch sets joined to completed sessions within range
+    const { data: sets, error: setsError } = await supabase
+      .from('v2_session_sets')
+      .select(
+        `
+          id,
+          session_exercise_id,
+          reps,
+          weight,
+          rpe,
+          rir,
+          duration_sec,
+          performed_at,
+          session_exercises!inner(
+            id,
+            exercise_id,
+            custom_exercise_id,
+            session_id,
+            v2_workout_sessions!inner(user_id, status, completed_at)
+          )
+        `
+      )
+      .eq('session_exercises.v2_workout_sessions.user_id', userId)
+      .eq('session_exercises.v2_workout_sessions.status', 'completed')
+      .not('session_exercises.v2_workout_sessions.completed_at', 'is', null)
+      .gte('session_exercises.v2_workout_sessions.completed_at', startIso)
+      .lte('session_exercises.v2_workout_sessions.completed_at', endIso);
+
+    if (setsError) {
+      if (__DEV__) {
+        devError('workout-query', setsError, {
+          action: 'getMuscleStressStats_sets',
+          userId,
+          startIso,
+          endIso,
+        });
+      }
+      return stress;
+    }
+
+    const rows = sets || [];
+    if (!rows.length) {
+      return stress;
+    }
+
+    // Collect exercise ids
+    const masterIds = new Set<string>();
+    const customIds = new Set<string>();
+
+    for (const row of rows) {
+      const se = row.session_exercises as {
+        exercise_id?: string | null;
+        custom_exercise_id?: string | null;
+      };
+      if (se?.exercise_id) {
+        masterIds.add(se.exercise_id);
+      }
+      if (se?.custom_exercise_id) {
+        customIds.add(se.custom_exercise_id);
+      }
+    }
+
+    // Step B: fetch exercise metadata
+    type ExerciseMeta = {
+      id: string;
+      primary_muscles: string[] | null;
+      implicit_hits: Record<string, number> | null;
+    };
+
+    const [masterMetaResult, customMetaResult] = await Promise.all([
+      masterIds.size
+        ? supabase
+            .from('v2_exercises')
+            .select('id, primary_muscles, implicit_hits')
+            .in('id', Array.from(masterIds))
+        : Promise.resolve({ data: [] as any[], error: null }),
+      customIds.size
+        ? supabase
+            .from('v2_user_custom_exercises')
+            .select('id, primary_muscles, implicit_hits')
+            .in('id', Array.from(customIds))
+        : Promise.resolve({ data: [] as any[], error: null }),
+    ]);
+
+    if (masterMetaResult.error || customMetaResult.error) {
+      if (__DEV__) {
+        devError('workout-query', masterMetaResult.error || customMetaResult.error, {
+          action: 'getMuscleStressStats_meta',
+          masterCount: masterIds.size,
+          customCount: customIds.size,
+        });
+      }
+      return stress;
+    }
+
+    const masterMeta = (masterMetaResult.data || []) as ExerciseMeta[];
+    const customMeta = (customMetaResult.data || []) as ExerciseMeta[];
+
+    const masterMap = new Map<string, ExerciseMeta>();
+    for (const ex of masterMeta) {
+      masterMap.set(ex.id, ex);
+    }
+
+    const customMap = new Map<string, ExerciseMeta>();
+    for (const ex of customMeta) {
+      customMap.set(ex.id, ex);
+    }
+
+    // Step C: aggregate stress per muscle
+    const clamp = (value: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, value));
+
+    for (const row of rows) {
+      const se = row.session_exercises as {
+        exercise_id?: string | null;
+        custom_exercise_id?: string | null;
+      };
+
+      const exerciseId = se?.exercise_id ?? undefined;
+      const customExerciseId = se?.custom_exercise_id ?? undefined;
+
+      const meta =
+        (exerciseId && masterMap.get(exerciseId)) ||
+        (customExerciseId && customMap.get(customExerciseId));
+
+      if (!meta) {
+        continue;
+      }
+
+      // Stimulus
+      const rpe: number | null =
+        typeof row.rpe === 'number' ? row.rpe : row.rpe == null ? null : Number(row.rpe);
+      const rir: number | null =
+        typeof row.rir === 'number' ? row.rir : row.rir == null ? null : Number(row.rir);
+
+      let stimulus: number;
+      if (rpe != null) {
+        stimulus = clamp((rpe - 5) / 5, 0, 1);
+      } else if (rir != null) {
+        const estRpe = 10 - rir;
+        stimulus = clamp((estRpe - 5) / 5, 0, 1);
+      } else {
+        stimulus = 0.6;
+      }
+
+      // Muscle weights
+      const muscleWeights = new Map<string, number>();
+
+      if (Array.isArray(meta.primary_muscles)) {
+        for (const m of meta.primary_muscles) {
+          if (!m) continue;
+          muscleWeights.set(m, (muscleWeights.get(m) || 0) + 1);
+        }
+      }
+
+      if (meta.implicit_hits && typeof meta.implicit_hits === 'object') {
+        for (const [m, w] of Object.entries(meta.implicit_hits)) {
+          const weight = typeof w === 'number' ? w : 0;
+          if (weight <= 0) continue;
+          muscleWeights.set(m, (muscleWeights.get(m) || 0) + weight);
+        }
+      }
+
+      let totalW = 0;
+      for (const w of muscleWeights.values()) {
+        totalW += w;
+      }
+      if (totalW <= 0) continue;
+
+      for (const [muscleKey, w] of muscleWeights.entries()) {
+        const p = w / totalW;
+        stress[muscleKey] = (stress[muscleKey] || 0) + stimulus * p;
+      }
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'getMuscleStressStats_result',
+        userId,
+        startIso,
+        endIso,
+        setCount: rows.length,
+        muscleCount: Object.keys(stress).length,
+      });
+    }
+
+    return stress;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, {
+        action: 'getMuscleStressStats_catch',
+        userId,
+        startIso,
+        endIso,
+      });
+    }
+    return stress;
   }
 }
 

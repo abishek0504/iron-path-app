@@ -660,13 +660,13 @@ Patch 15 findings:
 
 | Feature | Intended behavior | Implementation status | Files | Notes |
 |---|---|---|---|---|
-| Planner weekly template | Always show 7 days, manage slots, compute targets from prescriptions, start a day into a session | implemented (with TODOs) | `app/(tabs)/planner.tsx` | Target selection depends on missing `getExerciseHistory` export; custom-exercise target selection path is inconsistent with `getMergedExercise({ customExerciseId })` contract |
+| Planner weekly template | Always show 7 days, manage slots, compute targets from prescriptions, start a day into a session | implemented (with TODOs) | `app/(tabs)/planner.tsx` | Target selection uses merged exercise view + `getExerciseHistory`; custom-exercise path supported via XOR IDs |
 | Edit scoping: Today only | Structure edits apply to an active “today” session (create if missing) | partially implemented | `app/(tabs)/planner.tsx`, `src/lib/supabase/queries/workouts_helpers.ts`, `src/components/ui/EditScopePrompt.tsx` | `addSlot` supported; `removeSlot`/`swapExercise`/`reorderSlots` are not implemented for sessions |
 | Edit scoping: This week only | Structure edits apply only for current week instance | not implemented | `src/components/ui/EditScopePrompt.tsx`, `app/(tabs)/planner.tsx` | Disabled/stubbed with TODO |
 | Edit scoping: Next week onward | Structure edits apply to template | partially implemented | `src/lib/supabase/queries/templates.ts`, `app/(tabs)/planner.tsx` | `addSlot`/`removeSlot`/`swapExercise` supported; `reorderSlots` TODO |
 | Active workout execution UI | Execute a session: track sets, save, complete | placeholder | `app/(stack)/workout/active.tsx` | Consolidated: `/workout/active` canonical; `app/workout-active.tsx` removed |
-| Progress tab | Charts/analytics over performed truth | placeholder | `app/(tabs)/progress.tsx` | Contains TODO guidance about grouping keys |
-| Heatmap | Show daily muscle stress grid | not wired | `src/components/workout/WorkoutHeatmap.tsx` | Component exists; not imported by any route |
+| Progress tab | Charts/analytics over performed truth | implemented (history list) | `app/(tabs)/progress.tsx` | Shows completed sessions list (date, name, exercise count) from `getRecentSessions` + `v2_session_exercises` |
+| Heatmap | Show daily muscle stress grid | implemented (sensors) | `src/components/workout/WorkoutHeatmap.tsx`, `app/(tabs)/dashboard.tsx`, `src/components/ui/ModalManager.tsx` | Uses `getMuscleStressStats` over performed sets, presentational `WorkoutHeatmap` on Dashboard + global `muscleStatus` sheet |
 | Smart Adjust (rebalance apply) | If gaps detected, propose minimal changes and optionally apply | partially implemented | `src/lib/engine/rebalance.ts`, `src/components/ui/SmartAdjustPrompt.tsx`, `app/(tabs)/planner.tsx` | Detection + prompt exist; “Smart adjust” apply is TODO |
 
 ---

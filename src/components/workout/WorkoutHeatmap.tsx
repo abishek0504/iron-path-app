@@ -1,14 +1,12 @@
 /**
  * Workout Heatmap
- * Reusable component for displaying daily muscle stress
- * Shows daily muscle stress derived from performed sets (not freshness)
+ * Presentational component for displaying muscle stress
+ * Expects pre-aggregated stress data from callers
  */
 
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { supabase } from '../../lib/supabase/client';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing, borderRadius } from '../../lib/utils/theme';
-import { devLog, devError } from '../../lib/utils/logger';
 
 export interface MuscleStressData {
   muscle_key: string;
@@ -17,98 +15,22 @@ export interface MuscleStressData {
 }
 
 interface WorkoutHeatmapProps {
-  userId: string;
-  dateRange: { start: Date; end: Date };
+  stressData: MuscleStressData[];
   onMuscleSelect?: (muscleKey: string) => void;
 }
 
 export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
-  userId,
-  dateRange,
+  stressData,
   onMuscleSelect,
 }) => {
-  const [data, setData] = useState<MuscleStressData[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadHeatmapData();
-  }, [userId, dateRange]);
-
-  const loadHeatmapData = async () => {
-    if (__DEV__) {
-      devLog('heatmap', {
-        action: 'loadHeatmapData',
-        userId,
-        dateRange: {
-          start: dateRange.start.toISOString(),
-          end: dateRange.end.toISOString(),
-        },
-      });
-    }
-
-    setLoading(true);
-    try {
-      // Get daily muscle stress for date range
-      const { data: stressData, error } = await supabase
-        .from('v2_daily_muscle_stress')
-        .select('muscle_key, stress, v2_muscles!inner(display_name)')
-        .eq('user_id', userId)
-        .gte('date', dateRange.start.toISOString().split('T')[0])
-        .lte('date', dateRange.end.toISOString().split('T')[0])
-        .order('date', { ascending: true });
-
-      if (error) {
-        if (__DEV__) {
-          devError('heatmap', error, { userId, dateRange });
-        }
-        return;
-      }
-
-      // Aggregate stress by muscle across date range
-      const aggregated = new Map<string, { stress: number; display_name: string }>();
-
-      for (const row of stressData || []) {
-        const muscleKey = row.muscle_key;
-        const displayName =
-          (row.v2_muscles as any)?.display_name || muscleKey;
-        const current = aggregated.get(muscleKey) || {
-          stress: 0,
-          display_name: displayName,
-        };
-        aggregated.set(muscleKey, {
-          stress: current.stress + (row.stress || 0),
-          display_name: displayName,
-        });
-      }
-
-      const result: MuscleStressData[] = Array.from(aggregated.entries()).map(
-        ([key, value]) => ({
-          muscle_key: key,
-          display_name: value.display_name,
-          stress: value.stress,
-        })
-      );
-
-      // Sort by stress descending
-      result.sort((a, b) => b.stress - a.stress);
-
-      setData(result);
-
-      if (__DEV__) {
-        devLog('heatmap', {
-          action: 'loadHeatmapData_result',
-          muscleCount: result.length,
-          totalStress: result.reduce((sum, d) => sum + d.stress, 0),
-        });
-      }
-    } catch (error) {
-      if (__DEV__) {
-        devError('heatmap', error, { userId, dateRange });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (!stressData.length) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Muscle Stress Heatmap</Text>
+        <Text style={styles.emptyText}>No recent training data</Text>
+      </View>
+    );
+  }
 
   const getStressColor = (stress: number, maxStress: number): string => {
     if (maxStress === 0) return colors.border;
@@ -120,21 +42,13 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
     return colors.border;
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
-
-  const maxStress = Math.max(...data.map((d) => d.stress), 1);
+  const maxStress = Math.max(...stressData.map((d) => d.stress), 1);
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Muscle Stress Heatmap</Text>
       <View style={styles.grid}>
-        {data.map((item) => (
+        {stressData.map((item) => (
           <View
             key={item.muscle_key}
             style={[
@@ -143,6 +57,11 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
                 backgroundColor: getStressColor(item.stress, maxStress),
               },
             ]}
+            onTouchEnd={() => {
+              if (onMuscleSelect) {
+                onMuscleSelect(item.muscle_key);
+              }
+            }}
           >
             <Text style={styles.muscleName} numberOfLines={2}>
               {item.display_name}
@@ -166,11 +85,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
     marginBottom: spacing.md,
-  },
-  loadingContainer: {
-    padding: spacing.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   grid: {
     flexDirection: 'row',
@@ -198,6 +112,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textPrimary,
     opacity: 0.8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: colors.textMuted,
   },
 });
 

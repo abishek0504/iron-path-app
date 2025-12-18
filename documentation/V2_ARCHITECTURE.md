@@ -1470,10 +1470,9 @@ Store State: activeBottomSheet = null (or pendingBottomSheet if queued)
 **Location**: `src/components/workout/WorkoutHeatmap.tsx`
 **Purpose**: Muscle stress heatmap visualization
 **Props**:
-- `userId` (string): User ID
-- `dateRange` ({ start: Date, end: Date }): Date range for heatmap
-- `onMuscleSelect` (function, optional): Callback when muscle selected
-**Behavior**: Loads `v2_daily_muscle_stress` for date range, aggregates by muscle, displays color-coded grid
+- `stressData: { muscle_key: string; display_name: string; stress: number }[]` – Aggregated stress per muscle
+- `onMuscleSelect? (muscleKey: string)` – Optional callback when a muscle is selected
+**Behavior**: Purely presentational. Does **not** query Supabase. Colors each muscle according to its stress value using theme tokens. Callers (Dashboard, global `muscleStatus` sheet, future Progress charts) are responsible for computing `stressData` via `getMuscleStressStats` and resolving `display_name` from `v2_muscles`.
 
 ### Hooks
 
@@ -1730,7 +1729,7 @@ Components
   ├─→ ExercisePicker
   │   └─→ supabase.from('v2_exercises').select() (direct query)
   ├─→ WorkoutHeatmap
-  │   └─→ supabase.from('v2_daily_muscle_stress').select() (direct query)
+  │   └─→ Receives `stressData` from callers that use `getMuscleStressStats` + `v2_muscles`
   ├─→ WorkoutActive Screen
   │   ├─→ createWorkoutSession() → workouts.ts
   │   ├─→ saveSessionSet() → workouts.ts

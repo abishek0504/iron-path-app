@@ -14,6 +14,8 @@ import {
   getTopPRs,
   type TopPR,
 } from '../../src/lib/supabase/queries/workouts';
+import { WorkoutHeatmap, type MuscleStressData } from '../../src/components/workout/WorkoutHeatmap';
+import { getMuscleStressStats } from '../../src/lib/supabase/queries/workouts';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
 
@@ -35,6 +37,7 @@ export default function DashboardTab() {
   const [streak, setStreak] = useState<number>(0);
   const [recentSessions, setRecentSessionsState] = useState<SessionSummary[]>([]);
   const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
+  const [muscleStress, setMuscleStress] = useState<MuscleStressData[]>([]);
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
@@ -108,6 +111,24 @@ export default function DashboardTab() {
       const recent = await getRecentSessions(userId, 7);
       const topPrs = await getTopPRs(userId, 3);
 
+      // 30-day range for muscle stress
+      const stressEnd = new Date();
+      const stressStart = new Date(stressEnd);
+      stressStart.setDate(stressEnd.getDate() - 30);
+
+      const stressMap = await getMuscleStressStats(
+        userId,
+        stressStart.toISOString(),
+        stressEnd.toISOString()
+      );
+
+      const stressEntries = Object.entries(stressMap);
+      const heatmapData: MuscleStressData[] = stressEntries.map(([muscle_key, stress]) => ({
+        muscle_key,
+        display_name: muscle_key,
+        stress,
+      }));
+
       // Map exercise names for PRs
       const exerciseIds = topPrs
         .map((p) => p.exercise_id || p.custom_exercise_id)
@@ -130,6 +151,9 @@ export default function DashboardTab() {
           ...p,
           name: mergedNames[p.exercise_id || p.custom_exercise_id || ''] || 'Exercise',
         }))
+      );
+      setMuscleStress(
+        heatmapData.sort((a, b) => b.stress - a.stress)
       );
 
       if (__DEV__) {
@@ -183,6 +207,11 @@ export default function DashboardTab() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Dashboard" tabId="dashboard" />
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Muscle status</Text>
+          <WorkoutHeatmap stressData={muscleStress} />
+        </View>
+
         <View style={styles.row}>
           <View style={[styles.card, styles.flex1]}>
             <Text style={styles.cardTitle}>This week</Text>

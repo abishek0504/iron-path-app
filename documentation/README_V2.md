@@ -12,6 +12,7 @@ See [V2_ARCHITECTURE.md](./V2_ARCHITECTURE.md) for complete system contract, sch
 - **No Modal-in-Modal**: Global bottom sheets (Zustand) for quick actions, routes for complex flows
 - **Prescription-Based Targets**: Never invent generic defaults (3x10, 60s); all targets come from curated prescriptions
 - **Merged Exercise View**: Global defaults ⊕ user overrides, used everywhere
+- **Muscle Stress Sensors**: `getMuscleStressStats` derives per-muscle stress from `v2_session_sets` + exercise metadata; `WorkoutHeatmap` displays current status on Dashboard and via a global `muscleStatus` sheet
 - **Dev Logging**: Structured logging for auto-diagnosis
 - **RLS & Immutability**: Client read-only for master data, user-owned for customization
 

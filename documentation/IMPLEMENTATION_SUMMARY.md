@@ -118,7 +118,7 @@ All query functions follow the same pattern:
 - `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
 - `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
-#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08, 10)**
+#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08, 10, 11)**
 - `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session (structure preserved for XOR exercise/custom downstream)
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
@@ -129,6 +129,7 @@ All query functions follow the same pattern:
 - `getSessionsInRange(userId, startIso, endIso)` - Gets completed sessions in date range (filters by `completed_at` timestamp, not `started_at`) ✅ **FIXED (Patch 10)**
 - `getRecentSessions(userId, limit)` - Gets recent completed sessions ordered by `completed_at`
 - `getTopPRs(userId, limit)` - Gets top PR sets (hybrid: both weight-based and duration-based PRs) ✅ **FIXED (Patch 10)**
+ - `getMuscleStressStats(userId, startIso, endIso)` - Aggregates muscle stress from performed sets using Stimulus × NormalizedMuscleWeight (primary_muscles weight 1.0 + implicit_hits weights, normalized per exercise) for use by Dashboard/heatmap/Engine ✅ **NEW (Patch 11)**
 
 #### `src/lib/supabase/queries/workouts_helpers.ts` ✅ **NEW (Patch B)**
 - `getOrCreateActiveSessionForToday(userId, dayName?)` - Gets in-progress session for today, or creates new session for today
