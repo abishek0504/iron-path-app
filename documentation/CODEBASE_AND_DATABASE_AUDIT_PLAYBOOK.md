@@ -95,6 +95,8 @@ These are the “hard rules” the codebase and database are intended to follow.
 - Patch migrations (schema evolutions):
   - `./supabase/migrations/20250101000000_patch_c1_template_slots_custom_exercise_id.sql`
   - `./supabase/migrations/20250101000003_patch_h_remove_goal.sql`
+- Seed data migrations:
+  - `./supabase/migrations/20250101000004_seed_v2_muscles.sql` - Populates v2_muscles with 28 canonical muscles
 
 ### Core tables (conceptual model)
 
@@ -123,10 +125,13 @@ These are the “hard rules” the codebase and database are intended to follow.
 
 ### DB rebuild prerequisites (for the app to work)
 
-To get meaningful UI behavior (planner targets, AI generation), the DB needs seed data:
+To get meaningful UI behavior (planner targets, AI generation, heatmap, rebalance detection), the DB needs seed data:
 
 - **Required**:
-  - `v2_muscles`: canonical muscle keys
+  - `v2_muscles`: canonical muscle keys (28 muscles via migration `20250101000004_seed_v2_muscles.sql`)
+    - Organized into 6 groups: upper_body_push (7), upper_body_pull (6), core (2), lower_body_front (2), lower_body_back (4), stabilizers (7)
+    - All muscles are required for: exercise metadata validation, heatmap stress tracking, rebalance gap detection
+    - Philosophy: functionally distinct groups for compound movements (not individual muscle heads)
   - `v2_exercises`: exercise catalog
   - `v2_exercise_prescriptions`: targets per exercise
 - **Optional but used by features**:

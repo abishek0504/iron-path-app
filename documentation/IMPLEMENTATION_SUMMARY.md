@@ -14,7 +14,7 @@ This document tracks all completed V2 implementation work. It serves as a refere
 
 ### 2. Database Migrations ✅
 - `supabase/migrations/20240101000000_create_v2_tables.sql`: All v2_* tables with constraints
-  - `v2_muscles` - Canonical muscle keys
+  - `v2_muscles` - Canonical muscle keys (schema only, seed data in separate migration)
   - `v2_exercises` - Master exercise list (immutable from client)
   - `v2_exercise_prescriptions` - Curated programming targets
   - `v2_ai_recommended_exercises` - AI allow-list + base priority for fatigue-aware week generation
@@ -28,6 +28,13 @@ This document tracks all completed V2 implementation work. It serves as a refere
 - `supabase/migrations/20240101000001_create_v2_rls_policies.sql`: RLS policies for all tables
   - Immutable tables: auth SELECT only
   - User-owned tables: CRUD for owner only (`user_id = auth.uid()`)
+
+- `supabase/migrations/20250101000004_seed_v2_muscles.sql`: Seed data for v2_muscles table ✅ **NEW**
+  - Inserts all 28 canonical muscles organized into 6 functional groups
+  - Idempotent migration (uses `ON CONFLICT (key) DO NOTHING`)
+  - Groups: `upper_body_push` (7), `upper_body_pull` (6), `core` (2), `lower_body_front` (2), `lower_body_back` (4), `stabilizers` (7)
+  - Philosophy: Focus on functionally distinct muscle groups for compound movements (not individual muscle heads)
+  - All muscles are required for: heatmap display, rebalance detection, exercise metadata validation
 
 ### 3. Core Infrastructure ✅
 

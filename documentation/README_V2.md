@@ -48,7 +48,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 
 3. Run migrations:
 ```bash
-# Apply migrations to Supabase
+# Apply migrations to Supabase (in order):
+# - 20240101000000_create_v2_tables.sql (creates all tables)
+# - 20240101000001_create_v2_rls_policies.sql (RLS policies)
+# - 20250101000000_patch_c1_template_slots_custom_exercise_id.sql (schema patch)
+# - 20250101000003_patch_h_remove_goal.sql (schema patch)
+# - 20250101000004_seed_v2_muscles.sql (seed data: 28 canonical muscles)
 # Use Supabase CLI or dashboard to apply files in supabase/migrations/
 ```
 
@@ -96,7 +101,10 @@ npm start
 ## Database Schema
 
 All V2 tables are prefixed with `v2_`:
-- `v2_muscles`: Canonical muscle keys
+- `v2_muscles`: Canonical muscle keys (28 muscles, seeded via `20250101000004_seed_v2_muscles.sql`)
+  - Organized into 6 functional groups: upper_body_push (7), upper_body_pull (6), core (2), lower_body_front (2), lower_body_back (4), stabilizers (7)
+  - Philosophy: functionally distinct groups for compound movements (not individual muscle heads)
+  - Required for: exercise metadata validation, heatmap stress tracking, rebalance gap detection
 - `v2_exercises`: Master exercise list (immutable from client)
 - `v2_exercise_prescriptions`: Curated programming targets
 - `v2_ai_recommended_exercises`: AI allow-list + base priority for fatigue-aware week generation

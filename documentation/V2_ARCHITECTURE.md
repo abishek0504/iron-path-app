@@ -69,15 +69,65 @@ Immutability:
 
 ### `v2_muscles`
 
-Single source of truth for muscle keys used everywhere.
+Single source of truth for muscle keys used everywhere. This table contains **28 muscles** organized into 6 functional groups, designed for compound movement tracking (not isolation exercises).
 
-- `key text PRIMARY KEY`
-- `display_name text`
-- optional `group text`, `sort_order int`, `is_active boolean`
+**Schema**:
+- `key text PRIMARY KEY` - Unique muscle identifier (snake_case, e.g., "anterior_deltoids")
+- `display_name text NOT NULL` - Human-readable name (e.g., "Front Delts")
+- `group text` - Body region category for UI grouping (e.g., "upper_body_push", "stabilizers")
+- `sort_order int` - Display ordering within group
+- `is_active boolean DEFAULT true` - Soft delete flag
 
-Validation rule:
+**Muscle Philosophy**: Focus on functionally distinct muscle groups for compound movements. Individual muscle heads are NOT tracked separately unless there's a meaningful functional difference (e.g., `upper_chest` vs `lower_chest` for incline/decline variations, but `triceps` as a single group since all heads work together in compounds).
 
+**Complete Muscle List (28 total)**:
+
+**Upper Body Push (7 muscles)**:
+- `chest` - "Chest" (general pectorals)
+- `upper_chest` - "Upper Chest" (incline movements)
+- `lower_chest` - "Lower Chest" (decline movements)
+- `anterior_deltoids` - "Front Delts"
+- `lateral_deltoids` - "Side Delts"
+- `posterior_deltoids` - "Rear Delts"
+- `triceps` - "Triceps"
+
+**Upper Body Pull (6 muscles)**:
+- `lats` - "Lats"
+- `upper_back` - "Upper Back" (rhomboids, middle traps)
+- `lower_back` - "Lower Back" (erector spinae)
+- `traps` - "Traps"
+- `biceps` - "Biceps"
+- `forearms` - "Forearms"
+
+**Core (2 muscles)**:
+- `abs` - "Abs"
+- `obliques` - "Obliques"
+
+**Lower Body Front (2 muscles)**:
+- `quads` - "Quadriceps"
+- `hip_flexors` - "Hip Flexors"
+
+**Lower Body Back (4 muscles)**:
+- `hamstrings` - "Hamstrings"
+- `glutes` - "Glutes"
+- `calves` - "Calves"
+- `soleus` - "Soleus"
+
+**Stabilizers (7 muscles)** - Tracked via `implicit_hits` in compound movements:
+- `rotator_cuff` - "Rotator Cuff"
+- `serratus_anterior` - "Serratus Anterior"
+- `transverse_abdominis` - "Transverse Abdominis"
+- `glute_medius` - "Glute Medius"
+- `glute_minimus` - "Glute Minimus"
+- `piriformis` - "Piriformis"
+- `tibialis_anterior` - "Tibialis Anterior"
+
+**Validation rule**:
 - Any write path that references muscle keys must validate against `v2_muscles.key`.
+- All `primary_muscles[]` values in `v2_exercises` must exist in `v2_muscles.key`.
+- All keys in `implicit_hits{}` JSONB objects must exist in `v2_muscles.key`.
+
+**Seed Data**: The table is populated via migration `20250101000004_seed_v2_muscles.sql` which inserts all 28 muscles with proper grouping and sort order. The migration is idempotent (uses `ON CONFLICT (key) DO NOTHING`).
 
 ## 5) Exercise identity and biomechanics (global)
 
@@ -643,28 +693,83 @@ iron-path-app/
 
 ### v2_muscles
 
-**Purpose**: Canonical source of truth for muscle keys. All muscle references throughout the system must validate against this table.
+**Purpose**: Canonical source of truth for muscle keys. All muscle references throughout the system must validate against this table. Contains **28 muscles** organized into 6 functional groups, designed for compound movement tracking (not isolation exercises).
 
 **Fields**:
-- `key` (text, PRIMARY KEY): Unique muscle identifier (e.g., "chest", "biceps", "quadriceps"). Used as foreign key in other tables.
-- `display_name` (text, NOT NULL): Human-readable name (e.g., "Chest", "Biceps", "Quadriceps").
-- `group` (text, nullable): Muscle group categorization (e.g., "upper_body", "lower_body", "core").
-- `sort_order` (int, nullable): Display ordering for UI lists.
+- `key` (text, PRIMARY KEY): Unique muscle identifier (snake_case, e.g., "anterior_deltoids", "upper_chest", "rotator_cuff"). Used as foreign key in other tables and referenced in `v2_exercises.primary_muscles[]` and `v2_exercises.implicit_hits{}`.
+- `display_name` (text, NOT NULL): Human-readable name (e.g., "Front Delts", "Upper Chest", "Rotator Cuff").
+- `group` (text, nullable): Muscle group categorization for UI organization. Values: `upper_body_push`, `upper_body_pull`, `core`, `lower_body_front`, `lower_body_back`, `stabilizers`.
+- `sort_order` (int, nullable): Display ordering within group (1-based, increments per muscle in group).
 - `is_active` (boolean, default true): Soft delete flag. Inactive muscles are hidden from selection but preserved for historical data.
 - `created_at` (timestamptz, default now()): Record creation timestamp.
 - `updated_at` (timestamptz, default now()): Last update timestamp.
 
+**Muscle Philosophy**: The system focuses on functionally distinct muscle groups for compound movements. Individual muscle heads are NOT tracked separately unless there's a meaningful functional difference:
+- ✅ **Tracked separately**: `upper_chest` vs `lower_chest` (incline vs decline bench), `calves` vs `soleus` (standing vs seated), three deltoid heads (functionally different in compound movements)
+- ❌ **NOT tracked separately**: Individual tricep heads (all work together in compounds), individual quad heads (all work together in squats), individual bicep heads (both work together in pulling)
+
+**Complete Muscle Inventory (28 total)**:
+
+**Upper Body Push (group: `upper_body_push`, 7 muscles)**:
+1. `chest` - "Chest" (general pectorals, flat bench movements)
+2. `upper_chest` - "Upper Chest" (clavicular head, incline movements)
+3. `lower_chest` - "Lower Chest" (sternal head, decline movements)
+4. `anterior_deltoids` - "Front Delts" (front deltoids, push movements)
+5. `lateral_deltoids` - "Side Delts" (side deltoids, lateral raises)
+6. `posterior_deltoids` - "Rear Delts" (rear deltoids, important for shoulder health)
+7. `triceps` - "Triceps" (all heads work together in compound movements)
+
+**Upper Body Pull (group: `upper_body_pull`, 6 muscles)**:
+8. `lats` - "Lats" (latissimus dorsi, primary pulling muscle)
+9. `upper_back` - "Upper Back" (rhomboids, middle traps, rowing movements)
+10. `lower_back` - "Lower Back" (erector spinae, also part of core)
+11. `traps` - "Traps" (trapezius, upper/middle/lower)
+12. `biceps` - "Biceps" (both heads work together in compound pulling)
+13. `forearms` - "Forearms" (grip strength, often implicit in pulling)
+
+**Core (group: `core`, 2 muscles)**:
+14. `abs` - "Abs" (rectus abdominis, primary core)
+15. `obliques` - "Obliques" (external/internal obliques, rotational stability)
+
+**Lower Body Front (group: `lower_body_front`, 2 muscles)**:
+16. `quads` - "Quadriceps" (all quad heads work together in squats, lunges)
+17. `hip_flexors` - "Hip Flexors" (iliopsoas, important stabilizer and core connection)
+
+**Lower Body Back (group: `lower_body_back`, 4 muscles)**:
+18. `hamstrings` - "Hamstrings" (all heads work together in deadlifts, RDLs)
+19. `glutes` - "Glutes" (gluteus maximus, primary hip extension)
+20. `calves` - "Calves" (gastrocnemius, standing calf work)
+21. `soleus` - "Soleus" (seated calf work, functionally different from calves)
+
+**Stabilizers (group: `stabilizers`, 7 muscles)** - These are tracked via `implicit_hits` in compound movements but critical for rebalance detection:
+22. `rotator_cuff` - "Rotator Cuff" (shoulder joint stability)
+23. `serratus_anterior` - "Serratus Anterior" (scapular stability)
+24. `transverse_abdominis` - "Transverse Abdominis" (deep core stabilizer)
+25. `glute_medius` - "Glute Medius" (hip stabilizer)
+26. `glute_minimus` - "Glute Minimus" (hip stabilizer)
+27. `piriformis` - "Piriformis" (hip external rotation)
+28. `tibialis_anterior` - "Tibialis Anterior" (shin, often implicit in squats/deadlifts)
+
 **Relationships**:
-- Referenced by: `v2_exercises.primary_muscles[]`, `v2_exercises.implicit_hits{}`, `v2_muscle_freshness.muscle_key`, `v2_daily_muscle_stress.muscle_key`
+- Referenced by: `v2_exercises.primary_muscles[]` (array of muscle keys), `v2_exercises.implicit_hits{}` (JSONB keys), `v2_muscle_freshness.muscle_key`, `v2_daily_muscle_stress.muscle_key`
+- All muscle keys referenced in exercises must exist in this table (enforced by validation layer)
 
 **RLS**: Auth SELECT only (immutable from client)
 
+**Seed Data**: Populated via migration `20250101000004_seed_v2_muscles.sql`. The migration is idempotent (uses `ON CONFLICT (key) DO NOTHING`) and can be safely re-run.
+
+**Usage in System**:
+- **Heatmap Display**: All 28 muscles can appear in the heatmap when they have stress data from `getMuscleStressStats()`
+- **Rebalance Detection**: The `needsRebalance()` function compares muscles hit in recent sessions against ALL 28 muscles in this table to detect coverage gaps
+- **Exercise Metadata**: Exercises reference muscles via `primary_muscles[]` (primary targets) and `implicit_hits{}` (secondary/stabilizer activation)
+- **Validation**: All write paths (custom exercises, overrides) must validate muscle keys against this table
+
 **Example Data**:
 ```
-key: "chest"
-display_name: "Chest"
-group: "upper_body"
-sort_order: 1
+key: "anterior_deltoids"
+display_name: "Front Delts"
+group: "upper_body_push"
+sort_order: 4
 is_active: true
 ```
 
