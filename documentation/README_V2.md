@@ -99,7 +99,7 @@ All V2 tables are prefixed with `v2_`:
 - `v2_muscles`: Canonical muscle keys
 - `v2_exercises`: Master exercise list (immutable from client)
 - `v2_exercise_prescriptions`: Curated programming targets
-- `v2_ai_recommended_exercises`: AI allow-list
+- `v2_ai_recommended_exercises`: AI allow-list + base priority for fatigue-aware week generation
 - `v2_user_exercise_overrides`: User-specific overrides
 - `v2_user_custom_exercises`: User-created exercises
 - `v2_workout_templates`, `v2_template_days`, `v2_template_slots`: Planning

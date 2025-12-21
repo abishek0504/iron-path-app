@@ -163,6 +163,38 @@ AI rule:
 - Programming targets come from `v2_exercise_prescriptions`.
 - Computations use merged per-user exercise view.
 
+### AI week generation (in-flight fatigue simulation)
+
+The week generator must treat fatigue as a **gradient cost**, not a binary allow/deny switch.
+
+Hard rules:
+
+- **Start state (performed truth)**: Initialize fatigue from the last 48h performed stress (same model used by the dashboard/heatmap). This is read-only and derived from sessions/sets.
+- **In-flight simulation**: As the generator selects exercises, it must update a local (ephemeral) fatigue map so later picks naturally pivot away from already-fatigued muscles.
+- **No per-slot SQL**: All required data must be fetched up front; the selection loop must be pure TypeScript (no extra queries per pick).
+
+Estimator (per exercise):
+
+- `TargetSets = round((sets_min + sets_max) / 2)` from prescription/custom target band.
+- `EstimatedStress_total = TargetSets * EstStimulus` where `EstStimulus = 0.7` (assume a standard hard set ~RPE 8).
+- `NormalizedMuscleWeight_m` is built from:
+  - `primary_muscles` as weight 1.0 per muscle
+  - `implicit_hits[m]` as its numeric weight (clamped/validated elsewhere)
+  - normalize so \(\sum_m NormalizedMuscleWeight_m = 1.0\)
+- `EstimatedStress_m = EstimatedStress_total * NormalizedMuscleWeight_m`
+
+Scoring (per candidate):
+
+- Normalize current muscle stress into a fraction: `fraction_m = clamp(stress_m / MAX_FATIGUE_PER_MUSCLE, 0, 1)` where `MAX_FATIGUE_PER_MUSCLE = 10`.
+- Use the candidate’s `worstFraction = max_m fraction_m` across all muscles it hits.
+- Penalty rules:
+  - Green zone (`worstFraction <= 0.5`): penalty = 0
+  - Yellow zone (`0.5 < worstFraction <= 0.85`): penalty = `basePriority * 0.5`
+  - Red zone (`worstFraction > 0.85`): penalty = `∞` (hard stop for this run)
+- Score: `Score = basePriority - penalty`
+
+The generator returns an ordered list of eligible exercise IDs from the allow-list that is fatigue-aware for the current run.
+
 ## 8) User customization without corrupting global data
 
 ### `v2_user_exercise_overrides`
