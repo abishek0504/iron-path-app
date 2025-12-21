@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useRouter, useSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
 import { useUIStore } from '../../src/stores/uiStore';
@@ -9,7 +9,7 @@ import { devLog, devError } from '../../src/lib/utils/logger';
 type CallbackType = 'recovery' | 'password' | 'email_change' | string | null;
 
 export default function AuthCallbackScreen() {
-  const params = useSearchParams();
+  const params = useLocalSearchParams<{ code?: string; type?: string }>();
   const router = useRouter();
   const showToast = useUIStore((state) => state.showToast);
 
@@ -21,8 +21,8 @@ export default function AuthCallbackScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const code = params.get('code');
-    const type = (params.get('type') as CallbackType) || null;
+    const code = typeof params.code === 'string' ? params.code : Array.isArray(params.code) ? params.code[0] : undefined;
+    const type = (params.type as CallbackType) || null;
     setCbType(type);
 
     const run = async () => {

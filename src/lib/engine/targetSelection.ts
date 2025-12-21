@@ -79,7 +79,9 @@ export async function selectExerciseTargets(
   // Determine mode
   const mode: 'reps' | 'timed' = exercise.is_timed ? 'timed' : 'reps';
 
-  // Fetch prescription (custom exercises fall back to their own target bands)
+  // Fetch prescription (custom exercises fall back to their own target bands).
+  // Note: sets_min/sets_max here define the same bands used by the AI
+  // fatigue simulator in weekGeneration.ts when estimating TargetSets.
   const prescription =
     exercise.source === 'custom'
       ? (() => {

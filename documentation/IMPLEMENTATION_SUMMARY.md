@@ -14,10 +14,10 @@ This document tracks all completed V2 implementation work. It serves as a refere
 
 ### 2. Database Migrations ✅
 - `supabase/migrations/20240101000000_create_v2_tables.sql`: All v2_* tables with constraints
-  - `v2_muscles` - Canonical muscle keys
+  - `v2_muscles` - Canonical muscle keys (schema only, seed data in separate migration)
   - `v2_exercises` - Master exercise list (immutable from client)
   - `v2_exercise_prescriptions` - Curated programming targets
-  - `v2_ai_recommended_exercises` - AI allow-list
+  - `v2_ai_recommended_exercises` - AI allow-list + base priority for fatigue-aware week generation
   - `v2_user_exercise_overrides` - User-specific overrides
   - `v2_user_custom_exercises` - User-created exercises
   - `v2_workout_templates`, `v2_template_days`, `v2_template_slots` - Planning layer
@@ -28,6 +28,13 @@ This document tracks all completed V2 implementation work. It serves as a refere
 - `supabase/migrations/20240101000001_create_v2_rls_policies.sql`: RLS policies for all tables
   - Immutable tables: auth SELECT only
   - User-owned tables: CRUD for owner only (`user_id = auth.uid()`)
+
+- `supabase/migrations/20250101000004_seed_v2_muscles.sql`: Seed data for v2_muscles table ✅ **NEW**
+  - Inserts all 28 canonical muscles organized into 6 functional groups
+  - Idempotent migration (uses `ON CONFLICT (key) DO NOTHING`)
+  - Groups: `upper_body_push` (7), `upper_body_pull` (6), `core` (2), `lower_body_front` (2), `lower_body_back` (4), `stabilizers` (7)
+  - Philosophy: Focus on functionally distinct muscle groups for compound movements (not individual muscle heads)
+  - All muscles are required for: heatmap display, rebalance detection, exercise metadata validation
 
 ### 3. Core Infrastructure ✅
 
@@ -118,7 +125,7 @@ All query functions follow the same pattern:
 - `getExercisePrescription(exerciseId, experience, mode)` - Single prescription lookup (goal removed)
 - `getPrescriptionsForExercises(exerciseIds, experience, mode)` - Bulk lookup, returns Map (goal removed)
 
-#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08)**
+#### `src/lib/supabase/queries/workouts.ts` ✅ **UPDATED (Patch E, F, 07, 08, 10, 11)**
 - `createWorkoutSession(userId, templateId?, dayName?)` - Creates active session (structure preserved for XOR exercise/custom downstream)
 - `getActiveSession(userId)` - Gets user's active session
 - `completeWorkoutSession(sessionId)` - Marks session as completed
@@ -126,6 +133,10 @@ All query functions follow the same pattern:
 - `prefillSessionSets(sessionId, sessionExercises, targets)` - Prefills session sets with progressive overload targets at session start; targets map is keyed by XOR exercise/custom IDs and writes sets for the matching session exercise
 - `saveSessionSet(sessionExerciseId, setNumber, setData)` - Upserts a set
 - `getLast7DaysSessionStructure(userId)` - Gets last 7 days of completed session structure for "Copy last week" feature ✅ **NEW (Patch E)**
+- `getSessionsInRange(userId, startIso, endIso)` - Gets completed sessions in date range (filters by `completed_at` timestamp, not `started_at`) ✅ **FIXED (Patch 10)**
+- `getRecentSessions(userId, limit)` - Gets recent completed sessions ordered by `completed_at`
+- `getTopPRs(userId, limit)` - Gets top PR sets (hybrid: both weight-based and duration-based PRs) ✅ **FIXED (Patch 10)**
+ - `getMuscleStressStats(userId, startIso, endIso)` - Aggregates muscle stress from performed sets using Stimulus × NormalizedMuscleWeight (primary_muscles weight 1.0 + implicit_hits weights, normalized per exercise) for use by Dashboard/heatmap/Engine ✅ **NEW (Patch 11)**
 
 #### `src/lib/supabase/queries/workouts_helpers.ts` ✅ **NEW (Patch B)**
 - `getOrCreateActiveSessionForToday(userId, dayName?)` - Gets in-progress session for today, or creates new session for today
@@ -269,10 +280,18 @@ All query functions follow the same pattern:
 
 #### `src/lib/engine/weekGeneration.ts` - AI Week Generation ✅ **NEW**
 - **`generateWeekForTemplate(template, userId, profile)`**
-  - Fetches exercises from `v2_ai_recommended_exercises` (top 20 by priority)
-  - Returns array of exercise IDs for AI generation
-  - TODO: Full AI logic integration (currently returns allow-list exercises)
-  - Used by "Generate with AI" button in planner
+  - Uses `v2_ai_recommended_exercises` as an allow-list of candidates (`exercise_id`, `priority_order`; limit 50)
+  - Front-loads supporting data (no SQL inside the selection loop):
+    - Merged exercise metadata via `listMergedExercises(userId, exerciseIds)` (`primary_muscles`, `implicit_hits`)
+    - Prescription bands via `getPrescriptionsForExercises(exerciseIds, experience, mode)` (missing band = exclude; never invent defaults)
+    - Last 48h performed fatigue via `getMuscleStressStats(userId, startIso, endIso)` as the initial `MuscleStressMap`
+  - Runs a greedy **in-flight fatigue simulation** to order candidates:
+    - Per-exercise estimated stress: `TargetSets * 0.7 * NormalizedMuscleWeight` (weights from primary + implicit hits, normalized to sum=1)
+    - Scoring zones using worst (max) normalized muscle fraction:
+      - Green (<=50%): no penalty
+      - Yellow (50–85%): penalty = `0.5 * basePriority`
+      - Red (>85%): hard stop (candidate excluded for this run)
+  - Returns an ordered list of `exercise_id`s used by the planner’s "Generate with AI" flow
 
 #### `src/lib/engine/targetSelection.ts` - Prescription-Based Target Selection with Progressive Overload ✅ **UPDATED (Patch F, Patch 07)**
 - **`selectExerciseTargets({ exerciseId?, customExerciseId? }, userId, context, historyCount)`**
@@ -390,7 +409,7 @@ All hooks provide convenience wrappers around Zustand stores.
 
 #### AI Generation ✅ **UPDATED**
 - **"Generate with AI" Button**:
-  1. Calls `generateWeekForTemplate()` to fetch exercise IDs from `v2_ai_recommended_exercises` (top 20 by priority)
+  1. Calls `generateWeekForTemplate()` to get an ordered list of AI exercise IDs (allow-list + prescriptions + last-48h fatigue + in-flight simulation)
   2. Distributes exercises across days (2-3 per day, round-robin)
   3. Creates slots for each exercise in template
   4. Fetches exercise names and calculates targets

@@ -95,6 +95,8 @@ These are the “hard rules” the codebase and database are intended to follow.
 - Patch migrations (schema evolutions):
   - `./supabase/migrations/20250101000000_patch_c1_template_slots_custom_exercise_id.sql`
   - `./supabase/migrations/20250101000003_patch_h_remove_goal.sql`
+- Seed data migrations:
+  - `./supabase/migrations/20250101000004_seed_v2_muscles.sql` - Populates v2_muscles with 28 canonical muscles
 
 ### Core tables (conceptual model)
 
@@ -123,10 +125,13 @@ These are the “hard rules” the codebase and database are intended to follow.
 
 ### DB rebuild prerequisites (for the app to work)
 
-To get meaningful UI behavior (planner targets, AI generation), the DB needs seed data:
+To get meaningful UI behavior (planner targets, AI generation, heatmap, rebalance detection), the DB needs seed data:
 
 - **Required**:
-  - `v2_muscles`: canonical muscle keys
+  - `v2_muscles`: canonical muscle keys (28 muscles via migration `20250101000004_seed_v2_muscles.sql`)
+    - Organized into 6 groups: upper_body_push (7), upper_body_pull (6), core (2), lower_body_front (2), lower_body_back (4), stabilizers (7)
+    - All muscles are required for: exercise metadata validation, heatmap stress tracking, rebalance gap detection
+    - Philosophy: functionally distinct groups for compound movements (not individual muscle heads)
   - `v2_exercises`: exercise catalog
   - `v2_exercise_prescriptions`: targets per exercise
 - **Optional but used by features**:
@@ -537,11 +542,13 @@ Patch 09 findings:
 
 Patch 10 findings:
 
-- **Week range definition** (`app/(tabs)/dashboard.tsx`): computes local Sunday-start week boundaries and converts to ISO strings for querying.
-- **Query timestamp mismatch**:
-  - Dashboard labels metric as “This week completed workouts”, but `getSessionsInRange(...)` filters on `v2_workout_sessions.started_at` (not `completed_at`).
-- **PRs implementation bias**:
+- **Week range definition** (`app/(tabs)/dashboard.tsx`): computes local Sunday-start week boundaries and converts to ISO strings for querying. **Fixed**: Verified and documented Sunday-Saturday week calculation logic.
+- **Query timestamp mismatch**: **Fixed**
+  - Dashboard labels metric as "This week completed workouts", but `getSessionsInRange(...)` filters on `v2_workout_sessions.started_at` (not `completed_at`).
+  - **Resolution**: Updated `getSessionsInRange` to filter by `completed_at` instead of `started_at`, and added `.not('completed_at', 'is', null)` to ensure only sessions with completion timestamps are included.
+- **PRs implementation bias**: **Fixed**
   - `getTopPRs(...)` currently filters sets with `weight IS NOT NULL` and orders by `weight desc`, so timed PRs (`duration_sec`) are not discoverable by this query path.
+  - **Resolution**: Refactored `getTopPRs` to fetch both weight-based and duration-based PRs in parallel, then merge and return top results sorted by recency. Now supports hybrid PR ranking for both rep-based and timed exercises.
 
 ---
 
@@ -574,21 +581,40 @@ Patch 11 findings:
   - `./src/lib/supabase/queries/prescriptions.ts`
 - **Questions to answer**:
   - Does target selection correctly treat missing prescriptions as a hard failure?
-  - Does AI generation only use the allow-list?
+  - Does AI generation only use the allow-list, and how does it respect current fatigue?
   - Rebalance: is it detection-only and does it avoid per-item logging?
 
 Patch 12 findings:
 
 - **Target selection** (`src/lib/engine/targetSelection.ts`):
   - Missing prescription → returns `null` (hard failure path), with dev error logs.
-  - Progressive overload is designed to use performed history, but `getExerciseHistory` is currently missing from `queries/workouts.ts` (see Patch 05).
-  - Custom exercises are not handled by the current `selectExerciseTargets(...)` API shape because it always calls `getMergedExercise({ exerciseId })`.
-- **AI week generation** (`src/lib/engine/weekGeneration.ts`):
-  - Uses `v2_ai_recommended_exercises` allow-list only and returns up to 20 `exercise_id` values ordered by `priority_order`.
-  - Does not yet use `profile` or template content (parameter currently unused).
+  - Progressive overload uses performed history via `getExerciseHistory` (completed sessions only, keyed by master/custom id) and always clamps inside the prescription/custom band.
+  - Custom exercises are handled via their own target-band fields on `v2_user_custom_exercises`; masters read from `v2_exercise_prescriptions`.
+- **AI week generation — biomechanical simulator** (`src/lib/engine/weekGeneration.ts`):
+  - Uses `v2_ai_recommended_exercises` as an allow-list of candidate exercises (with `priority_order` as base priority).
+  - Front-loads all data in one go (no SQL in the selection loop):
+    - Merged exercise metadata from `listMergedExercises(userId, exerciseIds)` for `primary_muscles` + `implicit_hits`.
+    - Prescription bands from `getPrescriptionsForExercises(exerciseIds, experience, mode)` (same bands used by `selectExerciseTargets`).
+    - Real fatigue from last 48h performed truth via `getMuscleStressStats(userId, startIso, endIso)` as the initial `MuscleStressMap`.
+  - For each candidate builds an `ExerciseStressProfile`:
+    - `TargetSets = round((sets_min + sets_max) / 2)` from the prescription/custom band.
+    - `perMuscleWeights` from `primary_muscles` (1.0 each) plus `implicit_hits` weights, then normalized so the sum is 1.0 (this is `NormalizedMuscleWeight`).
+    - `basePriority` derived from `priority_order` (lower order → higher base priority).
+  - Initializes a `SimulatedFatigueState` with `getMuscleStressStats` output and then runs a greedy, slot-by-slot loop:
+    - For each candidate, computes the worst normalized fatigue fraction across its muscles:
+      - `fraction_m = clamp(stress_m / MAX_FATIGUE_PER_MUSCLE, 0, 1)`.
+      - `worstFraction = max_m fraction_m`.
+    - Applies zone scoring:
+      - Green zone (`worstFraction <= 0.5`): `FatiguePenalty = 0`.
+      - Yellow zone (`0.5 < worstFraction <= 0.85`): `FatiguePenalty = 0.5 * basePriority`.
+      - Red zone (`worstFraction > 0.85`): `FatiguePenalty = ∞` (exercise is hard-blocked for this run).
+    - Computes `Score = basePriority - FatiguePenalty` and picks the highest-scoring exercise; after each pick, calls `registerExercise(profile)` to add:
+      - `EstimatedStress_per_muscle = TargetSets * 0.7 * NormalizedMuscleWeight_m`.
+    - Stops when either all remaining candidates are in the red zone or the candidate set is exhausted.
+  - Returns an ordered list of `exercise_id`s that naturally pivots away from already-fatigued muscles while still honoring the allow-list and prescription bands.
 - **Rebalance detection** (`src/lib/engine/rebalance.ts`):
   - Detection-only (returns reasons + missed muscles; does not apply edits).
-  - Aggregates muscles hit from `primary_muscles` and the keys of `implicit_hits`.
+  - Aggregates muscles hit from `primary_muscles` and the keys of `implicit_hits`, and is used as a pre-start safety net (`needsRebalance`) before starting a session from the planner.
 
 ---
 
@@ -658,13 +684,13 @@ Patch 15 findings:
 
 | Feature | Intended behavior | Implementation status | Files | Notes |
 |---|---|---|---|---|
-| Planner weekly template | Always show 7 days, manage slots, compute targets from prescriptions, start a day into a session | implemented (with TODOs) | `app/(tabs)/planner.tsx` | Target selection depends on missing `getExerciseHistory` export; custom-exercise target selection path is inconsistent with `getMergedExercise({ customExerciseId })` contract |
+| Planner weekly template | Always show 7 days, manage slots, compute targets from prescriptions, start a day into a session | implemented (with TODOs) | `app/(tabs)/planner.tsx` | Target selection uses merged exercise view + `getExerciseHistory`; custom-exercise path supported via XOR IDs |
 | Edit scoping: Today only | Structure edits apply to an active “today” session (create if missing) | partially implemented | `app/(tabs)/planner.tsx`, `src/lib/supabase/queries/workouts_helpers.ts`, `src/components/ui/EditScopePrompt.tsx` | `addSlot` supported; `removeSlot`/`swapExercise`/`reorderSlots` are not implemented for sessions |
 | Edit scoping: This week only | Structure edits apply only for current week instance | not implemented | `src/components/ui/EditScopePrompt.tsx`, `app/(tabs)/planner.tsx` | Disabled/stubbed with TODO |
 | Edit scoping: Next week onward | Structure edits apply to template | partially implemented | `src/lib/supabase/queries/templates.ts`, `app/(tabs)/planner.tsx` | `addSlot`/`removeSlot`/`swapExercise` supported; `reorderSlots` TODO |
 | Active workout execution UI | Execute a session: track sets, save, complete | placeholder | `app/(stack)/workout/active.tsx` | Consolidated: `/workout/active` canonical; `app/workout-active.tsx` removed |
-| Progress tab | Charts/analytics over performed truth | placeholder | `app/(tabs)/progress.tsx` | Contains TODO guidance about grouping keys |
-| Heatmap | Show daily muscle stress grid | not wired | `src/components/workout/WorkoutHeatmap.tsx` | Component exists; not imported by any route |
+| Progress tab | Charts/analytics over performed truth | implemented (history list) | `app/(tabs)/progress.tsx` | Shows completed sessions list (date, name, exercise count) from `getRecentSessions` + `v2_session_exercises` |
+| Heatmap | Show daily muscle stress grid | implemented (sensors) | `src/components/workout/WorkoutHeatmap.tsx`, `app/(tabs)/dashboard.tsx`, `src/components/ui/ModalManager.tsx` | Uses `getMuscleStressStats` over performed sets, presentational `WorkoutHeatmap` on Dashboard + global `muscleStatus` sheet |
 | Smart Adjust (rebalance apply) | If gaps detected, propose minimal changes and optionally apply | partially implemented | `src/lib/engine/rebalance.ts`, `src/components/ui/SmartAdjustPrompt.tsx`, `app/(tabs)/planner.tsx` | Detection + prompt exist; “Smart adjust” apply is TODO |
 
 ---
