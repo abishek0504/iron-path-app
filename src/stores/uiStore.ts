@@ -12,6 +12,7 @@ export type BottomSheetId =
   | 'settingsMenu'
   | 'planDayPicker'
   | 'muscleStatus'
+  | 'sessionDetail'
   | null;
 
 export type Toast = {

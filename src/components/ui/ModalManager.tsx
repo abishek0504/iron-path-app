@@ -11,6 +11,7 @@ import { ExercisePicker } from '../exercise/ExercisePicker';
 import { SettingsMenu } from '../settings/SettingsMenu';
 import { PlanDayPicker } from './PlanDayPicker';
 import { WorkoutHeatmap, type MuscleStressData } from '../workout/WorkoutHeatmap';
+import { SessionDetailSheet } from '../progress/SessionDetailSheet';
 import { supabase } from '../../lib/supabase/client';
 import { getMuscleStressStats } from '../../lib/supabase/queries/workouts';
 import { devLog, devError } from '../../lib/utils/logger';
@@ -28,6 +29,7 @@ export const ModalManager: React.FC = () => {
   const shouldRenderSettingsMenu = activeBottomSheet === 'settingsMenu';
   const shouldRenderPlanDayPicker = activeBottomSheet === 'planDayPicker';
   const shouldRenderMuscleStatus = activeBottomSheet === 'muscleStatus';
+  const shouldRenderSessionDetail = activeBottomSheet === 'sessionDetail';
 
   return (
     <>
@@ -85,6 +87,22 @@ export const ModalManager: React.FC = () => {
           onClosed={onBottomSheetClosed}
           bottomSheetProps={bottomSheetProps}
         />
+      )}
+
+      {shouldRenderSessionDetail && (
+        <BottomSheet
+          visible={isBottomSheetOpen && activeBottomSheet === 'sessionDetail'}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          title="Session Details"
+          height="60%"
+          {...bottomSheetProps}
+        >
+          <SessionDetailSheet
+            selectedDate={bottomSheetProps.selectedDate}
+            onClose={closeBottomSheet}
+          />
+        </BottomSheet>
       )}
     </>
   );

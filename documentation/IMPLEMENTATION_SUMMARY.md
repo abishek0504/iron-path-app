@@ -481,7 +481,71 @@ All hooks provide convenience wrappers around Zustand stores.
 - **Features**: Simple screen with back button, uses theme tokens, follows V2 patterns
 - **Route**: Registered in `app/_layout.tsx` as route group `(stack)/workout/active`
 
-### 12. Configuration Files ✅
+### 12. Progress Tab Implementation ✅ **NEW**
+
+#### `app/(tabs)/progress.tsx` - Progress Tab Screen
+- **Features**:
+  - Weekly and monthly calendar views with navigation controls
+  - View toggle (Week/Month) using chip selector pattern
+  - Previous/Next navigation buttons (ChevronLeft/ChevronRight icons)
+  - Calendar grid displaying dates with completed workout sessions marked
+  - Date selection opens session detail bottom sheet
+  - Visual indicators for dates with sessions (dot indicator)
+  - Highlights today's date and selected date
+- **Data Loading**:
+  - Fetches sessions for visible date range via `getSessionsInRange(userId, startIso, endIso)`
+  - Groups sessions by date (using `completed_at` timestamp, not `day_name`)
+  - Week view: Sunday-Saturday range
+  - Month view: First day to last day of month
+  - Re-fetches when view mode or date range changes
+- **Components**:
+  - `ProgressCalendar`: Custom calendar component with week/month grid views
+  - `SessionDetailSheet`: Bottom sheet showing session details for selected date
+- **Navigation**: Opens `sessionDetail` bottom sheet when date is selected
+- **Theme**: Uses all theme tokens, no hardcoded values
+- **Dev Logging**: All operations wrapped in `__DEV__` checks, logs view mode, date ranges, session counts
+
+#### `src/components/progress/ProgressCalendar.tsx` ✅ **NEW**
+- **Purpose**: Calendar/list component for displaying weekly or monthly date views
+- **Features**:
+  - Week view: List of 7 days (Sunday-Saturday) with day name, date, and workout count badge
+    - Shows "X workouts" badge if sessions exist, "No workouts" if none
+    - Highlights today's date with primary color border and background
+    - Highlights selected date with primary color background
+    - Touchable list items that open session detail modal
+  - Month view: Full month calendar grid with proper week alignment (pads with previous month days)
+    - Marks dates with completed sessions (visual dot indicator)
+    - Highlights today's date with primary color border
+    - Highlights selected date with primary color background
+    - Touchable date cells for selection
+  - Displays date label (e.g., "January 1 - 7, 2025" for week, "January 2025" for month)
+- **Props**:
+  - `viewMode: 'week' | 'month'`
+  - `currentDate: Date` - Date for navigation (week start or month)
+  - `sessionsByDate: Map<string, { count: number }>` - Sessions grouped by date key (YYYY-MM-DD)
+  - `onDateSelect: (date: Date) => void` - Callback when date is selected
+  - `selectedDate: Date | null` - Currently selected date
+- **Styling**: Uses theme tokens (colors, spacing, typography, borderRadius)
+
+#### `src/components/progress/SessionDetailSheet.tsx` ✅ **NEW**
+- **Purpose**: Bottom sheet displaying session details for a selected date
+- **Features**:
+  - Shows all completed sessions for selected date
+  - Displays session date, day name, completion time
+  - Lists exercises with count (e.g., "3 exercises")
+  - Exercise list with dot indicators
+  - Empty state when no sessions found
+  - Loading state during data fetch
+- **Data Loading**:
+  - Fetches sessions for selected date via `getSessionsInRange(userId, startIso, endIso)`
+  - Fetches exercise names via `listMergedExercises()` for session exercises
+  - Groups exercises by session
+- **Props**:
+  - `selectedDate: Date` - Date to show sessions for
+  - `onClose: () => void` - Callback when sheet is closed
+- **Styling**: Uses theme tokens, follows existing bottom sheet patterns
+
+### 13. Configuration Files ✅
 - `package.json` - Dependencies (Zustand, react-native-reanimated, etc.)
 - `tsconfig.json` - TypeScript configuration
 - `babel.config.js` - Babel configuration
@@ -696,7 +760,7 @@ All hooks provide convenience wrappers around Zustand stores.
 4. **Build Remaining Screens**: 
    - ✅ Planner tab - COMPLETED
    - ✅ Home/workout tab (`app/(tabs)/index.tsx`) - COMPLETED
-   - Progress tab (`app/(tabs)/progress.tsx`) - Placeholder exists
+   - ✅ Progress tab (`app/(tabs)/progress.tsx`) - COMPLETED (calendar views with week/month toggle)
    - Profile tab (`app/(tabs)/profile.tsx`) - Placeholder exists
 5. **Implement Active Workout Screen**: Build the full workout execution screen at `app/(stack)/workout/active.tsx` (placeholder created)
 6. **Implement Session Detail Screen**: Build history detail at `app/session/[id].tsx`

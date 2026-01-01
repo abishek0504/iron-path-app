@@ -614,7 +614,56 @@ export async function getMuscleStressStats(
   const stress: MuscleStressMap = {};
 
   try {
-    // Step A: fetch sets joined to completed sessions within range
+    // Step A: fetch completed sessions within range first
+    const { data: sessions, error: sessionsError } = await supabase
+      .from('v2_workout_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .gte('completed_at', startIso)
+      .lte('completed_at', endIso);
+
+    if (sessionsError) {
+      if (__DEV__) {
+        devError('workout-query', sessionsError, {
+          action: 'getMuscleStressStats_sessions',
+          userId,
+          startIso,
+          endIso,
+        });
+      }
+      return stress;
+    }
+
+    const sessionIds = (sessions || []).map((s) => s.id);
+    if (!sessionIds.length) {
+      return stress;
+    }
+
+    // Step B: fetch session exercises for these sessions
+    const { data: sessionExercises, error: seError } = await supabase
+      .from('v2_session_exercises')
+      .select('id, exercise_id, custom_exercise_id, session_id')
+      .in('session_id', sessionIds);
+
+    if (seError) {
+      if (__DEV__) {
+        devError('workout-query', seError, {
+          action: 'getMuscleStressStats_sessionExercises',
+          userId,
+          sessionIdsCount: sessionIds.length,
+        });
+      }
+      return stress;
+    }
+
+    const sessionExerciseIds = (sessionExercises || []).map((se) => se.id);
+    if (!sessionExerciseIds.length) {
+      return stress;
+    }
+
+    // Step C: fetch sets for these session exercises
     const { data: sets, error: setsError } = await supabase
       .from('v2_session_sets')
       .select(
@@ -631,16 +680,11 @@ export async function getMuscleStressStats(
             id,
             exercise_id,
             custom_exercise_id,
-            session_id,
-            v2_workout_sessions!inner(user_id, status, completed_at)
+            session_id
           )
         `
       )
-      .eq('session_exercises.v2_workout_sessions.user_id', userId)
-      .eq('session_exercises.v2_workout_sessions.status', 'completed')
-      .not('session_exercises.v2_workout_sessions.completed_at', 'is', null)
-      .gte('session_exercises.v2_workout_sessions.completed_at', startIso)
-      .lte('session_exercises.v2_workout_sessions.completed_at', endIso);
+      .in('session_exercise_id', sessionExerciseIds);
 
     if (setsError) {
       if (__DEV__) {
@@ -659,15 +703,24 @@ export async function getMuscleStressStats(
       return stress;
     }
 
+    // Create a map of session_exercise_id -> exercise metadata
+    const seMap = new Map(
+      (sessionExercises || []).map((se) => [
+        se.id,
+        { exercise_id: se.exercise_id, custom_exercise_id: se.custom_exercise_id },
+      ])
+    );
+
     // Collect exercise ids
     const masterIds = new Set<string>();
     const customIds = new Set<string>();
 
     for (const row of rows) {
-      const se = row.session_exercises as {
-        exercise_id?: string | null;
-        custom_exercise_id?: string | null;
-      };
+      const se = seMap.get(row.session_exercise_id) || 
+        (row.session_exercises as {
+          exercise_id?: string | null;
+          custom_exercise_id?: string | null;
+        } | undefined);
       if (se?.exercise_id) {
         masterIds.add(se.exercise_id);
       }
@@ -727,10 +780,11 @@ export async function getMuscleStressStats(
       Math.max(min, Math.min(max, value));
 
     for (const row of rows) {
-      const se = row.session_exercises as {
-        exercise_id?: string | null;
-        custom_exercise_id?: string | null;
-      };
+      const se = seMap.get(row.session_exercise_id) || 
+        (row.session_exercises as {
+          exercise_id?: string | null;
+          custom_exercise_id?: string | null;
+        } | undefined);
 
       const exerciseId = se?.exercise_id ?? undefined;
       const customExerciseId = se?.custom_exercise_id ?? undefined;

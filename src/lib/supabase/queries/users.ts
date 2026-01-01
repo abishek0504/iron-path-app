@@ -20,7 +20,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       .from('v2_profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (error) {
       if (__DEV__) {
@@ -29,7 +29,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       return null;
     }
 
-    return data as UserProfile;
+    return data as UserProfile | null;
   } catch (error) {
     if (__DEV__) {
       devError('user-query', error, { userId });

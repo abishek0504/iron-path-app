@@ -673,8 +673,45 @@ Patch 14 findings:
 Patch 15 findings:
 
 - **Client keying**: app uses `EXPO_PUBLIC_SUPABASE_ANON_KEY` via `src/lib/supabase/client.ts` (no `service_role` usage found).
-- **RLS risk (system templates)**: `v2_workout_templates` policy allows `user_id IS NULL` for `FOR ALL` with `WITH CHECK`, meaning authenticated clients can potentially write to “system” templates (and by extension days/slots via “owner via template” policies).
+- **RLS risk (system templates)**: `v2_workout_templates` policy allows `user_id IS NULL` for `FOR ALL` with `WITH CHECK`, meaning authenticated clients can potentially write to "system" templates (and by extension days/slots via "owner via template" policies).
 - **Dev logging**: logging is consistently wrapped in `if (__DEV__)`; most logs are state drivers + aggregates. No env secrets are logged by the app code paths reviewed.
+
+---
+
+### Patch 16 — Progress tab calendar views enhancement
+
+- **Purpose**: Implement weekly and monthly calendar views for progress tracking with session detail display.
+- **Files modified**:
+  - `./app/(tabs)/progress.tsx` - Enhanced with calendar integration, view toggle, navigation controls
+  - `./src/components/progress/ProgressCalendar.tsx` - New calendar component (week/month grid views)
+  - `./src/components/progress/SessionDetailSheet.tsx` - New session detail bottom sheet
+  - `./src/components/ui/ModalManager.tsx` - Registered `sessionDetail` bottom sheet
+  - `./src/stores/uiStore.ts` - Added `sessionDetail` to `BottomSheetId` type
+- **Implementation details**:
+  - **Week view**: List of 7 days (Sunday-Saturday) with day name, date, and workout count badge; tapping opens session detail modal
+  - **Month view**: Full month calendar grid with week alignment
+  - **Date range queries**: Uses `getSessionsInRange(userId, startIso, endIso)` to fetch sessions for visible date range
+  - **Session grouping**: Groups sessions by date using `completed_at` timestamp (not `day_name`), counts sessions per date
+  - **Navigation**: Previous/Next buttons adjust `currentDate` state (week: ±7 days, month: ±1 month)
+  - **Date selection**: Opens `sessionDetail` bottom sheet showing all sessions for selected date
+  - **Visual indicators**: Dates with sessions marked with dot indicator, today's date highlighted, selected date highlighted
+  - **Session detail**: Displays session date, day name, completion time, exercise count, exercise list
+  - **Data loading**: Fetches exercise names via `listMergedExercises()` for session exercises
+  - **Dev logging**: Logs view mode changes, date ranges, session counts (aggregate only, wrapped in `__DEV__`)
+- **Styling**: All components use theme tokens (colors, spacing, typography, borderRadius), no hardcoded values
+- **Patterns followed**: 
+  - No modal-in-modal (uses global bottom sheet system)
+  - Date range calculation reuses dashboard patterns
+  - Chip selector pattern from PlanDayPicker for view toggle
+  - ChevronLeft/ChevronRight icons from lucide-react-native for navigation
+
+Patch 16 findings:
+
+- Progress tab now provides calendar-based progress tracking with weekly and monthly views
+- Session detail bottom sheet integrated into global modal system
+- Date range queries correctly use `completed_at` timestamps (performed truth) rather than `day_name`
+- Calendar component handles week/month grid layout, date selection, and visual indicators
+- All changes follow existing patterns (theme tokens, dev logging, error handling)
 
 ---
 
@@ -689,7 +726,7 @@ Patch 15 findings:
 | Edit scoping: This week only | Structure edits apply only for current week instance | not implemented | `src/components/ui/EditScopePrompt.tsx`, `app/(tabs)/planner.tsx` | Disabled/stubbed with TODO |
 | Edit scoping: Next week onward | Structure edits apply to template | partially implemented | `src/lib/supabase/queries/templates.ts`, `app/(tabs)/planner.tsx` | `addSlot`/`removeSlot`/`swapExercise` supported; `reorderSlots` TODO |
 | Active workout execution UI | Execute a session: track sets, save, complete | placeholder | `app/(stack)/workout/active.tsx` | Consolidated: `/workout/active` canonical; `app/workout-active.tsx` removed |
-| Progress tab | Charts/analytics over performed truth | implemented (history list) | `app/(tabs)/progress.tsx` | Shows completed sessions list (date, name, exercise count) from `getRecentSessions` + `v2_session_exercises` |
+| Progress tab | Charts/analytics over performed truth | implemented (calendar views) | `app/(tabs)/progress.tsx`, `src/components/progress/ProgressCalendar.tsx`, `src/components/progress/SessionDetailSheet.tsx` | Weekly/monthly calendar views with date selection, session detail bottom sheet, navigation controls |
 | Heatmap | Show daily muscle stress grid | implemented (sensors) | `src/components/workout/WorkoutHeatmap.tsx`, `app/(tabs)/dashboard.tsx`, `src/components/ui/ModalManager.tsx` | Uses `getMuscleStressStats` over performed sets, presentational `WorkoutHeatmap` on Dashboard + global `muscleStatus` sheet |
 | Smart Adjust (rebalance apply) | If gaps detected, propose minimal changes and optionally apply | partially implemented | `src/lib/engine/rebalance.ts`, `src/components/ui/SmartAdjustPrompt.tsx`, `app/(tabs)/planner.tsx` | Detection + prompt exist; “Smart adjust” apply is TODO |
 

@@ -1,31 +1,58 @@
 /**
  * Progress tab
- * Shows history of completed workouts (log) with basic stats
+ * Shows weekly and monthly calendar views with completed workout sessions
  *
  * NOTE: Grouping is by completed_at date (performed truth), not day_name
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, FlatList } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { supabase } from '../../src/lib/supabase/client';
-import { getRecentSessions, type WorkoutSession } from '../../src/lib/supabase/queries/workouts';
+import { getSessionsInRange, type WorkoutSession } from '../../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { useUIStore } from '../../src/stores/uiStore';
+import { ProgressCalendar } from '../../src/components/progress/ProgressCalendar';
+import { useModal } from '../../src/hooks/useModal';
 
-type SessionWithStats = {
-  id: string;
-  completed_at?: string;
-  day_name?: string;
-  exerciseCount: number;
-};
+type ViewMode = 'week' | 'month';
 
 export default function ProgressTab() {
   const showToast = useUIStore((state) => state.showToast);
+  const { openSheet } = useModal();
   const [loading, setLoading] = useState(true);
-  const [sessions, setSessions] = useState<SessionWithStats[]>([]);
+  const [viewMode, setViewMode] = useState<ViewMode>('week');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [sessionsByDate, setSessionsByDate] = useState<Map<string, { count: number }>>(
+    new Map()
+  );
+
+  const getDateRange = useCallback((date: Date, mode: ViewMode): [Date, Date] => {
+    if (mode === 'week') {
+      const start = new Date(date);
+      start.setHours(0, 0, 0, 0);
+      const dayOfWeek = start.getDay();
+      start.setDate(start.getDate() - dayOfWeek);
+
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+
+      return [start, end];
+    } else {
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const start = new Date(year, month, 1);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(year, month + 1, 0);
+      end.setHours(23, 59, 59, 999);
+      return [start, end];
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,80 +66,78 @@ export default function ProgressTab() {
         return;
       }
 
-      const recent: WorkoutSession[] = await getRecentSessions(userId, 90);
-      if (!recent.length) {
-        setSessions([]);
-        setLoading(false);
-        return;
+      const [start, end] = getDateRange(currentDate, viewMode);
+
+      const sessions: WorkoutSession[] = await getSessionsInRange(
+        userId,
+        start.toISOString(),
+        end.toISOString()
+      );
+
+      const dateMap = new Map<string, { count: number }>();
+      for (const session of sessions) {
+        if (session.completed_at) {
+          const dateKey = new Date(session.completed_at).toISOString().split('T')[0];
+          const existing = dateMap.get(dateKey);
+          dateMap.set(dateKey, { count: (existing?.count || 0) + 1 });
+        }
       }
 
-      const sessionIds = recent.map((s) => s.id);
-
-      const { data: exerciseRows, error: exercisesError } = await supabase
-        .from('v2_session_exercises')
-        .select('session_id')
-        .in('session_id', sessionIds);
-
-      if (exercisesError && __DEV__) {
-        devError('progress', exercisesError, { userId, step: 'session-exercises' });
-      }
-
-      const counts = new Map<string, number>();
-      for (const row of exerciseRows || []) {
-        const sid = row.session_id as string;
-        counts.set(sid, (counts.get(sid) || 0) + 1);
-      }
-
-      const mapped: SessionWithStats[] = recent.map((s) => ({
-        id: s.id,
-        completed_at: s.completed_at,
-        day_name: s.day_name,
-        exerciseCount: counts.get(s.id) || 0,
-      }));
-
-      setSessions(mapped);
+      setSessionsByDate(dateMap);
 
       if (__DEV__) {
         devLog('progress', {
-          action: 'load_history_done',
-          sessionCount: mapped.length,
-          maxExerciseCount: mapped.reduce(
-            (max, s) => (s.exerciseCount > max ? s.exerciseCount : max),
-            0
-          ),
+          action: 'load_calendar_done',
+          viewMode,
+          dateRange: {
+            start: start.toISOString(),
+            end: end.toISOString(),
+          },
+          sessionCount: sessions.length,
+          datesWithSessions: dateMap.size,
         });
       }
     } catch (error) {
       if (__DEV__) {
-        devError('progress', error);
+        devError('progress', error, { viewMode, currentDate });
       }
       showToast('Failed to load progress', 'error');
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [currentDate, viewMode, getDateRange, showToast]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const renderItem = ({ item }: { item: SessionWithStats }) => {
-    const dateLabel = item.completed_at
-      ? new Date(item.completed_at).toLocaleDateString()
-      : '—';
-    const name = item.day_name || 'Workout';
-    const countLabel =
-      item.exerciseCount === 1 ? '1 exercise' : `${item.exerciseCount || 0} exercises`;
+  const handleDateSelect = (date: Date) => {
+    setSelectedDate(date);
+    openSheet('sessionDetail', { selectedDate: date });
+  };
 
-    return (
-      <View style={styles.listRow}>
-        <View>
-          <Text style={styles.listPrimary}>{name}</Text>
-          <Text style={styles.listSecondary}>{dateLabel}</Text>
-        </View>
-        <Text style={styles.listSecondary}>{countLabel}</Text>
-      </View>
-    );
+  const handlePrevious = () => {
+    const newDate = new Date(currentDate);
+    if (viewMode === 'week') {
+      newDate.setDate(newDate.getDate() - 7);
+    } else {
+      newDate.setMonth(newDate.getMonth() - 1);
+    }
+    setCurrentDate(newDate);
+  };
+
+  const handleNext = () => {
+    const newDate = new Date(currentDate);
+    if (viewMode === 'week') {
+      newDate.setDate(newDate.getDate() + 7);
+    } else {
+      newDate.setMonth(newDate.getMonth() + 1);
+    }
+    setCurrentDate(newDate);
+  };
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
   };
 
   return (
@@ -121,24 +146,60 @@ export default function ProgressTab() {
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading history...</Text>
+          <Text style={styles.loadingText}>Loading progress...</Text>
         </View>
       ) : (
-        <View style={styles.content}>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Completed workouts</Text>
-            {sessions.length === 0 ? (
-              <Text style={styles.emptyText}>No completed workouts yet</Text>
-            ) : (
-              <FlatList
-                data={sessions}
-                keyExtractor={(item) => item.id}
-                renderItem={renderItem}
-                ItemSeparatorComponent={() => <View style={styles.separator} />}
-              />
-            )}
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.controls}>
+            <View style={styles.viewToggle}>
+              <Pressable
+                style={[styles.toggleChip, viewMode === 'week' && styles.toggleChipActive]}
+                onPress={() => handleViewModeChange('week')}
+              >
+                <Text
+                  style={[
+                    styles.toggleChipText,
+                    viewMode === 'week' && styles.toggleChipTextActive,
+                  ]}
+                >
+                  Week
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.toggleChip, viewMode === 'month' && styles.toggleChipActive]}
+                onPress={() => handleViewModeChange('month')}
+              >
+                <Text
+                  style={[
+                    styles.toggleChipText,
+                    viewMode === 'month' && styles.toggleChipTextActive,
+                  ]}
+                >
+                  Month
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.navigation}>
+              <Pressable style={styles.navButton} onPress={handlePrevious}>
+                <ChevronLeft size={20} color={colors.textPrimary} />
+              </Pressable>
+              <Pressable style={styles.navButton} onPress={handleNext}>
+                <ChevronRight size={20} color={colors.textPrimary} />
+              </Pressable>
+            </View>
           </View>
-        </View>
+
+          <View style={styles.card}>
+            <ProgressCalendar
+              viewMode={viewMode}
+              currentDate={currentDate}
+              sessionsByDate={sessionsByDate}
+              onDateSelect={handleDateSelect}
+              selectedDate={selectedDate}
+            />
+          </View>
+        </ScrollView>
       )}
     </SafeAreaView>
   );
@@ -160,8 +221,52 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.base,
   },
   content: {
-    flex: 1,
     padding: spacing.lg,
+    gap: spacing.md,
+  },
+  controls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  viewToggle: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  toggleChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.card,
+  },
+  toggleChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(163, 230, 53, 0.15)',
+  },
+  toggleChipText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+  },
+  toggleChipTextActive: {
+    color: colors.primary,
+    fontWeight: typography.weights.semibold,
+  },
+  navigation: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  navButton: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   card: {
     backgroundColor: colors.card,
@@ -169,37 +274,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.cardBorder,
     padding: spacing.md,
-    gap: spacing.sm,
-    flex: 1,
-  },
-  cardTitle: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-    marginBottom: spacing.sm,
-  },
-  listRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.xs,
-  },
-  listPrimary: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  listSecondary: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.sm,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: colors.cardBorder,
-    marginVertical: spacing.xs,
   },
 });
 
