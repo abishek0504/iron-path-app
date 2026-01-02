@@ -51,9 +51,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   title: {
-    fontSize: typography.sizes.xl,
+    fontSize: typography.sizes['2xl'],
     fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
+    color: colors.primary,
   },
   iconButton: {
     padding: spacing.sm,

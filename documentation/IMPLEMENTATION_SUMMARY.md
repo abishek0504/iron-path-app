@@ -368,7 +368,7 @@ All hooks provide convenience wrappers around Zustand stores.
   - Day selector (horizontal scrollable list) always shows all 7 days in fixed order
   - Selected day shows:
     - Exercise slots with names and calculated targets
-    - "Add Exercise" button (opens ExercisePicker)
+    - "Add Exercise" button (opens ExercisePicker modal)
     - "Generate with AI" button
     - "Start this day" button (creates workout session with selected day's `day_name`)
   - Rest days (days with no slots) show "No exercises scheduled" but still allow Add/Generate
@@ -378,7 +378,7 @@ All hooks provide convenience wrappers around Zustand stores.
 #### Slot Management ✅ **UPDATED (Patch B)**
 - **Adding Exercise**:
   1. User taps "Add Exercise"
-  2. `ExercisePicker` opens via `useExercisePicker()` hook
+  2. `ExercisePicker` opens via `useExercisePicker()` hook (modal/bottom sheet)
   3. User selects exercise
   4. **Edit scope prompt appears** (Patch B)
   5. User chooses scope:

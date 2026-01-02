@@ -18,10 +18,9 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
-import { Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
+import { Dumbbell, Timer, RotateCcw, Settings } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
-import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { getActiveSession } from '../../src/lib/supabase/queries/workouts';
@@ -466,10 +465,25 @@ export default function WorkoutTab() {
     return 'GOOD EVENING';
   };
 
+  const handleOpenSettings = useCallback(() => {
+    if (__DEV__) {
+      devLog('workout-tab', { action: 'openSettings' });
+    }
+    modal.openSheet('settingsMenu');
+  }, [modal]);
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <TabHeader title="Workout" tabId="workout" />
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.dayTitle}>{currentDay || 'Loading...'}</Text>
+            <Text style={styles.greetingText}>{getGreeting()}</Text>
+          </View>
+          <TouchableOpacity onPress={handleOpenSettings} style={styles.settingsButton}>
+            <Settings size={24} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
@@ -479,8 +493,6 @@ export default function WorkoutTab() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TabHeader title="Workout" tabId="workout" />
-
       {/* Background Ambient Glows */}
       <View style={styles.glowTop} pointerEvents="none" />
       <View style={styles.glowBottom} pointerEvents="none" />
@@ -491,6 +503,9 @@ export default function WorkoutTab() {
           <Text style={styles.dayTitle}>{currentDay || 'Loading...'}</Text>
           <Text style={styles.greetingText}>{getGreeting()}</Text>
         </View>
+        <TouchableOpacity onPress={handleOpenSettings} style={styles.settingsButton}>
+          <Settings size={24} color={colors.textSecondary} />
+        </TouchableOpacity>
       </Animated.View>
 
       <ScrollView
@@ -703,8 +718,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+  },
+  settingsButton: {
+    padding: spacing.sm,
+    borderRadius: 999,
   },
   headerLeft: {
     flex: 1,

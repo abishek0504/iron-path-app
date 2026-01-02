@@ -46,11 +46,16 @@ export default function ProgressTab() {
     } else {
       const year = date.getFullYear();
       const month = date.getMonth();
-      const start = new Date(year, month, 1);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(year, month + 1, 0);
-      end.setHours(23, 59, 59, 999);
-      return [start, end];
+      const firstDay = new Date(year, month, 1);
+      const startDate = new Date(firstDay);
+      startDate.setDate(startDate.getDate() - startDate.getDay());
+      startDate.setHours(0, 0, 0, 0);
+
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 41);
+      endDate.setHours(23, 59, 59, 999);
+
+      return [startDate, endDate];
     }
   }, []);
 
@@ -121,9 +126,10 @@ export default function ProgressTab() {
     if (viewMode === 'week') {
       newDate.setDate(newDate.getDate() - 7);
     } else {
-      newDate.setMonth(newDate.getMonth() - 1);
+      const year = newDate.getFullYear();
+      const month = newDate.getMonth();
+      setCurrentDate(new Date(year, month - 1, 1));
     }
-    setCurrentDate(newDate);
   };
 
   const handleNext = () => {
@@ -131,9 +137,10 @@ export default function ProgressTab() {
     if (viewMode === 'week') {
       newDate.setDate(newDate.getDate() + 7);
     } else {
-      newDate.setMonth(newDate.getMonth() + 1);
+      const year = newDate.getFullYear();
+      const month = newDate.getMonth();
+      setCurrentDate(new Date(year, month + 1, 1));
     }
-    setCurrentDate(newDate);
   };
 
   const handleViewModeChange = (mode: ViewMode) => {
