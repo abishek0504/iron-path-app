@@ -296,9 +296,10 @@ Patch 02 notes:
 - **Files (read-only)**:
   - `./src/lib/supabase/client.ts`
   - `./app/index.tsx`
+  - `./app/get-started.tsx` (landing page for unauthenticated users)
   - `./app/login.tsx`, `./app/signup.tsx`, `./app/signup-success.tsx`
   - `./app/auth/forgot-password.tsx`, `./app/auth/change-email.tsx`, `./app/auth/callback.tsx`
-  - `./app/onboarding.tsx`
+  - `./app/onboarding.tsx` (multi-step flow)
   - `./src/lib/supabase/queries/users.ts`
 - **Questions to answer**:
   - What are the required onboarding fields, and are they consistent between `README_V2.md` and `app/index.tsx`?
@@ -312,19 +313,24 @@ Patch 03 findings:
 - **Session persistence** (`src/lib/supabase/client.ts`):
   - Web: `localStorage` + `detectSessionInUrl: true`
   - Native: `AsyncStorage` + `detectSessionInUrl: false`
-- **Onboarding “required fields” mismatch**:
-
-| Source | Required fields for “done onboarding” |
-|---|---|
-| `README_V2.md` | `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` |
-| `app/index.tsx` bootstrap gate | `experience_level`, `days_per_week`, `equipment_access[]` (non-empty) |
-| `app/onboarding.tsx` validation | `fullName`, `age` (13–120), `weight` (>0), `experience`, `daysPerWeek` (1–7), `equipment[]` (non-empty), `useImperial` (toggle stored) |
+- **Onboarding flow**:
+  - **Get Started page** (`app/get-started.tsx`): Landing page for unauthenticated users with "Get Started" button (→ signup) and "Already have an account?" link (→ login).
+  - **Multi-step onboarding** (`app/onboarding.tsx`): 3-step flow with progress indicator:
+    - Step 1: Personal Information (`full_name`, `age`, `use_imperial`, `current_weight`)
+    - Step 2: Experience & Training (`experience_level`, `days_per_week`)
+    - Step 3: Equipment (`equipment_access[]` - multi-select)
+  - **Required fields for completion**: `full_name`, `age` (13-120), `current_weight` (>0), `use_imperial`, `experience_level`, `days_per_week` (1-7), `equipment_access[]` (at least one)
+  - **Bootstrap gate** (`app/index.tsx`): Checks `experience_level`, `days_per_week`, `equipment_access[]` (non-empty) to determine if onboarding is complete
+  - **Login flow** (`app/login.tsx`): After successful login, checks onboarding completion and redirects to `/onboarding` if incomplete
+  - **Signup flow** (`app/signup.tsx`): Always routes to `/onboarding` after successful signup (when session exists)
 
 - **Auth flows**:
-  - Signup (`app/signup.tsx`): if Supabase returns `data.session`, route → `/onboarding`; else → `/signup-success` (email confirmation flow).
-  - Forgot password (`app/auth/forgot-password.tsx`): uses `redirectTo = EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback')`.
-  - Change email (`app/auth/change-email.tsx`): uses `emailRedirectTo = EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback')`.
-  - Callback (`app/auth/callback.tsx`): exchanges `code` for session; `type=email_change` routes to `/(tabs)`; password reset routes to `/login` after setting password.
+  - **Unauthenticated entry**: `app/index.tsx` redirects to `/get-started` (landing page) instead of `/login`
+  - **Signup** (`app/signup.tsx`): Always routes to `/onboarding` after successful signup (when `data.session` exists); else → `/signup-success` (email confirmation flow)
+  - **Login** (`app/login.tsx`): After successful login, checks onboarding completion via `getUserProfile()`; if incomplete → `/onboarding`, if complete → `/` (routes to tabs)
+  - **Forgot password** (`app/auth/forgot-password.tsx`): uses `redirectTo = EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback')`
+  - **Change email** (`app/auth/change-email.tsx`): uses `emailRedirectTo = EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback')`
+  - **Callback** (`app/auth/callback.tsx`): exchanges `code` for session; `type=email_change` routes to `/(tabs)`; password reset routes to `/login` after setting password
 
 - **Error surfacing patterns (by screen)**:
   - `login.tsx`, `signup.tsx`: inline `errorText` (no toast).

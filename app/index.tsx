@@ -45,8 +45,8 @@ export default function Index() {
           router.replace('/onboarding');
         }
       } else {
-        // User is not authenticated, redirect to login
-        router.replace('/login');
+        // User is not authenticated, redirect to get started page
+        router.replace('/get-started');
       }
     } catch (error) {
       // If there's an error (e.g., missing env vars), redirect to login

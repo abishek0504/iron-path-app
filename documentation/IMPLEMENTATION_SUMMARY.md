@@ -334,11 +334,32 @@ All hooks provide convenience wrappers around Zustand stores.
 - Platform-specific handling (web vs native)
 - Web scrollbar styles import
 
-#### Onboarding (post-auth, minimal) ✅ **NEW**
-- Trigger: after login/sign-up, index route checks session → loads `v2_profiles`; missing required fields routes to `/onboarding`.
-- Required fields: `experience_level`, `days_per_week`, `equipment_access[]` (multi-select).
-- Submit: saves via `createUserProfile`/`updateUserProfile`, updates `userStore`, auto-creates user template if none and runs `ensureTemplateHasWeekDays`, then routes to Plan tab.
-- Validation: required fields block continue, inline red error text, Supabase errors surfaced (no silent failures).
+#### Get Started Landing Page ✅ **NEW**
+- **File**: `app/get-started.tsx`
+- **Purpose**: Entry point for unauthenticated users
+- **Features**:
+  - Hero section with app branding
+  - "Get Started" button → navigates to `/signup`
+  - "Already have an account?" link → navigates to `/login`
+  - Uses theme tokens, follows card-based design pattern
+
+#### Onboarding (multi-step flow) ✅ **UPDATED**
+- **File**: `app/onboarding.tsx`
+- **Trigger**: After login/sign-up, index route checks session → loads `v2_profiles`; missing required fields routes to `/onboarding`. Login flow also checks onboarding completion after successful login.
+- **Multi-step flow** (3 steps with progress indicator):
+  - **Step 1: Personal Information** - `full_name`, `age` (13-120), `use_imperial` (toggle), `current_weight` (shows lbs/kg based on toggle)
+  - **Step 2: Experience & Training** - `experience_level` (beginner/intermediate/advanced chips), `days_per_week` (1-7 days chips)
+  - **Step 3: Equipment** - `equipment_access[]` (multi-select chips: Full gym, Dumbbells, Bands, Bodyweight only)
+- **Required fields**: `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` (at least one)
+- **UI Features**:
+  - Step indicator header showing "Step X of 3"
+  - Progress bar showing completion percentage
+  - Next/Back buttons (Back hidden on step 1)
+  - Per-step validation before allowing Next
+  - Final step shows "Complete" button instead of "Next"
+- **Submit**: Validates all steps, saves via `createUserProfile`/`updateUserProfile`, updates `userStore`, auto-creates user template if none and runs `ensureTemplateHasWeekDays`, then routes to Plan tab.
+- **Validation**: Per-step validation blocks Next, inline red error text, final validation on submit, Supabase errors surfaced via toast (no silent failures).
+- **Dev logging**: Logs step progression and submission with `__DEV__` checks.
 
 #### `app/(tabs)/_layout.tsx` - Tab Navigator ✅ **NEW**
 - **Custom Tab Bar**: Implements capsule-style tab bar with sliding circle indicator

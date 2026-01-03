@@ -47,8 +47,15 @@ export default function ForgotPasswordScreen() {
         if (__DEV__) devError('forgot-password', error, { email });
         return;
       }
-      showToast('Reset email sent', 'success');
-      setInfo('Check your email for the reset link.');
+      
+      // Close the modal first, then show toast
+      router.back();
+      
+      // Show toast after a brief delay to ensure modal closes first
+      setTimeout(() => {
+        showToast('Password reset sent', 'success');
+      }, 300);
+      
       if (__DEV__) devLog('forgot-password', { action: 'reset-email-sent', redirectTo });
     } catch (error) {
       setInfo('Unable to send reset email.');

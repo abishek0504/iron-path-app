@@ -10,6 +10,8 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { getUserProfile } from '../src/lib/supabase/queries/users';
+import { devLog } from '../src/lib/utils/logger';
 
 export default function Login() {
   const router = useRouter();
@@ -36,6 +38,43 @@ export default function Login() {
       if (error) {
         setErrorText(error.message);
         return;
+      }
+
+      // Check onboarding completion
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const userId = session.user.id;
+        const profile = await getUserProfile(userId);
+
+        if (profile) {
+          const hasRequired =
+            !!profile.experience_level &&
+            !!profile.days_per_week &&
+            Array.isArray(profile.equipment_access) &&
+            (profile.equipment_access?.length || 0) > 0;
+
+          if (__DEV__) {
+            devLog('login-onboarding-check', {
+              hasProfile: !!profile,
+              hasRequired,
+              hasExperience: !!profile.experience_level,
+              hasDaysPerWeek: !!profile.days_per_week,
+              equipmentCount: profile.equipment_access?.length || 0,
+            });
+          }
+
+          if (!hasRequired) {
+            router.replace('/onboarding');
+            return;
+          }
+        } else {
+          // No profile exists, redirect to onboarding
+          if (__DEV__) {
+            devLog('login-onboarding-check', { hasProfile: false });
+          }
+          router.replace('/onboarding');
+          return;
+        }
       }
 
       router.replace('/');

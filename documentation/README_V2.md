@@ -16,11 +16,27 @@ See [V2_ARCHITECTURE.md](./V2_ARCHITECTURE.md) for complete system contract, sch
 - **Dev Logging**: Structured logging for auto-diagnosis
 - **RLS & Immutability**: Client read-only for master data, user-owned for customization
 
-## Onboarding (Post-Auth)
-- Runs after login/sign-up if required profile fields are missing.
-- Required fields: `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access` (multi-select).
-- Saves to `v2_profiles`, updates `userStore`.
-- Auto-creates a user template if none exists and ensures all 7 weekdays, then routes to Plan tab.
+## Get Started & Onboarding Flow
+
+### Get Started Landing Page
+- **File**: `app/get-started.tsx`
+- Entry point for unauthenticated users
+- "Get Started" button → navigates to signup
+- "Already have an account?" link → navigates to login
+
+### Onboarding (Post-Auth)
+- **File**: `app/onboarding.tsx`
+- **Trigger**: 
+  - After signup (always routes to onboarding when session exists)
+  - After login if onboarding incomplete (login checks completion)
+  - Index route redirects to onboarding if required fields missing
+- **Multi-step flow** (3 steps):
+  1. **Personal Information**: `full_name`, `age` (13-120), `use_imperial` (toggle), `current_weight` (lbs/kg)
+  2. **Experience & Training**: `experience_level` (beginner/intermediate/advanced), `days_per_week` (1-7)
+  3. **Equipment**: `equipment_access[]` (multi-select: Full gym, Dumbbells, Bands, Bodyweight only)
+- **Required fields**: `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` (at least one)
+- **Features**: Step indicator, progress bar, Next/Back navigation, per-step validation
+- **Completion**: Saves to `v2_profiles`, updates `userStore`, auto-creates user template if none exists and ensures all 7 weekdays, then routes to Plan tab
 
 ## Profile Tab
 - Location: `app/(tabs)/dashboard.tsx` (read-only dashboard).
