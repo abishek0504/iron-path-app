@@ -28,6 +28,10 @@ export default function Signup() {
   // Animation values for dropdowns
   const passwordDropdownAnim = useRef(new Animated.Value(0)).current;
   const confirmPasswordDropdownAnim = useRef(new Animated.Value(0)).current;
+  
+  // Refs to preserve password values (workaround for React Native secureTextEntry bug)
+  const passwordRef = useRef<string>('');
+  const confirmPasswordRef = useRef<string>('');
 
   const getPasswordErrorMessage = (error: any): string => {
     const errorMessage = error?.message?.toLowerCase() || '';
@@ -189,15 +193,27 @@ export default function Signup() {
           <Text style={styles.label}>Password</Text>
           <View style={styles.inputContainer}>
             <TextInput
+              key="password-input"
               style={styles.inputWithIcon}
               placeholder="••••••••"
               placeholderTextColor={colors.textMuted}
               value={password}
-              onChangeText={setPassword}
-              onFocus={() => setPasswordFocused(true)}
+              onChangeText={(text) => {
+                setPassword(text);
+                passwordRef.current = text;
+              }}
+              onFocus={() => {
+                setPasswordFocused(true);
+                // Restore password if it was cleared by React Native bug
+                if (!password && passwordRef.current) {
+                  setPassword(passwordRef.current);
+                }
+              }}
               onBlur={() => setPasswordFocused(false)}
               secureTextEntry={!showPassword}
               textContentType="newPassword"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
             <TouchableOpacity
               style={styles.eyeButton}
@@ -252,15 +268,27 @@ export default function Signup() {
           <Text style={styles.label}>Confirm Password</Text>
           <View style={styles.inputContainer}>
             <TextInput
+              key="confirm-password-input"
               style={styles.inputWithIcon}
               placeholder="••••••••"
               placeholderTextColor={colors.textMuted}
               value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              onFocus={() => setConfirmPasswordFocused(true)}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                confirmPasswordRef.current = text;
+              }}
+              onFocus={() => {
+                setConfirmPasswordFocused(true);
+                // Restore password if it was cleared by React Native bug
+                if (!confirmPassword && confirmPasswordRef.current) {
+                  setConfirmPassword(confirmPasswordRef.current);
+                }
+              }}
               onBlur={() => setConfirmPasswordFocused(false)}
               secureTextEntry={!showConfirmPassword}
               textContentType="newPassword"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
             <TouchableOpacity
               style={styles.eyeButton}

@@ -960,8 +960,9 @@ setup_buffer_sec_override: 45
 
 **Fields**:
 - `id` (uuid, PRIMARY KEY, FK → auth.users.id): User ID (matches auth.users.id).
-- `full_name` (text, nullable): User's full name.
-- `age` (int, nullable): User's age.
+- `first_name` (text, nullable): User's first name (required for onboarding).
+- `last_name` (text, nullable): User's last name (optional).
+- `date_of_birth` (date, nullable): User's date of birth (used to calculate age dynamically).
 - `gender` (text, nullable): User's gender.
 - `height` (numeric, nullable): User's height (in cm or inches based on use_imperial).
 - `current_weight` (numeric, nullable): Current weight (in kg or lbs).
@@ -981,8 +982,9 @@ setup_buffer_sec_override: 45
 **Example Data**:
 ```
 id: "user-uuid-123"
-full_name: "John Doe"
-age: 30
+first_name: "John"
+last_name: "Doe"
+date_of_birth: "1994-01-15"
 experience_level: "intermediate"
 days_per_week: 4
 use_imperial: true

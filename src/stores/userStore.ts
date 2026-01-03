@@ -8,8 +8,9 @@ import { devLog } from '../lib/utils/logger';
 
 export interface UserProfile {
   id: string;
-  full_name?: string;
-  age?: number;
+  first_name?: string;
+  last_name?: string;
+  date_of_birth?: string;
   gender?: string;
   height?: number;
   current_weight?: number;

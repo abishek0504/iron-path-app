@@ -16,7 +16,10 @@ import {
   TextInput,
   Switch,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Picker } from '@react-native-picker/picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 import { useUserStore } from '../src/stores/userStore';
@@ -32,6 +35,9 @@ import {
 } from '../src/lib/supabase/queries/templates';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { useToast } from '../src/hooks/useToast';
+import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
+import { BottomSheet } from '../src/components/ui/BottomSheet';
+import { DatePicker } from '../src/components/ui/DatePicker';
 
 const EXPERIENCE_OPTIONS = ['beginner', 'intermediate', 'advanced'];
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
@@ -49,10 +55,13 @@ export default function Onboarding() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Form data
-  const [fullName, setFullName] = useState('');
-  const [age, setAge] = useState<string>('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showWeightPicker, setShowWeightPicker] = useState(false);
   const [useImperial, setUseImperial] = useState(true);
-  const [currentWeight, setCurrentWeight] = useState<string>('');
+  const [currentWeight, setCurrentWeight] = useState<number>(70); // Default weight in kg
   const [experience, setExperience] = useState<string>('');
   const [daysPerWeek, setDaysPerWeek] = useState<number | null>(null);
   const [equipment, setEquipment] = useState<string[]>([]);
@@ -78,10 +87,13 @@ export default function Onboarding() {
       const profile = await getUserProfile(userId);
 
       if (profile) {
-        setFullName(profile.full_name || '');
-        setAge(profile.age != null ? String(profile.age) : '');
+        setFirstName(profile.first_name || '');
+        setLastName(profile.last_name || '');
+        if (profile.date_of_birth) {
+          setDateOfBirth(new Date(profile.date_of_birth));
+        }
         setUseImperial(profile.use_imperial ?? true);
-        setCurrentWeight(profile.current_weight != null ? String(profile.current_weight) : '');
+        setCurrentWeight(profile.current_weight != null ? profile.current_weight : 70);
         setExperience(profile.experience_level || '');
         setDaysPerWeek(profile.days_per_week || null);
         setEquipment(profile.equipment_access || []);
@@ -110,13 +122,12 @@ export default function Onboarding() {
     const errors: Record<string, string> = {};
 
     if (step === 1) {
-      if (!fullName.trim()) errors.fullName = 'Enter your name.';
-      const ageNum = age ? parseInt(age, 10) : null;
-      if (!ageNum || Number.isNaN(ageNum) || ageNum < 13 || ageNum > 120) {
-        errors.age = 'Enter a valid age (13-120).';
+      if (!firstName.trim()) errors.firstName = 'Enter your first name.';
+      const dobValidation = validateDateOfBirth(dateOfBirth);
+      if (!dobValidation.isValid) {
+        errors.dateOfBirth = dobValidation.error || 'Enter your date of birth.';
       }
-      const weightNum = currentWeight ? parseFloat(currentWeight) : null;
-      if (!weightNum || Number.isNaN(weightNum) || weightNum <= 0) {
+      if (!currentWeight || currentWeight <= 0) {
         errors.currentWeight = 'Enter your current weight.';
       }
     } else if (step === 2) {
@@ -182,9 +193,10 @@ export default function Onboarding() {
         experience_level: experience,
         days_per_week: daysPerWeek,
         equipment_access: equipment,
-        full_name: fullName.trim(),
-        age: age ? parseInt(age, 10) : undefined,
-        current_weight: currentWeight ? parseFloat(currentWeight) : undefined,
+        first_name: firstName.trim(),
+        last_name: lastName.trim() || undefined,
+        date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
+        current_weight: currentWeight,
         use_imperial: useImperial,
         id: userId,
       };
@@ -264,49 +276,77 @@ export default function Onboarding() {
         Tell us about yourself to personalize your experience
       </Text>
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Full name *</Text>
-        <TextInput
-          value={fullName}
-          onChangeText={setFullName}
-          placeholder="Your name"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-        />
-        {fieldErrors.fullName ? (
-          <Text style={styles.errorText}>{fieldErrors.fullName}</Text>
-        ) : null}
-      </View>
-
       <View style={styles.sectionRow}>
         <View style={[styles.section, styles.rowItem]}>
-          <Text style={styles.label}>Age *</Text>
+          <Text style={styles.label}>First name *</Text>
           <TextInput
-            value={age}
-            onChangeText={setAge}
-            placeholder="Years"
+            value={firstName}
+            onChangeText={setFirstName}
+            placeholder="First name"
             placeholderTextColor={colors.textMuted}
             style={styles.input}
-            keyboardType="number-pad"
+            autoCapitalize="words"
           />
-          {fieldErrors.age ? (
-            <Text style={styles.errorText}>{fieldErrors.age}</Text>
+          {fieldErrors.firstName ? (
+            <Text style={styles.errorText}>{fieldErrors.firstName}</Text>
           ) : null}
         </View>
 
         <View style={[styles.section, styles.rowItem]}>
-          <Text style={styles.label}>Units *</Text>
-          <View style={styles.unitsRow}>
-            <Text style={styles.unitsText}>
-              {useImperial ? 'Imperial (lbs)' : 'Metric (kg)'}
-            </Text>
-            <Switch
-              value={useImperial}
-              onValueChange={setUseImperial}
-              thumbColor={useImperial ? colors.primary : colors.borderLight}
-              trackColor={{ true: colors.primaryDark, false: colors.border }}
-            />
-          </View>
+          <Text style={styles.label}>Last name</Text>
+          <TextInput
+            value={lastName}
+            onChangeText={setLastName}
+            placeholder="Last name"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+            autoCapitalize="words"
+          />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.label}>Date of Birth *</Text>
+        <TouchableOpacity
+          onPress={() => setShowDatePicker(true)}
+          style={styles.datePickerButton}
+        >
+          <Text style={[styles.datePickerText, !dateOfBirth && styles.datePickerPlaceholder]}>
+            {dateOfBirth ? formatDateOfBirth(dateOfBirth) : 'Select your date of birth'}
+          </Text>
+        </TouchableOpacity>
+        {fieldErrors.dateOfBirth ? (
+          <Text style={styles.errorText}>{fieldErrors.dateOfBirth}</Text>
+        ) : null}
+        {dateOfBirth && (
+          <Text style={styles.ageDisplayText}>
+            Age: {calculateAge(dateOfBirth) ?? 'N/A'} years old
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.label}>Units *</Text>
+        <View style={styles.unitsRow}>
+          <Text style={styles.unitsText}>
+            {useImperial ? 'Imperial (lbs)' : 'Metric (kg)'}
+          </Text>
+          <Switch
+            value={useImperial}
+            onValueChange={(value) => {
+              setUseImperial(value);
+              // Convert weight when switching units
+              if (value) {
+                // Convert kg to lbs
+                setCurrentWeight(Math.round(currentWeight * 2.20462));
+              } else {
+                // Convert lbs to kg
+                setCurrentWeight(Math.round(currentWeight / 2.20462));
+              }
+            }}
+            thumbColor={useImperial ? colors.primary : colors.borderLight}
+            trackColor={{ true: colors.primaryDark, false: colors.border }}
+          />
         </View>
       </View>
 
@@ -314,14 +354,14 @@ export default function Onboarding() {
         <Text style={styles.label}>
           Current weight ({useImperial ? 'lbs' : 'kg'}) *
         </Text>
-        <TextInput
-          value={currentWeight}
-          onChangeText={setCurrentWeight}
-          placeholder={useImperial ? 'e.g. 180' : 'e.g. 82'}
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          keyboardType="decimal-pad"
-        />
+        <TouchableOpacity
+          onPress={() => setShowWeightPicker(true)}
+          style={styles.weightPickerButton}
+        >
+          <Text style={styles.weightPickerButtonText}>
+            {currentWeight} {useImperial ? 'lbs' : 'kg'}
+          </Text>
+        </TouchableOpacity>
         {fieldErrors.currentWeight ? (
           <Text style={styles.errorText}>{fieldErrors.currentWeight}</Text>
         ) : null}
@@ -439,7 +479,9 @@ export default function Onboarding() {
 
   return (
     <View style={styles.container}>
-      {renderStepIndicator()}
+      <SafeAreaView style={styles.safeAreaTop} edges={['top']}>
+        {renderStepIndicator()}
+      </SafeAreaView>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -484,6 +526,42 @@ export default function Onboarding() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Date Picker Bottom Sheet */}
+      <DatePicker
+        visible={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        value={dateOfBirth}
+        onChange={(date) => setDateOfBirth(date)}
+        maximumDate={new Date()}
+        minimumDate={new Date(1900, 0, 1)}
+      />
+
+      {/* Weight Picker Bottom Sheet */}
+      <BottomSheet
+        visible={showWeightPicker}
+        onClose={() => setShowWeightPicker(false)}
+        title={`Select Weight (${useImperial ? 'lbs' : 'kg'})`}
+        height={300}
+      >
+        <Picker
+          selectedValue={currentWeight}
+          onValueChange={(itemValue) => setCurrentWeight(itemValue)}
+          style={styles.weightPicker}
+          itemStyle={styles.weightPickerItem}
+        >
+          {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => {
+            const value = i; // 0-600 lbs or 0-300 kg
+            return (
+              <Picker.Item
+                key={value}
+                label={`${value} ${useImperial ? 'lbs' : 'kg'}`}
+                value={value}
+              />
+            );
+          })}
+        </Picker>
+      </BottomSheet>
     </View>
   );
 }
@@ -503,6 +581,9 @@ const styles = StyleSheet.create({
   loadingText: {
     color: colors.textSecondary,
     fontSize: typography.sizes.base,
+  },
+  safeAreaTop: {
+    backgroundColor: colors.background,
   },
   stepIndicator: {
     padding: spacing.lg,
@@ -569,6 +650,42 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
+  },
+  datePickerButton: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  datePickerText: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+  },
+  datePickerPlaceholder: {
+    color: colors.textMuted,
+  },
+  ageDisplayText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+    marginTop: spacing.xs,
+  },
+  weightPickerButton: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  weightPickerButtonText: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+  },
+  weightPicker: {
+    height: 200,
+    width: '100%',
+  },
+  weightPickerItem: {
+    fontSize: typography.sizes.base,
+    color: colors.textPrimary,
   },
   sectionRow: {
     flexDirection: 'row',

@@ -347,10 +347,10 @@ All hooks provide convenience wrappers around Zustand stores.
 - **File**: `app/onboarding.tsx`
 - **Trigger**: After login/sign-up, index route checks session → loads `v2_profiles`; missing required fields routes to `/onboarding`. Login flow also checks onboarding completion after successful login.
 - **Multi-step flow** (3 steps with progress indicator):
-  - **Step 1: Personal Information** - `full_name`, `age` (13-120), `use_imperial` (toggle), `current_weight` (shows lbs/kg based on toggle)
+  - **Step 1: Personal Information** - `first_name` (required), `last_name` (optional), `date_of_birth` (calendar picker, calculates age dynamically), `use_imperial` (toggle), `current_weight` (scrollable picker, shows lbs/kg based on toggle)
   - **Step 2: Experience & Training** - `experience_level` (beginner/intermediate/advanced chips), `days_per_week` (1-7 days chips)
   - **Step 3: Equipment** - `equipment_access[]` (multi-select chips: Full gym, Dumbbells, Bands, Bodyweight only)
-- **Required fields**: `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` (at least one)
+- **Required fields**: `first_name`, `date_of_birth`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` (at least one)
 - **UI Features**:
   - Step indicator header showing "Step X of 3"
   - Progress bar showing completion percentage

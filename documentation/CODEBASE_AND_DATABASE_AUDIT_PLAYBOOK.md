@@ -316,10 +316,10 @@ Patch 03 findings:
 - **Onboarding flow**:
   - **Get Started page** (`app/get-started.tsx`): Landing page for unauthenticated users with "Get Started" button (→ signup) and "Already have an account?" link (→ login).
   - **Multi-step onboarding** (`app/onboarding.tsx`): 3-step flow with progress indicator:
-    - Step 1: Personal Information (`full_name`, `age`, `use_imperial`, `current_weight`)
+    - Step 1: Personal Information (`first_name` required, `last_name` optional, `date_of_birth` (calendar picker), `use_imperial`, `current_weight` (scrollable picker))
     - Step 2: Experience & Training (`experience_level`, `days_per_week`)
     - Step 3: Equipment (`equipment_access[]` - multi-select)
-  - **Required fields for completion**: `full_name`, `age` (13-120), `current_weight` (>0), `use_imperial`, `experience_level`, `days_per_week` (1-7), `equipment_access[]` (at least one)
+  - **Required fields for completion**: `first_name`, `date_of_birth` (valid date, age 13-120), `current_weight` (>0), `use_imperial`, `experience_level`, `days_per_week` (1-7), `equipment_access[]` (at least one)
   - **Bootstrap gate** (`app/index.tsx`): Checks `experience_level`, `days_per_week`, `equipment_access[]` (non-empty) to determine if onboarding is complete
   - **Login flow** (`app/login.tsx`): After successful login, checks onboarding completion and redirects to `/onboarding` if incomplete
   - **Signup flow** (`app/signup.tsx`): Always routes to `/onboarding` after successful signup (when session exists)

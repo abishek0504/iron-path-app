@@ -31,10 +31,10 @@ See [V2_ARCHITECTURE.md](./V2_ARCHITECTURE.md) for complete system contract, sch
   - After login if onboarding incomplete (login checks completion)
   - Index route redirects to onboarding if required fields missing
 - **Multi-step flow** (3 steps):
-  1. **Personal Information**: `full_name`, `age` (13-120), `use_imperial` (toggle), `current_weight` (lbs/kg)
+  1. **Personal Information**: `first_name` (required), `last_name` (optional), `date_of_birth` (calendar picker), `use_imperial` (toggle), `current_weight` (scrollable picker, lbs/kg)
   2. **Experience & Training**: `experience_level` (beginner/intermediate/advanced), `days_per_week` (1-7)
   3. **Equipment**: `equipment_access[]` (multi-select: Full gym, Dumbbells, Bands, Bodyweight only)
-- **Required fields**: `full_name`, `age`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` (at least one)
+- **Required fields**: `first_name`, `date_of_birth`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]` (at least one)
 - **Features**: Step indicator, progress bar, Next/Back navigation, per-step validation
 - **Completion**: Saves to `v2_profiles`, updates `userStore`, auto-creates user template if none exists and ensures all 7 weekdays, then routes to Plan tab
 

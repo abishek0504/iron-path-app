@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Picker } from '@react-native-picker/picker';
 import { supabase } from '../src/lib/supabase/client';
 import { getUserProfile, updateUserProfile } from '../src/lib/supabase/queries/users';
 import { useUserStore, type UserProfile } from '../src/stores/userStore';
@@ -24,6 +25,9 @@ import { useUIStore } from '../src/stores/uiStore';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
+import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
+import { BottomSheet } from '../src/components/ui/BottomSheet';
+import { DatePicker } from '../src/components/ui/DatePicker';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
 
@@ -38,9 +42,12 @@ export default function EditProfileScreen() {
   const [profile, setLocalProfile] = useState<UserProfile | null>(null);
 
   const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [age, setAge] = useState('');
-  const [weight, setWeight] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showWeightPicker, setShowWeightPicker] = useState(false);
+  const [weight, setWeight] = useState<number>(70);
   const [experienceLevel, setExperienceLevel] = useState('');
   const [daysPerWeek, setDaysPerWeek] = useState('');
   const [useImperial, setUseImperial] = useState(true);
@@ -85,12 +92,15 @@ export default function EditProfileScreen() {
 
         setLocalProfile(p);
         setEmail(user.email ?? '');
-        setFullName(p.full_name ?? '');
-        setAge(p.age != null ? String(p.age) : '');
+        setFirstName(p.first_name ?? '');
+        setLastName(p.last_name ?? '');
+        if (p.date_of_birth) {
+          setDateOfBirth(new Date(p.date_of_birth));
+        }
         setExperienceLevel(p.experience_level ?? '');
         setDaysPerWeek(p.days_per_week != null ? String(p.days_per_week) : '');
         setUseImperial(p.use_imperial ?? true);
-        setWeight(p.current_weight != null ? String(p.current_weight) : '');
+        setWeight(p.current_weight != null ? p.current_weight : 70);
         setEquipment(p.equipment_access ?? []);
 
         if (__DEV__) {
@@ -111,21 +121,22 @@ export default function EditProfileScreen() {
 
   const hasChanges = useMemo(() => {
     if (!profile) return false;
-    const ageNum = age ? parseInt(age, 10) || undefined : undefined;
     const daysNum = daysPerWeek ? parseInt(daysPerWeek, 10) || undefined : undefined;
-    const weightNum = weight ? parseFloat(weight) || undefined : undefined;
+    const profileDob = profile.date_of_birth ? new Date(profile.date_of_birth).toISOString().split('T')[0] : null;
+    const currentDob = dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : null;
     const equipChanged =
       (profile.equipment_access ?? []).join('|') !== (equipment ?? []).join('|');
     return (
-      (profile.full_name ?? '') !== fullName ||
-      (profile.age ?? undefined) !== ageNum ||
+      (profile.first_name ?? '') !== firstName ||
+      (profile.last_name ?? '') !== lastName ||
+      profileDob !== currentDob ||
       (profile.experience_level ?? '') !== experienceLevel ||
       (profile.days_per_week ?? undefined) !== daysNum ||
       (profile.use_imperial ?? true) !== useImperial ||
-      (profile.current_weight ?? undefined) !== weightNum ||
+      (profile.current_weight ?? undefined) !== weight ||
       equipChanged
     );
-  }, [age, daysPerWeek, equipment, experienceLevel, fullName, profile, useImperial, weight]);
+  }, [dateOfBirth, daysPerWeek, equipment, experienceLevel, firstName, lastName, profile, useImperial, weight]);
 
   const navigateBackOrTabs = () => {
     const canGoBack = (router as any)?.canGoBack?.() ?? true;
@@ -158,12 +169,13 @@ export default function EditProfileScreen() {
     setSaving(true);
     try {
       const updates: Partial<UserProfile> = {
-        full_name: fullName.trim() || undefined,
-        age: age ? parseInt(age, 10) || undefined : undefined,
+        first_name: firstName.trim() || undefined,
+        last_name: lastName.trim() || undefined,
+        date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
         experience_level: experienceLevel.trim() || undefined,
         days_per_week: daysPerWeek ? parseInt(daysPerWeek, 10) || undefined : undefined,
         use_imperial: useImperial,
-        current_weight: weight ? parseFloat(weight) || undefined : undefined,
+        current_weight: weight,
         equipment_access: equipment,
       };
 
@@ -226,29 +238,48 @@ export default function EditProfileScreen() {
         </View>
 
         {/* Name */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Full Name</Text>
-          <TextInput
-            value={fullName}
-            onChangeText={setFullName}
-            placeholder="Your name"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-          />
-        </View>
-
-        {/* Age & days per week */}
         <View style={styles.row}>
           <View style={[styles.card, styles.rowItem]}>
-            <Text style={styles.label}>Age</Text>
+            <Text style={styles.label}>First Name</Text>
             <TextInput
-              value={age}
-              onChangeText={setAge}
-              placeholder="Years"
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="First name"
               placeholderTextColor={colors.textMuted}
               style={styles.input}
-              keyboardType="number-pad"
+              autoCapitalize="words"
             />
+          </View>
+          <View style={[styles.card, styles.rowItem]}>
+            <Text style={styles.label}>Last Name</Text>
+            <TextInput
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="Last name"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+              autoCapitalize="words"
+            />
+          </View>
+        </View>
+
+        {/* Date of Birth & days per week */}
+        <View style={styles.row}>
+          <View style={[styles.card, styles.rowItem]}>
+            <Text style={styles.label}>Date of Birth</Text>
+            <TouchableOpacity
+              onPress={() => setShowDatePicker(true)}
+              style={styles.datePickerButton}
+            >
+              <Text style={[styles.datePickerText, !dateOfBirth && styles.datePickerPlaceholder]}>
+                {dateOfBirth ? formatDateOfBirth(dateOfBirth) : 'Select date of birth'}
+              </Text>
+            </TouchableOpacity>
+            {dateOfBirth && (
+              <Text style={styles.ageDisplayText}>
+                Age: {calculateAge(dateOfBirth) ?? 'N/A'} years old
+              </Text>
+            )}
           </View>
           <View style={[styles.card, styles.rowItem]}>
             <Text style={styles.label}>Days / Week</Text>
@@ -287,7 +318,17 @@ export default function EditProfileScreen() {
               <Text style={styles.switchLabel}>Imperial</Text>
               <Switch
                 value={useImperial}
-                onValueChange={setUseImperial}
+                onValueChange={(value) => {
+                  setUseImperial(value);
+                  // Convert weight when switching units
+                  if (value) {
+                    // Convert kg to lbs
+                    setWeight(Math.round(weight * 2.20462));
+                  } else {
+                    // Convert lbs to kg
+                    setWeight(Math.round(weight / 2.20462));
+                  }
+                }}
                 thumbColor={useImperial ? colors.primary : colors.borderLight}
                 trackColor={{ true: colors.primaryDark, false: colors.border }}
               />
@@ -297,14 +338,14 @@ export default function EditProfileScreen() {
 
         <View style={styles.card}>
           <Text style={styles.label}>Current Weight ({useImperial ? 'lbs' : 'kg'})</Text>
-          <TextInput
-            value={weight}
-            onChangeText={setWeight}
-            placeholder={useImperial ? 'e.g. 180' : 'e.g. 82'}
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            keyboardType="decimal-pad"
-          />
+          <TouchableOpacity
+            onPress={() => setShowWeightPicker(true)}
+            style={styles.weightPickerButton}
+          >
+            <Text style={styles.weightPickerButtonText}>
+              {weight} {useImperial ? 'lbs' : 'kg'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Change password */}
@@ -353,6 +394,43 @@ export default function EditProfileScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Date Picker Bottom Sheet */}
+      <DatePicker
+        visible={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        value={dateOfBirth}
+        onChange={(date) => setDateOfBirth(date)}
+        maximumDate={new Date()}
+        minimumDate={new Date(1900, 0, 1)}
+      />
+
+      {/* Weight Picker Bottom Sheet */}
+      <BottomSheet
+        visible={showWeightPicker}
+        onClose={() => setShowWeightPicker(false)}
+        title={`Select Weight (${useImperial ? 'lbs' : 'kg'})`}
+        height={300}
+      >
+        <Picker
+          selectedValue={weight}
+          onValueChange={(itemValue) => setWeight(itemValue)}
+          style={styles.weightPicker}
+          itemStyle={styles.weightPickerItem}
+        >
+          {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => {
+            const value = i; // 0-600 lbs or 0-300 kg
+            return (
+              <Picker.Item
+                key={value}
+                label={`${value} ${useImperial ? 'lbs' : 'kg'}`}
+                value={value}
+              />
+            );
+          })}
+        </Picker>
+      </BottomSheet>
+
       <ConfirmDialog
         visible={showDiscardConfirm}
         title="Discard changes?"
@@ -435,6 +513,42 @@ const styles = StyleSheet.create({
   },
   rowItem: {
     flex: 1,
+  },
+  datePickerButton: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  datePickerText: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+  },
+  datePickerPlaceholder: {
+    color: colors.textMuted,
+  },
+  ageDisplayText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+    marginTop: spacing.xs,
+  },
+  weightPickerButton: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  weightPickerButtonText: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+  },
+  weightPicker: {
+    height: 200,
+    width: '100%',
+  },
+  weightPickerItem: {
+    fontSize: typography.sizes.base,
+    color: colors.textPrimary,
   },
   unitsRow: {
     flexDirection: 'row',
