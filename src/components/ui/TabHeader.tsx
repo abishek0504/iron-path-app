@@ -25,18 +25,23 @@ export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId }) => {
     openSheet('settingsMenu');
   };
 
+  // Only show settings button on dashboard tab
+  const showSettings = tabId === 'dashboard';
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
-      <TouchableOpacity
-        onPress={handleOpenSettings}
-        style={styles.iconButton}
-        accessibilityRole="button"
-        accessibilityLabel="Open settings"
-        activeOpacity={0.7}
-      >
-        <Settings size={24} color={colors.textSecondary} />
-      </TouchableOpacity>
+      {showSettings && (
+        <TouchableOpacity
+          onPress={handleOpenSettings}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
+          activeOpacity={0.7}
+        >
+          <Settings size={24} color={colors.textSecondary} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 };

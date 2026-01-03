@@ -18,11 +18,12 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
-import { Dumbbell, Timer, RotateCcw, Settings } from 'lucide-react-native';
+import { Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
+import { useUserStore } from '../../src/stores/userStore';
 import { getActiveSession } from '../../src/lib/supabase/queries/workouts';
 import { getTemplateWithDaysAndSlots } from '../../src/lib/supabase/queries/templates';
 import { getUserTemplates } from '../../src/lib/supabase/queries/templates';
@@ -170,6 +171,7 @@ export default function WorkoutTab() {
   const router = useRouter();
   const toast = useToast();
   const modal = useModal();
+  const { profile } = useUserStore();
   const [activeTemplate, setActiveTemplate] = useState<any>(null);
   const [templateDays, setTemplateDays] = useState<Array<{ day: { day_name: string }; slots: TemplateSlot[] }>>([]);
   const [selectedPlanDayName, setSelectedPlanDayName] = useState<string>(getTodayDayName());
@@ -460,17 +462,18 @@ export default function WorkoutTab() {
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'GOOD MORNING';
-    if (hour < 18) return 'GOOD AFTERNOON';
-    return 'GOOD EVENING';
+    const firstName = profile?.first_name || '';
+    let greeting = '';
+    if (hour < 12) greeting = 'Good morning';
+    else if (hour < 18) greeting = 'Good afternoon';
+    else greeting = 'Good evening';
+    
+    if (firstName) {
+      return `${greeting}, ${firstName}`;
+    }
+    return greeting.toUpperCase();
   };
 
-  const handleOpenSettings = useCallback(() => {
-    if (__DEV__) {
-      devLog('workout-tab', { action: 'openSettings' });
-    }
-    modal.openSheet('settingsMenu');
-  }, [modal]);
 
   if (isLoading) {
     return (
@@ -480,9 +483,6 @@ export default function WorkoutTab() {
             <Text style={styles.dayTitle}>{currentDay || 'Loading...'}</Text>
             <Text style={styles.greetingText}>{getGreeting()}</Text>
           </View>
-          <TouchableOpacity onPress={handleOpenSettings} style={styles.settingsButton}>
-            <Settings size={24} color={colors.textSecondary} />
-          </TouchableOpacity>
         </View>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading...</Text>
@@ -503,9 +503,6 @@ export default function WorkoutTab() {
           <Text style={styles.dayTitle}>{currentDay || 'Loading...'}</Text>
           <Text style={styles.greetingText}>{getGreeting()}</Text>
         </View>
-        <TouchableOpacity onPress={handleOpenSettings} style={styles.settingsButton}>
-          <Settings size={24} color={colors.textSecondary} />
-        </TouchableOpacity>
       </Animated.View>
 
       <ScrollView
@@ -721,10 +718,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
-  },
-  settingsButton: {
-    padding: spacing.sm,
-    borderRadius: 999,
   },
   headerLeft: {
     flex: 1,
