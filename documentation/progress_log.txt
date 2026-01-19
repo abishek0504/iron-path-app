@@ -1,15 +1,189 @@
-Progress Log
-------------
-2025-12-16:
-- Added functional signup/login screens (Supabase email/password) with inline errors.
-- Added onboarding flow collecting experience_level, days_per_week, equipment_access; saves to v2_profiles, updates userStore, and bootstraps template + 7 days before routing to Plan tab.
-- Added auth gate in index route: session check -> onboarding when required fields missing, tabs otherwise.
-- Documented onboarding in README_V2.md, V2_ARCHITECTURE.md, and IMPLEMENTATION_SUMMARY.md.
+IronPath V2 Progress Log
+========================
 
-2026-01-19:
-- Reviewed all documentation to assess current project state.
-- Added `documentation/PLAN.md` to track current task plan and progress.
-- Verified Supabase CLI availability via `npx supabase`.
+This file tracks major milestones and progress.
 
+---
 
+2026-01-19 - Documentation Restructure
+--------------------------------------
+Major documentation overhaul to improve maintainability.
 
+BEFORE:
+- Single 90+ page architecture document
+- Documentation duplicated self-explanatory code
+- Difficult to maintain and update
+- Hard to navigate
+
+AFTER:
+- 6 focused documentation files
+- Focus on WHY, HOW, and WHAT MATTERS
+- Let code document itself (TypeScript types, descriptive names)
+- Easy to maintain and update
+
+New Structure:
+1. 00_INDEX.md - Navigation and documentation philosophy
+2. SYSTEM_ARCHITECTURE.md - Core principles, decisions, patterns (WHY)
+3. DATABASE_SCHEMA.md - Schema, migrations, RLS, relationships (WHAT)
+4. ALGORITHMS.md - Mathematical formulas with worked examples (HOW calculations)
+5. DATA_FLOWS.md - Component connections, user flows (HOW things connect)
+6. SETUP_GUIDE.md - Environment setup, running the app (HOW to start)
+7. IMPLEMENTATION_STATUS.md - What's complete, TODOs, issues (WHAT state)
+
+Old documentation archived in documentation/archive/ with 2026-01-19 prefix.
+
+Key Insight: Documentation should capture what ISN'T already in the code.
+Variables named "exerciseId" don't need documentation saying "this is the exercise ID".
+But WHY we chose prescription-based targets DOES need documentation.
+
+---
+
+2026-01-19 - Progress Calendar Enhancement
+-------------------------------------------
+Implemented weekly and monthly calendar views for progress tracking.
+
+Added:
+- Weekly calendar view (7 days)
+- Monthly calendar view (full month grid)
+- View toggle between week/month
+- Session indicators (dots on dates with sessions)
+- SessionDetailSheet for viewing workout details
+- Exercise name resolution (master + custom)
+- Set details display (weight/reps/duration/RPE)
+
+Technical Details:
+- Date-based queries using completed_at timestamp
+- Local timezone handling for calendar display
+- Proper grouping by date (not day_name)
+- Merged exercise view for display
+
+---
+
+2026-01-19 - Dashboard Query Fixes
+-----------------------------------
+Fixed timestamp mismatches and PR implementation bias.
+
+Fixes:
+1. "This week" query now uses completed_at instead of started_at
+2. Added .not('completed_at', 'is', null) filter for completed sessions
+3. Refactored getTopPRs to include both weight and duration PRs
+4. Hybrid PR ranking by recency (most recent first)
+
+Technical Details:
+- getSessionsInRange now filters on completed_at
+- getTopPRs fetches weight + duration PRs in parallel
+- PRs merged and sorted by recency
+- Supports hybrid PR ranking (both types together)
+
+---
+
+2026-01-XX - Patch H: Remove Goal
+----------------------------------
+Removed goal field from prescriptions, profiles, and slots.
+
+Reasoning: Holistic training approach - all goals (strength, hypertrophy, mobility)
+met through comprehensive full-body workouts.
+
+Changes:
+- Unique key changed from (exercise_id, goal, experience, mode) to (exercise_id, experience, mode)
+- Consolidated duplicate prescriptions (preferred hypertrophy if existed)
+- Removed goal from v2_profiles
+- Removed goal from v2_template_slots
+
+Migration: 20250101000003_patch_h_remove_goal.sql
+
+---
+
+2026-01-XX - Patch D: Custom Exercise Targets
+----------------------------------------------
+Added target band fields to custom exercises.
+
+Changes:
+- Added mode, sets_min/max, reps_min/max, duration_sec_min/max to v2_user_custom_exercises
+- Backfilled existing custom exercises with mode='reps', 3-4 sets, 8-12 reps
+- Added CHECK constraints matching prescription constraints
+- Updated selectExerciseTargets to use custom exercise bands
+
+Migration: 20250101000002_patch_d_custom_exercise_targets.sql
+
+---
+
+2026-01-XX - Patches C1/C2: XOR Constraints
+--------------------------------------------
+Added custom_exercise_id to template slots and session exercises with XOR constraints.
+
+Changes:
+- v2_template_slots: Added custom_exercise_id column + XOR CHECK constraint
+- v2_session_exercises: Added custom_exercise_id column + XOR CHECK constraint
+- Enforces exactly one of exercise_id OR custom_exercise_id (not both, not neither)
+
+Migrations:
+- 20250101000000_patch_c1_template_slots_custom_exercise_id.sql
+- 20250101000001_patch_c2_session_exercises_custom_exercise_id.sql
+
+---
+
+2026-01-XX - Split Full Name
+-----------------------------
+Split full_name into first_name and last_name in profiles.
+
+Reasoning: Better data granularity, internationalization support, forms require first name only.
+
+Changes:
+- Removed full_name from v2_profiles
+- Added first_name (required) and last_name (optional)
+- Migration splits existing full_name on first space
+- Onboarding updated to collect first_name + last_name separately
+
+Migration: 20250101000005_split_full_name.sql
+
+---
+
+2026-01-XX - Seed v2_muscles
+-----------------------------
+Added migration to seed 28 canonical muscles.
+
+Muscles organized into 6 functional groups:
+1. Upper Body Push (7): chest, upper_chest, lower_chest, anterior_deltoids, lateral_deltoids, posterior_deltoids, triceps
+2. Upper Body Pull (6): lats, upper_back, lower_back, traps, biceps, forearms
+3. Core (2): abs, obliques
+4. Lower Body Front (2): quads, hip_flexors
+5. Lower Body Back (4): hamstrings, glutes, calves, soleus
+6. Stabilizers (7): rotator_cuff, serratus_anterior, transverse_abdominis, glute_medius, glute_minimus, piriformis, tibialis_anterior
+
+Philosophy: Focus on functionally distinct muscle groups for compound movements.
+
+Migration: 20250101000004_seed_v2_muscles.sql (idempotent)
+
+---
+
+2026-01-XX - Core V2 Implementation
+------------------------------------
+Initial V2 implementation with full architecture.
+
+Major Systems Implemented:
+- Database schema with RLS policies
+- Auth and onboarding flow
+- Template management (Planner)
+- Target selection with progressive overload
+- Session creation and prefill
+- Dashboard metrics
+- Exercise picker
+- Global bottom sheets
+- Toast notifications
+- Zustand stores (ui, user, exercise)
+- Query layer with error handling
+- Engine algorithms (targetSelection, rebalance, weekGeneration)
+- Dev logging system
+- Theme system
+
+See IMPLEMENTATION_STATUS.md for detailed feature matrix.
+
+---
+
+End of Log
+==========
+
+For current implementation status, see documentation/IMPLEMENTATION_STATUS.md
+For architecture decisions, see documentation/SYSTEM_ARCHITECTURE.md
+For feature details, see other documentation files in documentation/
