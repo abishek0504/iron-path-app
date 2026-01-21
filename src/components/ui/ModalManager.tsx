@@ -10,11 +10,9 @@ import { BottomSheet } from './BottomSheet';
 import { ExercisePicker } from '../exercise/ExercisePicker';
 import { SettingsMenu } from '../settings/SettingsMenu';
 import { PlanDayPicker } from './PlanDayPicker';
-import { WorkoutHeatmap, type MuscleStressData } from '../workout/WorkoutHeatmap';
+import { WorkoutHeatmap } from '../workout/WorkoutHeatmap';
 import { SessionDetailSheet } from '../progress/SessionDetailSheet';
 import { supabase } from '../../lib/supabase/client';
-import { getMuscleStressStats } from '../../lib/supabase/queries/workouts';
-import { devLog, devError } from '../../lib/utils/logger';
 
 export const ModalManager: React.FC = () => {
   const activeBottomSheet = useUIStore((state) => state.activeBottomSheet);
@@ -101,6 +99,7 @@ export const ModalManager: React.FC = () => {
           <SessionDetailSheet
             selectedDate={bottomSheetProps.selectedDate}
             onClose={closeBottomSheet}
+            onSessionDeleted={bottomSheetProps.onSessionDeleted}
           />
         </BottomSheet>
       )}
@@ -121,57 +120,19 @@ const MuscleStatusSheet: React.FC<MuscleStatusSheetProps> = ({
   onClosed,
   bottomSheetProps,
 }) => {
-  const [data, setData] = useState<MuscleStressData[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
 
-    const load = async () => {
-      setLoading(true);
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const userId = session?.user?.id;
-        if (!userId) return;
-
-        const end = new Date();
-        const start = new Date(end);
-        start.setDate(end.getDate() - 30);
-
-        const stressMap = await getMuscleStressStats(
-          userId,
-          start.toISOString(),
-          end.toISOString()
-        );
-
-        const entries = Object.entries(stressMap);
-        const heatmapData: MuscleStressData[] = entries.map(([muscle_key, stress]) => ({
-          muscle_key,
-          display_name: muscle_key,
-          stress,
-        }));
-
-        setData(heatmapData.sort((a, b) => b.stress - a.stress));
-
-        if (__DEV__) {
-          devLog('heatmap', {
-            action: 'muscleStatus_load_result',
-            userId,
-            muscleCount: heatmapData.length,
-          });
-        }
-      } catch (error) {
-        if (__DEV__) {
-          devError('heatmap', error, { action: 'muscleStatus_load' });
-        }
-      } finally {
-        setLoading(false);
-      }
+    const getUserId = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setUserId(session?.user?.id || null);
     };
 
-    load();
+    getUserId();
   }, [visible]);
 
   return (
@@ -183,12 +144,7 @@ const MuscleStatusSheet: React.FC<MuscleStatusSheetProps> = ({
       height="60%"
       {...bottomSheetProps}
     >
-      {loading ? null : (
-        <WorkoutHeatmap
-          stressData={data}
-          onMuscleSelect={bottomSheetProps.onMuscleSelect}
-        />
-      )}
+      {userId && <WorkoutHeatmap userId={userId} />}
     </BottomSheet>
   );
 }

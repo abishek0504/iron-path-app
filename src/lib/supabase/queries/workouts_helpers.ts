@@ -5,7 +5,8 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
-import { createWorkoutSession, type WorkoutSession } from './workouts';
+import { createWorkoutSession, type WorkoutSession, prefillSessionSets } from './workouts';
+import { selectExerciseTargets, type TargetSelectionContext } from '../../engine/targetSelection';
 
 /**
  * Get or create active session for today
@@ -121,12 +122,14 @@ export async function createSessionExercise(
  */
 export async function applyStructureEditToSession(
   sessionId: string,
+  userId: string,
   edit: {
     type: 'addSlot' | 'removeSlot' | 'swapExercise' | 'reorderSlots' | 'updateNotes';
     // Add slot
     exerciseId?: string;
     customExerciseId?: string;
     sortOrder?: number;
+    experience?: string;
     // Remove slot
     sessionExerciseId?: string;
     // Swap exercise
@@ -167,7 +170,37 @@ export async function applyStructureEditToSession(
         sortOrder,
       });
 
-      return !!result;
+      if (!result) return false;
+
+      // Prefill sets for the new exercise
+      const context: TargetSelectionContext = {
+        experience: edit.experience || 'beginner',
+      };
+
+      const target = await selectExerciseTargets(
+        {
+          exerciseId: edit.exerciseId,
+          customExerciseId: edit.customExerciseId,
+        },
+        userId,
+        context,
+        0
+      );
+
+      if (target) {
+        const targets = new Map();
+        const exerciseKey = edit.exerciseId || edit.customExerciseId!;
+        targets.set(exerciseKey, {
+          sets: target.sets,
+          reps: target.reps,
+          duration_sec: target.duration_sec,
+          weight: target.weight,
+        });
+
+        await prefillSessionSets(sessionId, [result], targets);
+      }
+
+      return true;
     } else if (edit.type === 'removeSlot') {
       if (!edit.sessionExerciseId) {
         if (__DEV__) {

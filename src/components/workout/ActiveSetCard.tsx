@@ -292,12 +292,14 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     justifyContent: 'center',
-    opacity: 0.3,
+    backgroundColor: colors.primary + '20',
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
   },
   swipeText: {
-    fontSize: typography.sizes.sm,
-    color: colors.success,
-    fontWeight: typography.weights.semibold,
+    fontSize: typography.sizes.base,
+    color: colors.primary,
+    fontWeight: typography.weights.bold,
   },
   expandedContainer: {
     backgroundColor: colors.card,

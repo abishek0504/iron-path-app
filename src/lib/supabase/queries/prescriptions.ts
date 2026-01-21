@@ -17,6 +17,8 @@ export interface ExercisePrescription {
   reps_max: number | null;
   duration_sec_min: number | null;
   duration_sec_max: number | null;
+  suggested_weight_lbs: number | null;
+  suggested_weight_kg: number | null;
   is_active: boolean;
   source_notes?: string;
 }

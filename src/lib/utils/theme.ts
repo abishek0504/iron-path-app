@@ -20,6 +20,14 @@ export const colors = {
   textMuted: '#71717a', // zinc-500
   
   // States
+  success: '#10b981', // green-500
+  successBg: 'rgba(16, 185, 129, 0.1)', // green-500/10
+  successText: '#6ee7b7', // green-300
+  
+  warning: '#f59e0b', // amber-500
+  warningBg: 'rgba(245, 158, 11, 0.1)', // amber-500/10
+  warningText: '#fcd34d', // amber-300
+  
   error: '#ef4444', // red-500
   errorBg: 'rgba(239, 68, 68, 0.1)', // red-500/10
   errorText: '#fca5a5', // red-300
@@ -55,6 +63,7 @@ export const typography = {
     xl: 24,
     '2xl': 32,
     '3xl': 42,
+    '4xl': 56,
   },
   weights: {
     normal: '400' as const,

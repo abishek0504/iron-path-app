@@ -118,7 +118,13 @@ export default function ProgressTab() {
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
-    openSheet('sessionDetail', { selectedDate: date });
+    openSheet('sessionDetail', { 
+      selectedDate: date,
+      onSessionDeleted: () => {
+        // Reload calendar after deletion
+        load();
+      },
+    });
   };
 
   const handlePrevious = () => {

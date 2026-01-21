@@ -260,33 +260,7 @@ export default function WorkoutTab() {
         setSelectedPlanDayName(planDayName);
       }
 
-      // Load exercise names for selected plan day
-      const selectedDay = sortedDays.find((d) => d.day.day_name === planDayName);
-      if (selectedDay) {
-        const namesMap = new Map<string, string>();
-        for (const slot of selectedDay.slots) {
-          if (slot.exercise_id || slot.custom_exercise_id) {
-            const exercise = await getMergedExercise(
-              slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
-              userId
-            );
-            if (exercise) {
-              namesMap.set(slot.id, exercise.name);
-            }
-          }
-        }
-        setExerciseNames(namesMap);
-        setSelectedDayExercises(
-          selectedDay.slots.map((slot) => ({
-            id: slot.id,
-            name: namesMap.get(slot.id) || 'Unknown Exercise',
-          }))
-        );
-      } else {
-        setSelectedDayExercises([]);
-      }
-
-      // Check for active session
+      // Check for active session FIRST
       const activeSession = await getActiveSession(userId);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -298,7 +272,89 @@ export default function WorkoutTab() {
           return sessionDate.getTime() === today.getTime();
         })();
 
-      setHasActiveWorkout(hasActiveForToday);
+      // Check if any sets have been actually completed (not just pre-filled)
+      let hasCompletedSets = false;
+      if (hasActiveForToday && activeSession) {
+        // First get session exercise IDs
+        const { data: sessionExerciseIds } = await supabase
+          .from('v2_session_exercises')
+          .select('id')
+          .eq('session_id', activeSession.id);
+
+        if (sessionExerciseIds && sessionExerciseIds.length > 0) {
+          const exerciseIds = sessionExerciseIds.map(se => se.id);
+          
+          // Check if any sets have performed_at timestamp
+          const { count } = await supabase
+            .from('v2_session_sets')
+            .select('*', { count: 'exact', head: true })
+            .in('session_exercise_id', exerciseIds)
+            .not('performed_at', 'is', null);
+
+          hasCompletedSets = (count ?? 0) > 0;
+        }
+      }
+
+      // Only show "Continue" if there are actually completed sets
+      setHasActiveWorkout(hasActiveForToday && hasCompletedSets);
+
+      // Load exercises from active session OR template
+      if (hasActiveForToday && activeSession) {
+        // Load exercises from the active session
+        const { data: sessionExercises } = await supabase
+          .from('v2_session_exercises')
+          .select('id, exercise_id, custom_exercise_id, sort_order')
+          .eq('session_id', activeSession.id)
+          .order('sort_order', { ascending: true });
+
+        if (sessionExercises) {
+          const namesMap = new Map<string, string>();
+          for (const se of sessionExercises) {
+            if (se.exercise_id || se.custom_exercise_id) {
+              const exercise = await getMergedExercise(
+                se.exercise_id ? { exerciseId: se.exercise_id } : { customExerciseId: se.custom_exercise_id! },
+                userId
+              );
+              if (exercise) {
+                namesMap.set(se.id, exercise.name);
+              }
+            }
+          }
+          setExerciseNames(namesMap);
+          setSelectedDayExercises(
+            sessionExercises.map((se) => ({
+              id: se.id,
+              name: namesMap.get(se.id) || 'Unknown Exercise',
+            }))
+          );
+        }
+      } else {
+        // Load exercises from template for the selected plan day
+        const selectedDay = sortedDays.find((d) => d.day.day_name === planDayName);
+        if (selectedDay) {
+          const namesMap = new Map<string, string>();
+          for (const slot of selectedDay.slots) {
+            if (slot.exercise_id || slot.custom_exercise_id) {
+              const exercise = await getMergedExercise(
+                slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
+                userId
+              );
+              if (exercise) {
+                namesMap.set(slot.id, exercise.name);
+              }
+            }
+          }
+          setExerciseNames(namesMap);
+          setSelectedDayExercises(
+            selectedDay.slots.map((slot) => ({
+              id: slot.id,
+              name: namesMap.get(slot.id) || 'Unknown Exercise',
+            }))
+          );
+        } else {
+          setSelectedDayExercises([]);
+        }
+      }
 
       // Check for completed session from today
       today.setHours(0, 0, 0, 0);
@@ -361,14 +417,16 @@ export default function WorkoutTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // Refresh on focus
+  // Refresh on focus - reload workout state when tab becomes active
   useFocusEffect(
     useCallback(() => {
       if (hasInitiallyLoaded) {
+        // Force reload to check for workout progress
+        console.log('[workout-tab] useFocusEffect: reloading workout state');
         loadTodayWorkout();
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hasInitiallyLoaded]) // Only depend on hasInitiallyLoaded, not loadTodayWorkout
+    }, [hasInitiallyLoaded]) // Don't include loadTodayWorkout to avoid re-creating callback
   );
 
   const openPlanDayPicker = useCallback(() => {
@@ -394,18 +452,14 @@ export default function WorkoutTab() {
     });
   }, [modal, templateDays, selectedPlanDayName, currentDay]);
 
-  const handleStartWorkout = () => {
+  const handleStartWorkout = async () => {
     if (!activeTemplate || !currentDay) return;
 
-    const selectedSlots =
-      templateDays.find((d) => d.day.day_name === selectedPlanDayName)?.slots || [];
-
-    if (selectedSlots.length === 0) {
-      openPlanDayPicker();
-      return;
-    }
-
-    // Navigate to workout execution; plan day stored when creating session (future screen)
+    // Always go directly to active workout screen
+    // The active.tsx screen will handle showing exercises from either:
+    // 1. Existing active session (Continue flow)
+    // 2. Today's session exercises ("Today only" additions)
+    // 3. Template slots for selected day
     router.push('/workout/active');
   };
 
@@ -457,7 +511,8 @@ export default function WorkoutTab() {
     }
   };
 
-  const isRestDay = selectedDayExercises.length === 0;
+  // Rest day only if no exercises AND no workout completed today
+  const isRestDay = selectedDayExercises.length === 0 && !isWorkoutCompleted;
   const isBorrowingPlanDay = selectedPlanDayName !== currentDay;
 
   const getGreeting = () => {
@@ -520,7 +575,19 @@ export default function WorkoutTab() {
           </Animated.View>
         ) : (
           <>
-            {isRestDay ? (
+            {isWorkoutCompleted && selectedDayExercises.length === 0 ? (
+              // Workout completed, no more exercises scheduled
+              <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
+                <View style={styles.restDayIconContainer}>
+                  <Text style={styles.completedEmoji}>✓</Text>
+                </View>
+                <Text style={styles.restDayTitle}>Workout Complete!</Text>
+                <Text style={styles.restDayText}>Great job today!</Text>
+                <Text style={styles.cardSubtext}>
+                  You can start a new workout or add exercises in the Planner tab.
+                </Text>
+              </Animated.View>
+            ) : isRestDay ? (
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
                 <View style={styles.restDayIconContainer}>
                   <Timer size={40} color="#22d3ee" />
@@ -777,6 +844,10 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: typography.sizes.lg,
     marginBottom: spacing.sm,
+  },
+  completedEmoji: {
+    fontSize: 48,
+    color: colors.success,
   },
   workoutCard: {
     width: '100%',

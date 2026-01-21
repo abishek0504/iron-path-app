@@ -186,6 +186,11 @@ export async function selectExerciseTargets(
           reps = Math.ceil((prescription.reps_min + prescription.reps_max) / 2);
         }
         reps = Math.max(prescription.reps_min, Math.min(prescription.reps_max, reps));
+        
+        // Use suggested weight from prescription if available
+        if ('suggested_weight_lbs' in prescription && prescription.suggested_weight_lbs !== null) {
+          weight = prescription.suggested_weight_lbs; // TODO: Use kg for metric users
+        }
       }
     }
   } else {

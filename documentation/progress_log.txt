@@ -5,6 +5,445 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-21 - CRITICAL BUG FIX: markSetComplete Was Not Setting performed_at
+---------------------------------------------------------------------------
+ROOT CAUSE FOUND:
+- ✅ Database query revealed ALL sets had `performed_at: null`
+- ✅ `markSetComplete` function was only updating passed values (weight/reps/rpe)
+- ✅ It NEVER set `performed_at` timestamp
+- ✅ This is why "Continue" button never appeared
+
+THE FIX:
+- Modified `markSetComplete` to ALWAYS set `performed_at: new Date().toISOString()`
+- Added better debug logging to track successful completions
+- Now every call to `markSetComplete` marks the set as truly complete
+
+CODE CHANGE:
+```typescript
+const { error } = await supabase
+  .from('v2_session_sets')
+  .update({
+    ...values,
+    performed_at: new Date().toISOString(), // ← CRITICAL FIX
+  })
+  .eq('id', setId);
+```
+
+BEHAVIOR NOW:
+- Tap "Complete Set" → `performed_at` is set in database
+- Exit mid-workout → All completed sets have timestamps
+- Return to Workout tab → "Continue" button appears
+- Database query confirms sets are marked complete
+
+---
+
+2026-01-21 - HOTFIX: Continue Button Now Appears After Completing Sets
+-----------------------------------------------------------------------
+FIXED:
+- ✅ Sets now ALWAYS saved with performed_at timestamp when completing
+- ✅ If defaults exist: Full save with actual weight/reps/RPE
+- ✅ If no defaults: Save with placeholder (weight=0) + RPE, user adjusts in batch logging
+- ✅ "Continue" button now appears immediately after completing any set
+- ✅ Exit mid-workout and return → "Continue" button shows correctly
+
+TECHNICAL CHANGE:
+- Modified `handleCompleteSet` to always call `markSetComplete` (sets performed_at)
+- Removed conditional save logic that only saved RPE without performed_at
+- Placeholder value (0) used for weight when no defaults, user overrides in batch logging
+
+BEHAVIOR:
+- Complete any set → "performed_at" timestamp set in database
+- Exit workout → Return to Workout tab → "Continue" button appears
+- Batch logging phase allows adjusting any values before moving to next exercise
+
+---
+
+2026-01-21 - CRITICAL FIXES: Workout Defaults, RPE State, Progress Persistence
+------------------------------------------------------------------------------
+FIXED THREE CRITICAL BUGS:
+
+**BUG 1: Defaults from Edit Defaults not filling active workout**
+- ✅ Workout now uses existing set values (weight/reps/RPE) from database
+- ✅ Priority: 1. Edit Defaults values → 2. Suggestion from history → 3. Prescription
+- ✅ RPE values from database are loaded into currentSetRPEs array
+- ✅ Weight/reps from sets prefilled into batch logging screen
+
+**BUG 2: RPE slider not updating in logging screen**
+- ✅ currentSetRPEs array now initialized from database set.rpe values
+- ✅ RPE values captured during execution properly flow to batch logging
+- ✅ Fixed initialization to use `sets.map(s => s.rpe || 7)` instead of `.fill(7)`
+
+**BUG 3: Workout progress not saved when exiting**
+- ✅ Sets saved to database immediately when "Complete Set" is pressed
+- ✅ If set has defaults (from Edit Defaults/prescription): Saved with performed_at timestamp
+- ✅ If set lacks defaults: Only RPE saved, user enters weight/reps in batch logging
+- ✅ User can exit mid-workout and resume exactly where they left off
+- ✅ "Continue" button shows correctly after completing any set with defaults
+
+TECHNICAL CHANGES:
+- Modified `loadActiveSession` to initialize RPEs from database values
+- Updated `loadWeightSuggestion` to prioritize existing set values over suggestions  
+- Changed `handleCompleteSet` to immediately save sets (full or RPE-only based on availability)
+- Added conditional logic: full save if weight/reps exist, RPE-only save otherwise
+- Added `supabase` import for direct RPE update without setting performed_at
+- All three state arrays (exercises, currentSetRPEs, setLogs) now sync with database
+
+BEHAVIOR:
+- Sets with pre-filled defaults: Marked complete immediately when tapping "Complete Set"
+- Sets without defaults: RPE saved, user enters weight/reps in batch logging
+- If you exit mid-workout, all progress preserved (either complete sets or RPE values)
+- Returning to workout shows "Continue" button (if any sets have performed_at)
+- Batch logging screen shows pre-filled defaults from Edit Defaults or prescription
+- RPE slider shows the value you selected during execution
+
+---
+
+2026-01-21 - UX FIX: Keyboard Dismiss Functionality
+---------------------------------------------------
+FIXED:
+- ✅ Added "Done" button on keyboard for last input field (iOS/Android)
+- ✅ Added "Next" button to advance between fields
+- ✅ Last field dismisses keyboard when pressing done/return
+- ✅ Applied to both SessionExerciseEditSheet and Active Workout batch logging
+- ✅ ScrollView now allows tapping outside inputs to maintain focus
+
+TECHNICAL CHANGES:
+- Added `returnKeyType="next"` for weight and intermediate fields
+- Added `returnKeyType="done"` for last field (reps on final set)
+- Added `onSubmitEditing` to dismiss keyboard on last field
+- Added `keyboardShouldPersistTaps="handled"` to ScrollViews
+- Imported `Keyboard` from react-native for manual dismiss
+
+USER EXPERIENCE:
+- Tap "Next" to move between weight → reps → RPE
+- Tap "Done" on last set's reps field to dismiss keyboard
+- Can also tap outside fields or save button to dismiss
+
+---
+
+2026-01-21 - CRITICAL FIX: Weight Defaults Now Populate from Prescriptions
+---------------------------------------------------------------------------
+FIXED:
+- ✅ Exercise prescriptions now include suggested_weight_lbs and suggested_weight_kg in interface
+- ✅ selectExerciseTargets now uses prescription suggested weights when no history exists
+- ✅ New exercises will have weights pre-filled (e.g., Bicep Curl = 15 lbs for beginners)
+- ✅ Sets are created with default weight values from database seed
+
+TECHNICAL CHANGES:
+- Updated ExercisePrescription interface to include suggested_weight fields
+- Modified targetSelection.ts to use prescription weights for first-time exercises
+- Weight now flows: Migration seed → Prescription query → Target selection → Set prefill
+
+BEHAVIOR:
+- First time doing an exercise: Uses suggested weight from database
+- Second time: Uses progressive overload (+2.5-5 lbs if you hit target reps)
+- Edit defaults screen now shows pre-filled weights instead of empty fields
+
+---
+
+2026-01-21 - UI/UX POLISH: Bottom Sheet Handle + Header Layout
+---------------------------------------------------------------
+FIXED:
+- ✅ Removed non-functional drag handle from BottomSheet component
+- ✅ Improved SessionExerciseEditSheet header layout
+- ✅ Better X button positioning (top-right with proper hit slop)
+- ✅ Cleaner visual hierarchy with "SET DEFAULTS" label + exercise name
+- ✅ Added border separator between header and content
+
+DESIGN CHANGES:
+- Header now shows: "SET DEFAULTS" (small gray text) above exercise name (large bold)
+- X button properly positioned in top-right corner with adequate tap area
+- Removed confusing drag handle that didn't work
+- Users can still tap backdrop or X button to dismiss
+
+---
+
+2026-01-21 - CRITICAL FIXES: RPE Editing + Weight Suggestions + Exercise Info
+-----------------------------------------------------------------------------
+BUGS FIXED:
+- ✅ RPE now editable in batch logging screen (tap number or use slider)
+- ✅ Weight validation now allows 0 for bodyweight exercises
+- ✅ Exercise info button now functional (shows target muscles + form tips)
+- ✅ Suggested weights properly prefilled from prescription data
+- ✅ Fixed duplicate variable declaration in weightSuggestions.ts
+
+NEW MIGRATION: 20260122000004_add_suggested_weights.sql (APPLIED via MCP)
+- Added `suggested_weight_lbs` and `suggested_weight_kg` columns to v2_exercise_prescriptions
+- Seeded realistic starting weights for all major exercises:
+  * Barbell Compounds: Bench (65-135), Squat (95-185), Deadlift (95-225)
+  * Dumbbell: Incline Press (20-50), Curls (15-35), Arnold Press (15-40)
+  * Cable/Machine: Lat Pulldown (60-140), Leg Press (200-400)
+  * Bodyweight: Pull-ups, Dips, Push-ups (0 weight)
+  * Experience-based: Beginner → Intermediate → Advanced
+
+WEIGHT SUGGESTION LOGIC UPDATED:
+- Priority 1: Recent history (progressive overload: +2.5-5 lbs if target hit)
+- Priority 2: Prescription suggested weight (from new columns)
+- Priority 3: Empty (user enters first time, only if no prescription)
+
+EXERCISE INFO MODAL:
+- Toggleable info card showing target muscles
+- Form tips (control, breathing, mind-muscle connection)
+- Context-aware muscle suggestions based on exercise name
+
+---
+
+2026-01-21 - UX REDESIGN: Batch Logging + Minimal Friction Workout Flow
+------------------------------------------------------------------------
+IMPROVED WORKOUT FLOW:
+- ✅ Redesigned to eliminate keyboard fiddling during sets
+- ✅ Three-phase flow for optimal workout intensity:
+
+  **PHASE 1: SET EXECUTION (Minimal UI)**
+  - Exercise name + "Set 1 of 3"
+  - Target display (8 reps @ 135 lbs)
+  - RPE slider ONLY (quick adjustment)
+  - "Complete Set" button
+  - Optional "Exercise Tips & Muscles Worked" info button
+
+  **PHASE 2: REST TIMER**
+  - Auto-starts after completing set (90 seconds)
+  - Visual countdown with progress bar
+  - Skip button if ready early
+  - Shows next set info
+
+  **PHASE 3: BATCH LOGGING (After all sets)**
+  - "Log Your Sets: [Exercise Name]"
+  - Table showing all 3 sets
+  - Enter weight & reps for all sets at once
+  - RPE already captured (from slider during execution)
+  - "Save & Continue" → next exercise
+
+UX BENEFITS:
+- ✅ **Zero keyboard during workout** - Just tap Complete and rest
+- ✅ **Optimal rest time** - No distraction from typing
+- ✅ **Better intensity** - Focus on the set, not the phone
+- ✅ **Batch efficiency** - Log everything at once when fresh in memory
+- ✅ **Matches real behavior** - You remember what weight you just used
+- ✅ **Flow state** - Minimal friction between sets
+
+TECHNICAL IMPLEMENTATION:
+- WorkoutPhase state machine: execution → rest → logging → complete
+- RPE captured during execution, stored in array
+- Weight suggestions pre-filled in batch logging screen
+- All 3 sets saved to database in one batch
+- Validation only when saving (not during execution)
+
+---
+
+2026-01-21 - CRITICAL BUG FIX: Set Completion & Button State
+-------------------------------------------------------------
+CRITICAL DATABASE BUG FIXED:
+- ✅ Fixed `performed_at` column having `DEFAULT now()`
+  - **Root Cause**: v2_session_sets.performed_at had DEFAULT now() in schema
+  - **Impact**: All pre-filled sets were immediately marked as "completed"
+  - **Symptom**: Active workout screen showed "all sets complete" on fresh workouts
+  - **Fix**: Removed DEFAULT constraint via migration 20260122000003
+  - **Result**: Sets now NULL until user actually completes them
+
+BUTTON STATE LOGIC FIX:
+- ✅ Fixed "Continue" showing when should be "Start"
+  - **Root Cause**: Creating session for "Today only" exercise set hasActiveWorkout=true
+  - **Impact**: Button said "Continue" even with zero completed sets
+  - **Fix**: Check for completed sets (performed_at NOT NULL) before showing "Continue"
+  - **Logic**: hasActiveWorkout = session exists AND has completed sets
+  - **Result**: "Start" shows until user completes first set, then "Continue"
+
+TECHNICAL DETAILS:
+- Migration drops DEFAULT from performed_at column
+- Added query to count completed sets before setting button state
+- Two-step query: get session_exercise_ids → count sets with performed_at
+
+USER IMPACT:
+- **Before**: Pre-filled sets appeared completed immediately
+- **After**: Sets show as incomplete until user logs them
+- **Before**: "Continue" button even on brand new workouts
+- **After**: "Start" button until first set completed
+
+MODIFIED FILES:
+- supabase/migrations/20260122000003_fix_performed_at_default.sql (NEW)
+- app/(tabs)/index.tsx (button state logic)
+
+---
+
+2026-01-21 - Active Workout Redesign + Critical Bug Fixes
+---------------------------------------------------------
+MAJOR UX OVERHAUL:
+- ✅ Completely redesigned active workout experience from ground up
+- ✅ Exercise-by-exercise flow (focus on one exercise at a time)
+- ✅ Complete all sets for current exercise before moving to next
+- ✅ Intuitive linear progression through workout
+
+NEW COMPONENTS:
+- ✅ RestTimer component with auto-start after set completion
+  - Visual countdown timer with progress bar
+  - Skip button for immediate advancement
+  - Default 90-second rest between sets
+  
+- ✅ ExerciseTimer component for timed exercises
+  - Manual start button (Play/Pause controls)
+  - Target duration display with progress bar
+  - Visual feedback when exceeding target duration
+  - Skip/Complete button
+  
+- ✅ Smart weight suggestions system
+  - Progressive overload algorithm (2.5-5% increase when target hit)
+  - History-based suggestions from recent workouts
+  - Confidence levels (high/medium/low) based on data quality
+  - Automatic prefill of suggested weights
+  - Falls back to prescription defaults for new exercises
+
+VALIDATION & ERROR HANDLING:
+- ✅ Real-time input validation
+  - Weight must be > 0
+  - Reps must be > 0
+  - Duration must be > 0
+- ✅ Visual error indicators (red borders on invalid inputs)
+- ✅ Clear error messages below inputs
+- ✅ Prevents set completion until all validations pass
+
+WORKFLOW IMPROVEMENTS:
+- ✅ Progress indicator showing "Exercise X of Y"
+- ✅ Visual progress bar
+- ✅ Set counter "Set X of Y"
+- ✅ Automatic advancement to next set after rest timer
+- ✅ "Next Exercise" button when all sets complete
+- ✅ "Finish Workout" button when all exercises complete
+- ✅ Completed set indicators with checkmarks
+
+PLANNER UX POLISH:
+- ✅ Consolidated Edit/Remove buttons
+  - Single "Edit" button for "Today Only" exercises
+  - "Delete Exercise" option inside edit sheet
+  - Cleaner, less cluttered interface
+
+CRITICAL BUG FIXES:
+- ✅ Fixed set_number null constraint violation
+  - Was passing exerciseId instead of sessionExerciseId to saveSessionSet
+  - Corrected function signature usage throughout
+
+NEW FILES:
+- src/components/workout/RestTimer.tsx
+- src/components/workout/ExerciseTimer.tsx
+- src/lib/utils/weightSuggestions.ts
+
+MODIFIED FILES:
+- app/(stack)/workout/active.tsx (complete rewrite)
+- app/(tabs)/planner.tsx (consolidated buttons)
+- src/components/workout/SessionExerciseEditSheet.tsx (added delete option)
+
+TECHNICAL DETAILS:
+- Weight suggestions use getExerciseHistory with 5-session lookback
+- Progressive overload: +5 lbs for heavy (>100), +2.5 lbs for light (<100)
+- Timers use React hooks with 1-second intervals
+- Input validation prevents null/zero values
+- Optimistic UI updates with error rollback
+
+USER BENEFITS:
+- **Focus**: One exercise at a time reduces cognitive load
+- **Guidance**: Suggested weights based on personal history
+- **Safety**: Validation prevents logging invalid data
+- **Efficiency**: Auto-timers minimize manual timer management
+- **Motivation**: Clear progress indicators show workout advancement
+
+ADDITIONAL UX FIXES:
+- ✅ Fixed "Start" button opening plan day picker unnecessarily
+  - Now goes directly to active workout (same as Continue)
+  - Active.tsx handles exercise loading intelligently
+
+- ✅ Fixed theme colors for active workout screen
+  - Added missing colors.success, colors.warning to theme
+  - Added typography sizes['4xl'] for large timer displays
+  - All text now properly visible on dark background
+
+- ✅ Improved post-workout completion flow
+  - "Workout Complete!" card instead of "Rest Day" after today-only workouts
+  - Clear distinction between rest day and completed state
+  - Helpful guidance to start new workout or add exercises
+
+- ✅ Added workout deletion functionality
+  - Delete button (trash icon) on each workout session in Progress tab
+  - Confirmation dialog with workout name
+  - Cascading delete of session exercises and sets
+  - Calendar auto-refreshes after deletion
+
+- ✅ Fixed isRestDay logic
+  - Now checks: `selectedDayExercises.length === 0 && !isWorkoutCompleted`
+  - Prevents showing "Rest Day" when workout is actually complete
+
+MODIFIED FILES (ADDITIONAL):
+- src/lib/utils/theme.ts (added success, warning colors + 4xl size)
+- app/(tabs)/index.tsx (fixed Start button + completion display logic)
+- src/components/progress/SessionDetailSheet.tsx (added delete functionality)
+- src/components/ui/ModalManager.tsx (passed onSessionDeleted callback)
+- app/(tabs)/progress.tsx (added reload after deletion)
+
+---
+
+2026-01-21 - UX Enhancement: Unified Planner View & Prescription Seeding
+--------------------------------------------------------------------------
+CRITICAL FIXES:
+- ✅ Seeded exercise prescriptions (135 total for 45 exercises)
+  - Created migration: 20260122000002_seed_exercise_prescriptions.sql
+  - Schema: exercise_id, goal, experience, mode, sets_min/max, reps_min/max
+  - Supports beginner/intermediate/advanced experience levels
+  - Fixes "No prescription found" error when adding exercises
+
+- ✅ Fixed Continue button redundancy
+  - Continue button now goes directly to active workout (no plan day picker)
+  - Only shows plan day picker when starting a new workout with empty slots
+
+- ✅ Auto-create sets for "Today only" exercises
+  - Modified applyStructureEditToSession to prefill sets using selectExerciseTargets
+  - New exercises get sets with target reps/weight based on user experience level
+
+- ✅ Fixed critical query errors
+  - Fixed table name in getExerciseHistory: session_exercises → v2_session_exercises
+  - Fixed OR condition syntax for foreign table filtering
+  - Eliminated PGRST200 "relationship not found" errors
+
+- ✅ Enhanced swipe indicator visibility
+  - Removed opacity: 0.3 that made text nearly invisible
+  - Added background with 20% primary color for contrast
+  - Increased text size and made bold
+  - Changed color from success green to primary blue
+
+UX ENHANCEMENT: Unified Planner View
+- ✅ "Today only" exercises now visible in Planner tab alongside template exercises
+  - Visual distinction: "Today Only" badge (light blue background, primary border)
+  - Shows calculated target prescriptions (e.g., "3 sets × 8 reps")
+  - "Edit" button opens inline set editor (pre-fill defaults before workout)
+  - "Remove" button deletes from active session
+  - Session exercises load automatically when viewing today's day
+  - Clears when switching to other days
+  - Fixed infinite reload loop (removed function from useEffect deps)
+
+- ✅ Created SessionExerciseEditSheet for inline set editing
+  - Bottom sheet modal for editing set defaults
+  - Edit weight, reps, duration, RPE for all sets before starting workout
+  - Saves directly to v2_session_sets
+  - Enables "frictionless logging" - only swipe during workout, minimal typing
+  - Shows all sets for selected exercise
+  - Real-time updates saved to database
+
+IMPLEMENTATION:
+- Modified app/(tabs)/planner.tsx:
+  - Added todaySessionExercises state
+  - Added loadTodaySessionExercises() function
+  - Loads active session for today via v2_workout_sessions + v2_session_exercises
+  - Merges session exercises with template slots in rendering
+  - Added useEffect to reload session exercises when day changes
+  - Added styles: exerciseHeader, todayBadge, todayBadgeText
+- Auto-refreshes session exercises after adding "Today only" exercise
+
+BENEFITS:
+- Single source of truth: see all today's exercises in one place
+- Clear visual distinction between recurring (template) and one-time (session) exercises
+- Reduced cognitive load: no need to switch between Planner and Workout tabs
+- Maintains architectural separation (template vs session) in database
+
+---
+
 2026-01-21 - Advanced Biomechanics & Active Workout UI
 -------------------------------------------------------
 Major upgrade to fatigue modeling and complete active workout implementation.

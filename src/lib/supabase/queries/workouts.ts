@@ -513,7 +513,7 @@ export async function getExerciseHistory(
           rir,
           duration_sec,
           performed_at,
-          session_exercises!inner(
+          v2_session_exercises!inner(
             exercise_id,
             custom_exercise_id,
             session_id,
@@ -521,11 +521,9 @@ export async function getExerciseHistory(
           )
         `
       )
-      .eq('session_exercises.v2_workout_sessions.user_id', userId)
-      .eq('session_exercises.v2_workout_sessions.status', 'completed')
-      .or(
-        `session_exercises.exercise_id.eq.${exerciseId},session_exercises.custom_exercise_id.eq.${exerciseId}`
-      )
+      .eq('v2_session_exercises.v2_workout_sessions.user_id', userId)
+      .eq('v2_session_exercises.v2_workout_sessions.status', 'completed')
+      .or(`exercise_id.eq.${exerciseId},custom_exercise_id.eq.${exerciseId}`, { foreignTable: 'v2_session_exercises' })
       .not('performed_at', 'is', null)
       .order('performed_at', { ascending: false })
       .limit(limit);
@@ -975,20 +973,32 @@ export async function markSetComplete(
       setId,
       hasReps: values.reps !== undefined,
       hasDuration: values.duration_sec !== undefined,
+      hasRpe: values.rpe !== undefined,
     });
   }
 
   try {
     const { error } = await supabase
       .from('v2_session_sets')
-      .update(values)
+      .update({
+        ...values,
+        performed_at: new Date().toISOString(), // CRITICAL: Mark as complete
+      })
       .eq('id', setId);
 
     if (error) {
       if (__DEV__) {
-        devError('workout-query', error, { setId });
+        devError('workout-query', error, { setId, values });
       }
       return false;
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'markSetComplete:success',
+        setId,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     return true;

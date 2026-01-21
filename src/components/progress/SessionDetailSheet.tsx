@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { Trash2 } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
 import { supabase } from '../../lib/supabase/client';
 import { getSessionsInRange, type WorkoutSession } from '../../lib/supabase/queries/workouts';
@@ -14,6 +15,7 @@ import { devLog, devError } from '../../lib/utils/logger';
 type Props = {
   selectedDate: Date;
   onClose: () => void;
+  onSessionDeleted?: () => void; // Callback to refresh calendar after deletion
 };
 
 type SessionWithExercises = WorkoutSession & {
@@ -21,9 +23,10 @@ type SessionWithExercises = WorkoutSession & {
   exerciseCount: number;
 };
 
-export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose }) => {
+export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onSessionDeleted }) => {
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionWithExercises[]>([]);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     loadSessions();
@@ -139,6 +142,59 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose }) =
     }
   };
 
+  const handleDeleteSession = async (sessionId: string, sessionName: string) => {
+    Alert.alert(
+      'Delete Workout',
+      `Are you sure you want to delete this workout (${sessionName})? This action cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingSessionId(sessionId);
+            try {
+              const { error } = await supabase
+                .from('v2_workout_sessions')
+                .delete()
+                .eq('id', sessionId);
+
+              if (error) {
+                if (__DEV__) {
+                  devError('session-detail', error, { sessionId });
+                }
+                Alert.alert('Error', 'Failed to delete workout');
+                return;
+              }
+
+              // Remove from local state
+              setSessions(prev => prev.filter(s => s.id !== sessionId));
+              
+              // Notify parent to refresh calendar
+              if (onSessionDeleted) {
+                onSessionDeleted();
+              }
+
+              if (__DEV__) {
+                devLog('session-detail', { action: 'delete_session', sessionId });
+              }
+            } catch (error) {
+              if (__DEV__) {
+                devError('session-detail', error, { action: 'delete_session', sessionId });
+              }
+              Alert.alert('Error', 'Failed to delete workout');
+            } finally {
+              setDeletingSessionId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatDate = (date: Date): string => {
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
@@ -180,10 +236,22 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose }) =
       {sessions.map((session) => (
         <View key={session.id} style={styles.sessionCard}>
           <View style={styles.sessionHeader}>
-            <Text style={styles.sessionTitle}>{session.day_name || 'Workout'}</Text>
-            {session.completed_at && (
-              <Text style={styles.sessionTime}>{formatTime(session.completed_at)}</Text>
-            )}
+            <View style={styles.sessionHeaderLeft}>
+              <Text style={styles.sessionTitle}>{session.day_name || 'Workout'}</Text>
+              {session.completed_at && (
+                <Text style={styles.sessionTime}>{formatTime(session.completed_at)}</Text>
+              )}
+            </View>
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => handleDeleteSession(session.id, session.day_name || 'Workout')}
+              disabled={deletingSessionId === session.id}
+            >
+              <Trash2 
+                size={20} 
+                color={deletingSessionId === session.id ? colors.textMuted : colors.error} 
+              />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.exerciseSection}>
@@ -255,8 +323,12 @@ const styles = StyleSheet.create({
   sessionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: spacing.xs,
+  },
+  sessionHeaderLeft: {
+    flex: 1,
+    gap: spacing.xs,
   },
   sessionTitle: {
     color: colors.textPrimary,
@@ -266,6 +338,10 @@ const styles = StyleSheet.create({
   sessionTime: {
     color: colors.textSecondary,
     fontSize: typography.sizes.sm,
+  },
+  deleteButton: {
+    padding: spacing.xs,
+    marginLeft: spacing.sm,
   },
   exerciseSection: {
     gap: spacing.xs,

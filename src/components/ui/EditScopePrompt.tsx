@@ -1,10 +1,13 @@
 /**
  * Edit Scope Prompt
  * Prompts user to choose scope when making structure edits
+ * 
+ * NOTE: Uses absolutely positioned overlay instead of Modal to avoid
+ * React Native's Modal stacking issues with BottomSheet
  */
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
 
 export type EditScope = 'today' | 'thisWeek' | 'nextWeek';
@@ -20,14 +23,19 @@ export const EditScopePrompt: React.FC<EditScopePromptProps> = ({
   onSelect,
   onCancel,
 }) => {
+  if (__DEV__ && visible) {
+    console.log('[EditScopePrompt] Rendering with visible=true');
+  }
+  
+  if (!visible) return null;
+  
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onCancel}
-    >
-      <View style={styles.overlay}>
+    <View style={styles.overlay} pointerEvents="box-none">
+      <TouchableWithoutFeedback onPress={onCancel}>
+        <View style={styles.backdrop} />
+      </TouchableWithoutFeedback>
+      
+      <View style={styles.centeredContainer} pointerEvents="box-none">
         <View style={styles.container}>
           <Text style={styles.title}>Apply this change to:</Text>
           
@@ -68,14 +76,30 @@ export const EditScopePrompt: React.FC<EditScopePromptProps> = ({
           </TouchableOpacity>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    elevation: 9999,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  centeredContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
@@ -86,6 +110,11 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     width: '100%',
     maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
   },
   title: {
     ...typography.h3,

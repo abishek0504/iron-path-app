@@ -47,6 +47,7 @@ import { devLog, devError } from '../../src/lib/utils/logger';
 import { isStructureEdit } from '../../src/lib/utils/editHelpers';
 import { EditScopePrompt, type EditScope } from '../../src/components/ui/EditScopePrompt';
 import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
+import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, applySessionStructureToTemplate } from '../../src/lib/supabase/queries/templates';
 import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
 import { generateWeekForTemplate } from '../../src/lib/engine/weekGeneration';
@@ -87,6 +88,18 @@ export default function PlannerTab() {
   } | null>(null);
   const [showSmartAdjustPrompt, setShowSmartAdjustPrompt] = useState(false);
   const [rebalanceResult, setRebalanceResult] = useState<RebalanceResult | null>(null);
+  const [todaySessionExercises, setTodaySessionExercises] = useState<Array<{
+    id: string;
+    exercise_id?: string;
+    custom_exercise_id?: string;
+    sort_order: number;
+  }>>([]);
+  const [showSessionEditSheet, setShowSessionEditSheet] = useState(false);
+  const [editingSessionExercise, setEditingSessionExercise] = useState<{
+    id: string;
+    name: string;
+    mode: 'reps' | 'timed';
+  } | null>(null);
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -183,6 +196,87 @@ export default function PlannerTab() {
     [profile]
   );
 
+  // Load today's session exercises
+  const loadTodaySessionExercises = useCallback(
+    async (userId: string) => {
+      if (__DEV__) {
+        devLog('planner', { action: 'loadTodaySessionExercises', userId });
+      }
+
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: session } = await supabase
+          .from('v2_workout_sessions')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .gte('started_at', `${today}T00:00:00Z`)
+          .lt('started_at', `${today}T23:59:59Z`)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (session) {
+          const { data: sessionExercises } = await supabase
+            .from('v2_session_exercises')
+            .select('id, exercise_id, custom_exercise_id, sort_order')
+            .eq('session_id', session.id)
+            .order('sort_order', { ascending: true });
+
+          setTodaySessionExercises(sessionExercises || []);
+
+          // Load exercise names and targets for session exercises
+          if (sessionExercises) {
+            const namesMap = new Map<string, string>(exerciseNames);
+            const targetsMap = new Map<string, ExerciseTarget>(slotTargets);
+            const effectiveExperience = profile?.experience_level || 'beginner';
+            
+            for (const se of sessionExercises) {
+              const exerciseId = se.exercise_id || se.custom_exercise_id;
+              if (!exerciseId) continue;
+
+              // Load exercise name
+              if (!namesMap.has(exerciseId)) {
+                const exercise = await getMergedExercise(
+                  se.exercise_id ? { exerciseId: se.exercise_id } : { customExerciseId: se.custom_exercise_id! },
+                  userId
+                );
+                if (exercise) {
+                  namesMap.set(exerciseId, exercise.name);
+                }
+              }
+
+              // Calculate target for this session exercise
+              const target = await selectExerciseTargets(
+                {
+                  exerciseId: se.exercise_id || undefined,
+                  customExerciseId: se.custom_exercise_id || undefined,
+                },
+                userId,
+                { experience: effectiveExperience },
+                0
+              );
+
+              if (target) {
+                targetsMap.set(exerciseId, target);
+              }
+            }
+            
+            setExerciseNames(namesMap);
+            setSlotTargets(targetsMap);
+          }
+        } else {
+          setTodaySessionExercises([]);
+        }
+      } catch (error) {
+        if (__DEV__) {
+          devError('planner', error, { action: 'loadTodaySessionExercises' });
+        }
+      }
+    },
+    [exerciseNames, slotTargets, profile]
+  );
+
   // Load template data
   const loadTemplate = useCallback(
     async (templateId: string) => {
@@ -233,6 +327,9 @@ export default function PlannerTab() {
               // Calculate targets for all slots
               await calculateTargetsForSlots(fullTemplate, userId);
             }
+
+            // Load today's session exercises
+            await loadTodaySessionExercises(userId);
           }
         } else {
           toast.error('Failed to load template');
@@ -246,7 +343,7 @@ export default function PlannerTab() {
         setIsLoadingTemplate(false);
       }
     },
-    [toast, getCurrentUserId, calculateTargetsForSlots, hasInitializedSelection]
+    [toast, getCurrentUserId, calculateTargetsForSlots, hasInitializedSelection, loadTodaySessionExercises]
   );
 
   // Initialize: load or create template
@@ -316,6 +413,21 @@ export default function PlannerTab() {
   // Get selected day
   const selectedDay = templateData?.days[selectedDayIndex] || null;
 
+  // Reload session exercises when day changes (only if viewing today)
+  useEffect(() => {
+    if (selectedDay && selectedDay.day.day_name === getTodayDayName()) {
+      const userId = getCurrentUserId();
+      userId.then((id) => {
+        if (id) {
+          loadTodaySessionExercises(id);
+        }
+      });
+    } else {
+      setTodaySessionExercises([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDayIndex]); // Only reload when day index changes, not on function recreation
+
   // Handle adding exercise to slot
   const handleAddExercise = useCallback(
     async (dayId: string) => {
@@ -336,17 +448,38 @@ export default function PlannerTab() {
         // Calculate sort order
         const sortOrder = dayData.slots.length + 1;
 
-        // Store pending edit and show prompt
-        setPendingEdit({
-          type: 'addSlot',
-          data: {
-            dayId,
+        // Store pending edit and show prompt AFTER bottom sheet closes
+        // React Native only allows ONE Modal at a time, so we must wait for
+        // the bottom sheet animation to complete (350ms) before showing the EditScopePrompt
+        if (__DEV__) {
+          devLog('planner', { 
+            action: 'setTimeoutForEditPrompt', 
+            dayId, 
             exerciseId: exercise.id,
-            customExerciseId: undefined,
-            sortOrder,
-          },
-        });
-        setShowEditScopePrompt(true);
+            exerciseName: exercise.name 
+          });
+        }
+        
+        setTimeout(() => {
+          if (__DEV__) {
+            devLog('planner', { 
+              action: 'showEditScopePrompt', 
+              dayId, 
+              exerciseId: exercise.id 
+            });
+          }
+          
+          setPendingEdit({
+            type: 'addSlot',
+            data: {
+              dayId,
+              exerciseId: exercise.id,
+              customExerciseId: undefined,
+              sortOrder,
+            },
+          });
+          setShowEditScopePrompt(true);
+        }, 400); // Wait 400ms (longer than the 350ms bottom sheet close animation)
       });
     },
     [picker, templateData, toast]
@@ -377,15 +510,18 @@ export default function PlannerTab() {
 
           // Apply structure edit to session
           if (pendingEdit.type === 'addSlot') {
-            const success = await applyStructureEditToSession(session.id, {
+            const success = await applyStructureEditToSession(session.id, userId, {
               type: 'addSlot',
               exerciseId: pendingEdit.data.exerciseId,
               customExerciseId: pendingEdit.data.customExerciseId,
               sortOrder: pendingEdit.data.sortOrder,
+              experience: profile?.experience_level || 'beginner',
             });
 
             if (success) {
               toast.success('Exercise added to today\'s session');
+              // Reload today's session exercises
+              await loadTodaySessionExercises(userId);
             } else {
               toast.error('Failed to add exercise');
             }
@@ -554,7 +690,7 @@ export default function PlannerTab() {
             </View>
 
             {/* Slots list */}
-            {selectedDay.slots.length === 0 ? (
+            {selectedDay.slots.length === 0 && todaySessionExercises.length === 0 ? (
               <View style={styles.emptySlotsContainer}>
                 <Text style={styles.emptySlotsText}>
                   No exercises scheduled for this day
@@ -565,6 +701,49 @@ export default function PlannerTab() {
               </View>
             ) : (
               <View style={styles.slotsList}>
+                {/* Show today-only exercises first (if viewing today) */}
+                {selectedDay.day.day_name === getTodayDayName() && todaySessionExercises.map((sessionExercise) => {
+                  const exerciseId = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
+                  const exerciseName = exerciseId ? exerciseNames.get(exerciseId) || 'Loading...' : 'Unknown';
+                  const target = exerciseId ? slotTargets.get(exerciseId) : null;
+                  const targetText = target
+                    ? target.mode === 'reps'
+                      ? `${target.sets} sets × ${target.reps} reps`
+                      : `${target.sets} sets × ${Math.floor((target.duration_sec || 0) / 60)} min`
+                    : 'Loading targets...';
+
+                  return (
+                    <View key={`session-${sessionExercise.id}`} style={styles.slotCard}>
+                      <View style={styles.slotContent}>
+                        <Text style={styles.slotExerciseName}>{exerciseName}</Text>
+                        <View style={styles.todayBadgeRow}>
+                          <View style={styles.todayBadge}>
+                            <Text style={styles.todayBadgeText}>Today Only</Text>
+                          </View>
+                          <Text style={styles.slotTargets}>
+                            {targetText}
+                          </Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.deleteButton, styles.editButton]}
+                        onPress={() => {
+                          setEditingSessionExercise({
+                            id: sessionExercise.id,
+                            name: exerciseName,
+                            mode: target?.mode || 'reps',
+                          });
+                          setShowSessionEditSheet(true);
+                        }}
+                        disabled={isSaving}
+                      >
+                        <Text style={[styles.deleteButtonText, styles.editButtonText]}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+
+                {/* Show template slots */}
                 {selectedDay.slots.map((slot) => {
                   const exerciseName = slot.exercise_id
                     ? exerciseNames.get(slot.exercise_id) || 'Loading...'
@@ -945,12 +1124,70 @@ export default function PlannerTab() {
       </ScrollView>
 
       <EditScopePrompt
+        key={pendingEdit ? `edit-${pendingEdit.type}` : 'edit-none'}
         visible={showEditScopePrompt}
         onSelect={handleApplyEdit}
         onCancel={() => {
           setShowEditScopePrompt(false);
           setPendingEdit(null);
         }}
+      />
+
+      <SessionExerciseEditSheet
+        visible={showSessionEditSheet}
+        onClose={() => {
+          setShowSessionEditSheet(false);
+          setEditingSessionExercise(null);
+        }}
+        onSave={async () => {
+          toast.success('Defaults saved');
+          const userId = await getCurrentUserId();
+          if (userId) {
+            await loadTodaySessionExercises(userId);
+          }
+        }}
+        onDelete={async () => {
+          if (!editingSessionExercise) return;
+
+          if (__DEV__) {
+            devLog('planner', { 
+              action: 'removeSessionExercise', 
+              sessionExerciseId: editingSessionExercise.id 
+            });
+          }
+
+          setIsSaving(true);
+          try {
+            const { error } = await supabase
+              .from('v2_session_exercises')
+              .delete()
+              .eq('id', editingSessionExercise.id);
+
+            if (error) {
+              toast.error('Failed to remove exercise');
+              if (__DEV__) {
+                devError('planner', error, { sessionExerciseId: editingSessionExercise.id });
+              }
+            } else {
+              toast.success('Exercise removed');
+              const userId = await getCurrentUserId();
+              if (userId) {
+                await loadTodaySessionExercises(userId);
+              }
+            }
+          } catch (error) {
+            toast.error('Failed to remove exercise');
+            if (__DEV__) {
+              devError('planner', error, { action: 'removeSessionExercise' });
+            }
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+        sessionExerciseId={editingSessionExercise?.id || ''}
+        exerciseName={editingSessionExercise?.name || ''}
+        mode={editingSessionExercise?.mode || 'reps'}
+        useImperial={profile?.use_imperial ?? true}
       />
 
       <SmartAdjustPrompt
@@ -1333,6 +1570,24 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.xs,
   },
+  todayBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  todayBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primary + '20',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  todayBadgeText: {
+    fontSize: typography.sizes.xs,
+    color: colors.primary,
+    fontWeight: typography.weights.semibold,
+  },
   deleteButton: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -1343,6 +1598,12 @@ const styles = StyleSheet.create({
     color: colors.errorText,
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.medium,
+  },
+  editButton: {
+    backgroundColor: colors.primary + '20',
+  },
+  editButtonText: {
+    color: colors.primary,
   },
   slotExerciseName: {
     fontSize: typography.sizes.base,
