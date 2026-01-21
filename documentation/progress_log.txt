@@ -35,6 +35,23 @@ BEHAVIOR NOW:
 - Return to Workout tab → "Continue" button appears
 - Database query confirms sets are marked complete
 
+DOCUMENTATION UPDATED:
+- DATABASE_SCHEMA.md: Added performed_at semantics section with bug fix note
+- DATA_FLOWS.md: Complete workout flow with exercise-by-exercise phases
+- SYSTEM_ARCHITECTURE.md: Added workout state machine section
+- IMPLEMENTATION_STATUS.md: Updated feature matrix, progress to 95%
+- 00_INDEX.md: Added recent updates section
+
+MIGRATION CREATED:
+- 20260122000004_add_suggested_weights.sql: Added suggested_weight_lbs/kg columns
+- Seeded realistic starting weights for 45 exercises
+- Weight suggestion logic now uses these as fallback when no history exists
+
+VERIFIED IN LOGS:
+- `markSetComplete:success` logs now show timestamps
+- `hasActiveWorkout: true` correctly appears after completing sets
+- useFocusEffect properly reloads workout state on tab focus
+
 ---
 
 2026-01-21 - HOTFIX: Continue Button Now Appears After Completing Sets

@@ -1,11 +1,11 @@
 # Implementation Status
 
-**Last Updated**: 2026-01-19  
+**Last Updated**: 2026-01-21  
 **Purpose**: Track what's implemented, what's TODO, and known issues.
 
 ## Summary
 
-**Overall Progress**: ~90% of core features implemented
+**Overall Progress**: ~95% of core features implemented
 
 **Core Systems**:
 - ✅ Database schema and RLS policies
@@ -94,20 +94,25 @@
 | Smart Adjust apply | ✅ Complete | Adds catch-up exercises to session |
 | Session creation | ✅ Complete | From template or standalone |
 | Exercise prefill | ✅ Complete | Copies from template slots |
-| Target calculation | ✅ Complete | Progressive overload |
-| Set prefill | ✅ Complete | Prefills with targets |
-| Active workout UI | ✅ Complete | FlashList with swipe gestures |
-| Swipe-to-complete | ✅ Complete | Swipe right to mark set complete |
-| Edit weight/reps/duration | ✅ Complete | Tap to expand and edit |
+| Target calculation | ✅ Complete | Progressive overload with suggested weights |
+| Set prefill | ✅ Complete | Prefills with targets, performed_at=NULL |
+| Active workout UI | ✅ Complete | Exercise-by-exercise flow with phases |
+| Set completion tracking | ✅ Complete | performed_at timestamp marks completion |
+| Batch logging screen | ✅ Complete | Log all sets after exercise complete |
+| Edit weight/reps/duration | ✅ Complete | In batch logging screen |
 | RPE input | ✅ Complete | Interactive slider with color zones |
-| Save changes | ✅ Complete | Optimistic UI with background sync |
+| Save changes | ✅ Complete | markSetComplete with performed_at |
 | Complete workout | ✅ Complete | Triggers Edge Function for freshness |
+| Resume active session | ✅ Complete | Continue button appears correctly |
+| Exit mid-workout | ✅ Complete | Progress saved, resume on return |
+| Weight suggestions | ✅ Complete | From history or prescription seed data |
+| Exercise info display | ✅ Complete | Shows target muscles and tips |
+| Keyboard dismiss | ✅ Complete | Done/Next buttons on inputs |
+| Rest timer | ⚠️ TODO | Automatic between sets |
 | Exercise notes display | ⚠️ TODO | Show slot notes |
-| Rest timer | ⚠️ TODO | Between sets |
 | Add exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
 | Remove exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
-| Abandon workout | ⚠️ TODO | Update status |
-| Resume active session | ⚠️ TODO | Check for active on boot |
+| Abandon workout | ⚠️ TODO | Update status to abandoned |
 
 ### Progress Tracking
 
@@ -240,44 +245,54 @@
    - **Status**: Current RLS: `USING (user_id = auth.uid() OR user_id IS NULL)`
    - **Fix**: Tighten policy or remove system template concept
 
-3. **Partial Derived Cache Implementation**
+2. **Partial Derived Cache Implementation**
    - **Impact**: v2_muscle_freshness now updated via Edge Function, v2_daily_muscle_stress still unused
    - **Status**: Freshness cache active, daily stress cache still computed on-demand
    - **Future**: Add daily stress cache rebuild job if needed
 
 ### Medium Priority
 
-4. **No AI Generation UI**
+3. **No AI Generation UI**
    - **Impact**: Can't trigger AI generation from app
    - **Status**: Engine complete, button/UI TODO
    - **Next**: Add "Generate with AI" button to Planner
 
-6. **workoutStore Unused**
+4. **workoutStore Unused**
    - **Impact**: Store created but not used
    - **Status**: Sessions fetched directly via queries
    - **Decision**: Remove or implement active session tracking
 
-7. **TypeScript Types Manual**
+5. **TypeScript Types Manual**
    - **Impact**: Risk of schema drift
    - **Status**: Hand-typed interfaces in query files
    - **Fix**: Generate from schema regularly
 
 ### Low Priority
 
-8. **No Exercise Reordering**
+6. **No Exercise Reordering**
    - **Impact**: Can't rearrange exercise order in day
    - **Status**: TODO
    - **Next**: Add drag-and-drop UI
 
-9. **No Multi-Select in Exercise Picker**
+7. **No Multi-Select in Exercise Picker**
    - **Impact**: Must add exercises one by one
    - **Status**: TODO
    - **Next**: Add multi-select mode with batch addition
 
-10. **No Theme Toggle**
-    - **Impact**: Always light mode
-    - **Status**: Theme system exists, no toggle UI
-    - **Next**: Add dark mode support
+8. **No Theme Toggle**
+   - **Impact**: Always light mode
+   - **Status**: Theme system exists, no toggle UI
+   - **Next**: Add dark mode support
+
+9. **No Rest Timer**
+   - **Impact**: Manual timing between sets
+   - **Status**: TODO
+   - **Next**: Add automatic rest timer based on RPE
+
+10. **No Abandon Workout**
+    - **Impact**: Active sessions stay active indefinitely
+    - **Status**: TODO
+    - **Next**: Add option to abandon workout (set status='abandoned')
 
 ## Completed Features (Recent)
 
@@ -286,11 +301,21 @@
 - ✅ Deployed Edge Function for automatic muscle freshness updates
 - ✅ Created database trigger on session completion
 - ✅ Migrated implicit_hits to weighted coefficients (40+ exercises seeded)
-- ✅ Implemented swipe-to-complete active workout UI
+- ✅ Implemented exercise-by-exercise active workout flow
+- ✅ Created batch logging screen with editable fields
+- ✅ Implemented set completion tracking with performed_at timestamps
+- ✅ Fixed markSetComplete to always set performed_at (CRITICAL BUG FIX)
+- ✅ Implemented Continue button logic for mid-workout exits
+- ✅ Added suggested_weight_lbs/kg to v2_exercise_prescriptions
+- ✅ Seeded realistic starting weights for 45 exercises
 - ✅ Created interactive RPE slider with color zones
 - ✅ Built Skia-powered muscle heatmap (28 muscles, GPU-accelerated)
 - ✅ Implemented Smart Adjust apply logic (catch-up exercises)
 - ✅ Installed @shopify/flash-list and @shopify/react-native-skia
+- ✅ Added keyboard dismiss functionality (Done/Next buttons)
+- ✅ Implemented exercise info display (muscles, tips)
+- ✅ Fixed bottom sheet UI (removed non-functional drag handle)
+- ✅ Improved SessionExerciseEditSheet header layout
 
 ### Patch H - Remove Goal (2026-01-XX)
 - ✅ Removed `goal` from prescriptions (holistic approach)

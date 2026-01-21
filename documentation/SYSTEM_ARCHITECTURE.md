@@ -211,6 +211,98 @@ const useUIStore = create<UIState>((set) => ({
 }));
 ```
 
+## Active Workout State Machine
+
+### WorkoutPhase Enum
+```typescript
+type WorkoutPhase = 'execution' | 'rest' | 'logging' | 'complete';
+```
+
+### Phase Transitions
+
+**EXECUTION Phase** (performing sets):
+- Display current exercise with all sets
+- User adjusts RPE slider for active set
+- User taps "Complete Set" button
+- `markSetComplete(setId, { reps, weight, rpe })` called
+  - **CRITICAL**: Always sets `performed_at = NOW()` to mark set as complete
+- Transition:
+  - If last set of exercise → LOGGING phase
+  - Else → REST phase
+
+**REST Phase** (between sets):
+- Automatic countdown timer (90-180s based on RPE)
+- User can skip or wait
+- Transition:
+  - Timer ends or skip pressed → EXECUTION phase (next set)
+
+**LOGGING Phase** (batch editing after exercise):
+- Display all sets for current exercise
+- Editable weight/reps/duration/RPE fields
+- RPE sliders allow final adjustments
+- User taps "Save & Continue"
+- Validation: weight ≥ 0, reps > 0 (or duration > 0)
+- For each edited set: `markSetComplete(setId, updatedValues)`
+- Load weight suggestion for next exercise
+- Transition:
+  - If more exercises remain → EXECUTION phase (first set of next exercise)
+  - Else → COMPLETE phase
+
+**COMPLETE Phase** (workout finished):
+- Display summary: "All sets complete"
+- User taps "Finish Workout"
+- `completeWorkoutSession(sessionId)` called
+  - UPDATE v2_workout_sessions SET status='completed', completed_at=NOW()
+  - Database trigger fires Edge Function for muscle freshness update
+- Navigate back to Workout tab
+
+### Set Completion Tracking
+
+**Database Contract**:
+```sql
+-- Prefill on session creation
+INSERT INTO v2_session_sets (
+  session_exercise_id, set_number,
+  weight, reps, rpe,
+  performed_at  -- NULL = not performed
+) VALUES (...);
+
+-- Mark complete when user taps "Complete Set"
+UPDATE v2_session_sets
+SET 
+  weight = $1,
+  reps = $2,
+  rpe = $3,
+  performed_at = NOW()  -- ← CRITICAL: This timestamp is the source of truth
+WHERE id = $4;
+```
+
+**Resume Logic**:
+```typescript
+// Check for incomplete workout
+const completedSets = sets.filter(s => s.performed_at !== null);
+const hasActiveWorkout = 
+  completedSets.length > 0 && 
+  completedSets.length < sets.length;
+
+// Show "Continue" button if true
+```
+
+### Critical Bug Fix (2026-01-21)
+
+**Problem**: `markSetComplete` originally only updated weight/reps/rpe but never set `performed_at`. This caused:
+- Sets appeared complete in UI but database had `performed_at = NULL`
+- "Continue" button never appeared after exiting mid-workout
+- Progress not saved
+
+**Solution**: Modified `markSetComplete` to ALWAYS include:
+```typescript
+{
+  ...values,
+  performed_at: new Date().toISOString()
+}
+```
+
 ## Navigation System (Expo Router)
 
 ### Route Types

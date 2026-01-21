@@ -1,6 +1,7 @@
 # IronPath V2 Documentation
 
 **Generated**: 2026-01-19  
+**Last Updated**: 2026-01-21 (Active Workout Flow & Set Completion Tracking)  
 **Philosophy**: Document what matters - architecture decisions, data flows, and setup procedures. Let well-written code document itself.
 
 ## Core Documentation
@@ -76,6 +77,23 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 
 Old documentation archived in [`archive/`](archive/) with timestamps.
 
+## Recent Updates
+
+### 2026-01-21: Active Workout Flow & Set Completion
+- **CRITICAL BUG FIX**: `markSetComplete` now always sets `performed_at` timestamp
+- **Exercise-by-Exercise Flow**: Implemented workout phase state machine (execution → rest → logging)
+- **Batch Logging**: User logs all sets after completing all reps for an exercise
+- **Resume Logic**: "Continue" button appears correctly after mid-workout exit
+- **Weight Suggestions**: Added `suggested_weight_lbs/kg` to prescriptions, seeded 45 exercises
+- **UX Improvements**: Keyboard dismiss, exercise info, improved bottom sheet UI
+
+**Documentation Updated**:
+- `DATABASE_SCHEMA.md`: Added performed_at semantics and bug fix note
+- `DATA_FLOWS.md`: Complete workout flow with phase transitions
+- `SYSTEM_ARCHITECTURE.md`: Added workout state machine section
+- `IMPLEMENTATION_STATUS.md`: Updated feature matrix and known issues
+- `progress_log.txt`: Detailed debugging and fix history
+
 ## Maintenance
 
 When updating:
@@ -84,5 +102,6 @@ When updating:
 - **Schema change**: Update `DATABASE_SCHEMA.md` and migration file
 - **Architecture decision**: Update `SYSTEM_ARCHITECTURE.md` with WHY
 - **New feature**: Update `IMPLEMENTATION_STATUS.md`
+- **Bug fix**: Add note to `progress_log.txt` and affected docs
 
 This keeps documentation maintainable while remaining comprehensive.

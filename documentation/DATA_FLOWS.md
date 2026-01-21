@@ -148,7 +148,7 @@ const handleAddExercise = async (exercise) => {
    └→ needsRebalance(userId, templateId, dayName)
        └→ If gaps detected: show SmartAdjustPrompt
            ├→ "Continue anyway": proceed to step 2
-           └→ "Smart adjust": TODO (show info message for now)
+           └→ "Smart adjust": applyRebalanceToSession() adds catch-up exercises
 
 2. Create workout session
    └→ createWorkoutSession(userId, templateId, dayName)
@@ -159,22 +159,68 @@ const handleAddExercise = async (exercise) => {
                └→ getMergedExercise() → determine mode
                └→ getExercisePrescription() → get target bands
                └→ getExerciseHistory() → check for progressive overload
-               └→ Calculate targets within bands
+               └→ Calculate targets within bands (uses suggested_weight if no history)
            └→ prefillSessionSets(sessionId, sessionExercises, targetsMap)
-               └→ INSERT into v2_session_sets (prefilled with starting targets)
+               └→ INSERT into v2_session_sets (prefilled with targets, performed_at=NULL)
    └→ Navigate to /workout/active
 
-3. User performs workout (placeholder screen currently)
+3. User performs workout (exercise-by-exercise flow)
    └→ app/(stack)/workout/active.tsx
-   └→ Display prefilled sets
-   └→ User edits weight/reps/duration/RPE
-   └→ saveSessionSet(sessionExerciseId, setNumber, setData)
-       └→ UPSERT v2_session_sets
-   └→ User completes workout
+   └→ WorkoutPhase state machine: 'execution' → 'rest' → 'logging' → next exercise
+   
+   EXECUTION PHASE (per exercise):
+   └→ Display current exercise with all sets
+   └→ For each set:
+       └→ User views default weight/reps from prefill
+       └→ User adjusts RPE slider (1-10) - saved in real-time
+       └→ User taps "Complete Set" button
+           └→ markSetComplete(setId, { reps, weight, duration_sec, rpe })
+               └→ UPDATE v2_session_sets SET
+                   weight = ?, reps = ?, rpe = ?, performed_at = NOW()
+               └→ CRITICAL: performed_at timestamp marks set as truly complete
+           └→ If last set: advance to LOGGING phase
+           └→ Else: advance to REST phase
+   
+   REST PHASE (between sets):
+   └→ Automatic rest timer (90-180s based on RPE)
+   └→ User can skip or wait
+   └→ Returns to EXECUTION phase for next set
+   
+   LOGGING PHASE (after all sets for exercise):
+   └→ Display batch logging screen
+   └→ Show all sets with editable weight/reps/RPE fields
+   └→ RPE sliders allow final adjustments
+   └→ User taps "Save & Continue"
+       └→ Validate: weight ≥ 0, reps > 0 (or duration > 0)
+       └→ For each edited set:
+           └→ markSetComplete(setId, { updated values })
+       └→ Load weight suggestion for next exercise
+       └→ Advance to next exercise (back to EXECUTION phase)
+   
+   WORKOUT COMPLETE:
+   └→ All exercises completed
+   └→ User taps "Finish Workout"
    └→ completeWorkoutSession(sessionId)
-       └→ UPDATE v2_workout_sessions SET status='completed', completed_at=now()
+       └→ UPDATE v2_workout_sessions SET
+           status='completed', completed_at=NOW()
+       └→ Edge Function triggered (database trigger)
+           └→ Updates v2_muscle_freshness with continuous decay
 
-4. User views progress
+4. Resume mid-workout (CRITICAL for Continue button)
+   └→ User exits during workout (presses back)
+   └→ Session stays status='active'
+   └→ Sets with performed_at NOT NULL = completed
+   └→ Sets with performed_at NULL = not started
+   └→ User returns to Workout tab
+       └→ useFocusEffect calls loadTodayWorkout()
+       └→ getActiveSession() finds session with completed sets
+       └→ hasActiveWorkout = (completedSets.length > 0 && allSets.length > completedSets.length)
+       └→ "Continue" button appears ✅
+   └→ User taps "Continue"
+       └→ Navigate to /workout/active
+       └→ Resume at first incomplete exercise
+
+5. User views progress
    └→ Navigate to Progress tab
    └→ app/(tabs)/progress.tsx
    └→ Calendar view (week or month)

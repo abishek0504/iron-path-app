@@ -264,7 +264,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `weight` (>= 0)
 - `rpe` (1-10) XOR `rir` - CHECK constraints enforce
 - `rest_sec` (0-600)
-- `performed_at`: Default now()
+- `performed_at`: Timestamp when set was completed (NULL = not performed)
 
 **Constraints:**
 - Reps/duration exclusivity: `NOT (reps IS NOT NULL AND duration_sec IS NOT NULL)`
@@ -276,7 +276,15 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **Indexes:**
 - `idx_v2_session_sets_exercise` on (session_exercise_id, set_number)
 
-**Prefill Semantics**: When workout starts, sets are prefilled with progressive overload targets. User edits these during workout. `performed_at` defaults to now(), so prefilled sets appear "performed" until user actively edits them.
+**Prefill & Completion Semantics**:
+- **Prefill**: When workout starts, sets are INSERTed with target values (weight, reps, rpe) but `performed_at = NULL`
+- **In Progress**: User views defaults, adjusts RPE, taps "Complete Set"
+- **Completed**: `markSetComplete()` UPDATEs the set with final values AND sets `performed_at = NOW()`
+- **CRITICAL**: `performed_at` is the ONLY field that determines if a set is truly complete
+- **Resume Logic**: Query `WHERE performed_at IS NOT NULL` to find completed sets
+- **Continue Button**: Appears when `SUM(performed_at IS NOT NULL) > 0 AND SUM(performed_at IS NULL) > 0`
+
+**Bug Fix (2026-01-21)**: `markSetComplete` originally only updated weight/reps/rpe but never set `performed_at`. This caused the "Continue" button to never appear after exiting mid-workout. Fixed by always setting `performed_at: new Date().toISOString()` in the UPDATE.
 
 ### Derived Caches (Optional, Rebuildable)
 
