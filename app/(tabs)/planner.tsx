@@ -1068,15 +1068,134 @@ export default function PlannerTab() {
         }}
         onSmartAdjust={async () => {
           setShowSmartAdjustPrompt(false);
-          // TODO: Implement smart adjust logic
-          // For now, just show a message
-          toast.info('Smart adjust feature coming soon. For now, please manually add exercises to cover missed muscles.');
-          if (__DEV__) {
-            devLog('planner', {
-              action: 'smartAdjust',
-              missedMuscles: rebalanceResult?.missedMuscles || [],
-              message: 'Smart adjust not yet implemented',
+          setIsSaving(true);
+
+          try {
+            const userId = await getCurrentUserId();
+            if (!userId || !activeTemplateId || !selectedDay) {
+              toast.error('Missing required data');
+              return;
+            }
+
+            // Get rebalance exercises
+            const { getRebalanceExercises } = await import('../../src/lib/engine/rebalance');
+            const rebalanceExerciseIds = await getRebalanceExercises(
+              rebalanceResult?.missedMuscles || [],
+              userId
+            );
+
+            if (rebalanceExerciseIds.length === 0) {
+              toast.error('No suitable catch-up exercises found');
+              return;
+            }
+
+            // Create the workout session
+            const session = await createWorkoutSession(
+              userId,
+              activeTemplateId,
+              selectedDay.day.day_name
+            );
+
+            if (!session) {
+              toast.error('Failed to create workout session');
+              return;
+            }
+
+            // Get existing exercises from the template day
+            const selectedExerciseRefs = selectedDay.slots.map((slot) => ({
+              exerciseId: slot.exercise_id || undefined,
+              customExerciseId: slot.custom_exercise_id || undefined,
+              notes: slot.notes || undefined,
+            }));
+
+            // Add rebalance exercises at the START (sort_order = -1, -2, -3)
+            const rebalanceExerciseRefs = rebalanceExerciseIds.map((id, index) => ({
+              exerciseId: id,
+              customExerciseId: undefined,
+              notes: '🎯 Catch-up exercise (Smart Adjust)',
+              sortOrder: -(index + 1), // -1, -2, -3 to appear first
+            }));
+
+            // Combine: rebalance exercises first, then original exercises
+            const allExerciseRefs = [
+              ...rebalanceExerciseRefs.map(ref => ({
+                exerciseId: ref.exerciseId,
+                customExerciseId: ref.customExerciseId,
+                notes: ref.notes,
+              })),
+              ...selectedExerciseRefs,
+            ];
+
+            // Create session exercises
+            const sessionExercisePromises = allExerciseRefs.map((ref, index) => {
+              const isRebalance = index < rebalanceExerciseIds.length;
+              return supabase
+                .from('v2_session_exercises')
+                .insert({
+                  session_id: session.id,
+                  exercise_id: ref.exerciseId || null,
+                  custom_exercise_id: ref.customExerciseId || null,
+                  sort_order: isRebalance ? -(rebalanceExerciseIds.length - index) : index,
+                })
+                .select()
+                .single();
             });
+
+            const sessionExerciseResults = await Promise.all(sessionExercisePromises);
+            const sessionExercises = sessionExerciseResults
+              .filter((r) => !r.error && r.data)
+              .map((r) => r.data!);
+
+            if (sessionExercises.length === 0) {
+              toast.error('Failed to create session exercises');
+              return;
+            }
+
+            // Prefill sets for all exercises (including rebalance exercises)
+            const { selectExerciseTargets } = await import('../../src/lib/engine/targetSelection');
+            const targets = new Map<string, any>();
+
+            for (const se of sessionExercises) {
+              const ref = {
+                exerciseId: se.exercise_id || undefined,
+                customExerciseId: se.custom_exercise_id || undefined,
+              };
+              const exerciseKey = ref.exerciseId || ref.customExerciseId;
+              if (!exerciseKey) continue;
+
+              const target = await selectExerciseTargets(ref, userId, {
+                experience: profile?.experience_level || 'beginner',
+              });
+
+              if (target) {
+                targets.set(exerciseKey, target);
+              }
+            }
+
+            const prefillSuccess = await prefillSessionSets(session.id, sessionExercises, targets);
+            if (!prefillSuccess) {
+              if (__DEV__) {
+                devLog('planner', {
+                  action: 'prefillSessionSets',
+                  success: false,
+                  message: 'Prefill failed but continuing',
+                });
+              }
+            }
+
+            toast.success(`Added ${rebalanceExerciseIds.length} catch-up exercise${rebalanceExerciseIds.length > 1 ? 's' : ''}`);
+            router.push('/(stack)/workout/active');
+          } catch (error) {
+            if (__DEV__) {
+              devError('planner', error, {
+                action: 'smartAdjust',
+                missedMuscles: rebalanceResult?.missedMuscles || [],
+              });
+            }
+            toast.error('Failed to apply smart adjust');
+          } finally {
+            setIsSaving(false);
+            setRebalanceResult(null);
           }
           setRebalanceResult(null);
         }}

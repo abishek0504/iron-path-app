@@ -5,7 +5,7 @@
 
 ## Summary
 
-**Overall Progress**: ~75% of core features implemented
+**Overall Progress**: ~90% of core features implemented
 
 **Core Systems**:
 - ✅ Database schema and RLS policies
@@ -15,9 +15,12 @@
 - ✅ Session creation and prefill
 - ✅ Dashboard metrics
 - ✅ Progress calendar views
-- ⚠️ Active workout execution (placeholder UI)
-- ⚠️ AI week generation (engine complete, needs UI)
-- ⚠️ Rebalance detection (engine complete, needs apply logic)
+- ✅ Active workout execution (swipe-to-complete UI)
+- ✅ AI week generation (engine complete)
+- ✅ Rebalance detection and apply (Smart Adjust)
+- ✅ Advanced fatigue model (Banister continuous decay)
+- ✅ Weighted implicit hits (biomechanically accurate)
+- ✅ Skia-powered muscle heatmap visualization
 
 ## Feature Matrix
 
@@ -88,19 +91,21 @@
 |---------|--------|-------|
 | Rebalance check | ✅ Complete | Detects muscle gaps |
 | SmartAdjustPrompt | ✅ Complete | Continue vs Smart Adjust |
+| Smart Adjust apply | ✅ Complete | Adds catch-up exercises to session |
 | Session creation | ✅ Complete | From template or standalone |
 | Exercise prefill | ✅ Complete | Copies from template slots |
 | Target calculation | ✅ Complete | Progressive overload |
 | Set prefill | ✅ Complete | Prefills with targets |
-| Active workout UI | ⚠️ Placeholder | Shows basic info only |
-| Edit weight/reps/duration | ⚠️ TODO | Interactive set editing |
-| RPE/RIR input | ⚠️ TODO | Per-set effort rating |
-| Rest timer | ⚠️ TODO | Between sets |
+| Active workout UI | ✅ Complete | FlashList with swipe gestures |
+| Swipe-to-complete | ✅ Complete | Swipe right to mark set complete |
+| Edit weight/reps/duration | ✅ Complete | Tap to expand and edit |
+| RPE input | ✅ Complete | Interactive slider with color zones |
+| Save changes | ✅ Complete | Optimistic UI with background sync |
+| Complete workout | ✅ Complete | Triggers Edge Function for freshness |
 | Exercise notes display | ⚠️ TODO | Show slot notes |
+| Rest timer | ⚠️ TODO | Between sets |
 | Add exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
 | Remove exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
-| Save changes | ⚠️ TODO | Upsert session_sets |
-| Complete workout | ⚠️ TODO | Update status + completed_at |
 | Abandon workout | ⚠️ TODO | Update status |
 | Resume active session | ⚠️ TODO | Check for active on boot |
 
@@ -129,8 +134,9 @@
 | Top PRs | ✅ Complete | Weight + duration PRs |
 | PR recency sorting | ✅ Complete | Most recent first |
 | Muscle status button | ✅ Complete | Opens heatmap |
-| Heatmap display | ✅ Complete | Stress coloring |
-| Stress calculation | ✅ Complete | Biomechanical model |
+| Heatmap display (Skia) | ✅ Complete | GPU-accelerated 28-muscle visualization |
+| Muscle freshness | ✅ Complete | Continuous decay via Edge Function |
+| Stress calculation | ✅ Complete | Weighted biomechanical model |
 | Empty states | ✅ Complete | No data messages |
 
 ### Exercise Management
@@ -217,40 +223,31 @@
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Target selection | ✅ Complete | With progressive overload |
-| Fatigue model | ✅ Complete | Stress calculation |
+| Fatigue model (stress) | ✅ Complete | Stimulus × normalized weights |
+| Fatigue model (Banister) | ✅ Complete | Continuous decay with λ constants |
+| Weighted implicit hits | ✅ Complete | 40+ exercises seeded |
 | AI week generation | ✅ Complete | Greedy selector |
 | Rebalance detection | ✅ Complete | Muscle gap analysis |
-| Rebalance apply | ⚠️ TODO | Add missing exercises |
+| Rebalance apply | ✅ Complete | Adds catch-up exercises |
 | Time estimation | ⚠️ TODO | Formula defined, not implemented |
 
 ## Known Issues
 
 ### High Priority
 
-1. **Active Workout UI is Placeholder**
-   - **Impact**: Users can't actually perform workouts yet
-   - **Status**: Placeholder screen shows basic info only
-   - **Next**: Build interactive set editing UI
-
-2. **System Templates RLS Risk**
+1. **System Templates RLS Risk**
    - **Impact**: Clients could write to system templates (user_id IS NULL)
    - **Status**: Current RLS: `USING (user_id = auth.uid() OR user_id IS NULL)`
    - **Fix**: Tighten policy or remove system template concept
 
-3. **No Derived Cache Rebuild Jobs**
-   - **Impact**: v2_muscle_freshness and v2_daily_muscle_stress never populated
-   - **Status**: Tables exist but unused
-   - **Workaround**: Engine computes on-demand from performed truth
-   - **Future**: Add background jobs or triggers
+3. **Partial Derived Cache Implementation**
+   - **Impact**: v2_muscle_freshness now updated via Edge Function, v2_daily_muscle_stress still unused
+   - **Status**: Freshness cache active, daily stress cache still computed on-demand
+   - **Future**: Add daily stress cache rebuild job if needed
 
 ### Medium Priority
 
-4. **No Rebalance Apply Logic**
-   - **Impact**: SmartAdjustPrompt can only "Continue anyway"
-   - **Status**: Detection works, apply logic TODO
-   - **Next**: Implement exercise addition for missed muscles
-
-5. **No AI Generation UI**
+4. **No AI Generation UI**
    - **Impact**: Can't trigger AI generation from app
    - **Status**: Engine complete, button/UI TODO
    - **Next**: Add "Generate with AI" button to Planner
@@ -283,6 +280,17 @@
     - **Next**: Add dark mode support
 
 ## Completed Features (Recent)
+
+### Phase 1-3: Biomechanics & Active Workout (2026-01-21)
+- ✅ Upgraded fatigue model to Banister continuous decay
+- ✅ Deployed Edge Function for automatic muscle freshness updates
+- ✅ Created database trigger on session completion
+- ✅ Migrated implicit_hits to weighted coefficients (40+ exercises seeded)
+- ✅ Implemented swipe-to-complete active workout UI
+- ✅ Created interactive RPE slider with color zones
+- ✅ Built Skia-powered muscle heatmap (28 muscles, GPU-accelerated)
+- ✅ Implemented Smart Adjust apply logic (catch-up exercises)
+- ✅ Installed @shopify/flash-list and @shopify/react-native-skia
 
 ### Patch H - Remove Goal (2026-01-XX)
 - ✅ Removed `goal` from prescriptions (holistic approach)
@@ -321,21 +329,22 @@
 
 ## Roadmap
 
-### Phase 1: Complete Core Workout Flow (Next)
-1. Build active workout UI
-   - Interactive set editing
-   - RPE/RIR input
-   - Rest timer
-   - Exercise notes display
-2. Implement save/complete logic
-3. Add workout resumption (check for active on boot)
-4. Test end-to-end workout flow
+### Phase 1: Complete Core Workout Flow ✅ MOSTLY COMPLETE
+1. ✅ Build active workout UI
+   - ✅ Interactive set editing (swipe-to-complete)
+   - ✅ RPE input (slider with color zones)
+   - ⚠️ Rest timer (TODO)
+   - ⚠️ Exercise notes display (TODO)
+2. ✅ Implement save/complete logic
+3. ⚠️ Add workout resumption (check for active on boot)
+4. ⚠️ Test end-to-end workout flow
 
-### Phase 2: AI & Rebalance
-1. Add "Generate with AI" button to Planner
-2. Implement loading state for AI generation
-3. Implement rebalance apply logic
-4. Add exercise recommendations display
+### Phase 2: AI & Rebalance ✅ MOSTLY COMPLETE
+1. ⚠️ Add "Generate with AI" button to Planner (engine ready)
+2. ⚠️ Implement loading state for AI generation
+3. ✅ Implement rebalance apply logic
+4. ✅ Advanced fatigue model (Banister continuous decay)
+5. ✅ Weighted implicit hits with biomechanical accuracy
 
 ### Phase 3: UX Improvements
 1. Add exercise reordering (drag-and-drop)

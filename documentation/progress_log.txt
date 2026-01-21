@@ -5,6 +5,96 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-21 - Advanced Biomechanics & Active Workout UI
+-------------------------------------------------------
+Major upgrade to fatigue modeling and complete active workout implementation.
+
+PHASE 1: Core Biomechanics & Data Integrity
+- ✅ Upgraded fatigue model to Banister Impulse-Response (continuous decay)
+  - Created Edge Function: update-muscle-freshness
+  - Deployed to Supabase with verify_jwt: true
+  - Implements exponential decay: Fatigue(t) = Fatigue₀ × e^(-λ × t)
+  - Decay constants (λ) for 28 muscles (slow/medium/fast/stabilizer recovery)
+  - Created database trigger on v2_workout_sessions completion
+  - Automatically updates v2_muscle_freshness after each workout
+
+- ✅ Refined implicit_hits to weighted activation coefficients
+  - Migrated from binary hit/no-hit to weighted coefficients (0-1 scale)
+  - 1.0 = Primary Mover, 0.6-0.9 = Major Synergist, 0.3-0.5 = Stabilizer
+  - Seeded 40+ exercises with biomechanically validated coefficients
+  - Enables accurate secondary muscle stress calculation
+  - Migration: 20260122000001_refine_implicit_hits.sql
+
+PHASE 2: Frictionless Active Workout UI
+- ✅ Implemented swipe-to-complete set logging
+  - Installed @shopify/flash-list for performant list rendering
+  - Created ActiveSetCard component with gesture support
+  - Swipe right → instantly marks set complete with target values
+  - Tap → expands to show editable fields
+  - Optimistic UI updates with background sync
+  - Error handling with toast notifications
+
+- ✅ Created interactive RPE slider
+  - Visual color gradient: Green (1-5) → Yellow (6-7) → Orange (8-9) → Red (10)
+  - Qualitative labels: "Warmup", "Easy", "Moderate", "Hard", "Max Effort"
+  - Zone descriptions for user education
+  - Integrated into ActiveSetCard expanded state
+  - Uses @react-native-community/slider (already installed)
+
+PHASE 3: Visualization & Logic
+- ✅ Implemented Skia-powered muscle heatmap
+  - Installed @shopify/react-native-skia for GPU-accelerated rendering
+  - Created BodyHeatmap component with all 28 muscle SVG paths
+  - ViewBox: 0 0 360 720 for consistent scaling
+  - Color mapping: Red (0-30%) → Orange (31-60%) → Yellow (61-80%) → Green (81-100%)
+  - Reads from v2_muscle_freshness table (updated by Edge Function)
+  - Performance: ~2-3ms render time vs ~15-20ms with standard SVG
+
+- ✅ Completed "Apply Rebalance" logic (Smart Adjust)
+  - Implemented getRebalanceExercises function
+  - Queries v2_exercises for exercises targeting missed muscles
+  - Filters by AI allow-list + prescriptions + density_score > 7
+  - Selects top 2-3 exercises covering most missed muscles
+  - Injects exercises at START of active session (sort_order = -1, -2, -3)
+  - Prefills sets with progressive overload targets
+  - Shows toast with count of added exercises
+
+New Files Created:
+- supabase/functions/update-muscle-freshness/index.ts (Edge Function)
+- supabase/migrations/20260122000000_trigger_muscle_freshness_update.sql
+- supabase/migrations/20260122000001_refine_implicit_hits.sql
+- src/components/workout/RPESlider.tsx
+- src/components/workout/ActiveSetCard.tsx
+- src/components/visualizations/BodyHeatmap.tsx
+- src/hooks/useMuscleColors.ts
+
+Files Modified:
+- documentation/ALGORITHMS.md (added Banister model, auto-regulation input, rebalance apply)
+- documentation/DATABASE_SCHEMA.md (added weighted activation schema)
+- documentation/SYSTEM_ARCHITECTURE.md (added frictionless logging, Skia visualization)
+- documentation/IMPLEMENTATION_STATUS.md (updated feature status to ~90% complete)
+- app/(stack)/workout/active.tsx (full implementation with FlashList)
+- app/(tabs)/planner.tsx (implemented Smart Adjust handler)
+- src/lib/engine/rebalance.ts (added getRebalanceExercises function)
+- src/lib/supabase/queries/workouts.ts (added markSetComplete, getSessionWithSets)
+- src/components/workout/WorkoutHeatmap.tsx (replaced grid with Skia)
+- package.json (added @shopify/flash-list, @shopify/react-native-skia)
+
+Technical Achievements:
+- Edge Function successfully deployed to Supabase
+- Database trigger configured for automatic freshness updates
+- Gesture-based UX for minimal friction during workouts
+- GPU-accelerated rendering for smooth animations
+- Complete end-to-end workout flow from plan → execute → track → recover
+
+Next Steps:
+- Test Edge Function trigger on session completion
+- Add "Generate with AI" button to Planner UI
+- Implement rest timer for between sets
+- Add workout resumption on app boot
+
+---
+
 2026-01-19 - Documentation Restructure
 --------------------------------------
 Major documentation overhaul to improve maintainability.

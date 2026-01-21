@@ -184,3 +184,131 @@ export async function needsRebalance(
   }
 }
 
+/**
+ * Get exercises to add for rebalancing
+ * Returns exercise IDs that target the missed muscles
+ */
+export async function getRebalanceExercises(
+  missedMuscles: string[],
+  userId: string
+): Promise<string[]> {
+  if (__DEV__) {
+    devLog('rebalance', {
+      action: 'getRebalanceExercises',
+      missedMuscleCount: missedMuscles.length,
+      userId,
+    });
+  }
+
+  try {
+    if (missedMuscles.length === 0) {
+      return [];
+    }
+
+    // 1. Get AI recommended exercises (allow-list)
+    const { data: aiExercises, error: aiError } = await supabase
+      .from('v2_ai_recommended_exercises')
+      .select('exercise_id')
+      .eq('is_active', true);
+
+    if (aiError) {
+      if (__DEV__) {
+        devError('rebalance', aiError, { userId });
+      }
+      return [];
+    }
+
+    const allowListIds = (aiExercises || []).map(e => e.exercise_id);
+    if (allowListIds.length === 0) {
+      return [];
+    }
+
+    // 2. Get exercises from allow-list
+    const { data: exercises, error: exercisesError } = await supabase
+      .from('v2_exercises')
+      .select('id, name, primary_muscles, density_score')
+      .in('id', allowListIds)
+      .gte('density_score', 7); // Prefer compound movements
+
+    if (exercisesError) {
+      if (__DEV__) {
+        devError('rebalance', exercisesError, { userId });
+      }
+      return [];
+    }
+
+    if (!exercises || exercises.length === 0) {
+      return [];
+    }
+
+    // 3. Score exercises by how many missed muscles they cover
+    interface ScoredExercise {
+      id: string;
+      name: string;
+      musclesCovered: string[];
+      score: number;
+    }
+
+    const scoredExercises: ScoredExercise[] = [];
+
+    for (const ex of exercises) {
+      const primaryMuscles = ex.primary_muscles || [];
+      const musclesCovered = primaryMuscles.filter(m =>
+        missedMuscles.includes(m)
+      );
+
+      if (musclesCovered.length > 0) {
+        scoredExercises.push({
+          id: ex.id,
+          name: ex.name,
+          musclesCovered,
+          score: musclesCovered.length * (ex.density_score || 7),
+        });
+      }
+    }
+
+    // 4. Sort by score (highest first) and select top 2-3
+    scoredExercises.sort((a, b) => b.score - a.score);
+
+    const selected: string[] = [];
+    const coveredMuscles = new Set<string>();
+
+    for (const ex of scoredExercises) {
+      // Check if this exercise covers any new muscles
+      const newMuscles = ex.musclesCovered.filter(m => !coveredMuscles.has(m));
+      if (newMuscles.length > 0) {
+        selected.push(ex.id);
+        for (const m of ex.musclesCovered) {
+          coveredMuscles.add(m);
+        }
+      }
+
+      // Limit to 3 exercises to avoid overwhelming the workout
+      if (selected.length >= 3) {
+        break;
+      }
+
+      // Stop if we've covered most of the missed muscles
+      if (coveredMuscles.size >= missedMuscles.length * 0.7) {
+        break;
+      }
+    }
+
+    if (__DEV__) {
+      devLog('rebalance', {
+        action: 'getRebalanceExercises_result',
+        userId,
+        selectedCount: selected.length,
+        musclesCoveredCount: coveredMuscles.size,
+      });
+    }
+
+    return selected;
+  } catch (error) {
+    if (__DEV__) {
+      devError('rebalance', error, { userId, missedMuscleCount: missedMuscles.length });
+    }
+    return [];
+  }
+}
+

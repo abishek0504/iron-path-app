@@ -1,76 +1,103 @@
 /**
  * Workout Heatmap
- * Presentational component for displaying muscle stress
- * Expects pre-aggregated stress data from callers
+ * High-performance muscle visualization using Skia
+ * Displays muscle freshness from v2_muscle_freshness table
  */
 
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { colors, spacing, borderRadius } from '../../lib/utils/theme';
-
-export interface MuscleStressData {
-  muscle_key: string;
-  display_name: string;
-  stress: number;
-}
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { colors, spacing, typography } from '../../lib/utils/theme';
+import { BodyHeatmap } from '../visualizations/BodyHeatmap';
+import { supabase } from '../../lib/supabase/client';
 
 interface WorkoutHeatmapProps {
-  stressData: MuscleStressData[];
-  onMuscleSelect?: (muscleKey: string) => void;
+  userId: string;
 }
 
-export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
-  stressData,
-  onMuscleSelect,
-}) => {
-  if (!stressData.length) {
+export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
+  const [loading, setLoading] = useState(true);
+  const [freshnessData, setFreshnessData] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    loadMuscleFreshness();
+  }, [userId]);
+
+  const loadMuscleFreshness = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('v2_muscle_freshness')
+        .select('muscle_key, freshness')
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      const freshnessMap: Record<string, number> = {};
+      for (const row of data || []) {
+        freshnessMap[row.muscle_key] = row.freshness || 100;
+      }
+
+      setFreshnessData(freshnessMap);
+    } catch (error) {
+      console.error('Error loading muscle freshness:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Muscle Stress Heatmap</Text>
-        <Text style={styles.emptyText}>No recent training data</Text>
+        <Text style={styles.title}>Muscle Freshness</Text>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading muscle data...</Text>
+        </View>
       </View>
     );
   }
 
-  const getStressColor = (stress: number, maxStress: number): string => {
-    if (maxStress === 0) return colors.border;
-    const intensity = stress / maxStress;
-    if (intensity > 0.8) return colors.error;
-    if (intensity > 0.6) return '#f97316'; // orange
-    if (intensity > 0.4) return '#eab308'; // yellow
-    if (intensity > 0.2) return colors.primary;
-    return colors.border;
-  };
-
-  const maxStress = Math.max(...stressData.map((d) => d.stress), 1);
+  if (Object.keys(freshnessData).length === 0) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Muscle Freshness</Text>
+        <Text style={styles.emptyText}>
+          No muscle data yet. Complete a workout to see your muscle freshness.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Muscle Stress Heatmap</Text>
-      <View style={styles.grid}>
-        {stressData.map((item) => (
-          <View
-            key={item.muscle_key}
-            style={[
-              styles.muscleCell,
-              {
-                backgroundColor: getStressColor(item.stress, maxStress),
-              },
-            ]}
-            onTouchEnd={() => {
-              if (onMuscleSelect) {
-                onMuscleSelect(item.muscle_key);
-              }
-            }}
-          >
-            <Text style={styles.muscleName} numberOfLines={2}>
-              {item.display_name}
-            </Text>
-            <Text style={styles.stressValue}>
-              {item.stress.toFixed(1)}
-            </Text>
-          </View>
-        ))}
+      <Text style={styles.title}>Muscle Freshness</Text>
+      <Text style={styles.subtitle}>
+        Visual representation of recovery state across all 28 muscles
+      </Text>
+      
+      {/* Skia-powered body heatmap */}
+      <View style={styles.heatmapContainer}>
+        <BodyHeatmap freshnessData={freshnessData} />
+      </View>
+
+      {/* Legend */}
+      <View style={styles.legend}>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#22c55e' }]} />
+          <Text style={styles.legendText}>81-100%: Fully Recovered</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#eab308' }]} />
+          <Text style={styles.legendText}>61-80%: Light Fatigue</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#f97316' }]} />
+          <Text style={styles.legendText}>31-60%: Moderate Fatigue</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#ef4444' }]} />
+          <Text style={styles.legendText}>0-30%: Fully Fatigued</Text>
+        </View>
       </View>
     </View>
   );
@@ -81,41 +108,56 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.bold,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  muscleCell: {
-    width: '30%',
-    aspectRatio: 1,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  muscleName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    textAlign: 'center',
     marginBottom: spacing.xs,
   },
-  stressValue: {
-    fontSize: 10,
-    color: colors.textPrimary,
-    opacity: 0.8,
+  subtitle: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+    marginBottom: spacing.lg,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.md,
+  },
+  loadingText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textMuted,
   },
   emptyText: {
-    fontSize: 14,
+    fontSize: typography.sizes.base,
     color: colors.textMuted,
+    textAlign: 'center',
+    paddingVertical: spacing.xl,
+  },
+  heatmapContainer: {
+    alignItems: 'center',
+    marginVertical: spacing.lg,
+  },
+  legend: {
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.cardBorder,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  legendDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+  },
+  legendText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
   },
 });
 

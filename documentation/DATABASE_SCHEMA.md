@@ -70,6 +70,9 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `density_score` (0-10): Exercise quality rating
 - `primary_muscles[]`: Array of muscle keys
 - `implicit_hits{}`: JSONB map of muscle_key → activation (0-1)
+  - **Weighted Activation Schema**: Coefficients distinguish Primary Movers (1.0) from Major Synergists (0.6-0.9) and Stabilizers (0.3-0.5)
+  - Example: Bench Press `{"triceps": 0.6, "anterior_deltoids": 0.5}` - triceps contributes 60% of the stress a primary mover would
+  - Allows the fatigue engine to accurately accrete stress to secondary muscles without overestimating total fatigue
 - `is_unilateral`: Doubles time estimate if true
 - `avg_time_per_set_sec`: Includes rest between sets
 - `is_timed`: Boolean flag for timed vs reps mode

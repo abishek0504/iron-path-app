@@ -275,6 +275,72 @@ stress_core = 3 * 0.6 * 0.086 = 0.155
 stress_lats = 3 * 0.6 * 0.057 = 0.103
 ```
 
+### 2.2 Advanced Fatigue Modeling: Continuous Decay (Banister Model)
+
+**Location**: `supabase/functions/update-muscle-freshness/index.ts`
+
+The previous 48-hour hard lookback was a static proxy that failed to account for the magnitude of systemic fatigue or non-linear recovery curves. To align with biomechanical reality, we are migrating to a modified Banister Impulse-Response model.
+
+**Mathematical Formulation:**
+```
+Fatigue(t) = Fatigue₀ × e^(-λ × t)
+```
+
+Where:
+* `Fatigue₀`: Normalized fatigue (0-100) at end of last session
+* `t`: Hours since last session
+* `λ`: Decay constant specific to muscle group size and CNS demand
+
+**Decay Constants (λ):**
+* **Slow Recovery** (λ=0.020, Half-life ~35h): Lower Back (Erectors), Hamstrings
+* **Medium Recovery** (λ=0.041, Half-life ~17h): Chest, Quads, Lats, Glutes, Upper Back, Traps, Core
+* **Fast Recovery** (λ=0.099, Half-life ~7h): Deltoids, Biceps, Triceps, Calves, Forearms
+* **Stabilizers** (λ=0.060, Half-life ~12h): Rotator Cuff, Serratus, Deep Core, Glute Med/Min
+
+**Implementation:**
+- Triggered automatically when a workout session is marked as 'completed'
+- Edge Function calculates stress per muscle using existing stress calculation logic
+- For muscles hit in session: `freshness = 0` (fully fatigued)
+- For all other muscles: Apply decay formula based on hours elapsed since last trained
+- Updates `v2_muscle_freshness` table with new freshness values (0-100)
+
+**Example Calculation:**
+```
+Chest muscle last trained 24 hours ago with initial fatigue = 100 (0% fresh)
+λ = 0.041 (medium recovery)
+t = 24 hours
+
+Fatigue(24) = 100 × e^(-0.041 × 24)
+           = 100 × e^(-0.984)
+           = 100 × 0.374
+           = 37.4
+
+Freshness = 100 - 37.4 = 62.6% recovered
+```
+
+### Auto-Regulation Data Input
+
+**Location**: `src/components/workout/RPESlider.tsx`
+
+Text entry for RPE is high-friction and prone to user error. We replace this with a visual slider that provides qualitative feedback, ensuring consistent data for the auto-regulation engine.
+
+**Visual Feedback:** Slider positions map to text labels:
+- RPE 1-5: "Warmup" (Green zone - too easy to count for stress)
+- RPE 6-7: "Easy" / "Moderate" (Yellow zone - building work capacity)
+- RPE 8-9: "Hard" / "Very Hard" (Orange zone - hypertrophy sweet spot)
+- RPE 10: "Max Effort" (Red zone - maximal exertion, occasional use)
+
+**Color Gradient:**
+```
+Green (1-5) → Yellow (6-7) → Orange (8-9) → Red (10)
+```
+
+**Implementation:**
+- Uses `@react-native-community/slider` for smooth touch interaction
+- Integer steps 1-10 for discrete RPE values
+- Real-time label updates as user drags slider
+- Integrated into ActiveSetCard expanded state
+
 ## AI Week Generation (Biomechanical Fatigue Simulator)
 
 **Location**: `src/lib/engine/weekGeneration.ts`
@@ -559,8 +625,36 @@ Total: 20 muscles missed
 ```
 Show SmartAdjustPrompt with:
   - "Continue anyway" (proceed without changes)
-  - "Smart adjust" (TODO: implement rebalance apply)
+  - "Smart adjust" (apply rebalance logic)
 ```
+
+### 5.1 Explicit Catch-Up Logic (Smart Adjust)
+
+**Location**: `src/lib/engine/rebalance.ts` (`getRebalanceExercises`)
+
+While the fatigue model handles recovery, "Rebalance" handles neglect.
+
+**Gap Detection:** Identify muscles not hit in the last 6 sessions.
+
+**Correction Algorithm:** If `needsRebalance` is true, the generator must inject a high-priority compound exercise for the missed muscle (e.g., Squats for Legs) into the *start* of the active session, potentially displacing lower-priority accessory movements to maintain time constraints.
+
+**Selection Criteria:**
+1. Query `v2_exercises` where `primary_muscles` overlaps with `missedMuscles`
+2. Filter by:
+   - Exercise is in `v2_ai_recommended_exercises` (allow-list)
+   - Exercise has prescription for user's experience level
+   - Prefer compound movements (density_score > 7)
+3. Select top 2-3 exercises that cover the most missed muscles
+4. Return exercise IDs
+
+**Application:**
+- When user selects "Smart Adjust" in SmartAdjustPrompt
+- Fetch active session ID
+- Call `getRebalanceExercises(missedMuscles, userId)`
+- Insert session exercises into `v2_session_exercises` with `sort_order = -1, -2, -3` (to appear first)
+- Prefill sets for new exercises using progressive overload targets
+- Show toast: "Added X catch-up exercises"
+- Navigate to active workout
 
 ## Time Estimation Formula
 

@@ -962,6 +962,126 @@ export async function prefillSessionSets(
 }
 
 /**
+ * Mark a set as complete with optimistic update
+ * Used by swipe-to-complete gesture in active workout
+ */
+export async function markSetComplete(
+  setId: string,
+  values: { reps?: number; weight?: number; duration_sec?: number; rpe?: number }
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'markSetComplete',
+      setId,
+      hasReps: values.reps !== undefined,
+      hasDuration: values.duration_sec !== undefined,
+    });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('v2_session_sets')
+      .update(values)
+      .eq('id', setId);
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { setId });
+      }
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { setId });
+    }
+    return false;
+  }
+}
+
+/**
+ * Get session with exercises and sets
+ * Used by active workout screen
+ */
+export async function getSessionWithSets(sessionId: string): Promise<{
+  session: WorkoutSession | null;
+  exercises: Array<{
+    id: string;
+    exercise_id?: string;
+    custom_exercise_id?: string;
+    sort_order: number;
+    sets: SessionSet[];
+  }>;
+} | null> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getSessionWithSets', sessionId });
+  }
+
+  try {
+    // Fetch session
+    const { data: session, error: sessionError } = await supabase
+      .from('v2_workout_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single();
+
+    if (sessionError) {
+      if (__DEV__) {
+        devError('workout-query', sessionError, { sessionId });
+      }
+      return null;
+    }
+
+    // Fetch exercises
+    const { data: sessionExercises, error: exercisesError } = await supabase
+      .from('v2_session_exercises')
+      .select('id, exercise_id, custom_exercise_id, sort_order')
+      .eq('session_id', sessionId)
+      .order('sort_order', { ascending: true });
+
+    if (exercisesError) {
+      if (__DEV__) {
+        devError('workout-query', exercisesError, { sessionId });
+      }
+      return { session, exercises: [] };
+    }
+
+    const sessionExerciseIds = (sessionExercises || []).map(se => se.id);
+
+    // Fetch sets for all exercises
+    const { data: sets, error: setsError } = await supabase
+      .from('v2_session_sets')
+      .select('*')
+      .in('session_exercise_id', sessionExerciseIds)
+      .order('set_number', { ascending: true });
+
+    if (setsError) {
+      if (__DEV__) {
+        devError('workout-query', setsError, { sessionId });
+      }
+      return { session, exercises: [] };
+    }
+
+    // Group sets by exercise
+    const exercises = (sessionExercises || []).map(se => ({
+      id: se.id,
+      exercise_id: se.exercise_id || undefined,
+      custom_exercise_id: se.custom_exercise_id || undefined,
+      sort_order: se.sort_order,
+      sets: (sets || []).filter(s => s.session_exercise_id === se.id),
+    }));
+
+    return { session, exercises };
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { sessionId });
+    }
+    return null;
+  }
+}
+
+/**
  * Get last 7 days of session structure
  * Returns array of day structures with exercises
  */

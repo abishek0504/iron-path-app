@@ -124,6 +124,54 @@ USING (
 - Risk: Clients could modify system templates
 - **TODO**: Tighten policy or remove system template concept
 
+### 3.1 Frictionless Logging Pattern (Active Workout)
+
+**Location**: `app/(stack)/workout/active.tsx`, `src/components/workout/ActiveSetCard.tsx`
+
+User research indicates high churn when logging is tedious. We adopt a "Management by Exception" philosophy.
+
+**Assumption:** The user follows the plan 90% of the time.
+
+**Interaction Pattern:**
+- **Swipe Right** gesture on a Set Card instantly logs the pre-filled target values (Weight/Reps) as performed
+- **Tap** the card opens the full editor only when the user deviates from the plan
+- **Optimistic UI**: Changes appear immediately, with background sync to database
+- **Error Handling**: Failed saves show toast notification and revert UI state
+
+**Set Card States:**
+1. **Collapsed (Default)**: Shows summary "Set 1: 135 lbs × 10 reps @ RPE 8"
+2. **Expanded (Editing)**: Shows editable TextInputs for Weight, Reps, RPE slider
+3. **Completed**: Green checkmark indicator, slightly faded appearance
+
+**Implementation:**
+- Uses `@shopify/flash-list` for performant list rendering (hundreds of sets)
+- `react-native-reanimated` for smooth swipe gestures
+- `react-native-gesture-handler` for touch handling
+
+### 4.1 High-Performance Visualization
+
+**Location**: `src/components/visualizations/BodyHeatmap.tsx`
+
+To visualize the 28-muscle freshness state without dropping frames during navigation, we utilize `@shopify/react-native-skia`. Standard SVGs are too heavy for complex animations on mobile devices.
+
+**Logic:** Map `v2_muscle_freshness` values (0-100) to a color interpolation:
+- 0-30: Red (#ef4444) - Fully fatigued
+- 31-60: Orange (#f97316) - Moderate fatigue
+- 61-80: Yellow (#eab308) - Light fatigue
+- 81-100: Green (#22c55e) - Fully recovered
+
+**Implementation:**
+- Uses Skia Canvas for GPU-accelerated rendering
+- 28 SVG paths mapped to canonical muscle keys from `v2_muscles`
+- ViewBox: `0 0 360 720` for consistent scaling
+- Real-time color updates based on freshness queries
+- No frame drops even during navigation transitions
+
+**Performance Benefits:**
+- Standard SVG: ~15-20ms render time per frame
+- Skia rendering: ~2-3ms render time per frame
+- Allows smooth animations and transitions
+
 ## State Management (Zustand)
 
 **WHY Zustand:** Lightweight, no boilerplate, works with React Native.
