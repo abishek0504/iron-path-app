@@ -5,6 +5,42 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-27 - Exercise Notes Display Feature
+--------------------------------------------
+IMPLEMENTED:
+- ✅ Added notes display in active workout screen
+- ✅ Notes fetched from template slots when session created from template
+- ✅ Notes displayed below exercise name in execution phase
+- ✅ Styled with info icon, card background, italic text
+- ✅ Gracefully handles exercises without notes (no UI shown)
+
+TECHNICAL CHANGES:
+- Modified `getSessionWithSets` in `src/lib/supabase/queries/workouts.ts`:
+  - Fetches notes from `v2_template_slots` when session has `template_id`
+  - Maps notes by exercise_id/custom_exercise_id
+  - Returns notes in exercise data structure
+- Updated `Exercise` interface in `app/(stack)/workout/active.tsx`:
+  - Added `notes?: string` field
+  - Notes loaded from session data in `loadActiveSession`
+- Added notes display UI component:
+  - Card-style container with info icon
+  - Positioned below exercise name, above set information
+  - Uses theme tokens for consistent styling
+  - Only renders when notes exist
+
+USER EXPERIENCE:
+- Users can now see exercise-specific notes during workouts
+- Notes provide context, form reminders, or workout-specific instructions
+- Clean, unobtrusive design that doesn't clutter the workout screen
+- Notes automatically appear for exercises that have them in the template
+
+DOCUMENTATION UPDATED:
+- IMPLEMENTATION_STATUS.md: Marked "Exercise notes display" as ✅ Complete
+- DATA_FLOWS.md: Updated Flow 2 to mention notes display in execution phase
+- progress_log.txt: Added this entry
+
+---
+
 2026-01-21 - CRITICAL BUG FIX: markSetComplete Was Not Setting performed_at
 ---------------------------------------------------------------------------
 ROOT CAUSE FOUND:

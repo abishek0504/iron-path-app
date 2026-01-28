@@ -43,6 +43,7 @@ interface Exercise {
   exercise_id?: string;
   custom_exercise_id?: string;
   mode: 'reps' | 'timed';
+  notes?: string;
   sets: SetData[];
 }
 
@@ -140,6 +141,7 @@ export default function ActiveWorkoutScreen() {
             exercise_id: ex.exercise_id,
             custom_exercise_id: ex.custom_exercise_id,
             mode: meta.is_timed ? 'timed' : 'reps',
+            notes: ex.notes,
             sets: ex.sets.map(s => ({ ...s, completed: !!s.performed_at })),
           });
         }
@@ -353,7 +355,7 @@ export default function ActiveWorkoutScreen() {
     const success = await completeWorkoutSession(sessionId);
     if (success) {
       toast.success('Workout completed!');
-      router.push('/(tabs)');
+      router.back(); // Properly dismisses modal
     } else {
       toast.error('Failed to complete workout');
     }
@@ -424,6 +426,14 @@ export default function ActiveWorkoutScreen() {
 
         {/* Exercise Name */}
         <Text style={styles.exerciseName}>{currentExercise.name}</Text>
+
+        {/* Exercise Notes */}
+        {currentExercise.notes && (
+          <View style={styles.notesContainer}>
+            <Info size={16} color={colors.textSecondary} />
+            <Text style={styles.notesText}>{currentExercise.notes}</Text>
+          </View>
+        )}
 
         {/* EXECUTION PHASE */}
         {workoutPhase.type === 'execution' && (
@@ -694,6 +704,24 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
     marginBottom: spacing.xs,
+  },
+  notesContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  notesText: {
+    flex: 1,
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    lineHeight: 20,
   },
   executionContainer: {
     gap: spacing.md,

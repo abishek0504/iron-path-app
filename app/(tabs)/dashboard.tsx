@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { ChevronRight } from 'lucide-react-native';
 import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
@@ -210,7 +211,17 @@ export default function DashboardTab() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Top PRs</Text>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Top PRs</Text>
+            <TouchableOpacity
+              onPress={() => router.push('/prs')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="View all PRs"
+            >
+              <ChevronRight size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
           {prs.length === 0 ? (
             <Text style={styles.emptyText}>No PRs yet</Text>
           ) : (
@@ -218,7 +229,13 @@ export default function DashboardTab() {
               <View key={p.set_id} style={styles.listRow}>
                 <Text style={styles.listPrimary}>{p.name}</Text>
                 <Text style={styles.listSecondary}>
-                  {p.weight ? `${p.weight} ${unitsLabel}` : p.duration_sec ? `${p.duration_sec}s` : '—'}
+                  {p.weight
+                    ? `${p.weight} ${unitsLabel}${
+                        p.reps_at_pr_weight?.length
+                          ? ` × ${p.reps_at_pr_weight.join('/')}`
+                          : ''
+                      }`
+                    : '—'}
                 </Text>
               </View>
             ))
@@ -234,7 +251,12 @@ export default function DashboardTab() {
               <View key={s.id} style={styles.listRow}>
                 <Text style={styles.listPrimary}>{s.day_name || 'Session'}</Text>
                 <Text style={styles.listSecondary}>
-                  {s.completed_at ? new Date(s.completed_at).toLocaleDateString() : '—'}
+                  {s.completed_at
+                    ? `${new Date(s.completed_at).toLocaleDateString()} ${new Date(s.completed_at).toLocaleTimeString(
+                        'en-US',
+                        { hour: 'numeric', minute: '2-digit' }
+                      )}`
+                    : '—'}
                 </Text>
               </View>
             ))
@@ -296,6 +318,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.semibold,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   metric: {
     color: colors.textPrimary,

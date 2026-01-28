@@ -74,6 +74,10 @@ export default function RootLayout() {
           name="edit-profile"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
+        <Stack.Screen
+          name="prs"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
       </Stack>
 
       {/* Global UI components */}

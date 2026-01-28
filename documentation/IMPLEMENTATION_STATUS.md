@@ -109,7 +109,7 @@
 | Exercise info display | ✅ Complete | Shows target muscles and tips |
 | Keyboard dismiss | ✅ Complete | Done/Next buttons on inputs |
 | Rest timer | ⚠️ TODO | Automatic between sets |
-| Exercise notes display | ⚠️ TODO | Show slot notes |
+| Exercise notes display | ✅ Complete | Shows slot notes from template |
 | Add exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
 | Remove exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
 | Abandon workout | ⚠️ TODO | Update status to abandoned |
@@ -359,7 +359,7 @@
    - ✅ Interactive set editing (swipe-to-complete)
    - ✅ RPE input (slider with color zones)
    - ⚠️ Rest timer (TODO)
-   - ⚠️ Exercise notes display (TODO)
+   - ✅ Exercise notes display (Complete)
 2. ✅ Implement save/complete logic
 3. ⚠️ Add workout resumption (check for active on boot)
 4. ⚠️ Test end-to-end workout flow

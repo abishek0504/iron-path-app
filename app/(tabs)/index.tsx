@@ -962,7 +962,7 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     alignItems: 'center',
-    marginTop: spacing.md,
+    marginTop: spacing.xl, // Increased to prevent collision with workout banner
     marginBottom: spacing.lg, // breathing room above tab bar with less scroll
   },
   planDayRow: {

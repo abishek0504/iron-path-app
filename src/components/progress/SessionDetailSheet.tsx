@@ -3,7 +3,7 @@
  * Displays session details for a selected date
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase/client';
 import { getSessionsInRange, type WorkoutSession } from '../../lib/supabase/queries/workouts';
 import { listMergedExercises } from '../../lib/supabase/queries/exercises';
 import { devLog, devError } from '../../lib/utils/logger';
+import { useUserStore } from '../../stores/userStore';
 
 type Props = {
   selectedDate: Date;
@@ -19,7 +20,7 @@ type Props = {
 };
 
 type SessionWithExercises = WorkoutSession & {
-  exerciseNames: string[];
+  exercises: Array<{ name: string; summary?: string }>;
   exerciseCount: number;
 };
 
@@ -27,6 +28,8 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionWithExercises[]>([]);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const profile = useUserStore((state) => state.profile);
+  const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
 
   useEffect(() => {
     loadSessions();
@@ -65,27 +68,61 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
       const { data: exerciseRows, error: exercisesError } = await supabase
         .from('v2_session_exercises')
-        .select('session_id, exercise_id, custom_exercise_id')
+        .select('id, session_id, exercise_id, custom_exercise_id')
         .in('session_id', sessionIds);
 
       if (exercisesError && __DEV__) {
         devError('session-detail', exercisesError, { userId, selectedDate });
       }
 
-      const exerciseMap = new Map<string, string[]>();
+      const exerciseBySession = new Map<string, Array<{ sessionExerciseId: string; exerciseKey: string }>>();
       const exerciseIds = new Set<string>();
       const customExerciseIds = new Set<string>();
 
       for (const row of exerciseRows || []) {
         const sid = row.session_id as string;
-        if (!exerciseMap.has(sid)) {
-          exerciseMap.set(sid, []);
+        if (!exerciseBySession.has(sid)) {
+          exerciseBySession.set(sid, []);
         }
-        if (row.exercise_id) {
-          exerciseIds.add(row.exercise_id);
+        const exerciseKey = row.exercise_id || row.custom_exercise_id;
+        if (!exerciseKey) continue;
+        exerciseBySession.get(sid)!.push({ sessionExerciseId: row.id as string, exerciseKey });
+        if (row.exercise_id) exerciseIds.add(row.exercise_id);
+        if (row.custom_exercise_id) customExerciseIds.add(row.custom_exercise_id);
+      }
+
+      const sessionExerciseIds = (exerciseRows || []).map((r) => r.id as string);
+      const { data: setRows, error: setError } = await supabase
+        .from('v2_session_sets')
+        .select('session_exercise_id, weight, reps, rpe, performed_at')
+        .in('session_exercise_id', sessionExerciseIds)
+        .not('performed_at', 'is', null);
+
+      if (setError && __DEV__) {
+        devError('session-detail', setError, { userId, selectedDate, step: 'setRows' });
+      }
+
+      // For each sessionExerciseId, pick the best performed set (max weight, then max reps)
+      const bestSetBySessionExercise = new Map<
+        string,
+        { weight: number | null; reps: number | null; rpe: number | null }
+      >();
+      for (const row of setRows || []) {
+        const seId = row.session_exercise_id as string;
+        const weight = row.weight == null ? null : Number(row.weight);
+        const reps = row.reps == null ? null : Number(row.reps);
+        const rpe = row.rpe == null ? null : Number(row.rpe);
+        const existing = bestSetBySessionExercise.get(seId);
+        if (!existing) {
+          bestSetBySessionExercise.set(seId, { weight, reps, rpe });
+          continue;
         }
-        if (row.custom_exercise_id) {
-          customExerciseIds.add(row.custom_exercise_id);
+        const wA = existing.weight ?? -1;
+        const wB = weight ?? -1;
+        const rA = existing.reps ?? -1;
+        const rB = reps ?? -1;
+        if (wB > wA || (wB === wA && rB > rA)) {
+          bestSetBySessionExercise.set(seId, { weight, reps, rpe });
         }
       }
 
@@ -106,20 +143,27 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         exerciseIdToName.set(ex.id, ex.name);
       }
 
-      for (const row of exerciseRows || []) {
-        const sid = row.session_id as string;
-        const exerciseId = row.exercise_id || row.custom_exercise_id;
-        if (exerciseId && exerciseIdToName.has(exerciseId)) {
-          exerciseMap.get(sid)?.push(exerciseIdToName.get(exerciseId)!);
-        }
-      }
-
       const sessionsWithExercises: SessionWithExercises[] = dateSessions.map((s) => {
-        const exerciseNames = exerciseMap.get(s.id) || [];
+        const rows = exerciseBySession.get(s.id) || [];
+        const exercises = rows
+          .map(({ sessionExerciseId, exerciseKey }) => {
+            const name = exerciseIdToName.get(exerciseKey) || 'Exercise';
+            const best = bestSetBySessionExercise.get(sessionExerciseId);
+            if (!best) return { name };
+
+            const weightStr =
+              best.weight == null ? null : best.weight === 0 ? 'Bodyweight' : `${Math.round(best.weight)} ${unitsLabel}`;
+            const repsStr = best.reps == null ? null : `${Math.round(best.reps)} reps`;
+            const rpeStr = best.rpe == null ? null : `RPE ${Math.round(best.rpe)}`;
+
+            const parts = [weightStr, repsStr, rpeStr].filter(Boolean) as string[];
+            return { name, summary: parts.length ? parts.join(' • ') : undefined };
+          })
+          .slice(0, 6);
         return {
           ...s,
-          exerciseNames,
-          exerciseCount: exerciseNames.length,
+          exercises,
+          exerciseCount: rows.length,
         };
       });
 
@@ -260,12 +304,15 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
                 ? '1 exercise'
                 : `${session.exerciseCount} exercises`}
             </Text>
-            {session.exerciseNames.length > 0 && (
+            {session.exercises.length > 0 && (
               <View style={styles.exerciseList}>
-                {session.exerciseNames.map((name, index) => (
+                {session.exercises.map((ex, index) => (
                   <View key={index} style={styles.exerciseItem}>
                     <View style={styles.exerciseDot} />
-                    <Text style={styles.exerciseName}>{name}</Text>
+                    <View style={styles.exerciseTextCol}>
+                      <Text style={styles.exerciseName}>{ex.name}</Text>
+                      {!!ex.summary && <Text style={styles.exerciseSummary}>{ex.summary}</Text>}
+                    </View>
                   </View>
                 ))}
               </View>
@@ -360,6 +407,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  exerciseTextCol: {
+    flex: 1,
+    gap: 2,
+  },
   exerciseDot: {
     width: 6,
     height: 6,
@@ -369,6 +420,10 @@ const styles = StyleSheet.create({
   exerciseName: {
     color: colors.textPrimary,
     fontSize: typography.sizes.sm,
+  },
+  exerciseSummary: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.xs,
   },
 });
 

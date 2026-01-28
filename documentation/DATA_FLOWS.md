@@ -169,6 +169,8 @@ const handleAddExercise = async (exercise) => {
    └→ WorkoutPhase state machine: 'execution' → 'rest' → 'logging' → next exercise
    
    EXECUTION PHASE (per exercise):
+   └→ Display current exercise name
+   └→ Display exercise notes (if available from template slot)
    └→ Display current exercise with all sets
    └→ For each set:
        └→ User views default weight/reps from prefill
