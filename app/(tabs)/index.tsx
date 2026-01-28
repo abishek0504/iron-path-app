@@ -24,12 +24,13 @@ import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/t
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
-import { getActiveSession } from '../../src/lib/supabase/queries/workouts';
+import { createWorkoutSession, getActiveSession, prefillSessionSets } from '../../src/lib/supabase/queries/workouts';
 import { getTemplateWithDaysAndSlots } from '../../src/lib/supabase/queries/templates';
 import { getUserTemplates } from '../../src/lib/supabase/queries/templates';
 import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
+import { selectExerciseTargets, type TargetSelectionContext } from '../../src/lib/engine/targetSelection';
 
 const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DAY_ORDER: Record<string, number> = {
@@ -45,6 +46,18 @@ const DAY_ORDER: Record<string, number> = {
 function getTodayDayName(): string {
   const dayIndex = new Date().getDay();
   return WEEK_DAYS[dayIndex];
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function getUtcDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function getUtcDayBoundsIso(dayKey: string): { startIso: string; endIsoExclusive: string } {
+  const startIso = `${dayKey}T00:00:00.000Z`;
+  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY).toISOString();
+  return { startIso, endIsoExclusive };
 }
 
 // Circular Button with Ripple Effect Component
@@ -262,14 +275,13 @@ export default function WorkoutTab() {
 
       // Check for active session FIRST
       const activeSession = await getActiveSession(userId);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const now = new Date();
+      const todayUtcKey = getUtcDayKey(now);
       const hasActiveForToday =
         !!activeSession &&
         (() => {
-          const sessionDate = new Date(activeSession.started_at);
-          sessionDate.setHours(0, 0, 0, 0);
-          return sessionDate.getTime() === today.getTime();
+          const sessionUtcKey = getUtcDayKey(new Date(activeSession.started_at));
+          return sessionUtcKey === todayUtcKey;
         })();
 
       // Check if any sets have been actually completed (not just pre-filled)
@@ -295,17 +307,30 @@ export default function WorkoutTab() {
         }
       }
 
-      // Only show "Continue" if there are actually completed sets
-      setHasActiveWorkout(hasActiveForToday && hasCompletedSets);
+      // Only bind to an active session when:
+      // - it is for "today" (UTC), and
+      // - the user is viewing today's plan day.
+      const isViewingToday = selectedPlanDayName === getTodayDayName();
+      setHasActiveWorkout(hasActiveForToday && isViewingToday);
 
       // Load exercises from active session OR template
-      if (hasActiveForToday && activeSession) {
+      // Only bind to active session when:
+      // - it is for "today" (UTC), and
+      // - the user is viewing today's plan day.
+      if (hasActiveForToday && activeSession && selectedPlanDayName === getTodayDayName()) {
         // Load exercises from the active session
-        const { data: sessionExercises } = await supabase
+        const { data: sessionExercises, error: sessionExercisesError } = await supabase
           .from('v2_session_exercises')
           .select('id, exercise_id, custom_exercise_id, sort_order')
           .eq('session_id', activeSession.id)
           .order('sort_order', { ascending: true });
+
+        if (sessionExercisesError && __DEV__) {
+          devError('workout-tab', sessionExercisesError, {
+            action: 'loadTodayWorkout_sessionExercises_error',
+            sessionId: activeSession.id,
+          });
+        }
 
         if (sessionExercises) {
           const namesMap = new Map<string, string>();
@@ -327,6 +352,14 @@ export default function WorkoutTab() {
               name: namesMap.get(se.id) || 'Unknown Exercise',
             }))
           );
+
+          if (__DEV__) {
+            devLog('workout-tab', {
+              action: 'loadTodayWorkout_sessionExercises_loaded',
+              sessionId: activeSession.id,
+              sessionExerciseCount: sessionExercises.length,
+            });
+          }
         }
       } else {
         // Load exercises from template for the selected plan day
@@ -351,15 +384,22 @@ export default function WorkoutTab() {
               name: namesMap.get(slot.id) || 'Unknown Exercise',
             }))
           );
+
+          if (__DEV__) {
+            devLog('workout-tab', {
+              action: 'loadTodayWorkout_templateSlots_loaded',
+              planDayName,
+              slotCount: selectedDay.slots.length,
+            });
+          }
         } else {
           setSelectedDayExercises([]);
         }
       }
 
       // Check for completed session from today
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
+        getUtcDayBoundsIso(todayUtcKey);
 
       const { data: completedSession } = await supabase
         .from('v2_workout_sessions')
@@ -368,8 +408,8 @@ export default function WorkoutTab() {
         .eq('template_id', template.id)
         .eq('day_name', planDayName)
         .eq('status', 'completed')
-        .gte('completed_at', today.toISOString())
-        .lt('completed_at', tomorrow.toISOString())
+        .gte('completed_at', todayStartIso)
+        .lt('completed_at', tomorrowStartIso)
         .maybeSingle();
 
       // Check if all exercises were completed
@@ -417,6 +457,14 @@ export default function WorkoutTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
+  // When the user changes the selected plan day (e.g., picks Wednesday),
+  // refresh the displayed exercises so Start isn't incorrectly disabled.
+  useEffect(() => {
+    if (!hasInitiallyLoaded) return;
+    loadTodayWorkout();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlanDayName]);
+
   // Refresh on focus - reload workout state when tab becomes active
   useFocusEffect(
     useCallback(() => {
@@ -455,12 +503,122 @@ export default function WorkoutTab() {
   const handleStartWorkout = async () => {
     if (!activeTemplate || !currentDay) return;
 
-    // Always go directly to active workout screen
-    // The active.tsx screen will handle showing exercises from either:
-    // 1. Existing active session (Continue flow)
-    // 2. Today's session exercises ("Today only" additions)
-    // 3. Template slots for selected day
-    router.push('/workout/active');
+    // If there is already an active session (Continue flow), just open active workout
+    if (hasActiveWorkout) {
+      router.push('/workout/active');
+      return;
+    }
+
+    // Otherwise, create a new workout session from the selected plan day
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      toast.error('Please log in');
+      return;
+    }
+
+    const selectedDay = templateDays.find((d) => d.day.day_name === selectedPlanDayName);
+    const slots = selectedDay?.slots || [];
+    if (slots.length === 0) {
+      toast.error('No exercises scheduled for this day');
+      return;
+    }
+
+    if (__DEV__) {
+      devLog('workout-tab', {
+        action: 'startWorkout:createSession',
+        templateId: activeTemplate.id,
+        selectedPlanDayName,
+        slotCount: slots.length,
+      });
+    }
+
+    try {
+      // Create session (started now, day_name = selected plan day)
+      const session = await createWorkoutSession(userId, activeTemplate.id, selectedPlanDayName);
+      if (!session) {
+        toast.error('Failed to start workout');
+        return;
+      }
+
+      // Create session exercises for each slot
+      const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+      const targetsMap = new Map<
+        string,
+        { sets: number; reps?: number; duration_sec?: number; weight?: number }
+      >();
+
+      const effectiveExperience = profile?.experience_level || 'beginner';
+      const context: TargetSelectionContext = { experience: effectiveExperience };
+
+      for (const slot of slots) {
+        if (!slot.exercise_id && !slot.custom_exercise_id) continue;
+
+        const { data: sessionExercise, error: exerciseError } = await supabase
+          .from('v2_session_exercises')
+          .insert({
+            session_id: session.id,
+            exercise_id: slot.exercise_id || null,
+            custom_exercise_id: slot.custom_exercise_id || null,
+            sort_order: slot.sort_order,
+          })
+          .select('id, exercise_id, custom_exercise_id')
+          .single();
+
+        if (exerciseError || !sessionExercise) {
+          if (__DEV__) {
+            devError('workout-tab', exerciseError || new Error('Failed to create session exercise'), {
+              sessionId: session.id,
+              slotId: slot.id,
+            });
+          }
+          continue;
+        }
+
+        sessionExercises.push({
+          id: sessionExercise.id,
+          exercise_id: sessionExercise.exercise_id || undefined,
+          custom_exercise_id: sessionExercise.custom_exercise_id || undefined,
+        });
+
+        const exerciseKey = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
+        if (!exerciseKey) continue;
+
+        const target = await selectExerciseTargets(
+          {
+            exerciseId: sessionExercise.exercise_id || undefined,
+            customExerciseId: sessionExercise.custom_exercise_id || undefined,
+          },
+          userId,
+          context,
+          0
+        );
+
+        if (target) {
+          targetsMap.set(exerciseKey, {
+            sets: target.sets,
+            reps: target.reps,
+            duration_sec: target.duration_sec,
+            weight: target.weight,
+          });
+        }
+      }
+
+      // Prefill session sets
+      if (sessionExercises.length > 0 && targetsMap.size > 0) {
+        await prefillSessionSets(session.id, sessionExercises, targetsMap);
+      }
+
+      toast.success('Workout started');
+      router.push('/workout/active');
+    } catch (error) {
+      if (__DEV__) {
+        devError('workout-tab', error, {
+          action: 'startWorkout:createSession_error',
+          selectedPlanDayName,
+        });
+      }
+      toast.error('Failed to start workout');
+    }
   };
 
   const handleResetWorkout = async () => {

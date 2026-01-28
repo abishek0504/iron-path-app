@@ -31,6 +31,13 @@ export default function ProgressTab() {
     new Map()
   );
 
+  const getLocalDateKey = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getDateRange = useCallback((date: Date, mode: ViewMode): [Date, Date] => {
     if (mode === 'week') {
       const start = new Date(date);
@@ -82,7 +89,8 @@ export default function ProgressTab() {
       const dateMap = new Map<string, { count: number }>();
       for (const session of sessions) {
         if (session.completed_at) {
-          const dateKey = new Date(session.completed_at).toISOString().split('T')[0];
+          const completed = new Date(session.completed_at);
+          const dateKey = getLocalDateKey(completed);
           const existing = dateMap.get(dateKey);
           dateMap.set(dateKey, { count: (existing?.count || 0) + 1 });
         }

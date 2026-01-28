@@ -126,6 +126,11 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id || null;
+
     const { error } = await supabase
       .from('v2_workout_sessions')
       .update({
@@ -139,6 +144,39 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
         devError('workout-query', error, { sessionId });
       }
       return false;
+    }
+
+    // Fallback: call Edge Function directly (DB trigger may not be configured)
+    if (userId) {
+      try {
+        const { error: fnError } = await supabase.functions.invoke('update-muscle-freshness', {
+          body: { user_id: userId, session_id: sessionId },
+        });
+
+        if (fnError && __DEV__) {
+          devError('workout-query', fnError, {
+            action: 'invoke_update_muscle_freshness_failed',
+            sessionId,
+          });
+        } else if (__DEV__) {
+          devLog('workout-query', {
+            action: 'invoke_update_muscle_freshness_ok',
+            sessionId,
+          });
+        }
+      } catch (invokeError) {
+        if (__DEV__) {
+          devError('workout-query', invokeError, {
+            action: 'invoke_update_muscle_freshness_exception',
+            sessionId,
+          });
+        }
+      }
+    } else if (__DEV__) {
+      devLog('workout-query', {
+        action: 'invoke_update_muscle_freshness_skipped_no_user',
+        sessionId,
+      });
     }
 
     return true;

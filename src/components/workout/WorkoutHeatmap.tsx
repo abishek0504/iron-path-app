@@ -4,11 +4,13 @@
  * Displays muscle freshness from v2_muscle_freshness table
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { colors, spacing, typography } from '../../lib/utils/theme';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
 import { supabase } from '../../lib/supabase/client';
+import { devError, devLog } from '../../lib/utils/logger';
 
 interface WorkoutHeatmapProps {
   userId: string;
@@ -22,9 +24,20 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
     loadMuscleFreshness();
   }, [userId]);
 
+  // Refresh when screen comes into focus (e.g., after completing a workout)
+  useFocusEffect(
+    useCallback(() => {
+      loadMuscleFreshness();
+    }, [userId])
+  );
+
   const loadMuscleFreshness = async () => {
     setLoading(true);
     try {
+      if (__DEV__) {
+        devLog('workout-heatmap', { action: 'loadMuscleFreshness:start', userId });
+      }
+
       const { data, error } = await supabase
         .from('v2_muscle_freshness')
         .select('muscle_key, freshness')
@@ -38,8 +51,19 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
       }
 
       setFreshnessData(freshnessMap);
+      if (__DEV__) {
+        devLog('workout-heatmap', {
+          action: 'loadMuscleFreshness:done',
+          userId,
+          rowCount: (data || []).length,
+          muscleCount: Object.keys(freshnessMap).length,
+          sampleMuscles: Object.entries(freshnessMap).slice(0, 5).map(([k, v]) => ({ key: k, freshness: v })),
+        });
+      }
     } catch (error) {
-      console.error('Error loading muscle freshness:', error);
+      if (__DEV__) {
+        devError('workout-heatmap', error, { action: 'loadMuscleFreshness:error', userId });
+      }
     } finally {
       setLoading(false);
     }
@@ -48,7 +72,6 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Muscle Freshness</Text>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading muscle data...</Text>
@@ -60,7 +83,6 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
   if (Object.keys(freshnessData).length === 0) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Muscle Freshness</Text>
         <Text style={styles.emptyText}>
           No muscle data yet. Complete a workout to see your muscle freshness.
         </Text>
@@ -70,11 +92,6 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Muscle Freshness</Text>
-      <Text style={styles.subtitle}>
-        Visual representation of recovery state across all 28 muscles
-      </Text>
-      
       {/* Skia-powered body heatmap */}
       <View style={styles.heatmapContainer}>
         <BodyHeatmap freshnessData={freshnessData} />

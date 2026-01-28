@@ -51,6 +51,13 @@ export const ProgressCalendar: React.FC<Props> = ({
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const getLocalDateKey = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getWeekDates = (): CalendarDate[] => {
     const start = new Date(currentDate);
     start.setHours(0, 0, 0, 0);
@@ -62,7 +69,7 @@ export const ProgressCalendar: React.FC<Props> = ({
     for (let i = 0; i < 7; i++) {
       const date = new Date(weekStart);
       date.setDate(weekStart.getDate() + i);
-      const dateKey = date.toISOString().split('T')[0];
+      const dateKey = getLocalDateKey(date);
       const sessionData = sessionsByDate.get(dateKey);
       const dateObj: CalendarDate = {
         date,
@@ -90,7 +97,7 @@ export const ProgressCalendar: React.FC<Props> = ({
 
     let current = new Date(startDate);
     while (current <= endDate) {
-      const dateKey = current.toISOString().split('T')[0];
+      const dateKey = getLocalDateKey(current);
       const sessionData = sessionsByDate.get(dateKey);
       const isCurrentMonth = current.getMonth() === month;
       const dateCopy = new Date(current);

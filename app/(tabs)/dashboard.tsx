@@ -247,19 +247,26 @@ export default function DashboardTab() {
           {recentSessions.length === 0 ? (
             <Text style={styles.emptyText}>No sessions yet</Text>
           ) : (
-            recentSessions.map((s) => (
-              <View key={s.id} style={styles.listRow}>
-                <Text style={styles.listPrimary}>{s.day_name || 'Session'}</Text>
-                <Text style={styles.listSecondary}>
-                  {s.completed_at
-                    ? `${new Date(s.completed_at).toLocaleDateString()} ${new Date(s.completed_at).toLocaleTimeString(
-                        'en-US',
-                        { hour: 'numeric', minute: '2-digit' }
-                      )}`
-                    : '—'}
-                </Text>
-              </View>
-            ))
+            recentSessions.map((s) => {
+              const completedAt = s.completed_at ? new Date(s.completed_at) : null;
+              const weekdayLabel =
+                completedAt
+                  ? completedAt.toLocaleDateString('en-US', { weekday: 'long' })
+                  : s.day_name || 'Session';
+              return (
+                <View key={s.id} style={styles.listRow}>
+                  <Text style={styles.listPrimary}>{weekdayLabel}</Text>
+                  <Text style={styles.listSecondary}>
+                    {completedAt
+                      ? `${completedAt.toISOString().split('T')[0]} ${completedAt.toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}`
+                      : '—'}
+                  </Text>
+                </View>
+              );
+            })
           )}
         </View>
 

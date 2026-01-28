@@ -54,6 +54,16 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
   hip_flexors: 0.060,
 };
 
+// Normalize muscle labels coming from exercise metadata into canonical keys
+// used by v2_muscles (lowercase, snake_case).
+function normalizeMuscleKey(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Basic normalization covers values like "Biceps", "Lower Back", "Tibialis Anterior"
+  return trimmed.toLowerCase().replace(/\s+/g, '_');
+}
+
 // Stimulus calculation (same as getMuscleStressStats)
 function calculateStimulus(rpe?: number | null, rir?: number | null): number {
   const RPE_THRESHOLD = 5;
@@ -169,14 +179,20 @@ Deno.serve(async (req) => {
       
       if (Array.isArray(meta.primary_muscles)) {
         for (const m of meta.primary_muscles) {
-          if (m) muscleWeights.set(m, (muscleWeights.get(m) || 0) + 1);
+          const key = normalizeMuscleKey(m);
+          if (!key) continue;
+          muscleWeights.set(key, (muscleWeights.get(key) || 0) + 1);
         }
       }
       
       if (meta.implicit_hits && typeof meta.implicit_hits === 'object') {
         for (const [m, w] of Object.entries(meta.implicit_hits)) {
+          const key = normalizeMuscleKey(m);
+          if (!key) continue;
           const weight = typeof w === 'number' ? w : 0;
-          if (weight > 0) muscleWeights.set(m, (muscleWeights.get(m) || 0) + weight);
+          if (weight > 0) {
+            muscleWeights.set(key, (muscleWeights.get(key) || 0) + weight);
+          }
         }
       }
       
