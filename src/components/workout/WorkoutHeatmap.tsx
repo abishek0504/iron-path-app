@@ -47,7 +47,12 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
 
       const freshnessMap: Record<string, number> = {};
       for (const row of data || []) {
-        freshnessMap[row.muscle_key] = row.freshness || 100;
+        // Important: preserve 0 values (fully fatigued) instead of falling back to 100.
+        const value =
+          row.freshness === null || row.freshness === undefined
+            ? 100
+            : Number(row.freshness);
+        freshnessMap[row.muscle_key] = value;
       }
 
       setFreshnessData(freshnessMap);
