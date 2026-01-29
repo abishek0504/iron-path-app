@@ -36,6 +36,7 @@ export interface TemplateSlot {
   updated_at: string;
 }
 
+
 export interface TemplateSummary extends Template {
   day_count?: number;
 }
@@ -190,6 +191,19 @@ export async function getTemplateWithDaysAndSlots(
     }
     return null;
   }
+}
+
+/**
+ * Get template slots for a given day name (for Smart Refresh comparison).
+ */
+export async function getTemplateSlotsForDay(
+  templateId: string,
+  dayName: string
+): Promise<TemplateSlot[]> {
+  const full = await getTemplateWithDaysAndSlots(templateId);
+  if (!full) return [];
+  const dayData = full.days.find((d) => d.day.day_name === dayName);
+  return dayData?.slots ?? [];
 }
 
 /**
@@ -438,6 +452,7 @@ export async function createTemplateSlot(
     return null;
   }
 }
+
 
 /**
  * Update a template slot

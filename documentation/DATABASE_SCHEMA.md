@@ -221,6 +221,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 
 **RLS**: Owner via template (transitive through days)
 
+
 ### Performed Truth
 
 #### v2_workout_sessions

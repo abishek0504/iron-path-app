@@ -583,6 +583,7 @@ export default function WorkoutTab() {
         const exerciseKey = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
         if (!exerciseKey) continue;
 
+        // Always use prescription/history-based targets
         const target = await selectExerciseTargets(
           {
             exerciseId: sessionExercise.exercise_id || undefined,

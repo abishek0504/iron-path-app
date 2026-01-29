@@ -86,7 +86,54 @@ getMergedExercise({ exerciseId?, customExerciseId? }, userId)
 2. If custom → return custom exercise directly
 3. Else → fetch master + fetch overrides → merge
 
-### 5. RLS & Immutability (WHY: Security and data integrity)
+### 5. Planning vs Performed Truth Set Defaults (WHY: Editable plan, accurate history)
+
+**Problem Solved:** Users need to plan exercises for future weeks without corrupting performed-truth history or global prescriptions.
+
+**Solution:**
+- **Planning layer:** `v2_template_slots` stores exercise structure only (which exercises, in what order, with what experience level).
+- **Performed truth:** `v2_session_sets` stores actual sets performed.
+- **Flow:**
+  - Planner edits:
+    - Users can add/remove exercises and set experience level for future weeks.
+    - No editable defaults for sets/reps/weight - templates store structure only.
+  - Start workout:
+    - Planner/Workout tab loads template slots.
+    - Always uses prescriptions + history via `selectExerciseTargets()` to determine prefill targets.
+    - `prefillSessionSets` writes `v2_session_sets` rows with these intelligent starting values.
+  - Active workout:
+    - User edits and completes sets.
+    - `markSetComplete` updates `v2_session_sets` and sets `performed_at`.
+
+This keeps **plan editing** (structure) and **performed truth** cleanly separated. Prescriptions + history provide intelligent prefill, and users can adjust during the workout if needed.
+
+### 5.1 Context-Aware View Controller (Planner and Workout tabs)
+
+**Constraint:** Planner and Workout remain separate tabs; no unified timeline replaces tabbed navigation. Context-aware logic lives within the existing tab structure.
+
+**Planner tab:**
+- **useDateContext(selectedDayName)** drives Today vs Future from the selected day in the day strip.
+- **Today** (selected day === current weekday): Add/remove write to **session** (`v2_session_exercises`). "Today Only" badge shown only for session exercises that are **not** in the template for that day (diff by `exercise_id`/`custom_exercise_id`). "Save to Routine" on Today Only cards promotes the exercise to `v2_template_slots` for that day.
+- **Future** (selected day !== today): Add/remove write to **template** (`v2_template_slots`) only.
+- No Edit Scope modal; scope is implicit from date context. Removing a session exercise shows toast "Exercise removed from today's session."
+
+**Workout tab:**
+- Dedicated "Today" / active session screen. No date picker; always the current active session.
+
+### 5.2 Smart Refresh Engine (Active Workout)
+
+**Purpose:** Re-sync the active session with the template and latest history when the plan or body has diverged, without losing performed truth.
+
+**Staleness detection** (`detectSessionStaleness` in `src/lib/engine/sessionStaleness.ts`):
+1. **Structural:** Template slot order/ids vs session exercise order/ids (excluding today-only) differ.
+2. **Target freshness:** Last completed workout `completed_at` > session `started_at` (progressive overload calc is stale).
+3. **Biomechanical (optional):** Any primary muscle freshness < 30% (requires `v2_muscle_freshness` and exercise primary muscles).
+
+**Active Workout UI:**
+- Refresh button in header: **Orange** when structural or target divergence; **Red** when biomechanical. Tapping opens **Smart Refresh confirmation sheet** (non-blocking overlay) with proposed additions, removals, and "Recalculating targets from latest history," then **Apply Updates**.
+- **Merge logic** (`getSmartRefreshPlan` + `applySmartRefresh` in `workouts_helpers.ts`): Never delete session exercises that have at least one set with `performed_at`. Delete unprotected session exercises not in template; insert from template; prefill new exercises with `selectExerciseTargets`; leave performed sets untouched.
+
+### 6. RLS & Immutability (WHY: Security and data integrity)
 
 **Immutable Tables** (auth SELECT only):
 - `v2_muscles` - Canonical muscle keys

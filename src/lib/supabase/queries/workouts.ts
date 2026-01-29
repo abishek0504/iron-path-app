@@ -84,6 +84,30 @@ export async function createWorkoutSession(
 }
 
 /**
+ * Get completed_at of the most recent completed session (for Smart Refresh target freshness).
+ */
+export async function getLastCompletedWorkoutAt(
+  userId: string
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('completed_at')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data?.completed_at) return null;
+    return data.completed_at;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get active session for user
  */
 export async function getActiveSession(userId: string): Promise<WorkoutSession | null> {

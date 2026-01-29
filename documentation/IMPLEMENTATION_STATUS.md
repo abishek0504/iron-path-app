@@ -62,7 +62,7 @@
 | Add exercise to day | ✅ Complete | Exercise picker |
 | Remove exercise | ✅ Complete | Swipe-to-delete |
 | Reorder exercises | ⚠️ TODO | Drag-and-drop |
-| Edit scope selection | ✅ Complete | Today vs Next Week |
+| Date context (Today vs Future) | ✅ Complete | useDateContext; no Edit Scope modal |
 | Target display | ✅ Complete | Shows sets/reps/duration from prescriptions |
 | Custom exercise creation | ✅ Complete | With target bands (Patch D) |
 | Custom exercise editing | ✅ Complete | Inline form |
@@ -70,6 +70,8 @@
 | Missing prescription warning | ✅ Complete | Shows "Missing targets" |
 | Empty day state | ✅ Complete | Add first exercise prompt |
 | Day navigation | ✅ Complete | Horizontal scroll |
+| Today Only badge | ✅ Complete | Diff session vs template; badge only when not in template |
+| Save to Routine | ✅ Complete | Promote Today Only exercise to template for that day |
 
 ### AI Generation
 
@@ -113,6 +115,9 @@
 | Add exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
 | Remove exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
 | Abandon workout | ⚠️ TODO | Update status to abandoned |
+| Smart Refresh staleness | ✅ Complete | Structural, target, biomechanical (optional) |
+| Smart Refresh button/sheet | ✅ Complete | Orange/Red; confirmation sheet + Apply |
+| Smart Refresh merge | ✅ Complete | Protect performed_at; delete divergent; insert from template |
 
 ### Progress Tracking
 

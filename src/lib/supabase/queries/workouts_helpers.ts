@@ -5,8 +5,15 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
-import { createWorkoutSession, type WorkoutSession, prefillSessionSets } from './workouts';
+import {
+  createWorkoutSession,
+  type WorkoutSession,
+  prefillSessionSets,
+  getSessionWithSets,
+} from './workouts';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../engine/targetSelection';
+import { getTemplateSlotsForDay } from './templates';
+import { getMergedExercise } from './exercises';
 
 /**
  * Get or create active session for today
@@ -265,5 +272,176 @@ export async function applyStructureEditToSession(
     }
     return false;
   }
+}
+
+export interface SmartRefreshPlan {
+  additions: Array<{ name: string; exercise_id?: string; custom_exercise_id?: string; sort_order: number }>;
+  removals: Array<{ session_exercise_id: string; name: string }>;
+  hasAdjustments: boolean;
+}
+
+/**
+ * Compute Smart Refresh plan: additions (from template not in session),
+ * removals (session exercises not in template, not protected by performed_at),
+ * and whether targets will be recalculated.
+ */
+export async function getSmartRefreshPlan(
+  sessionId: string,
+  templateId: string,
+  dayName: string,
+  userId: string
+): Promise<SmartRefreshPlan | null> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getSmartRefreshPlan', sessionId, templateId, dayName });
+  }
+
+  const sessionData = await getSessionWithSets(sessionId);
+  if (!sessionData?.session || !sessionData.exercises.length) {
+    return null;
+  }
+
+  const templateSlots = await getTemplateSlotsForDay(templateId, dayName);
+  const templateKeys = new Set(
+    templateSlots.map((s) => s.exercise_id || s.custom_exercise_id).filter(Boolean)
+  );
+  const sessionKeys = new Set(
+    sessionData.exercises.map((e) => e.exercise_id || e.custom_exercise_id).filter(Boolean)
+  );
+
+  const protectedSessionExerciseIds = new Set<string>();
+  for (const ex of sessionData.exercises) {
+    const hasPerformedSet = ex.sets?.some((s) => s.performed_at != null);
+    if (hasPerformedSet) {
+      protectedSessionExerciseIds.add(ex.id);
+    }
+  }
+
+  const removals: SmartRefreshPlan['removals'] = [];
+  for (const ex of sessionData.exercises) {
+    const key = ex.exercise_id || ex.custom_exercise_id;
+    if (!key) continue;
+    if (templateKeys.has(key)) continue;
+    if (protectedSessionExerciseIds.has(ex.id)) continue;
+    const meta = await getMergedExercise(
+      ex.exercise_id ? { exerciseId: ex.exercise_id } : { customExerciseId: ex.custom_exercise_id! },
+      userId
+    );
+    removals.push({ session_exercise_id: ex.id, name: meta?.name || 'Exercise' });
+  }
+
+  const additions: SmartRefreshPlan['additions'] = [];
+  for (const slot of templateSlots) {
+    const key = slot.exercise_id || slot.custom_exercise_id;
+    if (!key || sessionKeys.has(key)) continue;
+    const meta = await getMergedExercise(
+      slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
+      userId
+    );
+    additions.push({
+      name: meta?.name || 'Exercise',
+      exercise_id: slot.exercise_id || undefined,
+      custom_exercise_id: slot.custom_exercise_id || undefined,
+      sort_order: slot.sort_order,
+    });
+  }
+
+  const hasAdjustments = true;
+
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'getSmartRefreshPlan_result',
+      sessionId,
+      additionsCount: additions.length,
+      removalsCount: removals.length,
+    });
+  }
+
+  return { additions, removals, hasAdjustments };
+}
+
+/**
+ * Apply Smart Refresh: delete unprotected divergent exercises, insert from template, recalc targets.
+ * Never deletes sets with performed_at.
+ */
+export async function applySmartRefresh(
+  sessionId: string,
+  templateId: string,
+  dayName: string,
+  userId: string,
+  experience: string
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'applySmartRefresh', sessionId, templateId, dayName });
+  }
+
+  const sessionData = await getSessionWithSets(sessionId);
+  if (!sessionData?.session || !sessionData.exercises.length) {
+    return false;
+  }
+
+  const templateSlots = await getTemplateSlotsForDay(templateId, dayName);
+  const templateKeys = new Set(
+    templateSlots.map((s) => s.exercise_id || s.custom_exercise_id).filter(Boolean)
+  );
+  const sessionKeysBefore = new Set(
+    sessionData.exercises.map((e) => e.exercise_id || e.custom_exercise_id).filter(Boolean)
+  );
+
+  const protectedSessionExerciseIds = new Set<string>();
+  for (const ex of sessionData.exercises) {
+    const hasPerformedSet = ex.sets?.some((s) => s.performed_at != null);
+    if (hasPerformedSet) protectedSessionExerciseIds.add(ex.id);
+  }
+
+  for (const ex of sessionData.exercises) {
+    const key = ex.exercise_id || ex.custom_exercise_id;
+    if (!key || templateKeys.has(key) || protectedSessionExerciseIds.has(ex.id)) continue;
+    const { error } = await supabase
+      .from('v2_session_exercises')
+      .delete()
+      .eq('id', ex.id)
+      .eq('session_id', sessionId);
+    if (error && __DEV__) {
+      devError('workout-query', error, { action: 'applySmartRefresh_delete', sessionExerciseId: ex.id });
+    }
+  }
+
+  const context: TargetSelectionContext = { experience };
+  let nextSortOrder = Math.max(0, ...sessionData.exercises.map((e) => e.sort_order)) + 1;
+  for (const slot of templateSlots) {
+    const key = slot.exercise_id || slot.custom_exercise_id;
+    if (!key || sessionKeysBefore.has(key)) continue;
+    const created = await createSessionExercise(sessionId, {
+      exerciseId: slot.exercise_id || undefined,
+      customExerciseId: slot.custom_exercise_id || undefined,
+      sortOrder: nextSortOrder++,
+    });
+    if (created) {
+      const target = await selectExerciseTargets(
+        {
+          exerciseId: slot.exercise_id || undefined,
+          customExerciseId: slot.custom_exercise_id || undefined,
+        },
+        userId,
+        context,
+        0
+      );
+      if (target) {
+        const targetsMap = new Map();
+        targetsMap.set(key, {
+          sets: target.sets,
+          reps: target.reps,
+          duration_sec: target.duration_sec,
+          weight: target.weight,
+        });
+        await prefillSessionSets(sessionId, [created], targetsMap);
+      }
+    }
+  }
+
+  if (__DEV__) {
+    devLog('workout-query', { action: 'applySmartRefresh_done', sessionId });
+  }
+  return true;
 }
 

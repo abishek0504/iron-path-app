@@ -160,6 +160,9 @@ const handleAddExercise = async (exercise) => {
                └→ getExercisePrescription() → get target bands
                └→ getExerciseHistory() → check for progressive overload
                └→ Calculate targets within bands (uses suggested_weight if no history)
+           └→ Build targetsMap entry for this exercise:
+               └→ sets = prescription sets
+               └→ reps/duration/weight = prescription targets (with progressive overload if history exists)
            └→ prefillSessionSets(sessionId, sessionExercises, targetsMap)
                └→ INSERT into v2_session_sets (prefilled with targets, performed_at=NULL)
    └→ Navigate to /workout/active
@@ -237,7 +240,7 @@ const handleAddExercise = async (exercise) => {
        └→ Display session details
 ```
 
-### Flow 3: Edit Exercise → Scope Selection → Database Write
+### Flow 3: Add Exercise → Date Context → Database Write
 
 ```
 1. User taps "Add Exercise" in Planner
@@ -248,37 +251,47 @@ const handleAddExercise = async (exercise) => {
 
 2. User selects exercise in picker
    └→ ExercisePicker calls onSelect(exercise)
-   └→ uiStore.closeBottomSheet()
-   └→ Planner sets pendingEdit = { type: 'addSlot', exercise }
-   └→ Show EditScopePrompt
+   └→ uiStore closes bottom sheet
+   └→ Planner inspects selected day’s `day.day_name`
 
-3. User selects scope
-   └→ EditScopePrompt calls onSelect(scope)
-   
-   If scope === 'today':
+3. Date context decides write target (no scope prompt)
+
+   If selected day is **Today**:
      └→ getOrCreateActiveSessionForToday(userId, dayName)
          └→ Check for active session
          └→ If exists: return session
          └→ Else: createWorkoutSession(userId, null, dayName) for today
-     └→ applyStructureEditToSession(sessionId, edit)
-         └→ createSessionExercise(sessionId, { exerciseId, sortOrder })
-             └→ INSERT into v2_session_exercises
-     └→ Reload session data
-   
-   If scope === 'nextWeek':
-     └→ applyStructureEditToTemplate(templateId, edit)
+     └→ applyStructureEditToSession(sessionId, {
+           type: 'addSlot',
+           exerciseId,
+           customExerciseId: undefined,
+           sortOrder,
+           experience: profile.experience_level
+         })
+         └→ INSERT into v2_session_exercises (instance, Today-only)
+     └→ Reload today’s session exercises
+
+   If selected day is **Future** (not Today):
+     └→ applyStructureEditToTemplate(templateId, {
+           type: 'addSlot',
+           dayId,
+           exerciseId,
+           customExerciseId: undefined,
+           sortOrder
+         })
          └→ createTemplateSlot(dayId, { exerciseId, sortOrder })
-             └→ INSERT into v2_template_slots
+             └→ INSERT into v2_template_slots (structure only)
      └→ Reload template data
 
-4. Recalculate targets
-   └→ For each new slot:
+4. Recalculate targets for display
+   └→ For each template slot:
        └→ selectExerciseTargets({ exerciseId }, userId, context)
-       └→ Update targets map
-   └→ Re-render with new targets displayed
+       └→ Update targets map used for projected targets
+   └→ Re-render Planner with updated targets
 
 5. Show success toast
-   └→ toast.success('Exercise added')
+   └→ Today: `toast.success("Exercise added to today's session")`
+   └→ Future: `toast.success('Exercise added to plan')`
 ```
 
 ### Flow 4: AI Generation → Target Selection → Session Creation
@@ -321,12 +334,37 @@ const handleAddExercise = async (exercise) => {
    └→ Calculate targets for all slots
    └→ Reload template
    └→ toast.success('Week generated')
-
-2. User starts workout with AI-generated plan
-   └→ Follows normal "Start Workout" flow (Flow 2)
 ```
 
-### Flow 5: Dashboard Display → Stress Calculation → Database Query
+### Flow 5: Smart Refresh (Active Workout)
+
+```
+1. User is in Active Workout (session loaded from template + day)
+   └→ app/(stack)/workout/active.tsx
+   └→ After loadActiveSession: if session.template_id && session.day_name
+       └→ getTemplateSlotsForDay(templateId, dayName)
+       └→ getLastCompletedWorkoutAt(userId)
+       └→ detectSessionStaleness({ session, sessionExercises, templateSlots, lastCompletedWorkoutAt })
+       └→ setStaleness({ structural, biomechanical, target })
+
+2. Refresh button in header
+   └→ Orange when structural or target divergence; Red when biomechanical
+   └→ If no divergence: tap runs handleRecalculateTargets (recalc incomplete set targets only)
+   └→ If divergence: tap opens confirmation sheet
+       └→ getSmartRefreshPlan(sessionId, templateId, dayName, userId)
+       └→ setRefreshPlan(plan); setShowRefreshSheet(true)
+
+3. Smart Refresh confirmation sheet
+   └→ SmartRefreshConfirmationSheet shows: Additions, Removals, Adjustments
+   └→ User taps "Apply Updates"
+       └→ applySmartRefresh(sessionId, templateId, dayName, userId, experience)
+           └→ Protected = session exercises with any set.performed_at
+           └→ DELETE v2_session_exercises not in template and not protected
+           └→ INSERT new session exercises from template; prefillSessionSets with selectExerciseTargets
+       └→ loadActiveSession(); close sheet; toast.success('Workout updated from plan')
+```
+
+### Flow 6: Dashboard Display → Stress Calculation → Database Query
 
 ```
 1. Dashboard tab loads

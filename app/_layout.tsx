@@ -59,6 +59,20 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="add-exercise"
+          options={{
+            gestureEnabled: true,
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="add-exercise-edit"
+          options={{
+            gestureEnabled: true,
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="(stack)/workout/active"
           options={{ 
             presentation: 'modal', 

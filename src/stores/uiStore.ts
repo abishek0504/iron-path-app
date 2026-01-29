@@ -33,6 +33,9 @@ interface UIState {
   // Toasts
   toasts: Toast[];
   
+  /** Set true when add-exercise-edit adds to routine; planner refetches on focus and clears */
+  plannerNeedsRefetch: boolean;
+  
   // Actions
   openBottomSheet: (id: BottomSheetId, props?: Record<string, any>) => void;
   closeBottomSheet: () => void;
@@ -40,6 +43,7 @@ interface UIState {
   
   showToast: (message: string, type?: Toast['type'], duration?: number) => void;
   removeToast: (id: string) => void;
+  setPlannerNeedsRefetch: (value: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -49,7 +53,12 @@ export const useUIStore = create<UIState>((set) => ({
   pendingBottomSheet: null,
   pendingBottomSheetProps: {},
   toasts: [],
-  
+  plannerNeedsRefetch: false,
+
+  setPlannerNeedsRefetch: (value) => {
+    set({ plannerNeedsRefetch: value });
+  },
+
   openBottomSheet: (id, props = {}) => {
     if (__DEV__) {
       devLog('ui-store', { action: 'openBottomSheet', id, hasProps: Object.keys(props).length > 0 });

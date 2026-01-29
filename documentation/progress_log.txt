@@ -5,6 +5,27 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-28 - Add Exercise Edit: Per-Set UI and Validation
+--------------------------------------------------------
+IMPLEMENTED:
+- add-exercise-edit screen refactored to match SessionExerciseEditSheet-style editing
+- Each set is a separate card with per-set weight, reps (or duration for timed), and Remove button
+- Rest input placed between sets: "Rest after set N (sec)" for each set except the last
+- Add Set button at bottom of set list; minimum one set (Remove disabled when only one set)
+- Validation: weight >= 0, reps 1–50, duration 5–3600 sec, rest 0–600 sec; red error text and red border on invalid fields
+- Confirm add disabled until all sets valid; toast "Fix errors before confirming" if user taps with errors
+- Prefill from selectExerciseTargets: initial set count and default weight/reps/duration per set; default rest 90 sec between sets
+
+PERSISTENCE (Add for today only):
+- No longer uses prefillSessionSets (uniform targets). Creates v2_session_exercise then inserts v2_session_sets one-by-one with user-edited per-set values: set_number, weight, reps, duration_sec, rest_sec. RPE/rir/notes null.
+
+TECHNICAL:
+- State: sets[] of { id, set_number, weight, reps, duration_sec, rest_sec } (strings for inputs)
+- validateSet(set, isTimedMode) returns error keys; allSetsValid() used for submit and button disable
+- Styles: setCard, setHeaderRow, setNumber, removeSetText, inputRow, inputGroup, restSection, addSetButton, inputError, errorText (red)
+
+---
+
 2026-01-27 - Exercise Notes Display Feature
 --------------------------------------------
 IMPLEMENTED:
@@ -762,6 +783,48 @@ Major Systems Implemented:
 See IMPLEMENTATION_STATUS.md for detailed feature matrix.
 
 ---
+
+[2026-01-21] Architecture Simplification: Removed v2_template_slot_sets table and simplified prefill logic
+- Created migration 20260122000006_remove_template_slot_sets.sql to drop v2_template_slot_sets table and RLS policies
+- Removed getTemplateSlotSets() and upsertTemplateSlotSets() functions from templates.ts
+- Removed TemplateSlotSet and TemplateSlotSetInput interfaces
+- Updated index.tsx and planner.tsx to always use selectExerciseTargets() for prefill (removed template slot defaults logic)
+- Deleted TemplateSlotEditSheet.tsx component
+- Updated planner.tsx UI: removed Edit button for future-plan exercises, replaced with direct Remove button
+- Updated documentation:
+  - Removed v2_template_slot_sets section from DATABASE_SCHEMA.md
+  - Updated SYSTEM_ARCHITECTURE.md to clarify templates store structure only, prefill always uses prescriptions + history
+  - Updated DATA_FLOWS.md to reflect simplified prefill flow
+- Architecture now matches original principle: "Templates store structure only, never weight/reps/duration"
+- Prefill always uses prescriptions + history via selectExerciseTargets() for intelligent defaults
+- Users can still adjust values during active workout if needed
+
+[2026-01-28] Constraint: Do not replace workout tabs
+- Planner and Workout remain separate tabs; no unified timeline replacing tabbed navigation.
+- Context-aware view controller and smart refresh logic are implemented within the existing tab structure: Planner = date-driven (Today vs Future), Workout = dedicated Today/active session screen.
+
+[2026-01-28] Unified Flow implementation (Context-Aware + Smart Refresh)
+- Removed EditScopePrompt import from planner (dead code); scope is implicit from date context.
+- useDateContext hook (src/hooks/useDateContext.ts): selectedDayName → isToday, isFuture for Planner.
+- Planner: use dateContext.isToday in handleAddExercise; Today Only badge only for session exercises NOT in template (diff by exercise_id/custom_exercise_id).
+- Save to Routine: handleSaveToRoutine + button on Today Only cards; applyStructureEditToTemplate addSlot for that day.
+- detectSessionStaleness (src/lib/engine/sessionStaleness.ts): structural hash, target freshness (last workout > session started_at), optional biomechanical (muscle freshness < 30%).
+- getLastCompletedWorkoutAt (workouts.ts), getTemplateSlotsForDay (templates.ts).
+- getSmartRefreshPlan + applySmartRefresh (workouts_helpers.ts): plan additions/removals; merge protects performed_at, deletes unprotected divergent, inserts from template, prefill targets.
+- SmartRefreshConfirmationSheet: overlay with Additions/Removals/Adjustments + Apply Updates.
+- Active workout: load staleness after session load; Refresh button Orange (structural/target) or Red (biomechanical); tap opens sheet or runs handleRecalculateTargets; Apply runs applySmartRefresh then reload.
+- Planner remove session exercise toast: "Exercise removed from today's session."
+- Docs: SYSTEM_ARCHITECTURE 5.1 Context-Aware View Controller, 5.2 Smart Refresh Engine; DATA_FLOWS Flow 5 Smart Refresh; IMPLEMENTATION_STATUS updated; plan doc 2026-01-28_UNIFIED_FLOW_IMPLEMENTATION_PLAN.md.
+- Pending: Banister fatigue in Smart Refresh (Red state substitutions, volume reduction, suppress overload in selectExerciseTargets). Toast with "Undo" and "Also Remove from Plan" on session remove deferred (would require Toast/uiStore action support).
+
+[2026-01-28] Save to Routine duplicate fix; Start this day removed; Add Exercise as page
+- Save to Routine duplicate: only show "Today Only" session exercises in first block (filter: session exercises not in template). Template slots block unchanged. Prevents duplicate cards when exercise is in both session and template.
+- Removed "Start this day" button from Planner (redundant with Workout tab). Removed Play import and startButton/startButtonText styles.
+- Add Exercise no longer opens modal: navigates to full-page add-exercise screen with params dayId, templateId, dayName.
+- app/add-exercise.tsx: list all exercises (master + custom via listMergedExercises), search, expandable row (description, primary muscles, implicit hits, last/PR from getExerciseHistory), Add button per row. Back button in header.
+- app/add-exercise-edit.tsx: edit-before-add with per-set cards (weight/reps or duration), rest after each set, Add Set / Remove per set, validation (red errors), checkbox "Add for today only". Prefill from selectExerciseTargets. On confirm todayOnly: create session exercise then insert v2_session_sets with user per-set values; else add template slot.
+- Planner: Add Exercise button now router.push('/add-exercise', { dayId, templateId, dayName }). Removed handleAddExercise, useExercisePicker, Exercise import.
+- Registered add-exercise and add-exercise-edit in root _layout Stack.
 
 End of Log
 ==========

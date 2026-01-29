@@ -20,6 +20,7 @@ interface SessionSet {
   reps?: number;
   duration_sec?: number;
   rpe?: number;
+  isNew?: boolean;
 }
 
 interface SessionExerciseEditSheetProps {
@@ -46,6 +47,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   const [sets, setSets] = useState<SessionSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [originalSetIds, setOriginalSetIds] = useState<string[]>([]);
 
   const weightUnit = useImperial ? 'lbs' : 'kg';
 
@@ -75,7 +77,9 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
         return;
       }
 
-      setSets(data || []);
+      const loaded = (data || []) as SessionSet[];
+      setSets(loaded);
+      setOriginalSetIds(loaded.map((s) => s.id));
     } catch (error) {
       if (__DEV__) {
         devError('session-edit', error, { action: 'loadSets' });
@@ -92,21 +96,65 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
 
     setSaving(true);
     try {
-      // Update each set
-      for (const set of sets) {
-        const { error } = await supabase
-          .from('v2_session_sets')
-          .update({
-            weight: set.weight || null,
-            reps: set.reps || null,
-            duration_sec: set.duration_sec || null,
-            rpe: set.rpe || null,
-          })
-          .eq('id', set.id);
+      // Determine which existing sets should be deleted
+      const existingIdsInState = new Set(
+        sets.filter((s) => !s.isNew).map((s) => s.id)
+      );
+      const idsToDelete = originalSetIds.filter((id) => !existingIdsInState.has(id));
 
-        if (error) {
-          if (__DEV__) {
-            devError('session-edit', error, { setId: set.id });
+      if (idsToDelete.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('v2_session_sets')
+          .delete()
+          .in('id', idsToDelete);
+
+        if (deleteError && __DEV__) {
+          devError('session-edit', deleteError, {
+            action: 'deleteSets',
+            sessionExerciseId,
+            deleteCount: idsToDelete.length,
+          });
+        }
+      }
+
+      // Upsert remaining sets
+      for (const set of sets) {
+        if (set.isNew) {
+          const { error } = await supabase
+            .from('v2_session_sets')
+            .insert({
+              session_exercise_id: sessionExerciseId,
+              set_number: set.set_number,
+              weight: set.weight || null,
+              reps: set.reps || null,
+              duration_sec: set.duration_sec || null,
+              rpe: set.rpe || null,
+            });
+
+          if (error && __DEV__) {
+            devError('session-edit', error, {
+              action: 'insertSet',
+              sessionExerciseId,
+              setNumber: set.set_number,
+            });
+          }
+        } else {
+          const { error } = await supabase
+            .from('v2_session_sets')
+            .update({
+              set_number: set.set_number,
+              weight: set.weight || null,
+              reps: set.reps || null,
+              duration_sec: set.duration_sec || null,
+              rpe: set.rpe || null,
+            })
+            .eq('id', set.id);
+
+          if (error && __DEV__) {
+            devError('session-edit', error, {
+              action: 'updateSet',
+              setId: set.id,
+            });
           }
         }
       }
@@ -133,6 +181,37 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
           : s
       )
     );
+  };
+
+  const handleAddSet = () => {
+    setSets((prev) => {
+      const last = prev[prev.length - 1];
+      const nextNumber = (last?.set_number ?? 0) + 1;
+      return [
+        ...prev,
+        {
+          id: `new-${nextNumber}-${Date.now()}`,
+          set_number: nextNumber,
+          weight: last?.weight,
+          reps: last?.reps,
+          duration_sec: last?.duration_sec,
+          rpe: undefined,
+          isNew: true,
+        },
+      ];
+    });
+  };
+
+  const handleRemoveSet = (setId: string) => {
+    setSets((prev) => {
+      if (prev.length <= 1) return prev;
+      const filtered = prev.filter((s) => s.id !== setId);
+      // Re-number sequentially
+      return filtered.map((s, index) => ({
+        ...s,
+        set_number: index + 1,
+      }));
+    });
   };
 
   return (
@@ -168,7 +247,17 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
           >
             {sets.map((set, index) => (
               <View key={set.id} style={styles.setCard}>
-                <Text style={styles.setNumber}>Set {set.set_number}</Text>
+                <View style={styles.setHeaderRow}>
+                  <Text style={styles.setNumber}>Set {set.set_number}</Text>
+                  {sets.length > 1 && (
+                    <TouchableOpacity
+                      onPress={() => handleRemoveSet(set.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.removeSetText}>Remove</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
                 <View style={styles.inputRow}>
                   {mode === 'reps' && (
@@ -237,6 +326,10 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                 </View>
               </View>
             ))}
+
+            <TouchableOpacity style={styles.addSetButton} onPress={handleAddSet}>
+              <Text style={styles.addSetButtonText}>Add Set</Text>
+            </TouchableOpacity>
           </ScrollView>
         )}
 
@@ -380,6 +473,29 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.semibold,
     color: colors.background,
+  },
+  setHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  removeSetText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+  },
+  addSetButton: {
+    marginTop: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  addSetButtonText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.primary,
   },
   deleteButton: {
     backgroundColor: colors.error + '20',

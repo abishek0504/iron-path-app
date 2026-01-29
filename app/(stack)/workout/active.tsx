@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, CheckCircle, ChevronRight, Info } from 'lucide-react-native';
+import { ArrowLeft, CheckCircle, ChevronRight, Info, RefreshCcw } from 'lucide-react-native';
 import { colors, spacing, borderRadius, typography } from '../../../src/lib/utils/theme';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
 import { RPESlider } from '../../../src/components/workout/RPESlider';
@@ -31,11 +31,21 @@ import {
   getSessionWithSets,
   markSetComplete,
   completeWorkoutSession,
+  getLastCompletedWorkoutAt,
 } from '../../../src/lib/supabase/queries/workouts';
+import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
 import { useUserStore } from '../../../src/stores/userStore';
 import { useToast } from '../../../src/hooks/useToast';
 import { calculateWeightSuggestion } from '../../../src/lib/utils/weightSuggestions';
+import { selectExerciseTargets } from '../../../src/lib/engine/targetSelection';
+import { detectSessionStaleness } from '../../../src/lib/engine/sessionStaleness';
+import {
+  getSmartRefreshPlan,
+  applySmartRefresh,
+  type SmartRefreshPlan,
+} from '../../../src/lib/supabase/queries/workouts_helpers';
+import { SmartRefreshConfirmationSheet } from '../../../src/components/ui/SmartRefreshConfirmationSheet';
 
 interface Exercise {
   id: string; // session_exercise_id
@@ -78,6 +88,8 @@ export default function ActiveWorkoutScreen() {
 
   const [loading, setLoading] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionTemplateId, setSessionTemplateId] = useState<string | null>(null);
+  const [sessionDayName, setSessionDayName] = useState<string | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [workoutPhase, setWorkoutPhase] = useState<WorkoutPhase>({ type: 'execution', setIndex: 0 });
@@ -93,6 +105,17 @@ export default function ActiveWorkoutScreen() {
 
   // Exercise info modal
   const [showExerciseInfo, setShowExerciseInfo] = useState(false);
+  const [isRecalculatingTargets, setIsRecalculatingTargets] = useState(false);
+
+  // Smart Refresh: staleness and confirmation sheet
+  const [staleness, setStaleness] = useState<{
+    structural: boolean;
+    biomechanical: boolean;
+    target: boolean;
+  } | null>(null);
+  const [showRefreshSheet, setShowRefreshSheet] = useState(false);
+  const [refreshPlan, setRefreshPlan] = useState<SmartRefreshPlan | null>(null);
+  const [isApplyingRefresh, setIsApplyingRefresh] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -120,6 +143,8 @@ export default function ActiveWorkoutScreen() {
       }
 
       setSessionId(session.id);
+      setSessionTemplateId(session.template_id ?? null);
+      setSessionDayName(session.day_name ?? null);
 
       const sessionData = await getSessionWithSets(session.id);
       if (!sessionData) {
@@ -167,6 +192,40 @@ export default function ActiveWorkoutScreen() {
       if (!foundIncomplete && exercisesWithMeta.length > 0) {
         // All exercises complete
         setWorkoutPhase({ type: 'complete' });
+      }
+
+      // Smart Refresh: detect staleness when session has template + day
+      if (session?.template_id && session?.day_name && userId) {
+        try {
+          const [templateSlots, lastCompletedAt] = await Promise.all([
+            getTemplateSlotsForDay(session.template_id, session.day_name),
+            getLastCompletedWorkoutAt(userId),
+          ]);
+          const result = detectSessionStaleness({
+            session: {
+              id: session.id,
+              template_id: session.template_id,
+              day_name: session.day_name,
+              started_at: session.started_at,
+            },
+            sessionExercises: sessionData.exercises.map((e) => ({
+              exercise_id: e.exercise_id,
+              custom_exercise_id: e.custom_exercise_id,
+              sort_order: e.sort_order,
+            })),
+            templateSlots: templateSlots.map((s) => ({
+              exercise_id: s.exercise_id,
+              custom_exercise_id: s.custom_exercise_id,
+              sort_order: s.sort_order,
+            })),
+            lastCompletedWorkoutAt: lastCompletedAt ?? undefined,
+          });
+          setStaleness(result);
+        } catch {
+          setStaleness(null);
+        }
+      } else {
+        setStaleness(null);
       }
     } catch (error) {
       console.error('Error loading active session:', error);
@@ -216,6 +275,85 @@ export default function ActiveWorkoutScreen() {
       rpe: currentSetRPEs[idx] || set.rpe || 7,
     }));
     setSetLogs(logs);
+  };
+
+  const handleRecalculateTargets = async () => {
+    if (!userId || !sessionId || exercises.length === 0) {
+      return;
+    }
+
+    setIsRecalculatingTargets(true);
+    try {
+      let updatedSetCount = 0;
+      const experience = profile?.experience_level || 'beginner';
+
+      for (const exercise of exercises) {
+        const exerciseRef = {
+          exerciseId: exercise.exercise_id,
+          customExerciseId: exercise.custom_exercise_id,
+        };
+
+        const target = await selectExerciseTargets(
+          exerciseRef,
+          userId,
+          { experience },
+          0
+        );
+
+        if (!target) continue;
+
+        for (const set of exercise.sets) {
+          if (set.completed) continue;
+
+          const updatePayload: {
+            reps?: number | null;
+            weight?: number | null;
+            duration_sec?: number | null;
+          } = {};
+
+          if (target.mode === 'reps') {
+            if (target.reps !== undefined) {
+              updatePayload.reps = target.reps;
+            }
+            if (target.weight !== undefined) {
+              updatePayload.weight = target.weight;
+            }
+          } else {
+            if (target.duration_sec !== undefined) {
+              updatePayload.duration_sec = target.duration_sec;
+            }
+          }
+
+          if (Object.keys(updatePayload).length === 0) {
+            continue;
+          }
+
+          const { error } = await supabase
+            .from('v2_session_sets')
+            .update(updatePayload)
+            .eq('id', set.id)
+            .is('performed_at', null);
+
+          if (!error) {
+            updatedSetCount += 1;
+          }
+        }
+      }
+
+      if (updatedSetCount > 0) {
+        toast.success(
+          `Recalculated targets for ${updatedSetCount} set${updatedSetCount === 1 ? '' : 's'}`
+        );
+        await loadActiveSession();
+      } else {
+        toast.info?.('No incomplete sets to update');
+      }
+    } catch (error) {
+      console.error('Error recalculating targets:', error);
+      toast.error('Failed to recalculate targets');
+    } finally {
+      setIsRecalculatingTargets(false);
+    }
   };
 
   const handleCompleteSet = async () => {
@@ -401,7 +539,44 @@ export default function ActiveWorkoutScreen() {
           <ArrowLeft size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Active Workout</Text>
-        <View style={styles.headerSpacer} />
+        {(() => {
+          const hasDivergence =
+            staleness && (staleness.structural || staleness.target || staleness.biomechanical);
+          const refreshColor = staleness?.biomechanical
+            ? colors.error
+            : hasDivergence
+              ? colors.warning
+              : colors.textPrimary;
+          return (
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={async () => {
+                if (hasDivergence && sessionId && sessionTemplateId && sessionDayName && userId) {
+                  const plan = await getSmartRefreshPlan(
+                    sessionId,
+                    sessionTemplateId,
+                    sessionDayName,
+                    userId
+                  );
+                  setRefreshPlan(plan ?? null);
+                  setShowRefreshSheet(true);
+                } else {
+                  await handleRecalculateTargets();
+                }
+              }}
+              disabled={isRecalculatingTargets || isApplyingRefresh}
+            >
+              <RefreshCcw
+                size={20}
+                color={
+                  isRecalculatingTargets || isApplyingRefresh
+                    ? colors.textSecondary
+                    : refreshColor
+                }
+              />
+            </TouchableOpacity>
+          );
+        })()}
       </View>
 
       <ScrollView 
@@ -624,6 +799,42 @@ export default function ActiveWorkoutScreen() {
           </View>
         )}
       </ScrollView>
+
+      <SmartRefreshConfirmationSheet
+        visible={showRefreshSheet}
+        plan={refreshPlan}
+        onClose={() => {
+          setShowRefreshSheet(false);
+          setRefreshPlan(null);
+        }}
+        onApply={async () => {
+          if (!sessionId || !sessionTemplateId || !sessionDayName || !userId) return;
+          setIsApplyingRefresh(true);
+          try {
+            const success = await applySmartRefresh(
+              sessionId,
+              sessionTemplateId,
+              sessionDayName,
+              userId,
+              profile?.experience_level || 'beginner'
+            );
+            if (success) {
+              toast.success('Workout updated from plan');
+              await loadActiveSession();
+              setShowRefreshSheet(false);
+              setRefreshPlan(null);
+            } else {
+              toast.error('Failed to apply updates');
+            }
+          } catch (error) {
+            console.error('Smart Refresh apply error:', error);
+            toast.error('Failed to apply updates');
+          } finally {
+            setIsApplyingRefresh(false);
+          }
+        }}
+        applying={isApplyingRefresh}
+      />
     </SafeAreaView>
   );
 }
