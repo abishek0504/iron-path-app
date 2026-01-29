@@ -157,12 +157,13 @@ const handleAddExercise = async (exercise) => {
        └→ For each exercise:
            └→ selectExerciseTargets({ exerciseId?, customExerciseId? }, userId, context)
                └→ getMergedExercise() → determine mode
-               └→ getExercisePrescription() → get target bands
+               └→ getExercisePrescription() → get target bands (exercise_id + experience + mode)
                └→ getExerciseHistory() → check for progressive overload
-               └→ Calculate targets within bands (uses suggested_weight if no history)
+               └→ Calculate targets within bands (uses suggested_weight if no history; bodyweight exercises use NULL weight)
            └→ Build targetsMap entry for this exercise:
                └→ sets = prescription sets
                └→ reps/duration/weight = prescription targets (with progressive overload if history exists)
+   (Flow: prescription fills initial targets → user edits and saves → next time algorithm uses tracked values from history to suggest new targets within the same band.)
            └→ prefillSessionSets(sessionId, sessionExercises, targetsMap)
                └→ INSERT into v2_session_sets (prefilled with targets, performed_at=NULL)
    └→ Navigate to /workout/active

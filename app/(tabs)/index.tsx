@@ -3,7 +3,7 @@
  * Shows today's workout with pulsing start/continue button
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -27,7 +27,7 @@ import { useUserStore } from '../../src/stores/userStore';
 import { createWorkoutSession, getActiveSession, prefillSessionSets } from '../../src/lib/supabase/queries/workouts';
 import { getTemplateWithDaysAndSlots } from '../../src/lib/supabase/queries/templates';
 import { getUserTemplates } from '../../src/lib/supabase/queries/templates';
-import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
+import { listMergedExercises } from '../../src/lib/supabase/queries/exercises';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../src/lib/engine/targetSelection';
@@ -197,6 +197,10 @@ export default function WorkoutTab() {
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
+  const loadInFlightRef = useRef(false);
+  const lastFocusLoadRef = useRef(0);
+
+  const FOCUS_RELOAD_THROTTLE_MS = 4000;
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -219,6 +223,8 @@ export default function WorkoutTab() {
 
   // Load workout data (template + sessions) and populate selected plan day
   const loadTodayWorkout = useCallback(async () => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     if (!hasInitiallyLoaded) {
       setIsLoading(true);
     }
@@ -227,6 +233,7 @@ export default function WorkoutTab() {
     if (!userId) {
       setIsLoading(false);
       setHasInitiallyLoaded(true);
+      loadInFlightRef.current = false;
       return;
     }
 
@@ -313,10 +320,14 @@ export default function WorkoutTab() {
       const isViewingToday = selectedPlanDayName === getTodayDayName();
       setHasActiveWorkout(hasActiveForToday && isViewingToday);
 
+      // Match plan day case-insensitively (DB may store "Monday" or "monday")
+      const matchPlanDay = (d: { day: { day_name?: string } }) =>
+        (d.day.day_name ?? '').toLowerCase() === (planDayName ?? '').toLowerCase();
+
       // Load exercises from active session OR template
-      // Only bind to active session when:
-      // - it is for "today" (UTC), and
-      // - the user is viewing today's plan day.
+      let exercisesToShow: Array<{ id: string; name: string }> = [];
+      const selectedDay = sortedDays.find(matchPlanDay);
+
       if (hasActiveForToday && activeSession && selectedPlanDayName === getTodayDayName()) {
         // Load exercises from the active session
         const { data: sessionExercises, error: sessionExercisesError } = await supabase
@@ -332,26 +343,25 @@ export default function WorkoutTab() {
           });
         }
 
-        if (sessionExercises) {
+        if (sessionExercises && sessionExercises.length > 0) {
+          const exerciseIds = [
+            ...new Set(
+              sessionExercises
+                .flatMap((se) => [se.exercise_id, se.custom_exercise_id].filter(Boolean) as string[])
+            ),
+          ];
+          const merged = exerciseIds.length > 0 ? await listMergedExercises(userId, exerciseIds) : [];
+          const nameByExerciseId = new Map(merged.map((e) => [e.id, e.name]));
           const namesMap = new Map<string, string>();
           for (const se of sessionExercises) {
-            if (se.exercise_id || se.custom_exercise_id) {
-              const exercise = await getMergedExercise(
-                se.exercise_id ? { exerciseId: se.exercise_id } : { customExerciseId: se.custom_exercise_id! },
-                userId
-              );
-              if (exercise) {
-                namesMap.set(se.id, exercise.name);
-              }
-            }
+            const key = se.exercise_id || se.custom_exercise_id;
+            if (key) namesMap.set(se.id, nameByExerciseId.get(key) ?? 'Unknown Exercise');
           }
           setExerciseNames(namesMap);
-          setSelectedDayExercises(
-            sessionExercises.map((se) => ({
-              id: se.id,
-              name: namesMap.get(se.id) || 'Unknown Exercise',
-            }))
-          );
+          exercisesToShow = sessionExercises.map((se) => ({
+            id: se.id,
+            name: namesMap.get(se.id) ?? 'Unknown Exercise',
+          }));
 
           if (__DEV__) {
             devLog('workout-tab', {
@@ -361,41 +371,40 @@ export default function WorkoutTab() {
             });
           }
         }
-      } else {
-        // Load exercises from template for the selected plan day
-        const selectedDay = sortedDays.find((d) => d.day.day_name === planDayName);
-        if (selectedDay) {
-          const namesMap = new Map<string, string>();
-          for (const slot of selectedDay.slots) {
-            if (slot.exercise_id || slot.custom_exercise_id) {
-              const exercise = await getMergedExercise(
-                slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
-                userId
-              );
-              if (exercise) {
-                namesMap.set(slot.id, exercise.name);
-              }
-            }
-          }
-          setExerciseNames(namesMap);
-          setSelectedDayExercises(
-            selectedDay.slots.map((slot) => ({
-              id: slot.id,
-              name: namesMap.get(slot.id) || 'Unknown Exercise',
-            }))
-          );
+      }
 
-          if (__DEV__) {
-            devLog('workout-tab', {
-              action: 'loadTodayWorkout_templateSlots_loaded',
-              planDayName,
-              slotCount: selectedDay.slots.length,
-            });
-          }
-        } else {
-          setSelectedDayExercises([]);
+      // Template branch or fallback when session had 0 exercises: show planned exercises so we never show "Rest Day" when plan has slots
+      if (exercisesToShow.length === 0 && selectedDay && selectedDay.slots.length > 0) {
+        const slotIds = [
+          ...new Set(
+            selectedDay.slots.flatMap((s) =>
+              [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[]
+            )
+          ),
+        ];
+        const merged = slotIds.length > 0 ? await listMergedExercises(userId, slotIds) : [];
+        const nameByExerciseId = new Map(merged.map((e) => [e.id, e.name]));
+        const namesMap = new Map<string, string>();
+        for (const slot of selectedDay.slots) {
+          const key = slot.exercise_id || slot.custom_exercise_id;
+          if (key) namesMap.set(slot.id, nameByExerciseId.get(key) ?? 'Unknown Exercise');
+        }
+        setExerciseNames(namesMap);
+        exercisesToShow = selectedDay.slots.map((slot) => ({
+          id: slot.id,
+          name: namesMap.get(slot.id) ?? 'Unknown Exercise',
+        }));
+
+        if (__DEV__) {
+          devLog('workout-tab', {
+            action: 'loadTodayWorkout_templateSlots_loaded',
+            planDayName,
+            slotCount: selectedDay.slots.length,
+          });
         }
       }
+
+      setSelectedDayExercises(exercisesToShow);
 
       // Check for completed session from today
       const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
@@ -449,6 +458,7 @@ export default function WorkoutTab() {
     } finally {
       setIsLoading(false);
       setHasInitiallyLoaded(true);
+      loadInFlightRef.current = false;
     }
   }, [getCurrentUserId, toast, selectedPlanDayName, hasInitiallyLoaded]);
 
@@ -465,16 +475,19 @@ export default function WorkoutTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlanDayName]);
 
-  // Refresh on focus - reload workout state when tab becomes active
+  // Refresh on focus - reload when tab becomes active, throttled to avoid request storm (ERR_INSUFFICIENT_RESOURCES)
   useFocusEffect(
     useCallback(() => {
-      if (hasInitiallyLoaded) {
-        // Force reload to check for workout progress
-        console.log('[workout-tab] useFocusEffect: reloading workout state');
-        loadTodayWorkout();
+      if (!hasInitiallyLoaded) return;
+      const now = Date.now();
+      if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
+      lastFocusLoadRef.current = now;
+      if (__DEV__) {
+        devLog('workout-tab', { action: 'useFocusEffect: reloading workout state' });
       }
+      loadTodayWorkout();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hasInitiallyLoaded]) // Don't include loadTodayWorkout to avoid re-creating callback
+    }, [hasInitiallyLoaded])
   );
 
   const openPlanDayPicker = useCallback(() => {

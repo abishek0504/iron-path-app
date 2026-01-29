@@ -130,6 +130,14 @@ export default function ActiveWorkoutScreen() {
     }
   }, [currentExerciseIndex, exercises]);
 
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  };
+
   const loadActiveSession = async () => {
     if (!userId) return;
 
@@ -138,7 +146,7 @@ export default function ActiveWorkoutScreen() {
       const session = await getActiveSession(userId);
       if (!session) {
         toast.error('No active workout found');
-        router.back();
+        goBack();
         return;
       }
 
@@ -493,7 +501,7 @@ export default function ActiveWorkoutScreen() {
     const success = await completeWorkoutSession(sessionId);
     if (success) {
       toast.success('Workout completed!');
-      router.back(); // Properly dismisses modal
+      goBack();
     } else {
       toast.error('Failed to complete workout');
     }
@@ -515,7 +523,7 @@ export default function ActiveWorkoutScreen() {
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No exercises in this workout</Text>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
             <Text style={styles.backButtonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -531,8 +539,7 @@ export default function ActiveWorkoutScreen() {
       <View style={styles.header}>
         <TouchableOpacity 
           onPress={() => {
-            // Save current state before exiting (so user can continue later)
-            router.back();
+            goBack();
           }} 
           style={styles.headerButton}
         >

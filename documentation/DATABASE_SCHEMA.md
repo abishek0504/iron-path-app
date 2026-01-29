@@ -14,6 +14,13 @@ Apply migrations in this exact order:
 6. **20250101000003_patch_h_remove_goal.sql** - Removes goal from profiles/prescriptions/slots
 7. **20250101000004_seed_v2_muscles.sql** - Seeds 28 canonical muscles
 8. **20250101000005_split_full_name.sql** - Splits full_name into first_name/last_name
+9. **20260122000001_refine_implicit_hits.sql** - Updates implicit_hits to weighted coefficients (40+ exercises)
+10. **20260122000002_seed_exercise_prescriptions.sql** - Seeds exercise prescriptions for all exercises
+11. **20260122000004_add_suggested_weights.sql** - Adds suggested_weight_lbs/kg to prescriptions (45 exercises)
+12. **20260128000000_seed_exercise_metadata.sql** - Seeds description, secondary_muscles, equipment_needed, movement_pattern, tempo_category
+13. **20260128000001_seed_ai_recommended_exercises.sql** - Seeds AI allow-list with priority_order and notes (all exercises with prescriptions)
+14. **20260128000002_seed_prescription_source_notes.sql** - Seeds source_notes explaining prescription rationale
+15. **20260128000003_add_bw_multiplier_prescriptions.sql** - Adds suggested_weight_multiplier_bw (bodyweight-based default; no NULLs)
 
 ##
 
@@ -69,10 +76,19 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **Key Fields:**
 - `density_score` (0-10): Exercise quality rating
 - `primary_muscles[]`: Array of muscle keys
+- `secondary_muscles[]`: Array of secondary muscles involved (nullable, seeded from biomechanics research)
 - `implicit_hits{}`: JSONB map of muscle_key → activation (0-1)
   - **Weighted Activation Schema**: Coefficients distinguish Primary Movers (1.0) from Major Synergists (0.6-0.9) and Stabilizers (0.3-0.5)
   - Example: Bench Press `{"triceps": 0.6, "anterior_deltoids": 0.5}` - triceps contributes 60% of the stress a primary mover would
   - Allows the fatigue engine to accurately accrete stress to secondary muscles without overestimating total fatigue
+- `description`: Exercise description and form cues (nullable, seeded with instructional text)
+- `equipment_needed[]`: Array of required equipment (nullable, empty array = bodyweight)
+- `movement_pattern`: Primary movement pattern classification (nullable)
+  - Values: `push`, `pull`, `squat`, `hinge`, `lunge`, `carry`, `rotation`, `anti-rotation`
+  - Based on NSCA movement pattern framework
+- `tempo_category`: Tempo classification (nullable)
+  - Values: `explosive` (maximal velocity, power-focused), `controlled` (moderate tempo, hypertrophy-focused), `isometric` (static hold)
+  - Based on ACSM tempo guidelines
 - `is_unilateral`: Doubles time estimate if true
 - `avg_time_per_set_sec`: Includes rest between sets
 - `is_timed`: Boolean flag for timed vs reps mode
@@ -97,6 +113,9 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `sets_min/max` (1-10)
 - `reps_min/max` (1-50, only if mode='reps')
 - `duration_sec_min/max` (5-3600, only if mode='timed')
+- `suggested_weight_multiplier_bw`: **Bodyweight multiplier for suggested weight (no NULLs).** suggested_weight = current_weight × this. Single default per exercise/experience (no ranges). Based on average lifting benchmarks (e.g. Deadlift ~1.0/1.5/2.0× BW, Squat ~0.85/1.5/1.75×, Bench ~0.65/1.25/1.5×). Bodyweight exercises (chin-up, pull-up, dip, push-up) = 0. Seeded in 20260128000003.
+- `suggested_weight_lbs/kg`: Legacy fixed weights (nullable); runtime prefers multiplier × profile.current_weight with fallback 150 lb / 70 kg.
+- `source_notes`: Research-backed notes explaining prescription rationale (seeded 2026-01-28)
 
 **Constraints:**
 - Mode-specific target bands (reps XOR duration)
@@ -109,6 +128,23 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **Indexes:**
 - `idx_v2_exercise_prescriptions_lookup` on (exercise_id, experience, mode, is_active)
 
+**How prescriptions are selected**
+- Lookup key: `(exercise_id, experience, mode)` with `is_active = true`. One row per exercise per experience level per mode (reps vs timed).
+- Code: `getExercisePrescription(exerciseId, experience, mode)` in `src/lib/supabase/queries/prescriptions.ts`. Used by `selectExerciseTargets()` in `src/lib/engine/targetSelection.ts` and by week generation in `src/lib/engine/weekGeneration.ts`.
+- Custom exercises do not use this table; they use their own target bands from `v2_user_custom_exercises` (sets_min/max, reps_min/max, duration_sec_min/max).
+
+**Why rows look similar (bands vs weights)**
+- Rep/set **bands** (e.g. beginner 3 sets, 8–12 reps) are shared by design across many rep-based exercises for hypertrophy. So Chin Up and Squat can have the same sets_min/max and reps_min/max for a given experience/mode. That is intentional: the band is “do 8–12 reps in 3 sets,” not “do the same weight.”
+- What differs per exercise is **suggested_weight_multiplier_bw**: e.g. Squat (Barbell) 0.85/1.5/1.75× BW; Chin Up (Supinated) 0 (bodyweight-only). Suggested weight is always calculated: current_weight × multiplier (fallback 150 lb / 70 kg when profile has no current_weight). No NULLs: bodyweight exercises use multiplier 0 so suggested weight = 0. So “different exercises use different prescriptions” means: same rep band is possible, but each exercise has its own row and its own starting weight (or NULL for bodyweight).
+
+**Chin-ups vs squats (harder vs easier)**
+- Chin-ups are harder per rep than squats. The system does not give “the same amount” of work: it gives the same **rep band** (e.g. 8–12) and **exercise-specific starting weight**. For chin-ups, multiplier = 0 so suggested weight = 0 (bodyweight; user can add weight via belt). For squats, multiplier = 0.85/1.5/1.75× BW so suggested = e.g. 128 lbs for 150 lb beginner. So the first time: chin-up suggests “3 sets × 8–12 reps” at bodyweight; squat suggests “3 sets × 8–12 reps” at 95 lbs (beginner). After the user logs sessions, the algorithm uses **tracked values** (last weight, last reps, RPE) to progress: for chin-ups progress is usually more reps or added weight (belt/dumbbell) within the band; for squats it is weight increases when hitting top of rep band at acceptable RPE.
+
+**End-to-end flow: prescription → user edit → algorithm**
+1. **Fill from prescription**: When starting a session, `selectExerciseTargets()` uses the prescription band (sets/reps or duration) and, if no history, **suggested weight = current_weight × suggested_weight_multiplier_bw** (fallback 150 lb or 70 kg). Always a number; no NULLs. Targets are prefilled into `v2_session_sets` (e.g. 3 sets × 10 reps @ 128 lbs for 150 lb beginner squat).
+2. **User edits**: The user can change weight, reps, RPE, and duration before or after completing a set. Saving marks the set complete (`performed_at` set) and stores the actual values in `v2_session_sets`.
+3. **Algorithm uses tracked values**: On the next session, `getExerciseHistory()` returns last weight, last reps, last duration, and average RPE. `selectExerciseTargets()` uses that for progressive overload: e.g. if last reps ≥ 90% of reps_max and RPE ≤ 7, suggest weight increase and reset reps to reps_min; otherwise suggest lastReps+1 at same weight. So future targets are driven by **performed truth**, not by the static prescription; the prescription only defines the valid band and the initial/default suggestion.
+
 **Patch H Impact:**
 - Removed `goal` column
 - Consolidated duplicates (preferred hypertrophy if existed)
@@ -119,8 +155,13 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 
 **Key Fields:**
 - `exercise_id` (PRIMARY KEY, FK to v2_exercises)
-- `priority_order`: Lower = higher priority in selection
+- `priority_order`: Lower = higher priority in selection (1 = highest priority)
+  - **Priority Tiers**: 1-10 (foundational compounds), 11-20 (secondary compounds), 21-30 (assistance), 31-40 (isolation), 41+ (core/stability)
+  - Based on exercise hierarchy: compound movements prioritized over isolation exercises
+- `notes`: Exercise description and programming rationale (seeded 2026-01-28)
 - `is_active`: Soft delete flag
+
+**Seeding**: All exercises with active prescriptions are automatically added to AI allow-list (migration 20260128000001)
 
 **RLS**: Auth SELECT only
 
@@ -135,6 +176,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **Key Fields:**
 - PRIMARY KEY: `(user_id, exercise_id)`
 - Override fields: `*_override` suffix (density_score_override, primary_muscles_override, etc.)
+- **User default targets** (migration 20260128000004): `default_set_count`, `default_weight`, `default_reps`, `default_duration_sec`, `default_rest_sec`. Used to prefill add-exercise-edit and future workouts from the user's last-saved values. Prescriptions remain suggested starting values; once the user edits and taps Done (edit-slot), these defaults persist.
 
 **Merge Rule**: `merged_value = override ?? master_default`
 
@@ -405,6 +447,43 @@ For app to function, need at a minimum:
 - AI recommendations in `v2_ai_recommended_exercises` (if using AI generation)
 
 **Without prescriptions**: Planner will show "Missing targets" and exclude exercises from AI generation.
+
+### Exercise Metadata Seeding (2026-01-28)
+Migration `20260128000000_seed_exercise_metadata.sql` fills missing fields in `v2_exercises`:
+- **description**: Exercise descriptions and form cues based on biomechanics best practices
+- **secondary_muscles**: Secondary muscles involved (complementary to `implicit_hits` weighted coefficients)
+- **equipment_needed**: Required equipment arrays (empty array = bodyweight exercises)
+- **movement_pattern**: Classification using NSCA framework (push, pull, squat, hinge, lunge, carry, rotation, anti-rotation)
+- **tempo_category**: Tempo classification (explosive, controlled, isometric) based on ACSM guidelines
+
+**Data Sources**: 
+- EMG research and biomechanics literature for muscle activation patterns
+- NSCA movement pattern classification system
+- ACSM tempo guidelines for repetition duration
+- Exercise form best practices from strength training literature
+
+**Coverage**: All exercises referenced in prescriptions migration (40+ exercises) have complete metadata seeded.
+
+### AI Recommended Exercises Seeding (2026-01-28)
+Migration `20260128000001_seed_ai_recommended_exercises.sql` seeds `v2_ai_recommended_exercises`:
+- **Priority Order**: Based on exercise hierarchy (compound movements first, isolation last)
+  - Tier 1 (1-10): Foundational compounds (Squat, Deadlift, Bench Press, etc.)
+  - Tier 2 (11-20): Secondary compounds (Incline Press, Hip Thrust, etc.)
+  - Tier 3 (21-30): Assistance/accessory compounds
+  - Tier 4 (31-40): Isolation exercises
+  - Tier 5 (41+): Core/stability exercises
+- **Notes**: Exercise descriptions and programming rationale for each exercise
+- **Coverage**: All exercises with active prescriptions are eligible for AI generation
+
+### Prescription Source Notes Seeding (2026-01-28)
+Migration `20260128000002_seed_prescription_source_notes.sql` fills `source_notes` in `v2_exercise_prescriptions`:
+- **Purpose**: Explains prescription rationale and target band sources
+- **Content**: Research-backed notes about why specific rep/set ranges are recommended
+- **Examples**: 
+  - Beginner hypertrophy: "8-12 reps optimize muscle growth for novices"
+  - Advanced hypertrophy: "5-8 reps emphasize strength-endurance"
+  - Isometric targets: Explains time-under-tension principles
+- **Coverage**: All prescriptions have source notes explaining programming decisions
 
 ## Type Generation
 

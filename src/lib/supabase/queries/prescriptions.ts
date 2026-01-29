@@ -19,6 +19,8 @@ export interface ExercisePrescription {
   duration_sec_max: number | null;
   suggested_weight_lbs: number | null;
   suggested_weight_kg: number | null;
+  /** Multiplier of bodyweight for suggested weight. suggested = current_weight * this. 0 = bodyweight-only. Always set (no NULL). */
+  suggested_weight_multiplier_bw: number;
   is_active: boolean;
   source_notes?: string;
 }

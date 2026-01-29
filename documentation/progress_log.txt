@@ -5,6 +5,73 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-28 - Workout Tab: Fix Unknown Exercise and ERR_INSUFFICIENT_RESOURCES
+-----------------------------------------------------------------------------
+ROOT CAUSE:
+- Unknown Exercise: Exercise names were resolved by calling getMergedExercise once per session/slot in a loop. When fetches failed (e.g. ERR_INSUFFICIENT_RESOURCES) or were slow, namesMap stayed empty for some items.
+- ERR_INSUFFICIENT_RESOURCES: useFocusEffect ran loadTodayWorkout on every tab focus; loadTodayWorkout did N sequential getMergedExercise calls (one per exercise) plus auth, templates, session, etc. Rapid tab switching or repeated focus caused a request storm and exhausted browser resources.
+
+FIXES (app/(tabs)/index.tsx):
+- Batched exercise name resolution: Replaced per-exercise getMergedExercise loops with a single listMergedExercises(userId, exerciseIds) call for session exercises and for template slots. Build namesMap from the batch result so one failed request doesn't leave multiple "Unknown Exercise".
+- In-flight guard: loadInFlightRef prevents overlapping loadTodayWorkout runs (e.g. focus + selectedPlanDayName effect). Set at start of loadTodayWorkout, cleared in finally.
+- Focus throttle: useFocusEffect only calls loadTodayWorkout if last focus load was > 4s ago (lastFocusLoadRef). Prevents request storm when switching tabs repeatedly.
+- Replaced console.log in useFocusEffect with devLog.
+
+---
+
+2026-01-28 - Bodyweight Multiplier for Suggested Weight (No NULLs)
+------------------------------------------------------------------
+IMPLEMENTED:
+- Added suggested_weight_multiplier_bw to v2_exercise_prescriptions (migration 20260128000003). Single default value per exercise/experience (no ranges). Based on average lifting benchmarks: Deadlift ~1.0/1.5/2.0× BW, Squat ~0.85/1.5/1.75×, Bench ~0.65/1.25/1.5×, OHP ~0.4/0.6/0.8×, RDL ~0.8/1.2/1.6×; bodyweight exercises (chin-up, pull-up, dip, push-up, etc.) = 0.
+- selectExerciseTargets() always calculates suggested weight: current_weight × multiplier (fallback 150 lb / 70 kg when profile has no current_weight). Optional context.current_weight and context.use_imperial; fetches profile when not provided. Never returns undefined for weight in reps mode (0 when multiplier 0).
+- calculateWeightSuggestion() uses prescription suggested_weight_multiplier_bw and profile current_weight; returns weight = round((bw ?? DEFAULT_BW) * multiplier, 0.5). Fallback when no prescription returns weight: 0 (no NULLs). formatWeightSuggestion shows "0 lbs" when weight is 0 (typeof suggestion.weight === 'number').
+- Custom exercises (no prescription row) get weight = 0 when no history.
+
+FILES:
+- supabase/migrations/20260128000003_add_bw_multiplier_prescriptions.sql
+- src/lib/supabase/queries/prescriptions.ts (interface suggested_weight_multiplier_bw)
+- src/lib/engine/targetSelection.ts (context current_weight/use_imperial, getUserProfile, DEFAULT_BW, always compute weight from multiplier)
+- src/lib/utils/weightSuggestions.ts (multiplier × BW, experience param, fallback 0, formatWeightSuggestion for 0)
+- documentation/DATABASE_SCHEMA.md (migration order, key fields, flow)
+
+---
+
+2026-01-28 - Prescription Selection, Purpose, and Flow (Documentation)
+----------------------------------------------------------------------
+DOCUMENTED:
+- How prescriptions are selected: (exercise_id, experience, mode) with is_active=true; one row per exercise per experience per mode. Custom exercises use their own bands from v2_user_custom_exercises.
+- Why rows look similar: rep/set bands are shared by design (hypertrophy); suggested_weight_lbs/kg differs per exercise (Squat 95/135/185, Chin Up NULL bodyweight, etc.).
+- Chin-ups vs squats: same rep band possible; different starting weight (bodyweight vs barbell). Algorithm uses tracked values for progressive overload (reps or added weight for chin-ups; weight increases for squats when hitting top of band at RPE ≤7).
+- End-to-end flow: (1) prescription fills initial targets; (2) user edits and saves; (3) algorithm uses getExerciseHistory() and selectExerciseTargets() for next session within same band.
+
+FILES UPDATED:
+- DATABASE_SCHEMA.md: Added subsections under v2_exercise_prescriptions (How prescriptions are selected, Why rows look similar, Chin-ups vs squats, End-to-end flow).
+- DATA_FLOWS.md: Clarified Flow 2 (Start workout) with prescription lookup and flow note (prescription → user edit → algorithm uses tracked values).
+
+---
+
+2026-01-28 - User Default Targets and Planner Recovery
+------------------------------------------------------
+IMPLEMENTED:
+- No template found when back from workout: planner useFocusEffect recovery now sets isLoadingTemplate(true) before async getTemplates/loadTemplate so the user sees "Loading planner..." instead of "No template found" until load completes. Handles empty templates and getCurrentUserId failure by clearing loading.
+- User default targets (master exercises): migration 20260128000004 adds default_set_count, default_weight, default_reps, default_duration_sec, default_rest_sec to v2_user_exercise_overrides. Prescriptions remain suggested starting values; user-edited values persist when they tap Done in add-exercise-edit (edit-slot mode).
+- add-exercise-edit: saveUserDefaultsAndBack implemented. Validates sets, upserts user defaults (first set + set count) via upsertUserExerciseDefaults (update-or-insert so other override columns are preserved). Navigates to planner; no prescription toast.
+- Prefill: loadPrefill prefers getUserExerciseDefaults when exerciseId is set; otherwise uses selectExerciseTargets (prescription + history).
+
+FILES:
+- app/(tabs)/planner.tsx (recovery sets loading, catch/clear loading)
+- supabase/migrations/20260128000004_add_user_default_targets.sql
+- src/lib/supabase/queries/exercises.ts (getUserExerciseDefaults, upsertUserExerciseDefaults)
+- app/add-exercise-edit.tsx (saveUserDefaultsAndBack, loadPrefill from user defaults)
+- documentation/DATABASE_SCHEMA.md (v2_user_exercise_overrides default_* fields)
+
+MIGRATION APPLIED VIA SUPABASE MCP:
+- Checked live DB: list_tables / execute_sql confirmed v2_user_exercise_overrides had no default_* columns.
+- Applied via apply_migration(name: "add_user_default_targets", query: <SQL>). Recorded as version 20260129174611.
+- Verified: execute_sql on information_schema.columns shows default_set_count, default_weight, default_reps, default_duration_sec, default_rest_sec.
+
+---
+
 2026-01-28 - Add Exercise Edit: Per-Set UI and Validation
 --------------------------------------------------------
 IMPLEMENTED:
@@ -825,6 +892,32 @@ See IMPLEMENTATION_STATUS.md for detailed feature matrix.
 - app/add-exercise-edit.tsx: edit-before-add with per-set cards (weight/reps or duration), rest after each set, Add Set / Remove per set, validation (red errors), checkbox "Add for today only". Prefill from selectExerciseTargets. On confirm todayOnly: create session exercise then insert v2_session_sets with user per-set values; else add template slot.
 - Planner: Add Exercise button now router.push('/add-exercise', { dayId, templateId, dayName }). Removed handleAddExercise, useExercisePicker, Exercise import.
 - Registered add-exercise and add-exercise-edit in root _layout Stack.
+
+[2026-01-28] Seed exercise metadata fields with research-backed data
+- Created migration 20260128000000_seed_exercise_metadata.sql to fill missing fields in v2_exercises:
+  - description: Exercise descriptions and form cues based on biomechanics best practices
+  - secondary_muscles: Secondary muscles involved (complementary to implicit_hits weighted coefficients)
+  - equipment_needed: Required equipment arrays (empty array = bodyweight exercises)
+  - movement_pattern: Classification using NSCA framework (push, pull, squat, hinge, lunge, carry, rotation, anti-rotation)
+  - tempo_category: Tempo classification (explosive, controlled, isometric) based on ACSM guidelines
+- Data sources: EMG research, biomechanics literature, NSCA movement pattern classification, ACSM tempo guidelines
+- Coverage: All 40+ exercises referenced in prescriptions migration have complete metadata seeded
+- Applied via Supabase MCP: Used execute_sql to apply all exercise metadata updates successfully
+- Updated DATABASE_SCHEMA.md: Added field descriptions, migration order, seeding section
+- Migration is idempotent (UPDATE statements safe to re-run)
+
+[2026-01-28] Seed AI recommended exercises and prescription source notes
+- Created migration 20260128000001_seed_ai_recommended_exercises.sql:
+  - Seeds v2_ai_recommended_exercises with priority_order and notes for all exercises with prescriptions
+  - Priority tiers: 1-10 (foundational compounds), 11-20 (secondary), 21-30 (assistance), 31-40 (isolation), 41+ (core/stability)
+  - Notes: Exercise descriptions and programming rationale based on exercise hierarchy research
+  - Coverage: All 45 exercises with prescriptions are now in AI allow-list
+- Created migration 20260128000002_seed_prescription_source_notes.sql:
+  - Seeds source_notes in v2_exercise_prescriptions explaining prescription rationale
+  - Research-backed notes about rep/set ranges and programming principles
+  - Coverage: All 135 prescriptions have source notes (45 exercises × 3 experience levels)
+- Applied via Supabase MCP: Both migrations applied successfully
+- Updated DATABASE_SCHEMA.md: Added AI recommended exercises and prescription source notes sections
 
 End of Log
 ==========

@@ -31,6 +31,10 @@ import {
   applyStructureEditToTemplate,
   getTemplateSlotsForDay,
 } from '../src/lib/supabase/queries/templates';
+import {
+  getUserExerciseDefaults,
+  upsertUserExerciseDefaults,
+} from '../src/lib/supabase/queries/exercises';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
 
@@ -104,6 +108,7 @@ export default function AddExerciseEditScreen() {
     customExerciseId: string;
     exerciseName: string;
     isTimed: string;
+    editSlotId?: string;
   }>();
   const {
     dayId,
@@ -113,7 +118,10 @@ export default function AddExerciseEditScreen() {
     customExerciseId,
     exerciseName,
     isTimed,
+    editSlotId,
   } = params;
+  const isEditSlot = !!editSlotId;
+  const [removing, setRemoving] = useState(false);
 
   const profileId = useUserStore((s) => s.profile?.id);
   const experience = useUserStore((s) => s.profile?.experience_level) || 'beginner';
@@ -151,23 +159,67 @@ export default function AddExerciseEditScreen() {
     }
     setLoading(true);
     try {
-      const target = await selectExerciseTargets(
-        { exerciseId: exerciseIdVal, customExerciseId: customExerciseIdVal },
-        userId,
-        { experience },
-        0
-      );
-      const count = Math.max(1, target?.sets ?? 3);
-      // Autofill from target when available; otherwise sensible defaults (not 0) so user can edit
-      const weightStr =
-        target?.mode === 'reps' && target.weight != null ? String(target.weight) : '';
-      const repsStr =
-        target?.mode === 'reps' && target.reps != null ? String(target.reps) : '10';
-      const durStr =
-        target?.mode === 'timed' && target.duration_sec != null
-          ? String(target.duration_sec)
-          : '60';
-      const restStr = String(DEFAULT_REST_SEC);
+      // Prefer user-saved defaults (master exercises only) over prescription
+      let count: number;
+      let weightStr: string;
+      let repsStr: string;
+      let durStr: string;
+      let restStr: string;
+
+      if (exerciseIdVal) {
+        const userDefaults = await getUserExerciseDefaults(userId, exerciseIdVal);
+        if (userDefaults && userDefaults.default_set_count >= 1) {
+          count = userDefaults.default_set_count;
+          weightStr =
+            userDefaults.default_weight != null ? String(userDefaults.default_weight) : '';
+          repsStr =
+            userDefaults.default_reps != null ? String(userDefaults.default_reps) : '10';
+          durStr =
+            userDefaults.default_duration_sec != null
+              ? String(userDefaults.default_duration_sec)
+              : '60';
+          restStr =
+            userDefaults.default_rest_sec != null
+              ? String(userDefaults.default_rest_sec)
+              : String(DEFAULT_REST_SEC);
+          if (__DEV__) devLog('add-exercise-edit', { action: 'loadPrefill_fromUserDefaults', setCount: count });
+        } else {
+          const target = await selectExerciseTargets(
+            { exerciseId: exerciseIdVal, customExerciseId: customExerciseIdVal },
+            userId,
+            { experience },
+            0
+          );
+          count = Math.max(1, target?.sets ?? 3);
+          weightStr =
+            target?.mode === 'reps' && target.weight != null ? String(target.weight) : '';
+          repsStr =
+            target?.mode === 'reps' && target.reps != null ? String(target.reps) : '10';
+          durStr =
+            target?.mode === 'timed' && target.duration_sec != null
+              ? String(target.duration_sec)
+              : '60';
+          restStr = String(DEFAULT_REST_SEC);
+        }
+      } else {
+        const target = await selectExerciseTargets(
+          { exerciseId: exerciseIdVal, customExerciseId: customExerciseIdVal },
+          userId,
+          { experience },
+          0
+        );
+        count = Math.max(1, target?.sets ?? 3);
+        weightStr =
+          target?.mode === 'reps' && target.weight != null ? String(target.weight) : '';
+        repsStr =
+          target?.mode === 'reps' && target.reps != null ? String(target.reps) : '10';
+        durStr =
+          target?.mode === 'timed' && target.duration_sec != null
+            ? String(target.duration_sec)
+            : '60';
+        restStr = String(DEFAULT_REST_SEC);
+      }
+
       const next: EditSet[] = [];
       for (let i = 1; i <= count; i++) {
         next.push({
@@ -180,7 +232,7 @@ export default function AddExerciseEditScreen() {
         });
       }
       setSets(next);
-      if (__DEV__) devLog('add-exercise-edit', { action: 'loadPrefill', target: !!target, setCount: next.length });
+      if (__DEV__) devLog('add-exercise-edit', { action: 'loadPrefill', setCount: next.length });
     } catch (e) {
       if (__DEV__) devError('add-exercise-edit', e);
     } finally {
@@ -224,7 +276,65 @@ export default function AddExerciseEditScreen() {
     });
   };
 
+  const handleRemoveFromRoutine = async () => {
+    if (!editSlotId || !templateId) return;
+    setRemoving(true);
+    try {
+      const success = await applyStructureEditToTemplate(templateId, { type: 'removeSlot', slotId: editSlotId });
+      if (success) {
+        useUIStore.getState().setPlannerNeedsRefetch(true);
+        toast.success('Removed from routine');
+        router.replace('/(tabs)/planner');
+      } else {
+        toast.error('Failed to remove from routine');
+      }
+    } catch (e) {
+      if (__DEV__) devError('add-exercise-edit', e);
+      toast.error('Failed to remove from routine');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const saveUserDefaultsAndBack = async () => {
+    if (!allSetsValid(sets, isTimedMode)) {
+      toast.error('Fix errors before saving');
+      return;
+    }
+    if (exerciseIdVal && userId) {
+      const first = sets[0];
+      const success = await upsertUserExerciseDefaults(userId, exerciseIdVal, {
+        setCount: sets.length,
+        weight:
+          !isTimedMode && first.weight.trim() !== ''
+            ? parseFloat(first.weight)
+            : null,
+        reps:
+          !isTimedMode && first.reps.trim() !== ''
+            ? parseInt(first.reps, 10)
+            : null,
+        duration_sec:
+          isTimedMode && first.duration_sec.trim() !== ''
+            ? parseInt(first.duration_sec, 10)
+            : null,
+        rest_sec:
+          first.rest_sec.trim() !== ''
+            ? parseInt(first.rest_sec, 10)
+            : null,
+      });
+      if (!success) {
+        toast.error('Failed to save defaults');
+        return;
+      }
+    }
+    router.replace('/(tabs)/planner');
+  };
+
   const handleConfirm = async () => {
+    if (isEditSlot) {
+      await saveUserDefaultsAndBack();
+      return;
+    }
     const missingContext: string[] = [];
     if (!userId) missingContext.push('userId');
     if (!dayId) missingContext.push('dayId');
@@ -308,7 +418,15 @@ export default function AddExerciseEditScreen() {
           return;
         }
         toast.success('Added to routine');
+        if (__DEV__) {
+          const before = useUIStore.getState().plannerNeedsRefetch;
+          devLog('add-exercise-edit', { action: 'setPlannerNeedsRefetch', before, settingTo: true });
+        }
         useUIStore.getState().setPlannerNeedsRefetch(true);
+        if (__DEV__) {
+          const after = useUIStore.getState().plannerNeedsRefetch;
+          devLog('add-exercise-edit', { action: 'setPlannerNeedsRefetch', after, success: after === true });
+        }
       }
       router.replace('/(tabs)/planner');
     } catch (e) {
@@ -440,33 +558,49 @@ export default function AddExerciseEditScreen() {
             <Text style={styles.addSetButtonText}>Add Set</Text>
           </TouchableOpacity>
 
-          <View style={styles.todayOnlyCard}>
-            <View style={styles.checkboxRow}>
-              <Text style={styles.checkboxLabel}>Add for today only</Text>
-              <Switch
-                value={todayOnly}
-                onValueChange={setTodayOnly}
-                trackColor={{ false: colors.borderLight, true: colors.primary }}
-                thumbColor={colors.background}
-              />
+          {!isEditSlot && (
+            <View style={styles.todayOnlyCard}>
+              <View style={styles.checkboxRow}>
+                <Text style={styles.checkboxLabel}>Add for today only</Text>
+                <Switch
+                  value={todayOnly}
+                  onValueChange={setTodayOnly}
+                  trackColor={{ false: colors.borderLight, true: colors.primary }}
+                  thumbColor={colors.background}
+                />
+              </View>
+              <Text style={styles.hint}>
+                Off = add to routine for this day. On = add only to today&apos;s session.
+              </Text>
             </View>
-            <Text style={styles.hint}>
-              Off = add to routine for this day. On = add only to today&apos;s session.
-            </Text>
-          </View>
+          )}
+
+          {isEditSlot && (
+            <TouchableOpacity
+              style={[styles.removeFromRoutineBtn, removing && styles.confirmBtnDisabled]}
+              onPress={handleRemoveFromRoutine}
+              disabled={removing}
+            >
+              {removing ? (
+                <ActivityIndicator size="small" color={colors.error} />
+              ) : (
+                <Text style={styles.removeFromRoutineBtnText}>Remove from routine</Text>
+              )}
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[
               styles.confirmBtn,
-              (saving || !allSetsValid(sets, isTimedMode)) && styles.confirmBtnDisabled,
+              (saving || (!isEditSlot && !allSetsValid(sets, isTimedMode))) && styles.confirmBtnDisabled,
             ]}
             onPress={handleConfirm}
-            disabled={saving || !allSetsValid(sets, isTimedMode)}
+            disabled={saving || (!isEditSlot && !allSetsValid(sets, isTimedMode))}
           >
             {saving ? (
               <ActivityIndicator size="small" color={colors.background} />
             ) : (
-              <Text style={styles.confirmBtnText}>Confirm add</Text>
+              <Text style={styles.confirmBtnText}>{isEditSlot ? 'Done' : 'Confirm add'}</Text>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -595,6 +729,20 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.textMuted,
     marginTop: spacing.xs,
+  },
+  removeFromRoutineBtn: {
+    backgroundColor: colors.errorBg,
+    borderWidth: 1,
+    borderColor: colors.error,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  removeFromRoutineBtnText: {
+    color: colors.error,
+    fontSize: typography.sizes.base,
+    fontWeight: '600',
   },
   confirmBtn: {
     backgroundColor: colors.primary,

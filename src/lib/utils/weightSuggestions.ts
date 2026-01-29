@@ -1,15 +1,19 @@
 /**
  * Weight Suggestion Logic
- * 
+ *
  * Calculates smart weight suggestions based on:
  * 1. Recent workout history (progressive overload)
- * 2. Exercise prescriptions (default starting point)
- * 3. User experience level
+ * 2. Prescription bodyweight multiplier (suggested = current_weight * multiplier; no NULLs)
+ * 3. Fallback default when no history/prescription
  */
 
 import { getExerciseHistory } from '../supabase/queries/workouts';
+import { getUserProfile } from '../supabase/queries/users';
 import { supabase } from '../supabase/client';
 import { devLog } from './logger';
+
+const DEFAULT_BW_LBS = 150;
+const DEFAULT_BW_KG = 70;
 
 interface WeightSuggestion {
   weight?: number;
@@ -21,6 +25,7 @@ interface WeightSuggestion {
 
 /**
  * Calculate suggested weight for next set
+ * experienceLevel: optional; if not provided, fetched from user profile for prescription lookup
  */
 export async function calculateWeightSuggestion(
   exerciseId: string | undefined,
@@ -29,7 +34,9 @@ export async function calculateWeightSuggestion(
   setNumber: number,
   mode: 'reps' | 'timed',
   targetReps?: number,
-  targetDuration?: number
+  targetDuration?: number,
+  experienceLevel?: string,
+  useImperial: boolean = true
 ): Promise<WeightSuggestion> {
   if (__DEV__) {
     devLog('weight-suggestion', {
@@ -82,24 +89,31 @@ export async function calculateWeightSuggestion(
     }
   }
 
-  // No history - fetch from prescription table
+  // No history - use prescription bodyweight multiplier (always a number, no NULLs)
   if (referenceId && mode === 'reps') {
+    const experience = experienceLevel ?? (await getUserProfile(userId))?.experience_level ?? 'beginner';
     const { data: prescription } = await supabase
       .from('v2_exercise_prescriptions')
-      .select('suggested_weight_lbs, suggested_weight_kg, experience')
+      .select('suggested_weight_multiplier_bw')
       .eq('exercise_id', referenceId)
+      .eq('experience', experience)
       .eq('mode', 'reps')
-      .single();
+      .eq('is_active', true)
+      .maybeSingle();
 
-    if (prescription && prescription.suggested_weight_lbs) {
-      // Use prescription weight (assume beginner/intermediate for now)
-      const weight = prescription.suggested_weight_lbs; // TODO: Use user's actual experience level
-      
+    if (prescription && typeof prescription.suggested_weight_multiplier_bw === 'number') {
+      const multiplier = prescription.suggested_weight_multiplier_bw;
+      const profile = await getUserProfile(userId);
+      const bw = profile?.current_weight ?? (useImperial ? DEFAULT_BW_LBS : DEFAULT_BW_KG);
+      const raw = bw * multiplier;
+      const weight = Math.round(raw * 2) / 2;
+
       if (__DEV__) {
         devLog('weight-suggestion', {
-          action: 'usingPrescription',
+          action: 'usingPrescriptionBwMultiplier',
           weight,
-          experience: prescription.experience,
+          multiplier,
+          experience,
         });
       }
 
@@ -112,11 +126,11 @@ export async function calculateWeightSuggestion(
     }
   }
 
-  // Fallback - no history, no prescription
+  // Fallback - no history, no prescription: still return 0 so UI has a value (user edits at workout)
   if (mode === 'reps') {
     return {
       reps: targetReps,
-      weight: undefined, // User will input first time
+      weight: 0,
       source: 'default',
       confidence: 'low',
     };
@@ -136,7 +150,7 @@ export function formatWeightSuggestion(
   suggestion: WeightSuggestion,
   useImperial: boolean
 ): string {
-  if (suggestion.weight) {
+  if (typeof suggestion.weight === 'number') {
     const unit = useImperial ? 'lbs' : 'kg';
     return `${suggestion.weight} ${unit}`;
   }

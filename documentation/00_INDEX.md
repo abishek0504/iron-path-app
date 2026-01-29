@@ -79,6 +79,32 @@ Old documentation archived in [`archive/`](archive/) with timestamps.
 
 ## Recent Updates
 
+### 2026-01-28: Bodyweight Multiplier for Suggested Weight (No NULLs)
+- **suggested_weight_multiplier_bw**: New column on v2_exercise_prescriptions. Suggested weight = current_weight × multiplier (fallback 150 lb / 70 kg). Single value per exercise/experience from average lifting benchmarks (Deadlift ~1.0/1.5/2.0× BW, Squat ~0.85/1.5/1.75×, Bench ~0.65/1.25/1.5×; bodyweight exercises = 0). No NULLs: always a calculated default; user enters actual value when working out.
+- **Code**: targetSelection and weightSuggestions use multiplier × BW; formatWeightSuggestion shows "0 lbs" when weight is 0.
+
+### 2026-01-28: Prescription Selection and Flow (Documentation)
+- **Prescription clarity**: DATABASE_SCHEMA.md now explains how prescriptions are selected (exercise_id + experience + mode), why rows look similar (shared rep bands, exercise-specific suggested_weight), how chin-ups vs squats differ (bodyweight vs barbell; algorithm uses tracked values for progressive overload), and the end-to-end flow: prescription → user edit → algorithm uses tracked values.
+- **DATA_FLOWS.md**: Flow 2 (Start workout) updated with prescription lookup detail and flow note.
+
+### 2026-01-28: Exercise Metadata & AI Recommendations Seeding
+- **Research-Backed Seed Data**: Created migrations to fill missing fields across multiple tables
+- **v2_exercises**: description, secondary_muscles, equipment_needed, movement_pattern, tempo_category
+- **v2_ai_recommended_exercises**: priority_order and notes for all exercises with prescriptions
+- **v2_exercise_prescriptions**: source_notes explaining prescription rationale
+- **Data Sources**: EMG research, biomechanics literature, NSCA movement patterns, ACSM tempo guidelines, exercise hierarchy research
+- **Coverage**: 
+  - All 45 exercises have complete metadata
+  - All exercises with prescriptions are in AI allow-list with priority rankings
+  - All 135 prescriptions have source notes explaining programming decisions
+- **Movement Patterns**: push, pull, squat, hinge, lunge, carry, rotation, anti-rotation
+- **Tempo Categories**: explosive, controlled, isometric
+- **Applied via Supabase MCP**: All migrations applied successfully using execute_sql and apply_migration
+
+**Documentation Updated**:
+- `DATABASE_SCHEMA.md`: Added field descriptions, migration order, seeding sections for all tables
+- `progress_log.txt`: Documented seeding work and data sources
+
 ### 2026-01-21: Active Workout Flow & Set Completion
 - **CRITICAL BUG FIX**: `markSetComplete` now always sets `performed_at` timestamp
 - **Exercise-by-Exercise Flow**: Implemented workout phase state machine (execution → rest → logging)

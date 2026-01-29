@@ -54,10 +54,9 @@ EXPO_PUBLIC_SUPABASE_REDIRECT_URL=http://localhost:8081/auth/callback
 ### 4. Setup Supabase Database
 
 **Option A: Using Supabase MCP (Recommended)**
-```bash
-# Assuming MCP is configured
-# Apply migrations via MCP tools
-```
+- **Check the live database first**: Use MCP `list_tables` or `execute_sql` (e.g. `SELECT column_name FROM information_schema.columns WHERE table_name = 'your_table'`) to confirm the change doesn't already exist and fits the schema.
+- **Apply migrations**: Use MCP `apply_migration` with `name` (string) and `query` (string = full SQL). Migrations are recorded in the project; local files in `supabase/migrations/` are the source of truth for the SQL.
+- **Verify**: After applying, run `list_migrations` and/or `execute_sql` to confirm the new columns/objects exist.
 
 **Option B: Using Supabase CLI**
 ```bash
@@ -130,7 +129,9 @@ This opens Expo DevTools in browser. Choose platform:
 ```bash
 npm run web
 ```
-Opens http://localhost:8081 in browser
+Opens http://localhost:8081 in browser.
+
+**Dev logs on web (terminal instead of browser console):** In a second terminal run `node scripts/dev-log-server.js`. In __DEV__ on web, `devLog`/`devError` POST to http://localhost:3333/log so logs appear in that Node terminal.
 
 **iOS Simulator (Mac only):**
 ```bash

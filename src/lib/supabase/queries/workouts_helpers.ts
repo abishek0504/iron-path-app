@@ -444,4 +444,3 @@ export async function applySmartRefresh(
   }
   return true;
 }
-

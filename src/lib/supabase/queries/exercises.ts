@@ -309,3 +309,111 @@ export async function listMergedExercises(
   }
 }
 
+/** User default targets for prefill (from v2_user_exercise_overrides). Master exercises only. */
+export interface UserExerciseDefaults {
+  default_set_count: number;
+  default_weight: number | null;
+  default_reps: number | null;
+  default_duration_sec: number | null;
+  default_rest_sec: number | null;
+}
+
+/**
+ * Get user default targets for an exercise (master only).
+ * Used to prefill add-exercise-edit when the user has previously saved defaults.
+ */
+export async function getUserExerciseDefaults(
+  userId: string,
+  exerciseId: string
+): Promise<UserExerciseDefaults | null> {
+  const { data, error } = await supabase
+    .from('v2_user_exercise_overrides')
+    .select('default_set_count, default_weight, default_reps, default_duration_sec, default_rest_sec')
+    .eq('user_id', userId)
+    .eq('exercise_id', exerciseId)
+    .maybeSingle();
+
+  if (error && __DEV__) {
+    devError('exercise-query', error, { userId, exerciseId });
+    return null;
+  }
+  if (!data || data.default_set_count == null || data.default_set_count < 1) {
+    return null;
+  }
+  return {
+    default_set_count: data.default_set_count,
+    default_weight: data.default_weight ?? null,
+    default_reps: data.default_reps ?? null,
+    default_duration_sec: data.default_duration_sec ?? null,
+    default_rest_sec: data.default_rest_sec ?? null,
+  };
+}
+
+/** Payload for upserting user default targets. */
+export interface UpsertUserDefaultsPayload {
+  setCount: number;
+  weight: number | null;
+  reps: number | null;
+  duration_sec: number | null;
+  rest_sec: number | null;
+}
+
+/**
+ * Upsert user default targets for an exercise (master only).
+ * Call when user saves "Done" in add-exercise-edit (edit-slot mode) or when we want to persist prefill values.
+ * Uses update when row exists so other override columns are not overwritten.
+ */
+export async function upsertUserExerciseDefaults(
+  userId: string,
+  exerciseId: string,
+  payload: UpsertUserDefaultsPayload
+): Promise<boolean> {
+  const { setCount, weight, reps, duration_sec, rest_sec } = payload;
+  const updatedAt = new Date().toISOString();
+
+  const { data: existing } = await supabase
+    .from('v2_user_exercise_overrides')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('exercise_id', exerciseId)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from('v2_user_exercise_overrides')
+      .update({
+        default_set_count: setCount,
+        default_weight: weight,
+        default_reps: reps,
+        default_duration_sec: duration_sec,
+        default_rest_sec: rest_sec,
+        updated_at: updatedAt,
+      })
+      .eq('user_id', userId)
+      .eq('exercise_id', exerciseId);
+    if (error) {
+      if (__DEV__) devError('exercise-query', error, { userId, exerciseId });
+      return false;
+    }
+    return true;
+  }
+
+  const { error: insertError } = await supabase
+    .from('v2_user_exercise_overrides')
+    .insert({
+      user_id: userId,
+      exercise_id: exerciseId,
+      default_set_count: setCount,
+      default_weight: weight,
+      default_reps: reps,
+      default_duration_sec: duration_sec,
+      default_rest_sec: rest_sec,
+      updated_at: updatedAt,
+    });
+  if (insertError) {
+    if (__DEV__) devError('exercise-query', insertError, { userId, exerciseId });
+    return false;
+  }
+  return true;
+}
+

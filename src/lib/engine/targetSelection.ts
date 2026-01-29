@@ -7,7 +7,13 @@
 import { getExercisePrescription } from '../supabase/queries/prescriptions';
 import { getMergedExercise } from '../supabase/queries/exercises';
 import { getExerciseHistory } from '../supabase/queries/workouts';
+import { getUserProfile } from '../supabase/queries/users';
 import { devLog, devError } from '../utils/logger';
+
+/** Fallback bodyweight (lbs) when profile has no current_weight. */
+const DEFAULT_BW_LBS = 150;
+/** Fallback bodyweight (kg) when profile has no current_weight. */
+const DEFAULT_BW_KG = 70;
 
 export interface ExerciseTarget {
   exercise_id: string;
@@ -20,6 +26,10 @@ export interface ExerciseTarget {
 
 export interface TargetSelectionContext {
   experience: string;
+  /** Optional: bodyweight for suggested weight = multiplier * current_weight. Fetched from profile if not provided. */
+  current_weight?: number;
+  /** Optional: if false, use kg and DEFAULT_BW_KG for fallback. */
+  use_imperial?: boolean;
 }
 
 export interface ExerciseIdentifier {
@@ -186,10 +196,22 @@ export async function selectExerciseTargets(
           reps = Math.ceil((prescription.reps_min + prescription.reps_max) / 2);
         }
         reps = Math.max(prescription.reps_min, Math.min(prescription.reps_max, reps));
-        
-        // Use suggested weight from prescription if available
-        if ('suggested_weight_lbs' in prescription && prescription.suggested_weight_lbs !== null) {
-          weight = prescription.suggested_weight_lbs; // TODO: Use kg for metric users
+
+        // Always calculate suggested weight from bodyweight multiplier (no NULLs)
+        if ('suggested_weight_multiplier_bw' in prescription && typeof prescription.suggested_weight_multiplier_bw === 'number') {
+          const multiplier = prescription.suggested_weight_multiplier_bw;
+          let bw: number = context.current_weight ?? 0;
+          if (bw <= 0) {
+            const profile = await getUserProfile(userId);
+            bw = profile?.current_weight ?? (context.use_imperial === false ? DEFAULT_BW_KG : DEFAULT_BW_LBS);
+          }
+          const raw = bw * multiplier;
+          weight = Math.round(raw * 2) / 2; // nearest 0.5
+        } else {
+          // Custom exercise or legacy: use suggested_weight_lbs if present, else 0
+          weight = ('suggested_weight_lbs' in prescription && prescription.suggested_weight_lbs != null)
+            ? prescription.suggested_weight_lbs
+            : 0;
         }
       }
     }
