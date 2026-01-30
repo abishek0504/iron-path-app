@@ -13,6 +13,7 @@ import { colors, spacing, borderRadius, typography } from '../src/lib/utils/them
 import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore } from '../src/stores/userStore';
 import { devLog } from '../src/lib/utils/logger';
+import { AuthVideoBackground } from '../src/components/ui/AuthVideoBackground';
 
 export default function Login() {
   const router = useRouter();
@@ -90,6 +91,8 @@ export default function Login() {
 
   return (
     <View style={styles.container}>
+      <AuthVideoBackground />
+      <View style={styles.content}>
       <View style={styles.card}>
         <Text style={styles.title}>Welcome back</Text>
         <Text style={styles.subtitle}>Log in to continue</Text>
@@ -143,6 +146,7 @@ export default function Login() {
           <Text style={styles.linkText}>Need an account? Sign up</Text>
         </TouchableOpacity>
       </View>
+      </View>
     </View>
   );
 }
@@ -150,10 +154,14 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.background,
     padding: spacing.lg,
+    zIndex: 1,
   },
   card: {
     width: '100%',

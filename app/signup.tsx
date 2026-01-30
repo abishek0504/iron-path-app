@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 import { Check, X, Eye, EyeOff } from 'lucide-react-native';
+import { AuthVideoBackground } from '../src/components/ui/AuthVideoBackground';
 
 export default function Signup() {
   const router = useRouter();
@@ -171,7 +173,13 @@ export default function Signup() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.card}>
+      <AuthVideoBackground />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.card}>
         <Text style={styles.title}>Create your account</Text>
         <Text style={styles.subtitle}>Sign up to get started</Text>
 
@@ -357,6 +365,7 @@ export default function Signup() {
           <Text style={styles.linkText}>Already have an account? Log in</Text>
         </TouchableOpacity>
       </View>
+      </ScrollView>
     </View>
   );
 }
@@ -364,10 +373,14 @@ export default function Signup() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.background,
     padding: spacing.lg,
+    minHeight: '100%',
   },
   card: {
     width: '100%',
