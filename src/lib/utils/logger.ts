@@ -2,25 +2,10 @@
  * Dev logging utility
  * All logs are wrapped in __DEV__ checks and only log aggregates/state drivers
  * Never log per-item data in loops
- * On web in __DEV__, logs are sent to the dev log server (run: node scripts/dev-log-server.js) so they appear in the Node terminal.
+ * On web we use console to avoid ERR_CONNECTION_REFUSED when the dev log server is not running.
  */
 
 type LogPayload = Record<string, any>;
-
-const DEV_LOG_URL = 'http://localhost:3333/log';
-
-function isWeb(): boolean {
-  return typeof window !== 'undefined' && typeof window.document !== 'undefined';
-}
-
-function sendToLogServer(module: string, payload: LogPayload, level: 'log' | 'error' | 'warn'): void {
-  if (!isWeb()) return;
-  fetch(DEV_LOG_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ module, payload, level }),
-  }).catch(() => {});
-}
 
 /**
  * Structured dev logging
@@ -28,10 +13,7 @@ function sendToLogServer(module: string, payload: LogPayload, level: 'log' | 'er
  * @param payload - State drivers, ranges, aggregates (not per-item data)
  */
 export function devLog(module: string, payload: LogPayload): void {
-  if (__DEV__) {
-    if (isWeb()) sendToLogServer(module, payload, 'log');
-    else console.log(`[${module}]`, payload);
-  }
+  if (__DEV__) console.log(`[${module}]`, payload);
 }
 
 /**
@@ -41,11 +23,7 @@ export function devLog(module: string, payload: LogPayload): void {
  * @param context - Additional context
  */
 export function devError(module: string, error: unknown, context?: LogPayload): void {
-  if (__DEV__) {
-    const payload = { error: String(error), ...context };
-    if (isWeb()) sendToLogServer(module, payload, 'error');
-    else console.error(`[${module}] ERROR:`, error, context || '');
-  }
+  if (__DEV__) console.error(`[${module}] ERROR:`, error, context || '');
 }
 
 /**
@@ -55,10 +33,6 @@ export function devError(module: string, error: unknown, context?: LogPayload): 
  * @param context - Additional context
  */
 export function devWarn(module: string, message: string, context?: LogPayload): void {
-  if (__DEV__) {
-    const payload = { message, ...context };
-    if (isWeb()) sendToLogServer(module, payload, 'warn');
-    else console.warn(`[${module}] WARN:`, message, context || '');
-  }
+  if (__DEV__) console.warn(`[${module}] WARN:`, message, context || '');
 }
 

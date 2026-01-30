@@ -464,45 +464,61 @@ export default function PlannerTab() {
   // Get selected day and date context (Today vs Future) — declared before useFocusEffect so it can be used there
   const selectedDay = templateData?.days[selectedDayIndex] || null;
 
-  // Refetch when needed: flag set, or templateData lost (e.g. back from workout). Throttle recovery to prevent infinite loop when load fails.
+  // Refetch when needed: flag set (e.g. after add/remove in add-exercise-edit), or templateData lost (e.g. back from workout). Throttle recovery to avoid infinite retry when load fails.
   useFocusEffect(
     useCallback(() => {
-      if (plannerNeedsRefetch && activeTemplateId) {
+      if (plannerNeedsRefetch) {
         setPlannerNeedsRefetch(false);
-        loadTemplate(activeTemplateId);
-      } else {
-        // Recover when templateData is null — only once per focus and throttled to avoid infinite retry when load fails
-        const now = Date.now();
-        const mayRecover =
-          !templateData &&
-          !isLoadingTemplate &&
-          !loadTemplateInFlightRef.current &&
-          !recoveryAttemptedThisFocusRef.current &&
-          now - lastRecoveryAttemptRef.current >= RECOVERY_THROTTLE_MS;
-
-        if (mayRecover) {
-          recoveryAttemptedThisFocusRef.current = true;
-          lastRecoveryAttemptRef.current = now;
-          setIsLoadingTemplate(true);
-          getCurrentUserId().then((userId) => {
-            if (!userId) {
-              setIsLoadingTemplate(false);
-              return;
-            }
-            getUserTemplatesCached(userId).then((templates) => {
-              if (templates.length > 0) {
-                loadTemplate(templates[0].id);
-              } else {
+        if (activeTemplateId) {
+          loadTemplate(activeTemplateId);
+        } else {
+          // Refetch requested but we don't have activeTemplateId (e.g. tab remounted after add/remove) — run recovery to load first template
+          const now = Date.now();
+          if (now - lastRecoveryAttemptRef.current >= RECOVERY_THROTTLE_MS) {
+            lastRecoveryAttemptRef.current = now;
+            setIsLoadingTemplate(true);
+            getCurrentUserId().then((userId) => {
+              if (!userId) {
                 setIsLoadingTemplate(false);
+                return;
               }
-            }).catch(() => setIsLoadingTemplate(false));
-          });
-        } else if (selectedDay?.day.day_name === getTodayDayName()) {
-          // When viewing today, refresh today's session so "Today Only" additions (and Edit) show up
-          getCurrentUserId().then((id) => {
-            if (id) loadTodaySessionExercises(id);
-          });
+              getUserTemplatesCached(userId).then((templates) => {
+                if (templates.length > 0) loadTemplate(templates[0].id);
+                else setIsLoadingTemplate(false);
+              }).catch(() => setIsLoadingTemplate(false));
+            });
+          }
         }
+        return;
+      }
+
+      // Recover when templateData is null — only once per focus and throttled
+      const now = Date.now();
+      const mayRecover =
+        !templateData &&
+        !isLoadingTemplate &&
+        !loadTemplateInFlightRef.current &&
+        !recoveryAttemptedThisFocusRef.current &&
+        now - lastRecoveryAttemptRef.current >= RECOVERY_THROTTLE_MS;
+
+      if (mayRecover) {
+        recoveryAttemptedThisFocusRef.current = true;
+        lastRecoveryAttemptRef.current = now;
+        setIsLoadingTemplate(true);
+        getCurrentUserId().then((userId) => {
+          if (!userId) {
+            setIsLoadingTemplate(false);
+            return;
+          }
+          getUserTemplatesCached(userId).then((templates) => {
+            if (templates.length > 0) loadTemplate(templates[0].id);
+            else setIsLoadingTemplate(false);
+          }).catch(() => setIsLoadingTemplate(false));
+        });
+      } else if (selectedDay?.day.day_name === getTodayDayName()) {
+        getCurrentUserId().then((id) => {
+          if (id) loadTodaySessionExercises(id);
+        });
       }
 
       return () => {
@@ -512,17 +528,14 @@ export default function PlannerTab() {
   );
   const dateContext = useDateContext(selectedDay?.day.day_name);
 
-  // Reload session exercises when day changes (only if viewing today)
+  // When switching to today tab: show cached Today Only list immediately, refresh in background.
+  // Do not clear todaySessionExercises when switching away — keeps cache so returning to today has no lag (like Routine).
   useEffect(() => {
     if (selectedDay && selectedDay.day.day_name === getTodayDayName()) {
       const userId = getCurrentUserId();
       userId.then((id) => {
-        if (id) {
-          loadTodaySessionExercises(id);
-        }
+        if (id) loadTodaySessionExercises(id);
       });
-    } else {
-      setTodaySessionExercises([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDayIndex]); // Only reload when day index changes, not on function recreation
@@ -540,6 +553,7 @@ export default function PlannerTab() {
       }
       setIsSaving(true);
       try {
+        invalidateTemplate(activeTemplateId);
         const dayData = templateData?.days.find((d) => d.day.id === dayId);
         const sortOrder = (dayData?.slots.length ?? 0) + 1;
         const success = await applyStructureEditToTemplate(activeTemplateId, {
@@ -550,8 +564,9 @@ export default function PlannerTab() {
           sortOrder,
         });
         if (success) {
-          invalidateTemplate(activeTemplateId);
           await loadTemplate(activeTemplateId);
+          const userId = await getCurrentUserId();
+          if (userId) loadTodaySessionExercises(userId);
           toast.success('Added to routine for this day');
         } else {
           toast.error('Failed to add to routine');
@@ -565,7 +580,7 @@ export default function PlannerTab() {
         setIsSaving(false);
       }
     },
-    [activeTemplateId, templateData, loadTemplate, toast]
+    [activeTemplateId, templateData, loadTemplate, loadTodaySessionExercises, getCurrentUserId, toast]
   );
 
   // Handle removing slot (template structure only)

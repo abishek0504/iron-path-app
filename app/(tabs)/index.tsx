@@ -28,6 +28,7 @@ import { createWorkoutSession, getActiveSession, prefillSessionSets } from '../.
 import {
   getTemplateWithDaysAndSlotsCached,
   getUserTemplatesCached,
+  invalidateTemplate,
 } from '../../src/lib/cache/templateCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
@@ -266,7 +267,8 @@ export default function WorkoutTab() {
 
       setActiveTemplate(template);
 
-      // Get full template with days and slots (depends on template)
+      // Invalidate so we always get fresh template (e.g. after adding exercises in Plan tab)
+      invalidateTemplate(template.id);
       const fullTemplate = await getTemplateWithDaysAndSlotsCached(template.id);
       if (!fullTemplate) {
         setTemplateDays([]);
@@ -332,22 +334,21 @@ export default function WorkoutTab() {
           .then(({ data }) => data),
       ]);
 
-      // Only bind to an active session when:
-      // - it is for "today" (UTC), and
-      // - the user is viewing today's plan day.
+      // "Continue" only when there's a save point (at least one set performed). Otherwise show "Start" and current plan.
       const isViewingToday = selectedPlanDayName === getTodayDayName();
-      setHasActiveWorkout(hasActiveForToday && isViewingToday);
+      const hasSavePoint = hasActiveForToday && isViewingToday && hasCompletedSets;
+      setHasActiveWorkout(hasSavePoint);
 
       // Match plan day case-insensitively (DB may store "Monday" or "monday")
       const matchPlanDay = (d: { day: { day_name?: string } }) =>
         (d.day.day_name ?? '').toLowerCase() === (planDayName ?? '').toLowerCase();
 
-      // Load exercises from active session OR template
+      // Show session exercises only when there's a save point (user has started logging). Otherwise show template (current plan) so add/remove in Plan tab is reflected.
       let exercisesToShow: Array<{ id: string; name: string }> = [];
       const selectedDay = sortedDays.find(matchPlanDay);
 
-      if (hasActiveForToday && activeSession && selectedPlanDayName === getTodayDayName()) {
-        // Load exercises from the active session
+      if (hasActiveForToday && activeSession && selectedPlanDayName === getTodayDayName() && hasCompletedSets) {
+        // Load exercises from the active session (only when user has a save point)
         const { data: sessionExercises, error: sessionExercisesError } = await supabase
           .from('v2_session_exercises')
           .select('id, exercise_id, custom_exercise_id, sort_order')
@@ -391,33 +392,74 @@ export default function WorkoutTab() {
         }
       }
 
-      // Template branch or fallback when session had 0 exercises: show planned exercises so we never show "Rest Day" when plan has slots
-      if (exercisesToShow.length === 0 && selectedDay && selectedDay.slots.length > 0) {
-        const slotIds = [
-          ...new Set(
-            selectedDay.slots.flatMap((s) =>
-              [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[]
-            )
-          ),
-        ];
-        const merged = slotIds.length > 0 ? await listMergedExercisesCached(userId, slotIds) : [];
-        const nameByExerciseId = new Map(merged.map((e) => [e.id, e.name]));
+      // When no save point: show template (current plan) + Today Only (session exercises not in template) so Plan tab add/remove is reflected and Today Only still appears
+      if (exercisesToShow.length === 0 && selectedDay) {
+        const templateSlotKeys = new Set(
+          selectedDay.slots.flatMap((s) =>
+            [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[]
+          )
+        );
+        const slotIds = [...new Set(templateSlotKeys)];
+        const mergedSlots = slotIds.length > 0 ? await listMergedExercisesCached(userId, slotIds) : [];
+        const nameByExerciseId = new Map(mergedSlots.map((e) => [e.id, e.name]));
         const namesMap = new Map<string, string>();
         for (const slot of selectedDay.slots) {
           const key = slot.exercise_id || slot.custom_exercise_id;
           if (key) namesMap.set(slot.id, nameByExerciseId.get(key) ?? 'Unknown Exercise');
         }
-        setExerciseNames(namesMap);
         exercisesToShow = selectedDay.slots.map((slot) => ({
           id: slot.id,
           name: namesMap.get(slot.id) ?? 'Unknown Exercise',
         }));
 
-        if (__DEV__) {
+        // Add Today Only: session exercises not in template (when viewing today and we have an active session)
+        if (
+          hasActiveForToday &&
+          activeSession &&
+          selectedPlanDayName === getTodayDayName()
+        ) {
+          const { data: sessionExercises } = await supabase
+            .from('v2_session_exercises')
+            .select('id, exercise_id, custom_exercise_id, sort_order')
+            .eq('session_id', activeSession.id)
+            .order('sort_order', { ascending: true });
+
+          const todayOnly = (sessionExercises || []).filter((se) => {
+            const key = se.exercise_id || se.custom_exercise_id;
+            return key && !templateSlotKeys.has(key);
+          });
+          if (todayOnly.length > 0) {
+            const todayOnlyIds = [
+              ...new Set(
+                todayOnly.flatMap((se) =>
+                  [se.exercise_id, se.custom_exercise_id].filter(Boolean) as string[]
+                )
+            )];
+            const mergedToday = todayOnlyIds.length > 0
+              ? await listMergedExercisesCached(userId, todayOnlyIds)
+              : [];
+            const todayNames = new Map(mergedToday.map((e) => [e.id, e.name]));
+            for (const se of todayOnly) {
+              const key = se.exercise_id || se.custom_exercise_id;
+              if (key) namesMap.set(se.id, todayNames.get(key) ?? 'Unknown Exercise');
+            }
+            exercisesToShow = [
+              ...exercisesToShow,
+              ...todayOnly.map((se) => ({
+                id: se.id,
+                name: namesMap.get(se.id) ?? 'Unknown Exercise',
+              })),
+            ];
+          }
+        }
+
+        setExerciseNames(namesMap);
+        if (__DEV__ && selectedDay.slots.length > 0) {
           devLog('workout-tab', {
-            action: 'loadTodayWorkout_templateSlots_loaded',
+            action: 'loadTodayWorkout_templateAndTodayOnly_loaded',
             planDayName,
-            slotCount: selectedDay.slots.length,
+            templateCount: selectedDay.slots.length,
+            totalCount: exercisesToShow.length,
           });
         }
       }
@@ -532,7 +574,25 @@ export default function WorkoutTab() {
 
     const selectedDay = templateDays.find((d) => d.day.day_name === selectedPlanDayName);
     const slots = selectedDay?.slots || [];
+
+    // Allow starting with only Today Only (no template slots): just open active workout
     if (slots.length === 0) {
+      const existingSession = await getActiveSession(userId);
+      const todayUtcKey = getUtcDayKey(new Date());
+      const existingIsToday =
+        existingSession &&
+        getUtcDayKey(new Date(existingSession.started_at)) === todayUtcKey &&
+        existingSession.day_name === selectedPlanDayName;
+      if (existingIsToday && existingSession) {
+        const { data: existingExercises } = await supabase
+          .from('v2_session_exercises')
+          .select('id')
+          .eq('session_id', existingSession.id);
+        if (existingExercises && existingExercises.length > 0) {
+          router.push('/workout/active');
+          return;
+        }
+      }
       toast.error('No exercises scheduled for this day');
       return;
     }
@@ -546,7 +606,61 @@ export default function WorkoutTab() {
       });
     }
 
+    const effectiveExperience = profile?.experience_level || 'beginner';
+    const context: TargetSelectionContext = { experience: effectiveExperience };
+
     try {
+      const existingSession = await getActiveSession(userId);
+      const todayUtcKey = getUtcDayKey(new Date());
+      const existingIsToday =
+        existingSession &&
+        getUtcDayKey(new Date(existingSession.started_at)) === todayUtcKey &&
+        existingSession.day_name === selectedPlanDayName;
+
+      // Collect Today Only from existing session (exercises not in template) so we preserve them when replacing
+      let todayOnlyFromExisting: Array<{ exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }> = [];
+      if (existingIsToday && existingSession) {
+        const { data: existingSes } = await supabase
+          .from('v2_session_exercises')
+          .select('id, exercise_id, custom_exercise_id, sort_order')
+          .eq('session_id', existingSession.id)
+          .order('sort_order', { ascending: true });
+        const templateSlotKeys = new Set(
+          slots.flatMap((s) => [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[])
+        );
+        todayOnlyFromExisting = (existingSes || [])
+          .filter((se) => {
+            const key = se.exercise_id || se.custom_exercise_id;
+            return key && !templateSlotKeys.has(key);
+          })
+          .map((se) => ({
+            exercise_id: se.exercise_id ?? null,
+            custom_exercise_id: se.custom_exercise_id ?? null,
+            sort_order: se.sort_order,
+          }));
+      }
+
+      // If existing session has no save point, delete it before creating new one (so new session = template + Today Only)
+      if (existingIsToday && existingSession) {
+        const { data: seIds } = await supabase
+          .from('v2_session_exercises')
+          .select('id')
+          .eq('session_id', existingSession.id);
+        const ids = (seIds || []).map((se: { id: string }) => se.id);
+        let hasSavePoint = false;
+        if (ids.length > 0) {
+          const { count } = await supabase
+            .from('v2_session_sets')
+            .select('*', { count: 'exact', head: true })
+            .in('session_exercise_id', ids)
+            .not('performed_at', 'is', null);
+          hasSavePoint = (count ?? 0) > 0;
+        }
+        if (!hasSavePoint) {
+          await supabase.from('v2_workout_sessions').delete().eq('id', existingSession.id);
+        }
+      }
+
       // Create session (started now, day_name = selected plan day)
       const session = await createWorkoutSession(userId, activeTemplate.id, selectedPlanDayName);
       if (!session) {
@@ -554,16 +668,15 @@ export default function WorkoutTab() {
         return;
       }
 
-      // Create session exercises for each slot
       const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
       const targetsMap = new Map<
         string,
         { sets: number; reps?: number; duration_sec?: number; weight?: number }
       >();
 
-      const effectiveExperience = profile?.experience_level || 'beginner';
-      const context: TargetSelectionContext = { experience: effectiveExperience };
+      let nextSortOrder = 0;
 
+      // 1) Template slots
       for (const slot of slots) {
         if (!slot.exercise_id && !slot.custom_exercise_id) continue;
 
@@ -573,7 +686,7 @@ export default function WorkoutTab() {
             session_id: session.id,
             exercise_id: slot.exercise_id || null,
             custom_exercise_id: slot.custom_exercise_id || null,
-            sort_order: slot.sort_order,
+            sort_order: nextSortOrder++,
           })
           .select('id, exercise_id, custom_exercise_id')
           .single();
@@ -597,7 +710,6 @@ export default function WorkoutTab() {
         const exerciseKey = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
         if (!exerciseKey) continue;
 
-        // Always use prescription/history-based targets
         const target = await selectExerciseTargets(
           {
             exerciseId: sessionExercise.exercise_id || undefined,
@@ -607,7 +719,6 @@ export default function WorkoutTab() {
           context,
           0
         );
-
         if (target) {
           targetsMap.set(exerciseKey, {
             sets: target.sets,
@@ -618,7 +729,56 @@ export default function WorkoutTab() {
         }
       }
 
-      // Prefill session sets
+      // 2) Today Only from existing session (persist for this date)
+      for (const row of todayOnlyFromExisting) {
+        const { data: sessionExercise, error: exerciseError } = await supabase
+          .from('v2_session_exercises')
+          .insert({
+            session_id: session.id,
+            exercise_id: row.exercise_id,
+            custom_exercise_id: row.custom_exercise_id,
+            sort_order: nextSortOrder++,
+          })
+          .select('id, exercise_id, custom_exercise_id')
+          .single();
+
+        if (exerciseError || !sessionExercise) {
+          if (__DEV__) {
+            devError('workout-tab', exerciseError || new Error('Failed to create Today Only session exercise'), {
+              sessionId: session.id,
+            });
+          }
+          continue;
+        }
+
+        sessionExercises.push({
+          id: sessionExercise.id,
+          exercise_id: sessionExercise.exercise_id || undefined,
+          custom_exercise_id: sessionExercise.custom_exercise_id || undefined,
+        });
+
+        const exerciseKey = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
+        if (!exerciseKey) continue;
+
+        const target = await selectExerciseTargets(
+          {
+            exerciseId: sessionExercise.exercise_id || undefined,
+            customExerciseId: sessionExercise.custom_exercise_id || undefined,
+          },
+          userId,
+          context,
+          0
+        );
+        if (target) {
+          targetsMap.set(exerciseKey, {
+            sets: target.sets,
+            reps: target.reps,
+            duration_sec: target.duration_sec,
+            weight: target.weight,
+          });
+        }
+      }
+
       if (sessionExercises.length > 0 && targetsMap.size > 0) {
         await prefillSessionSets(session.id, sessionExercises, targetsMap);
       }
