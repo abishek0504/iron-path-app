@@ -12,12 +12,14 @@ import { listMergedExercises } from '../../src/lib/supabase/queries/exercises';
 import {
   getSessionsInRange,
   getRecentSessions,
-  getCachedTopPRs,
-  getYearToDateStats,
-  getStreak,
   formatPRDisplay,
   type TopPR,
 } from '../../src/lib/supabase/queries/workouts';
+import {
+  getYearToDateStatsCached,
+  getStreakCached,
+  getCachedTopPRsCached,
+} from '../../src/lib/cache/dashboardStatsCache';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
@@ -47,6 +49,7 @@ export default function DashboardTab() {
   const [recentSessions, setRecentSessionsState] = useState<SessionSummary[]>([]);
   const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
   const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
@@ -100,26 +103,12 @@ export default function DashboardTab() {
       const [thisWeek, recent, topPrs, yearStats, streakCount] = await Promise.all([
         getSessionsInRange(userId, start.toISOString(), end.toISOString()),
         getRecentSessions(userId, 3),
-        getCachedTopPRs(userId, 3),
-        getYearToDateStats(userId),
-        getStreak(userId),
+        getCachedTopPRsCached(userId, 3),
+        getYearToDateStatsCached(userId),
+        getStreakCached(userId),
       ]);
 
-      // Muscle freshness data is now loaded by WorkoutHeatmap component
-
-      // Map exercise names for PRs
-      const exerciseIds = topPrs
-        .map((p) => p.exercise_id || p.custom_exercise_id)
-        .filter(Boolean) as string[];
-      let mergedNames: Record<string, string> = {};
-      if (exerciseIds.length) {
-        const merged = await listMergedExercises(userId, exerciseIds);
-        mergedNames = merged.reduce<Record<string, string>>((acc, ex) => {
-          acc[ex.id] = ex.name || 'Exercise';
-          return acc;
-        }, {});
-      }
-
+      // Phase 1: show stats and lists immediately with placeholder PR names
       setWeekCompleted(thisWeek.length);
       setWeekTarget(targetDays);
       setYearDaysWorkedOut(yearStats.daysWorkedOut);
@@ -129,9 +118,35 @@ export default function DashboardTab() {
       setPrs(
         topPrs.map((p) => ({
           ...p,
-          name: mergedNames[p.exercise_id || p.custom_exercise_id || ''] || 'Exercise',
+          name: 'Exercise',
         }))
       );
+      setLoading(false);
+      setShowHeatmap(true);
+
+      // Phase 2: fill in PR names (no loading gate; UI already visible)
+      const exerciseIds = topPrs
+        .map((p) => p.exercise_id || p.custom_exercise_id)
+        .filter(Boolean) as string[];
+      if (exerciseIds.length) {
+        try {
+          const merged = await listMergedExercises(userId, exerciseIds);
+          const mergedNames = merged.reduce<Record<string, string>>((acc, ex) => {
+            acc[ex.id] = ex.name || 'Exercise';
+            return acc;
+          }, {});
+          setPrs(
+            topPrs.map((p) => ({
+              ...p,
+              name: mergedNames[p.exercise_id || p.custom_exercise_id || ''] || 'Exercise',
+            }))
+          );
+        } catch (prNamesError) {
+          if (__DEV__) {
+            devError('profile-dashboard', prNamesError, { action: 'listMergedExercises_pr_names' });
+          }
+        }
+      }
 
       if (__DEV__) {
         devLog('profile-dashboard', {
@@ -203,13 +218,18 @@ export default function DashboardTab() {
               <RotateCcw size={20} color={colors.textSecondary} />
             </Pressable>
           </View>
-          {profile?.id && (
+          {profile?.id && showHeatmap ? (
             <WorkoutHeatmap
               userId={profile.id}
               bodySide={bodySide}
               onBodySideChange={setBodySide}
             />
-          )}
+          ) : profile?.id ? (
+            <View style={styles.heatmapPlaceholder}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.heatmapPlaceholderText}>Loading…</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.statGrid}>
@@ -392,6 +412,16 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  heatmapPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
+  },
+  heatmapPlaceholderText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
   },
   metric: {
     color: colors.textPrimary,

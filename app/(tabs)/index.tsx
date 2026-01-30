@@ -243,9 +243,12 @@ export default function WorkoutTab() {
         devLog('workout-tab', { action: 'loadTodayWorkout:start', userId });
       }
 
-      // Get user's active template (first template, or system template)
-      const templates = await getUserTemplates(userId);
-      const template = templates.length > 0 ? templates[0] : null;
+      // First parallel batch: templates and active session (neither depends on the other)
+      const [templatesResult, activeSession] = await Promise.all([
+        getUserTemplates(userId),
+        getActiveSession(userId),
+      ]);
+      const template = templatesResult.length > 0 ? templatesResult[0] : null;
 
       if (!template) {
         setActiveTemplate(null);
@@ -255,18 +258,20 @@ export default function WorkoutTab() {
         setIsWorkoutCompleted(false);
         setIsLoading(false);
         setHasInitiallyLoaded(true);
+        loadInFlightRef.current = false;
         return;
       }
 
       setActiveTemplate(template);
 
-      // Get full template with days and slots
+      // Get full template with days and slots (depends on template)
       const fullTemplate = await getTemplateWithDaysAndSlots(template.id);
       if (!fullTemplate) {
         setTemplateDays([]);
         setSelectedDayExercises([]);
         setIsLoading(false);
         setHasInitiallyLoaded(true);
+        loadInFlightRef.current = false;
         return;
       }
 
@@ -281,8 +286,6 @@ export default function WorkoutTab() {
         setSelectedPlanDayName(planDayName);
       }
 
-      // Check for active session FIRST
-      const activeSession = await getActiveSession(userId);
       const now = new Date();
       const todayUtcKey = getUtcDayKey(now);
       const hasActiveForToday =
@@ -292,28 +295,40 @@ export default function WorkoutTab() {
           return sessionUtcKey === todayUtcKey;
         })();
 
-      // Check if any sets have been actually completed (not just pre-filled)
-      let hasCompletedSets = false;
-      if (hasActiveForToday && activeSession) {
-        // First get session exercise IDs
-        const { data: sessionExerciseIds } = await supabase
-          .from('v2_session_exercises')
-          .select('id')
-          .eq('session_id', activeSession.id);
+      // Second parallel batch: session exercise count (for active session) and completed session from today
+      const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
+        getUtcDayBoundsIso(todayUtcKey);
 
-        if (sessionExerciseIds && sessionExerciseIds.length > 0) {
-          const exerciseIds = sessionExerciseIds.map(se => se.id);
-          
-          // Check if any sets have performed_at timestamp
+      const [hasCompletedSets, completedSession] = await Promise.all([
+        // Task A: session exercise IDs + sets count when we have an active session for today
+        (async (): Promise<boolean> => {
+          if (!hasActiveForToday || !activeSession) return false;
+          const { data: sessionExerciseIds } = await supabase
+            .from('v2_session_exercises')
+            .select('id')
+            .eq('session_id', activeSession.id);
+          if (!sessionExerciseIds || sessionExerciseIds.length === 0) return false;
+          const seIds = sessionExerciseIds.map((se: { id: string }) => se.id);
           const { count } = await supabase
             .from('v2_session_sets')
             .select('*', { count: 'exact', head: true })
-            .in('session_exercise_id', exerciseIds)
+            .in('session_exercise_id', seIds)
             .not('performed_at', 'is', null);
-
-          hasCompletedSets = (count ?? 0) > 0;
-        }
-      }
+          return (count ?? 0) > 0;
+        })(),
+        // Task B: completed session from today
+        supabase
+          .from('v2_workout_sessions')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('template_id', template.id)
+          .eq('day_name', planDayName)
+          .eq('status', 'completed')
+          .gte('completed_at', todayStartIso)
+          .lt('completed_at', tomorrowStartIso)
+          .maybeSingle()
+          .then(({ data }) => data),
+      ]);
 
       // Only bind to an active session when:
       // - it is for "today" (UTC), and
@@ -407,35 +422,18 @@ export default function WorkoutTab() {
 
       setSelectedDayExercises(exercisesToShow);
 
-      // Check for completed session from today
-      const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
-        getUtcDayBoundsIso(todayUtcKey);
-
-      const { data: completedSession } = await supabase
-        .from('v2_workout_sessions')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('template_id', template.id)
-        .eq('day_name', planDayName)
-        .eq('status', 'completed')
-        .gte('completed_at', todayStartIso)
-        .lt('completed_at', tomorrowStartIso)
-        .maybeSingle();
-
-      // Check if all exercises were completed
+      // Check if all exercises were completed (completedSession from parallel batch above)
       let isTrulyCompleted = false;
       if (completedSession && !activeSession) {
-        // Count session exercises
-        const { data: sessionExercises } = await supabase
+        const { data: completedSessionExercises } = await supabase
           .from('v2_session_exercises')
           .select('id')
           .eq('session_id', completedSession.id);
 
         const currentExerciseCount =
           fullTemplate.days.find((d) => d.day.day_name === planDayName)?.slots.length || 0;
-        const loggedExerciseCount = sessionExercises?.length || 0;
+        const loggedExerciseCount = completedSessionExercises?.length || 0;
 
-        // Workout is truly completed if all exercises were logged
         isTrulyCompleted = loggedExerciseCount >= currentExerciseCount || currentExerciseCount === 0;
       }
 
