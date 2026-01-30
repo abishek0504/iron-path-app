@@ -94,6 +94,26 @@ const handleAddExercise = async (exercise) => {
 };
 ```
 
+## State management
+
+**Stores (Zustand)** live in `src/stores/`. Screens use them for shared, cross-screen state.
+
+| Store | Purpose | Used by |
+|-------|---------|--------|
+| **userStore** | Profile (id, experience_level, current_weight, use_imperial, etc.). Single source of truth for current user. | index (set after auth), login (set after login), onboarding, edit-profile, dashboard, planner, workout active, add-exercise, add-exercise-edit, prs |
+| **uiStore** | Bottom sheets (exercisePicker, planDayPicker, etc.), toasts, `plannerNeedsRefetch` flag. Prevents modal-in-modal. | Planner, Workout tab, add-exercise-edit, dashboard, progress, edit-profile, auth screens |
+| **workoutStore** | Active session (sessionId, currentExerciseIndex, etc.). | **Not used by any screen.** Active workout screen uses local state + fetch-on-mount. Reserved for future or alternate flows. |
+| **exerciseStore** | Search query, selected exercises. | **Not used by any screen.** Reserved for future exercise-picker or multi-select flows. |
+
+**Profile flow:** Set in store by: root index (after auth), login (after sign-in), onboarding (after save), edit-profile (after load/update), dashboard (if missing, fetch and set). Other screens read `useUserStore((s) => s.profile)` and optionally `setProfile` / `updateProfile`.
+
+**Fetch-on-mount + guards:** Workout tab, Planner, Dashboard, and “today session” in Planner all use:
+- **In-flight ref:** `loadInFlightRef` (or equivalent) so a load does not start while a previous one is still running; avoids overlapping requests and flicker.
+- **Focus throttle (Workout tab):** `useFocusEffect` only triggers reload if last focus load was more than 4s ago.
+- **Stable callbacks:** Load functions use minimal deps (e.g. `[profile]` only) and functional state updates where they merge into existing state, so effect loops (e.g. “load → set state → callback recreated → effect runs again”) do not occur.
+
+**Planner-specific:** `loadTodaySessionExercises` uses functional updates for `setExerciseNames` / `setSlotTargets` and depends only on `[profile]`; `loadTemplateInFlightRef` and `recoveryAttemptedThisFocusRef` plus 5s throttle prevent failed-to-load infinite retry.
+
 ## Critical User Flows
 
 ### Flow 1: Signup → Onboarding → Planner

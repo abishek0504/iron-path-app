@@ -11,10 +11,12 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
+import { useUserStore } from '../src/stores/userStore';
 import { devLog } from '../src/lib/utils/logger';
 
 export default function Login() {
   const router = useRouter();
+  const setProfile = useUserStore((state) => state.setProfile);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -47,6 +49,7 @@ export default function Login() {
         const profile = await getUserProfileCached(userId);
 
         if (profile) {
+          setProfile(profile);
           const hasRequired =
             !!profile.experience_level &&
             !!profile.days_per_week &&

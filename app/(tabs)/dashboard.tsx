@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -50,6 +50,7 @@ export default function DashboardTab() {
   const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
   const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const loadInFlightRef = useRef(false);
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
@@ -80,6 +81,8 @@ export default function DashboardTab() {
   };
 
   const load = useCallback(async () => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     setLoading(true);
     try {
       const {
@@ -87,6 +90,7 @@ export default function DashboardTab() {
       } = await supabase.auth.getSession();
       const userId = session?.user?.id;
       if (!userId) {
+        loadInFlightRef.current = false;
         showToast('Please log in', 'error');
         router.replace('/login');
         return;
@@ -167,6 +171,7 @@ export default function DashboardTab() {
       showToast('Failed to load dashboard', 'error');
     } finally {
       setLoading(false);
+      loadInFlightRef.current = false;
     }
   }, [profile, router, setProfile, showToast, today]);
 

@@ -5,6 +5,14 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-28 - State management audit and consistency
+--------------------------------------------------
+- **Login:** Set profile in userStore after successful login (setProfile(profile)) so store is populated before redirect; index still fetches and sets on entry.
+- **Dashboard:** Added loadInFlightRef so load() does not run again while a previous load is in progress; early return on !userId clears ref. Reduces overlapping fetches when switching to Dashboard tab repeatedly.
+- **Documentation:** DATA_FLOWS.md now has a "State management" section: stores (userStore, uiStore, workoutStore, exerciseStore), who uses them, profile flow, fetch-on-mount + guards (in-flight ref, focus throttle, stable callbacks), Planner-specific guards. Notes that workoutStore and exerciseStore are not currently used by any screen (reserved).
+
+---
+
 2026-01-28 - Workout Tab: Fix Unknown Exercise and ERR_INSUFFICIENT_RESOURCES
 -----------------------------------------------------------------------------
 ROOT CAUSE:
