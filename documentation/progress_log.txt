@@ -5,6 +5,70 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-30 - Multi-workout fixes + Generate with AI sessions-per-day
+---------------------------------------------------------------------
+IMPLEMENTED:
+- **Workout tab – session-only exercises (app/(tabs)/index.tsx):**
+  - When viewing a specific session (viewingSession exists), always show only that session’s exercises from v2_session_exercises. No mixing with the day’s template slots or other sessions. Fixes bug where Workout 2 showed Chin Up plus Calf Raise/Dip from template or another session.
+  - When no sessions exist for today: show template for selected plan day so user can Start and create a session.
+- **Explicit cleanup when deleting a workout:**
+  - deleteSessionWithExercises(userId, sessionId) in src/lib/supabase/queries/workouts.ts: deletes v2_session_exercises for the session first (DB CASCADE removes v2_session_sets), then deletes v2_workout_sessions row. Ensures no orphaned session_exercises/sets.
+  - Planner trash (delete container) and Progress tab SessionDetailSheet delete now call deleteSessionWithExercises instead of deleting only v2_workout_sessions.
+- **Generate with AI – sessions per day (app/(tabs)/planner.tsx + src/lib/engine/weekGeneration.ts):**
+  - "Generate with AI" first shows Alert: "How many workout sessions per day?" with options 1 session, 2 sessions (e.g. morning/evening). Cancel closes.
+  - generateWeekForTemplate(template, userId, profile, { sessionsPerDay }) accepts optional sessionsPerDay (default 1). When sessionsPerDay > 1: returns Array<Array<string[]>> (days × sessions × exercise ids). Each session within a day is generated with muscle separation: fatigue accumulates within the day so session 2 avoids muscles hit in session 1 (same logic as different days).
+  - runGenerateWithAI(sessionsPerDay) handler: calls generator; if 1 session, distributes round-robin as before; if 2 sessions, adds slots per day in order (session 1 exercises then session 2). After adding slots, invalidateTemplate + loadTemplate to refresh and recalc targets.
+  - runOneSession() helper in weekGeneration runs greedy selector for up to maxExercises per session; sim and remaining are shared across the week so exercises are not repeated.
+
+FILES:
+- app/(tabs)/index.tsx (viewingSession → always load session exercises only; no template mix)
+- app/(tabs)/planner.tsx (Alert for sessions per day; runGenerateWithAI; createTemplateSlot import; delete uses deleteSessionWithExercises)
+- src/lib/supabase/queries/workouts.ts (deleteSessionWithExercises)
+- src/lib/engine/weekGeneration.ts (runOneSession, generateWeekForTemplate options.sessionsPerDay, return Array<Array<string[]>> when sessionsPerDay > 1)
+- src/components/progress/SessionDetailSheet.tsx (deleteSessionWithExercises, invalidateSessionsInRangeForUser import)
+
+---
+
+2026-01-30 - Multi-workout-per-day (Workout tab + Planner + active screen)
+---------------------------------------------------------------------------
+IMPLEMENTED:
+- **Workout tab (app/(tabs)/index.tsx):**
+  - Load all sessions for today via getSessionsForToday(userId, todayStartIso, tomorrowStartIso); each session = one "workout".
+  - Default to first incomplete workout (first session with status !== 'completed'); if all complete, show first (index 0).
+  - "Add Workout" button in header: createWorkoutSession(); loadTodayWorkout(undefined, { selectLast: true }).
+  - "Change" opens WorkoutPicker only when sessionsToday.length > 1 (hidden when 0 or 1 workout). List Workout 1, 2, … (✓ if completed); onSelect(index) → setSelectedWorkoutIndex(index); loadTodayWorkout(index).
+  - Start/Continue/Complete per selected workout: completed → greyed "Complete"; active with save point → "Continue" (navigate with sessionId); else "Start" (create or use session, navigate with sessionId).
+  - Reset workout: only the selected session is deleted when selectedSession exists and is active; otherwise legacy delete-all-active for today.
+- **Planner (app/(tabs)/planner.tsx):**
+  - When selected day is Today: workout containers. Each container = one session: "Workout 1", "Workout 2", … with header (title + Delete), list of exercises, and "Add Exercise" inside the container.
+  - "Add Workout" at top (when Today): createWorkoutSession(); loadTodaySessions(userId); new container appears below.
+  - Delete container (trash icon): deleteSessionWithExercises(userId, session.id); loadTodaySessions(userId).
+  - When 0 sessions for Today: one empty "Workout 1" container with Add Exercise (no sessionId; add-exercise-edit uses getOrCreateActiveSessionForToday).
+  - When selected day is not Today: single "Workout 1" block with template slots + Add Exercise (no containers).
+  - loadTodaySessions(userId): getSessionsForToday; for each session load exercises; set sessionsTodayWithExercises; fetch names/targets for display.
+- **Active workout (app/(stack)/workout/active.tsx):**
+  - Accepts sessionId route param; when present, getSessionById(userId, sessionId) instead of getActiveSession(userId).
+- **Queries:** getSessionsForToday(), getSessionById() in src/lib/supabase/queries/workouts.ts.
+- **UI:** WorkoutPicker component (src/components/ui/WorkoutPicker.tsx); workoutPicker bottom sheet in uiStore and ModalManager.
+
+BEHAVIOR:
+- If user deletes a logged session in Progress tab, that workout is no longer in DB; Workout tab reload shows remaining sessions; the deleted workout is "not done" so it will not appear as completed (and if it was the only one, Start will create a new session).
+- Plan day selector retained for "Plan day: Monday" and "Add Workout" / Start new session (template + day_name).
+
+FILES:
+- app/(tabs)/index.tsx (sessionsToday, selectedWorkoutIndex, getSessionsForToday, Add Workout, Change only when sessionsToday.length > 1, Start/Continue/Complete per workout, sessionId in navigation, handleResetWorkout for selected session)
+- app/(tabs)/planner.tsx (workout containers when Today: sessionsTodayWithExercises, loadTodaySessions, Add Workout, Delete container, Add Exercise per container; non-Today: single Workout 1 block with template slots)
+- app/(stack)/workout/active.tsx (useLocalSearchParams sessionId, getSessionById when param present)
+- app/add-exercise.tsx (sessionId param, pass to add-exercise-edit)
+- app/add-exercise-edit.tsx (sessionId param; when todayOnly and sessionId use that session instead of getOrCreateActiveSessionForToday)
+- src/lib/supabase/queries/workouts.ts (getSessionsForToday, getSessionById)
+- src/components/ui/WorkoutPicker.tsx (new)
+- src/components/ui/ModalManager.tsx (workoutPicker sheet)
+- src/stores/uiStore.ts (workoutPicker in BottomSheetId)
+- documentation/DATA_FLOWS.md (Flow 2 step 4 + new step 5 Multi-workout-per-day)
+
+---
+
 2026-01-28 - State management audit and consistency
 --------------------------------------------------
 - **Login:** Set profile in userStore after successful login (setProfile(profile)) so store is populated before redirect; index still fetches and sets on entry.

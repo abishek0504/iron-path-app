@@ -8,8 +8,8 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { Trash2 } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
 import { supabase } from '../../lib/supabase/client';
-import { getSessionsInRangeCached } from '../../lib/cache/sessionsCache';
-import type { WorkoutSession } from '../../lib/supabase/queries/workouts';
+import { getSessionsInRangeCached, invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
+import { deleteSessionWithExercises, type WorkoutSession } from '../../lib/supabase/queries/workouts';
 import { listMergedExercisesCached } from '../../lib/cache/exerciseCache';
 import { devLog, devError } from '../../lib/utils/logger';
 import { useUserStore } from '../../stores/userStore';
@@ -202,10 +202,12 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
           onPress: async () => {
             setDeletingSessionId(sessionId);
             try {
-              const { error } = await supabase
-                .from('v2_workout_sessions')
-                .delete()
-                .eq('id', sessionId);
+              const userId = useUserStore.getState().profile?.id;
+              if (!userId) {
+                Alert.alert('Error', 'Not signed in');
+                return;
+              }
+              const { error } = await deleteSessionWithExercises(userId, sessionId);
 
               if (error) {
                 if (__DEV__) {
@@ -217,8 +219,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
               // Remove from local state
               setSessions(prev => prev.filter(s => s.id !== sessionId));
-              const userId = useUserStore.getState().profile?.id;
-              if (userId) invalidateSessionsInRangeForUser(userId);
+              invalidateSessionsInRangeForUser(userId);
               // Notify parent to refresh calendar
               if (onSessionDeleted) {
                 onSessionDeleted();

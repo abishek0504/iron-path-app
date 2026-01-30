@@ -108,6 +108,65 @@ class SimulatedFatigueState {
 }
 
 /**
+ * Run one "session" of the greedy selector: pick up to maxExercises, mutating sim and remaining.
+ * Used for multi-session-per-day so each session gets different muscle groups (fatigue accumulates).
+ */
+function runOneSession(
+  sim: SimulatedFatigueState,
+  profiles: Map<string, ExerciseStressProfile>,
+  remaining: Set<string>,
+  maxExercises: number
+): string[] {
+  const picked: string[] = [];
+
+  while (picked.length < maxExercises) {
+    let bestId: string | null = null;
+    let bestScore = -Infinity;
+    let anyNonRed = false;
+
+    for (const id of remaining) {
+      const profile = profiles.get(id);
+      if (!profile) continue;
+
+      const { zone } = sim.getZoneForExercise(profile);
+
+      let fatiguePenalty: number;
+      if (zone === 'green') {
+        fatiguePenalty = 0;
+        anyNonRed = true;
+      } else if (zone === 'yellow') {
+        fatiguePenalty = profile.basePriority * 0.5;
+        anyNonRed = true;
+      } else {
+        fatiguePenalty = Infinity;
+      }
+
+      if (!Number.isFinite(fatiguePenalty)) continue;
+
+      const score = profile.basePriority - fatiguePenalty;
+      if (score > bestScore) {
+        bestScore = score;
+        bestId = id;
+      }
+    }
+
+    if (!bestId || bestScore === -Infinity || !anyNonRed) break;
+
+    const chosenProfile = profiles.get(bestId);
+    if (!chosenProfile) {
+      remaining.delete(bestId);
+      continue;
+    }
+
+    picked.push(bestId);
+    sim.registerExercise(chosenProfile);
+    remaining.delete(bestId);
+  }
+
+  return picked;
+}
+
+/**
  * Generate exercise IDs for a week template.
  *
  * Uses:
@@ -123,17 +182,24 @@ class SimulatedFatigueState {
  * - Green zone (<=50% stress): no penalty.
  * - Yellow zone (50–85%): 0.5 * BasePriority penalty.
  * - Red zone (>85%): effectively infinite penalty (hard stop).
+ *
+ * When sessionsPerDay > 1, each day gets multiple "sessions" with muscle separation:
+ * fatigue accumulates within the day so session 2 avoids muscles hit in session 1.
  */
 export async function generateWeekForTemplate(
   template: FullTemplate,
   userId: string,
-  profile: UserProfile | null
-): Promise<string[]> {
+  profile: UserProfile | null,
+  options?: { sessionsPerDay?: number }
+): Promise<string[] | Array<Array<string[]>>> {
+  const sessionsPerDay = Math.max(1, Math.min(3, options?.sessionsPerDay ?? 1));
+
   if (__DEV__) {
     devLog('week-generation', {
       action: 'generateWeekForTemplate',
       templateId: template.template.id,
       dayCount: template.days.length,
+      sessionsPerDay,
     });
   }
 
@@ -301,73 +367,56 @@ export async function generateWeekForTemplate(
 
     const sim = new SimulatedFatigueState(currentStress);
     const remaining = new Set<string>(Array.from(profiles.keys()));
-    const result: string[] = [];
 
-    // 6) Greedy fatigue-aware selection loop (pure TS, no SQL)
-    while (remaining.size > 0) {
-      let bestId: string | null = null;
-      let bestScore = -Infinity;
-      let anyNonRed = false;
-
-      for (const id of remaining) {
-        const profile = profiles.get(id);
-        if (!profile) continue;
-
-        const { zone } = sim.getZoneForExercise(profile);
-
-        let fatiguePenalty: number;
-        if (zone === 'green') {
-          fatiguePenalty = 0;
-          anyNonRed = true;
-        } else if (zone === 'yellow') {
-          fatiguePenalty = profile.basePriority * 0.5;
-          anyNonRed = true;
-        } else {
-          // Red zone: hard stop for this candidate
-          fatiguePenalty = Infinity;
-        }
-
-        if (!Number.isFinite(fatiguePenalty)) {
-          continue;
-        }
-
-        const score = profile.basePriority - fatiguePenalty;
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestId = id;
-        }
+    if (sessionsPerDay === 1) {
+      // Legacy: one flat list (greedy until no green/yellow left)
+      const result: string[] = [];
+      while (remaining.size > 0) {
+        const picked = runOneSession(sim, profiles, remaining, 50);
+        if (picked.length === 0) break;
+        result.push(...picked);
       }
 
-      if (!bestId || bestScore === -Infinity || !anyNonRed) {
-        // Nothing safe left to add
-        break;
+      if (__DEV__) {
+        devLog('week-generation', {
+          action: 'generateWeekForTemplate_result',
+          userId,
+          templateId: template.template.id,
+          candidateCount: exerciseIds.length,
+          excludedCount: excluded.length,
+          pickedCount: result.length,
+          hasStress: Object.keys(currentStress).length > 0,
+        });
       }
+      return result;
+    }
 
-      const chosenProfile = profiles.get(bestId);
-      if (!chosenProfile) {
-        remaining.delete(bestId);
-        continue;
+    // Multi-session per day: per day, per session, pick 2–3 exercises (muscle separation within day)
+    const resultPerDay: Array<Array<string[]>> = [];
+    for (let dayIndex = 0; dayIndex < template.days.length; dayIndex++) {
+      const daySessions: string[][] = [];
+      for (let sessionIndex = 0; sessionIndex < sessionsPerDay; sessionIndex++) {
+        const maxExercises = 2 + ((dayIndex * sessionsPerDay + sessionIndex) % 2);
+        const picked = runOneSession(sim, profiles, remaining, maxExercises);
+        daySessions.push(picked);
       }
-
-      result.push(bestId);
-      sim.registerExercise(chosenProfile);
-      remaining.delete(bestId);
+      resultPerDay.push(daySessions);
     }
 
     if (__DEV__) {
+      const totalPicked = resultPerDay.flat(2).length;
       devLog('week-generation', {
         action: 'generateWeekForTemplate_result',
         userId,
         templateId: template.template.id,
-        candidateCount: exerciseIds.length,
-        excludedCount: excluded.length,
-        pickedCount: result.length,
+        sessionsPerDay,
+        dayCount: resultPerDay.length,
+        totalPicked,
         hasStress: Object.keys(currentStress).length > 0,
       });
     }
 
-    return result;
+    return resultPerDay;
   } catch (error) {
     if (__DEV__) {
       devError('week-generation', error, {

@@ -167,6 +167,91 @@ export async function invokeUpdateMuscleFreshness(
 }
 
 /**
+ * Get a session by id (for multi-workout-per-day when opening a specific workout)
+ */
+export async function getSessionById(
+  userId: string,
+  sessionId: string
+): Promise<WorkoutSession | null> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getSessionById', userId, sessionId });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { userId, sessionId });
+      }
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, sessionId });
+    }
+    return null;
+  }
+}
+
+/**
+ * Delete a workout session and its exercises/sets explicitly (ensures cleanup even if CASCADE is missing).
+ * Deletes session_exercises for the session first (DB CASCADE removes session_sets), then the session.
+ */
+export async function deleteSessionWithExercises(
+  userId: string,
+  sessionId: string
+): Promise<{ error: Error | null }> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'deleteSessionWithExercises', userId, sessionId });
+  }
+
+  try {
+    const { error: exError } = await supabase
+      .from('v2_session_exercises')
+      .delete()
+      .eq('session_id', sessionId);
+
+    if (exError) {
+      if (__DEV__) {
+        devError('workout-query', exError, { action: 'deleteSessionWithExercises_exercises', sessionId });
+      }
+      return { error: exError };
+    }
+
+    const { error: sessionError } = await supabase
+      .from('v2_workout_sessions')
+      .delete()
+      .eq('id', sessionId)
+      .eq('user_id', userId);
+
+    if (sessionError) {
+      if (__DEV__) {
+        devError('workout-query', sessionError, { action: 'deleteSessionWithExercises_session', sessionId });
+      }
+      return { error: sessionError };
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', { action: 'deleteSessionWithExercises_ok', sessionId });
+    }
+    return { error: null };
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { action: 'deleteSessionWithExercises_exception', sessionId });
+    }
+    return { error: error instanceof Error ? error : new Error(String(error)) };
+  }
+}
+
+/**
  * Get active session for user
  */
 export async function getActiveSession(userId: string): Promise<WorkoutSession | null> {
@@ -197,6 +282,44 @@ export async function getActiveSession(userId: string): Promise<WorkoutSession |
       devError('workout-query', error, { userId });
     }
     return null;
+  }
+}
+
+/**
+ * Get all sessions for a given day (active + completed), ordered by started_at ascending.
+ * Used for multi-workout-per-day: each session is one "workout" in the UI.
+ */
+export async function getSessionsForToday(
+  userId: string,
+  dayStartIso: string,
+  dayEndIsoExclusive: string
+): Promise<WorkoutSession[]> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getSessionsForToday', userId, dayStartIso, dayEndIsoExclusive });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('started_at', dayStartIso)
+      .lt('started_at', dayEndIsoExclusive)
+      .order('started_at', { ascending: true });
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { userId, dayStartIso, dayEndIsoExclusive });
+      }
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, dayStartIso, dayEndIsoExclusive });
+    }
+    return [];
   }
 }
 

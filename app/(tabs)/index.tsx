@@ -18,13 +18,19 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
-import { Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
+import { Dumbbell, Timer, RotateCcw, Plus } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase/client';
 import { colors, spacing, layout, borderRadius, typography } from '../../src/lib/utils/theme';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
-import { createWorkoutSession, getActiveSession, prefillSessionSets } from '../../src/lib/supabase/queries/workouts';
+import {
+  createWorkoutSession,
+  getActiveSession,
+  getSessionsForToday,
+  prefillSessionSets,
+  type WorkoutSession,
+} from '../../src/lib/supabase/queries/workouts';
 import {
   getTemplateWithDaysAndSlotsCached,
   getUserTemplatesCached,
@@ -201,10 +207,15 @@ export default function WorkoutTab() {
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
+  const [sessionsToday, setSessionsToday] = useState<WorkoutSession[]>([]);
+  const [selectedWorkoutIndex, setSelectedWorkoutIndex] = useState<number>(0);
+  const [isAddingWorkout, setIsAddingWorkout] = useState(false);
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
 
   const FOCUS_RELOAD_THROTTLE_MS = 4000;
+
+  const selectedSession = sessionsToday[selectedWorkoutIndex] ?? null;
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -225,15 +236,18 @@ export default function WorkoutTab() {
     setCurrentDay(getTodayDayName());
   }, []);
 
-  // Load workout data (template + sessions) and populate selected plan day
-  const loadTodayWorkout = useCallback(async () => {
-    if (loadInFlightRef.current) return;
-    loadInFlightRef.current = true;
-    if (!hasInitiallyLoaded) {
-      setIsLoading(true);
-    }
+  // Load workout data (template + sessions) and populate selected workout
+  // preserveWorkoutIndex: when user picks a workout via Change, keep that selection
+  // selectLast: after Add Workout, select the new (last) workout
+  const loadTodayWorkout = useCallback(
+    async (preserveWorkoutIndex?: number, options?: { selectLast?: boolean }) => {
+      if (loadInFlightRef.current) return;
+      loadInFlightRef.current = true;
+      if (!hasInitiallyLoaded) {
+        setIsLoading(true);
+      }
 
-    const userId = await getCurrentUserId();
+      const userId = await getCurrentUserId();
     if (!userId) {
       setIsLoading(false);
       setHasInitiallyLoaded(true);
@@ -246,16 +260,21 @@ export default function WorkoutTab() {
         devLog('workout-tab', { action: 'loadTodayWorkout:start', userId });
       }
 
-      // First parallel batch: templates and active session (neither depends on the other)
-      const [templatesResult, activeSession] = await Promise.all([
+      const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
+        getUtcDayBoundsIso(getUtcDayKey(new Date()));
+
+      // First parallel batch: templates and all sessions for today (multi-workout-per-day)
+      const [templatesResult, sessionsForToday] = await Promise.all([
         getUserTemplatesCached(userId),
-        getActiveSession(userId),
+        getSessionsForToday(userId, todayStartIso, tomorrowStartIso),
       ]);
       const template = templatesResult.length > 0 ? templatesResult[0] : null;
 
       if (!template) {
         setActiveTemplate(null);
         setTemplateDays([]);
+        setSessionsToday([]);
+        setSelectedWorkoutIndex(0);
         setSelectedDayExercises([]);
         setHasActiveWorkout(false);
         setIsWorkoutCompleted(false);
@@ -266,6 +285,20 @@ export default function WorkoutTab() {
       }
 
       setActiveTemplate(template);
+      setSessionsToday(sessionsForToday);
+
+      // Which workout to show: preserve selection, select last (after Add Workout), or first incomplete
+      const firstIncomplete = sessionsForToday.findIndex((s) => s.status !== 'completed');
+      const indexToUse =
+        options?.selectLast && sessionsForToday.length > 0
+          ? sessionsForToday.length - 1
+          : preserveWorkoutIndex !== undefined
+            ? Math.min(preserveWorkoutIndex, Math.max(0, sessionsForToday.length - 1))
+            : firstIncomplete >= 0
+              ? firstIncomplete
+              : 0;
+      setSelectedWorkoutIndex(indexToUse);
+      const viewingSession = sessionsForToday[indexToUse] ?? null;
 
       // Invalidate so we always get fresh template (e.g. after adding exercises in Plan tab)
       invalidateTemplate(template.id);
@@ -290,75 +323,50 @@ export default function WorkoutTab() {
         setSelectedPlanDayName(planDayName);
       }
 
-      const now = new Date();
-      const todayUtcKey = getUtcDayKey(now);
-      const hasActiveForToday =
-        !!activeSession &&
-        (() => {
-          const sessionUtcKey = getUtcDayKey(new Date(activeSession.started_at));
-          return sessionUtcKey === todayUtcKey;
-        })();
+      // For the selected workout: has save point? completed?
+      const hasCompletedSets = viewingSession
+        ? await (async (): Promise<boolean> => {
+            const { data: sessionExerciseIds } = await supabase
+              .from('v2_session_exercises')
+              .select('id')
+              .eq('session_id', viewingSession.id);
+            if (!sessionExerciseIds || sessionExerciseIds.length === 0) return false;
+            const seIds = sessionExerciseIds.map((se: { id: string }) => se.id);
+            const { count } = await supabase
+              .from('v2_session_sets')
+              .select('*', { count: 'exact', head: true })
+              .in('session_exercise_id', seIds)
+              .not('performed_at', 'is', null);
+            return (count ?? 0) > 0;
+          })()
+        : false;
 
-      // Second parallel batch: session exercise count (for active session) and completed session from today
-      const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
-        getUtcDayBoundsIso(todayUtcKey);
-
-      const [hasCompletedSets, completedSession] = await Promise.all([
-        // Task A: session exercise IDs + sets count when we have an active session for today
-        (async (): Promise<boolean> => {
-          if (!hasActiveForToday || !activeSession) return false;
-          const { data: sessionExerciseIds } = await supabase
-            .from('v2_session_exercises')
-            .select('id')
-            .eq('session_id', activeSession.id);
-          if (!sessionExerciseIds || sessionExerciseIds.length === 0) return false;
-          const seIds = sessionExerciseIds.map((se: { id: string }) => se.id);
-          const { count } = await supabase
-            .from('v2_session_sets')
-            .select('*', { count: 'exact', head: true })
-            .in('session_exercise_id', seIds)
-            .not('performed_at', 'is', null);
-          return (count ?? 0) > 0;
-        })(),
-        // Task B: completed session from today
-        supabase
-          .from('v2_workout_sessions')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('template_id', template.id)
-          .eq('day_name', planDayName)
-          .eq('status', 'completed')
-          .gte('completed_at', todayStartIso)
-          .lt('completed_at', tomorrowStartIso)
-          .maybeSingle()
-          .then(({ data }) => data),
-      ]);
-
-      // "Continue" only when there's a save point (at least one set performed). Otherwise show "Start" and current plan.
       const isViewingToday = selectedPlanDayName === getTodayDayName();
-      const hasSavePoint = hasActiveForToday && isViewingToday && hasCompletedSets;
+      const hasSavePoint =
+        !!viewingSession && viewingSession.status === 'active' && isViewingToday && hasCompletedSets;
       setHasActiveWorkout(hasSavePoint);
 
       // Match plan day case-insensitively (DB may store "Monday" or "monday")
       const matchPlanDay = (d: { day: { day_name?: string } }) =>
         (d.day.day_name ?? '').toLowerCase() === (planDayName ?? '').toLowerCase();
 
-      // Show session exercises only when there's a save point (user has started logging). Otherwise show template (current plan) so add/remove in Plan tab is reflected.
+      // When viewing a specific session: always show only that session's exercises (no template mix).
+      // When no session exists for today: show template for selected day so user can Start and create a session.
       let exercisesToShow: Array<{ id: string; name: string }> = [];
       const selectedDay = sortedDays.find(matchPlanDay);
 
-      if (hasActiveForToday && activeSession && selectedPlanDayName === getTodayDayName() && hasCompletedSets) {
-        // Load exercises from the active session (only when user has a save point)
+      if (viewingSession) {
+        // Always load exercises from the selected session only (avoids mixing template with other sessions' exercises)
         const { data: sessionExercises, error: sessionExercisesError } = await supabase
           .from('v2_session_exercises')
           .select('id, exercise_id, custom_exercise_id, sort_order')
-          .eq('session_id', activeSession.id)
+          .eq('session_id', viewingSession.id)
           .order('sort_order', { ascending: true });
 
         if (sessionExercisesError && __DEV__) {
           devError('workout-tab', sessionExercisesError, {
             action: 'loadTodayWorkout_sessionExercises_error',
-            sessionId: activeSession.id,
+            sessionId: viewingSession.id,
           });
         }
 
@@ -385,21 +393,22 @@ export default function WorkoutTab() {
           if (__DEV__) {
             devLog('workout-tab', {
               action: 'loadTodayWorkout_sessionExercises_loaded',
-              sessionId: activeSession.id,
+              sessionId: viewingSession.id,
               sessionExerciseCount: sessionExercises.length,
             });
           }
+        } else {
+          setExerciseNames(new Map());
         }
-      }
-
-      // When no save point: show template (current plan) + Today Only (session exercises not in template) so Plan tab add/remove is reflected and Today Only still appears
-      if (exercisesToShow.length === 0 && selectedDay) {
-        const templateSlotKeys = new Set(
-          selectedDay.slots.flatMap((s) =>
-            [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[]
-          )
-        );
-        const slotIds = [...new Set(templateSlotKeys)];
+      } else if (selectedDay) {
+        // No sessions for today: show template for selected day so user can Start and create a session
+        const slotIds = [
+          ...new Set(
+            selectedDay.slots.flatMap((s) =>
+              [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[]
+            )
+          ),
+        ];
         const mergedSlots = slotIds.length > 0 ? await listMergedExercisesCached(userId, slotIds) : [];
         const nameByExerciseId = new Map(mergedSlots.map((e) => [e.id, e.name]));
         const namesMap = new Map<string, string>();
@@ -411,84 +420,29 @@ export default function WorkoutTab() {
           id: slot.id,
           name: namesMap.get(slot.id) ?? 'Unknown Exercise',
         }));
-
-        // Add Today Only: session exercises not in template (when viewing today and we have an active session)
-        if (
-          hasActiveForToday &&
-          activeSession &&
-          selectedPlanDayName === getTodayDayName()
-        ) {
-          const { data: sessionExercises } = await supabase
-            .from('v2_session_exercises')
-            .select('id, exercise_id, custom_exercise_id, sort_order')
-            .eq('session_id', activeSession.id)
-            .order('sort_order', { ascending: true });
-
-          const todayOnly = (sessionExercises || []).filter((se) => {
-            const key = se.exercise_id || se.custom_exercise_id;
-            return key && !templateSlotKeys.has(key);
-          });
-          if (todayOnly.length > 0) {
-            const todayOnlyIds = [
-              ...new Set(
-                todayOnly.flatMap((se) =>
-                  [se.exercise_id, se.custom_exercise_id].filter(Boolean) as string[]
-                )
-            )];
-            const mergedToday = todayOnlyIds.length > 0
-              ? await listMergedExercisesCached(userId, todayOnlyIds)
-              : [];
-            const todayNames = new Map(mergedToday.map((e) => [e.id, e.name]));
-            for (const se of todayOnly) {
-              const key = se.exercise_id || se.custom_exercise_id;
-              if (key) namesMap.set(se.id, todayNames.get(key) ?? 'Unknown Exercise');
-            }
-            exercisesToShow = [
-              ...exercisesToShow,
-              ...todayOnly.map((se) => ({
-                id: se.id,
-                name: namesMap.get(se.id) ?? 'Unknown Exercise',
-              })),
-            ];
-          }
-        }
-
         setExerciseNames(namesMap);
         if (__DEV__ && selectedDay.slots.length > 0) {
           devLog('workout-tab', {
-            action: 'loadTodayWorkout_templateAndTodayOnly_loaded',
+            action: 'loadTodayWorkout_template_loaded',
             planDayName,
             templateCount: selectedDay.slots.length,
-            totalCount: exercisesToShow.length,
           });
         }
       }
 
       setSelectedDayExercises(exercisesToShow);
 
-      // Check if all exercises were completed (completedSession from parallel batch above)
-      let isTrulyCompleted = false;
-      if (completedSession && !activeSession) {
-        const { data: completedSessionExercises } = await supabase
-          .from('v2_session_exercises')
-          .select('id')
-          .eq('session_id', completedSession.id);
-
-        const currentExerciseCount =
-          fullTemplate.days.find((d) => d.day.day_name === planDayName)?.slots.length || 0;
-        const loggedExerciseCount = completedSessionExercises?.length || 0;
-
-        isTrulyCompleted = loggedExerciseCount >= currentExerciseCount || currentExerciseCount === 0;
-      }
-
+      // Selected workout is completed when its session status is 'completed'
+      const isTrulyCompleted = viewingSession?.status === 'completed' ?? false;
       setIsWorkoutCompleted(isTrulyCompleted);
 
       if (__DEV__) {
         devLog('workout-tab', {
           action: 'loadTodayWorkout:done',
           hasTemplate: !!template,
-          exerciseCount: fullTemplate.days?.reduce((acc, d) => acc + d.slots.length, 0) || 0,
-          hasActiveWorkout: hasActiveForToday,
+          sessionsTodayCount: sessionsForToday.length,
+          selectedWorkoutIndex: indexToUse,
+          hasActiveWorkout: hasSavePoint,
           isWorkoutCompleted: isTrulyCompleted,
           selectedPlanDayName: planDayName,
         });
@@ -556,12 +510,52 @@ export default function WorkoutTab() {
     });
   }, [modal, templateDays, selectedPlanDayName, currentDay]);
 
+  const openWorkoutPicker = useCallback(() => {
+    if (sessionsToday.length === 0) return;
+    modal.openSheet('workoutPicker', {
+      workouts: sessionsToday.map((s, i) => ({
+        index: i,
+        label: `Workout ${i + 1}`,
+        isCompleted: s.status === 'completed',
+      })),
+      selectedIndex: selectedWorkoutIndex,
+      onSelect: (index: number) => {
+        modal.closeSheet();
+        setSelectedWorkoutIndex(index);
+        loadTodayWorkout(index);
+      },
+    });
+  }, [modal, sessionsToday, selectedWorkoutIndex, loadTodayWorkout]);
+
+  const handleAddWorkout = useCallback(async () => {
+    const userId = await getCurrentUserId();
+    if (!userId || !activeTemplate) {
+      toast.error('Please log in and have an active plan');
+      return;
+    }
+    setIsAddingWorkout(true);
+    try {
+      const session = await createWorkoutSession(userId, activeTemplate.id, selectedPlanDayName);
+      if (session) {
+        toast.success('Workout added');
+        await loadTodayWorkout(undefined, { selectLast: true });
+      } else {
+        toast.error('Failed to add workout');
+      }
+    } catch (error) {
+      if (__DEV__) devError('workout-tab', error, { action: 'handleAddWorkout' });
+      toast.error('Failed to add workout');
+    } finally {
+      setIsAddingWorkout(false);
+    }
+  }, [getCurrentUserId, activeTemplate, selectedPlanDayName, loadTodayWorkout, toast]);
+
   const handleStartWorkout = async () => {
     if (!activeTemplate || !currentDay) return;
 
-    // If there is already an active session (Continue flow), just open active workout
-    if (hasActiveWorkout) {
-      router.push('/workout/active');
+    // If there is already an active session (Continue flow), open that workout
+    if (hasActiveWorkout && selectedSession?.id) {
+      router.push({ pathname: '/workout/active', params: { sessionId: selectedSession.id } });
       return;
     }
 
@@ -575,8 +569,12 @@ export default function WorkoutTab() {
     const selectedDay = templateDays.find((d) => d.day.day_name === selectedPlanDayName);
     const slots = selectedDay?.slots || [];
 
-    // Allow starting with only Today Only (no template slots): just open active workout
+    // Allow starting with only Today Only (no template slots): use selected session or open active
     if (slots.length === 0) {
+      if (selectedSession?.status === 'active') {
+        router.push({ pathname: '/workout/active', params: { sessionId: selectedSession.id } });
+        return;
+      }
       const existingSession = await getActiveSession(userId);
       const todayUtcKey = getUtcDayKey(new Date());
       const existingIsToday =
@@ -589,7 +587,7 @@ export default function WorkoutTab() {
           .select('id')
           .eq('session_id', existingSession.id);
         if (existingExercises && existingExercises.length > 0) {
-          router.push('/workout/active');
+          router.push({ pathname: '/workout/active', params: { sessionId: existingSession.id } });
           return;
         }
       }
@@ -610,7 +608,9 @@ export default function WorkoutTab() {
     const context: TargetSelectionContext = { experience: effectiveExperience };
 
     try {
-      const existingSession = await getActiveSession(userId);
+      // Use selected session when viewing an active one (multi-workout-per-day); else single active session
+      const existingSession =
+        selectedSession?.status === 'active' ? selectedSession : await getActiveSession(userId);
       const todayUtcKey = getUtcDayKey(new Date());
       const existingIsToday =
         existingSession &&
@@ -784,7 +784,7 @@ export default function WorkoutTab() {
       }
 
       toast.success('Workout started');
-      router.push('/workout/active');
+      router.push({ pathname: '/workout/active', params: { sessionId: session.id } });
     } catch (error) {
       if (__DEV__) {
         devError('workout-tab', error, {
@@ -808,30 +808,40 @@ export default function WorkoutTab() {
         return;
       }
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Reset only the selected workout (multi-workout-per-day)
+      if (selectedSession?.id && selectedSession.status === 'active') {
+        const { error: deleteError } = await supabase
+          .from('v2_workout_sessions')
+          .delete()
+          .eq('id', selectedSession.id)
+          .eq('user_id', userId);
 
-      // Delete any active workout sessions from today
-      const { error: deleteError } = await supabase
-        .from('v2_workout_sessions')
-        .delete()
-        .eq('user_id', userId)
-        .eq('template_id', activeTemplate.id)
-        .eq('day_name', currentDay)
-        .eq('status', 'active')
-        .gte('started_at', today.toISOString())
-        .lt('started_at', tomorrow.toISOString());
+        if (deleteError && __DEV__) {
+          devError('workout-tab', deleteError, { action: 'handleResetWorkout', sessionId: selectedSession.id });
+        }
+      } else {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
 
-      if (deleteError && __DEV__) {
-        devError('workout-tab', deleteError, { action: 'handleResetWorkout' });
+        const { error: deleteError } = await supabase
+          .from('v2_workout_sessions')
+          .delete()
+          .eq('user_id', userId)
+          .eq('template_id', activeTemplate.id)
+          .eq('day_name', currentDay)
+          .eq('status', 'active')
+          .gte('started_at', today.toISOString())
+          .lt('started_at', tomorrow.toISOString());
+
+        if (deleteError && __DEV__) {
+          devError('workout-tab', deleteError, { action: 'handleResetWorkout' });
+        }
       }
 
-      // Update state
-      setHasActiveWorkout(false);
-      setIsWorkoutCompleted(false);
       setShowResetModal(false);
+      await loadTodayWorkout(selectedWorkoutIndex);
 
       toast.success('Workout has been reset. You can now start fresh!');
     } catch (error) {
@@ -891,6 +901,16 @@ export default function WorkoutTab() {
           <Text style={styles.dayTitle}>{currentDay || 'Loading...'}</Text>
           <Text style={styles.greetingText}>{getGreeting()}</Text>
         </View>
+        {activeTemplate && (
+          <Pressable
+            onPress={handleAddWorkout}
+            disabled={isAddingWorkout}
+            style={[styles.addWorkoutButton, isAddingWorkout && styles.addWorkoutButtonDisabled]}
+          >
+            <Plus size={18} color={colors.primary} />
+            <Text style={styles.addWorkoutButtonText}>Add Workout</Text>
+          </Pressable>
+        )}
       </Animated.View>
 
       <ScrollView
@@ -1013,6 +1033,16 @@ export default function WorkoutTab() {
                   isCompleted={false}
                 />
               )}
+              {sessionsToday.length > 1 && (
+                <View style={styles.planDayRow}>
+                  <Text style={styles.planDayLabel}>
+                    Workout {selectedWorkoutIndex + 1} of {sessionsToday.length}
+                  </Text>
+                  <Pressable onPress={openWorkoutPicker} style={styles.planDayChangeButton}>
+                    <Text style={styles.planDayChangeText}>Change</Text>
+                  </Pressable>
+                </View>
+              )}
               {templateDays.length > 0 && (
                 <View style={styles.planDayRow}>
                   <Text style={styles.planDayLabel}>Plan day: {selectedPlanDayName}</Text>
@@ -1123,6 +1153,25 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flex: 1,
+  },
+  addWorkoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  addWorkoutButtonDisabled: {
+    opacity: 0.6,
+  },
+  addWorkoutButtonText: {
+    color: colors.primary,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
   },
   dayTitle: {
     fontSize: typography.sizes['2xl'],

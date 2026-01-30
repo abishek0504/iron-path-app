@@ -20,7 +20,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, CheckCircle, ChevronRight, Info, RefreshCcw } from 'lucide-react-native';
 import { colors, spacing, borderRadius, typography } from '../../../src/lib/utils/theme';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
@@ -28,6 +28,7 @@ import { RPESlider } from '../../../src/components/workout/RPESlider';
 import { getMergedExercise } from '../../../src/lib/supabase/queries/exercises';
 import {
   getActiveSession,
+  getSessionById,
   getSessionWithSets,
   markSetComplete,
   completeWorkoutSession,
@@ -83,12 +84,13 @@ type WorkoutPhase =
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ sessionId?: string }>();
   const toast = useToast();
   const profile = useUserStore((state) => state.profile);
   const userId = profile?.id;
 
   const [loading, setLoading] = useState(true);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(params.sessionId ?? null);
   const [sessionTemplateId, setSessionTemplateId] = useState<string | null>(null);
   const [sessionDayName, setSessionDayName] = useState<string | null>(null);
   const [exercises, setExercises] = useState<Exercise[]>([]);
@@ -122,7 +124,7 @@ export default function ActiveWorkoutScreen() {
     if (userId) {
       loadActiveSession();
     }
-  }, [userId]);
+  }, [userId, params.sessionId]);
 
   // Load weight suggestion when exercise changes
   useEffect(() => {
@@ -144,9 +146,11 @@ export default function ActiveWorkoutScreen() {
 
     setLoading(true);
     try {
-      const session = await getActiveSession(userId);
+      const session = params.sessionId
+        ? await getSessionById(userId, params.sessionId)
+        : await getActiveSession(userId);
       if (!session) {
-        toast.error('No active workout found');
+        toast.error(params.sessionId ? 'Workout not found' : 'No active workout found');
         goBack();
         return;
       }

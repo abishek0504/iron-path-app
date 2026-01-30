@@ -10,6 +10,7 @@ import { BottomSheet } from './BottomSheet';
 import { ExercisePicker } from '../exercise/ExercisePicker';
 import { SettingsMenu } from '../settings/SettingsMenu';
 import { PlanDayPicker } from './PlanDayPicker';
+import { WorkoutPicker } from './WorkoutPicker';
 import { WorkoutHeatmap } from '../workout/WorkoutHeatmap';
 import { SessionDetailSheet } from '../progress/SessionDetailSheet';
 import { supabase } from '../../lib/supabase/client';
@@ -26,6 +27,7 @@ export const ModalManager: React.FC = () => {
   const shouldRenderExercisePicker = activeBottomSheet === 'exercisePicker';
   const shouldRenderSettingsMenu = activeBottomSheet === 'settingsMenu';
   const shouldRenderPlanDayPicker = activeBottomSheet === 'planDayPicker';
+  const shouldRenderWorkoutPicker = activeBottomSheet === 'workoutPicker';
   const shouldRenderMuscleStatus = activeBottomSheet === 'muscleStatus';
   const shouldRenderSessionDetail = activeBottomSheet === 'sessionDetail';
 
@@ -74,6 +76,23 @@ export const ModalManager: React.FC = () => {
             days={bottomSheetProps.days}
             onSelect={bottomSheetProps.onSelect}
             onResetToToday={bottomSheetProps.onResetToToday}
+          />
+        </BottomSheet>
+      )}
+
+      {shouldRenderWorkoutPicker && (
+        <BottomSheet
+          visible={isBottomSheetOpen && activeBottomSheet === 'workoutPicker'}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          title="Choose workout"
+          height="35%"
+          {...bottomSheetProps}
+        >
+          <WorkoutPicker
+            workouts={bottomSheetProps.workouts}
+            selectedIndex={bottomSheetProps.selectedIndex}
+            onSelect={bottomSheetProps.onSelect}
           />
         </BottomSheet>
       )}

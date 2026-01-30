@@ -105,6 +105,7 @@ export default function AddExerciseEditScreen() {
     dayId: string;
     templateId: string;
     dayName: string;
+    sessionId?: string;
     exerciseId: string;
     customExerciseId: string;
     exerciseName: string;
@@ -115,6 +116,7 @@ export default function AddExerciseEditScreen() {
     dayId,
     templateId,
     dayName,
+    sessionId,
     exerciseId,
     customExerciseId,
     exerciseName,
@@ -132,7 +134,8 @@ export default function AddExerciseEditScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sets, setSets] = useState<EditSet[]>([]);
-  const [todayOnly, setTodayOnly] = useState(false);
+  // When adding from a specific workout container (sessionId), default to today only so the exercise lands in that session
+  const [todayOnly, setTodayOnly] = useState(!!params.sessionId);
 
   const exerciseIdVal = exerciseId || undefined;
   const customExerciseIdVal = customExerciseId || undefined;
@@ -359,9 +362,20 @@ export default function AddExerciseEditScreen() {
     setSaving(true);
     try {
       if (todayOnly) {
-        const session = await getOrCreateActiveSessionForToday(userId, dayName);
+        let session: { id: string } | null;
+        if (sessionId) {
+          const { data } = await supabase
+            .from('v2_workout_sessions')
+            .select('id')
+            .eq('id', sessionId)
+            .eq('user_id', userId)
+            .maybeSingle();
+          session = data;
+        } else {
+          session = await getOrCreateActiveSessionForToday(userId, dayName);
+        }
         if (!session) {
-          toast.error('Failed to get today\'s session');
+          toast.error(sessionId ? 'Workout not found' : 'Failed to get today\'s session');
           return;
         }
         const { data: existing } = await supabase
@@ -405,6 +419,7 @@ export default function AddExerciseEditScreen() {
         }
         if (__DEV__) devLog('add-exercise-edit', { action: 'sessionSetsInserted', count: sets.length });
         toast.success('Added to today\'s session');
+        useUIStore.getState().setPlannerNeedsRefetch(true);
       } else {
         const slots = await getTemplateSlotsForDay(templateId, dayName);
         const sortOrder = slots.length + 1;

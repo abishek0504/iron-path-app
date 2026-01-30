@@ -7,10 +7,11 @@
 import { create } from 'zustand';
 import { devLog } from '../lib/utils/logger';
 
-export type BottomSheetId = 
+export type BottomSheetId =
   | 'exercisePicker'
   | 'settingsMenu'
   | 'planDayPicker'
+  | 'workoutPicker'
   | 'muscleStatus'
   | 'sessionDetail'
   | null;

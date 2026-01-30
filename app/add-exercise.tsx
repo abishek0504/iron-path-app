@@ -38,8 +38,8 @@ function formatMuscles(muscles: string[] | undefined): string {
 
 export default function AddExerciseScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ dayId: string; templateId: string; dayName: string }>();
-  const { dayId, templateId, dayName } = params;
+  const params = useLocalSearchParams<{ dayId: string; templateId: string; dayName: string; sessionId?: string }>();
+  const { dayId, templateId, dayName, sessionId } = params;
   const profileId = useUserStore((s) => s.profile?.id);
 
   const [userId, setUserId] = useState<string | null>(profileId ?? null);
@@ -132,6 +132,7 @@ export default function AddExerciseScreen() {
         dayId,
         templateId,
         dayName,
+        ...(sessionId ? { sessionId } : {}),
         exerciseId: isCustom ? '' : exercise.id,
         customExerciseId: isCustom ? exercise.id : '',
         exerciseName: exercise.name,

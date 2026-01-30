@@ -239,14 +239,27 @@ const handleAddExercise = async (exercise) => {
    └→ Sets with performed_at NULL = not started
    └→ User returns to Workout tab
        └→ useFocusEffect calls loadTodayWorkout()
-       └→ getActiveSession() finds session with completed sets
-       └→ hasActiveWorkout = (completedSets.length > 0 && allSets.length > completedSets.length)
-       └→ "Continue" button appears ✅
+       └→ getSessionsForToday() loads all sessions for today (multi-workout-per-day)
+       └→ selectedWorkoutIndex = first incomplete session (or 0 if all complete)
+       └→ hasActiveWorkout = selected session is active and has ≥1 set performed
+       └→ "Continue" button appears for that workout ✅
    └→ User taps "Continue"
-       └→ Navigate to /workout/active
+       └→ Navigate to /workout/active with params.sessionId = selectedSession.id
+       └→ Active screen loads that session (getSessionById when sessionId param present)
        └→ Resume at first incomplete exercise
 
-5. User views progress
+5. Multi-workout-per-day (multiple sessions same day)
+   └→ Workout tab loads getSessionsForToday(userId, todayStartIso, tomorrowStartIso)
+       └→ Returns all sessions for today (active + completed), ordered by started_at ascending
+   └→ Default view: first incomplete workout (first session with status !== 'completed'); if all complete, show first (index 0)
+   └→ "Add Workout" (header): createWorkoutSession(); loadTodayWorkout(undefined, { selectLast: true })
+   └→ "Change" opens WorkoutPicker only when more than one workout for the day (sessionsToday.length > 1); list "Workout 1", "Workout 2", … (✓ if completed); onSelect(index) → setSelectedWorkoutIndex(index); loadTodayWorkout(index)
+   └→ Start/Continue/Complete: per selected workout. If selected session completed → greyed "Complete"; if active with save point → "Continue" (navigate with sessionId); else "Start" (create or use session, navigate with sessionId)
+   └→ If user deletes a session in Progress tab, that session is removed from DB; next Workout tab load shows remaining sessions; deleted workout no longer appears (so it is "not done" and won’t be loaded as completed)
+   └→ Planner: When Today, workout containers (Workout 1, Workout 2, …). Each container has title, exercises, "Add Exercise" inside, and Delete (trash). "Add Workout" at top creates a new session (new container below). When not Today, single "Workout 1" block with template slots + Add Exercise. Add-exercise/add-exercise-edit accept optional sessionId so Add Exercise in a container adds to that session.
+   └→ workout/active: accepts sessionId route param; when present, getSessionById(userId, sessionId) instead of getActiveSession(userId)
+
+6. User views progress
    └→ Navigate to Progress tab
    └→ app/(tabs)/progress.tsx
    └→ Calendar view (week or month)
