@@ -46,6 +46,11 @@ export const spacing = {
   xxl: 48,
 } as const;
 
+/** Layout constants (e.g. tab bar). Use with safe area insets for scroll padding. */
+export const layout = {
+  tabBarHeight: 72,
+} as const;
+
 export const borderRadius = {
   sm: 8,
   md: 16,

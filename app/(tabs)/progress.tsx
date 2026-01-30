@@ -7,9 +7,9 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
-import { colors, spacing, typography, borderRadius } from '../../src/lib/utils/theme';
+import { colors, spacing, layout, typography, borderRadius } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { supabase } from '../../src/lib/supabase/client';
 import { getSessionsInRange, type WorkoutSession } from '../../src/lib/supabase/queries/workouts';
@@ -21,6 +21,7 @@ import { useModal } from '../../src/hooks/useModal';
 type ViewMode = 'week' | 'month';
 
 export default function ProgressTab() {
+  const insets = useSafeAreaInsets();
   const showToast = useUIStore((state) => state.showToast);
   const { openSheet } = useModal();
   const [loading, setLoading] = useState(true);
@@ -170,7 +171,12 @@ export default function ProgressTab() {
           <Text style={styles.loadingText}>Loading progress...</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
+          ]}
+        >
           <View style={styles.controls}>
             <View style={styles.viewToggle}>
               <Pressable

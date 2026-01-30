@@ -13,10 +13,10 @@ import {
   ActivityIndicator,
   FlatList,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Plus } from 'lucide-react-native';
-import { colors, spacing, typography, borderRadius } from '../../src/lib/utils/theme';
+import { colors, spacing, layout, typography, borderRadius } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useToast } from '../../src/hooks/useToast';
 import { useDateContext } from '../../src/hooks/useDateContext';
@@ -62,6 +62,7 @@ function getTodayDayName(): string {
 
 export default function PlannerTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const toast = useToast();
   const { profile } = useUserStore();
   const plannerNeedsRefetch = useUIStore((s) => s.plannerNeedsRefetch);
@@ -627,7 +628,13 @@ export default function PlannerTab() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Plan" tabId="plan" />
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
+        ]}
+      >
         {/* Day selector - always show all 7 days in fixed order */}
         <View style={styles.daySelector}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>

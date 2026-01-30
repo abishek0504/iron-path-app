@@ -8,7 +8,7 @@ import { useUIStore } from '../src/stores/uiStore';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
 import { listMergedExercises } from '../src/lib/supabase/queries/exercises';
-import { getTopPRs, type TopPR } from '../src/lib/supabase/queries/workouts';
+import { getCachedTopPRs, formatPRDisplay, type TopPR } from '../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../src/lib/utils/logger';
 
 export default function PRsScreen() {
@@ -33,7 +33,7 @@ export default function PRsScreen() {
         return;
       }
 
-      const topPrs = await getTopPRs(userId, 50);
+      const topPrs = await getCachedTopPRs(userId, 50);
       const exerciseIds = topPrs
         .map((p) => p.exercise_id || p.custom_exercise_id)
         .filter(Boolean) as string[];
@@ -71,7 +71,7 @@ export default function PRsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TabHeader title="Top PRs" tabId="dashboard" />
+      <TabHeader title="PRs" tabId="dashboard" />
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.primary} />
@@ -86,11 +86,7 @@ export default function PRsScreen() {
               <View key={p.set_id} style={styles.card}>
                 <Text style={styles.primary}>{p.name}</Text>
                 <Text style={styles.secondary}>
-                  {p.weight
-                    ? `${p.weight} ${unitsLabel}${
-                        p.reps_at_pr_weight?.length ? ` × ${p.reps_at_pr_weight.join('/')}` : ''
-                      }`
-                    : '—'}
+                  {formatPRDisplay(p, unitsLabel)}
                 </Text>
               </View>
             ))

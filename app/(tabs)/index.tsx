@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, {
   FadeIn,
@@ -20,7 +20,7 @@ import Animated, {
 import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
 import { Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase/client';
-import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
+import { colors, spacing, layout, borderRadius, typography } from '../../src/lib/utils/theme';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
@@ -182,6 +182,7 @@ const CircularButton = ({
 
 export default function WorkoutTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const toast = useToast();
   const modal = useModal();
   const { profile } = useUserStore();
@@ -734,7 +735,10 @@ export default function WorkoutTab() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {!activeTemplate ? (
@@ -948,7 +952,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    paddingBottom: spacing.xl * 3, // keep CTA above tab bar with less scroll
   },
   header: {
     flexDirection: 'row',

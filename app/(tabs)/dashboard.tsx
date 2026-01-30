@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, RotateCcw } from 'lucide-react-native';
-import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
+import { colors, spacing, layout, borderRadius, typography } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
@@ -12,9 +12,10 @@ import { listMergedExercises } from '../../src/lib/supabase/queries/exercises';
 import {
   getSessionsInRange,
   getRecentSessions,
-  getTopPRs,
+  getCachedTopPRs,
   getYearToDateStats,
   getStreak,
+  formatPRDisplay,
   type TopPR,
 } from '../../src/lib/supabase/queries/workouts';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
@@ -32,6 +33,7 @@ type SessionSummary = {
 
 export default function DashboardTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const showToast = useUIStore((state) => state.showToast);
   const profile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
@@ -97,8 +99,8 @@ export default function DashboardTab() {
       const { start, end } = getWeekRange();
       const [thisWeek, recent, topPrs, yearStats, streakCount] = await Promise.all([
         getSessionsInRange(userId, start.toISOString(), end.toISOString()),
-        getRecentSessions(userId, 7),
-        getTopPRs(userId, 3),
+        getRecentSessions(userId, 3),
+        getCachedTopPRs(userId, 3),
         getYearToDateStats(userId),
         getStreak(userId),
       ]);
@@ -183,7 +185,12 @@ export default function DashboardTab() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Dashboard" tabId="dashboard" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
+        ]}
+      >
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Muscle status</Text>
@@ -271,13 +278,7 @@ export default function DashboardTab() {
               <View key={p.set_id} style={styles.listRow}>
                 <Text style={styles.listPrimary}>{p.name}</Text>
                 <Text style={styles.listSecondary}>
-                  {p.weight
-                    ? `${p.weight} ${unitsLabel}${
-                        p.reps_at_pr_weight?.length
-                          ? ` × ${p.reps_at_pr_weight.join('/')}`
-                          : ''
-                      }`
-                    : '—'}
+                  {formatPRDisplay(p, unitsLabel)}
                 </Text>
               </View>
             ))
@@ -346,7 +347,6 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
     gap: spacing.md,
-    paddingBottom: spacing.xxl,
   },
   row: {
     flexDirection: 'row',

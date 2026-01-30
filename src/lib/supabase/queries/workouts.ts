@@ -647,17 +647,45 @@ export async function getSessionStats(sessionId: string): Promise<SessionStats |
   }
 }
 
+export type PRType = 'weight' | 'reps_only' | 'timed';
+
 export interface TopPR {
   set_id: string;
   session_id: string;
   session_exercise_id: string;
   exercise_id?: string;
   custom_exercise_id?: string;
+  pr_type?: PRType;
   weight?: number;
   reps?: number;
   duration_sec?: number;
   performed_at?: string;
   reps_at_pr_weight?: number[];
+}
+
+/** Format duration in seconds for PR display: "45s" or "1:30". */
+export function formatPrDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/** Format a single PR for UI: weight×reps, "N reps", or timed duration. */
+export function formatPRDisplay(p: TopPR, unitsLabel: string): string {
+  if (p.pr_type === 'timed' && p.duration_sec != null) {
+    return formatPrDuration(p.duration_sec);
+  }
+  if (p.pr_type === 'reps_only' && p.reps != null) {
+    return `${p.reps} reps`;
+  }
+  if (p.weight != null) {
+    const repPart = p.reps != null ? ` × ${p.reps}` : '';
+    return `${p.weight} ${unitsLabel}${repPart}`;
+  }
+  if (p.reps != null) return `${p.reps} reps`;
+  if (p.duration_sec != null) return formatPrDuration(p.duration_sec);
+  return '—';
 }
 
 export interface ExerciseHistory {
@@ -811,6 +839,82 @@ export async function getTopPRs(
   } catch (error) {
     if (__DEV__) {
       devError('workout-query', error, { userId, limit, step: 'top-prs' });
+    }
+    return [];
+  }
+}
+
+const CACHED_PR_SELECT_FULL =
+  'set_id, session_id, session_exercise_id, pr_type, weight, reps, duration_sec, performed_at, exercise_id, custom_exercise_id';
+const CACHED_PR_SELECT_LEGACY =
+  'set_id, session_id, session_exercise_id, weight, reps, performed_at, exercise_id, custom_exercise_id';
+
+function mapCachedPrRows(rows: any[], legacy: boolean): TopPR[] {
+  return rows.map((row: any) => ({
+    set_id: row.set_id,
+    session_id: row.session_id,
+    session_exercise_id: row.session_exercise_id,
+    exercise_id: row.exercise_id ?? undefined,
+    custom_exercise_id: row.custom_exercise_id ?? undefined,
+    pr_type: legacy ? 'weight' : (row.pr_type ?? undefined),
+    weight: row.weight != null ? Number(row.weight) : undefined,
+    reps: row.reps != null ? Number(row.reps) : undefined,
+    duration_sec: legacy ? undefined : (row.duration_sec != null ? Number(row.duration_sec) : undefined),
+    performed_at: row.performed_at ?? undefined,
+  }));
+}
+
+/**
+ * Get top PRs from cache (v2_user_exercise_prs).
+ * Includes weight, reps_only (bodyweight), and timed PRs. Ordered by weight DESC, reps DESC, duration_sec DESC.
+ * If the table lacks pr_type/duration_sec (older migration), falls back to legacy select and treats all as weight PRs.
+ */
+export async function getCachedTopPRs(
+  userId: string,
+  limit = 3
+): Promise<TopPR[]> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getCachedTopPRs', userId, limit });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('v2_user_exercise_prs')
+      .select(CACHED_PR_SELECT_FULL)
+      .eq('user_id', userId)
+      .order('weight', { ascending: false, nullsFirst: false })
+      .order('reps', { ascending: false, nullsFirst: false })
+      .order('duration_sec', { ascending: false, nullsFirst: false })
+      .limit(limit);
+
+    if (error) {
+      const isUndefinedColumn = (error as { code?: string })?.code === '42703';
+      if (isUndefinedColumn) {
+        const { data: legacyData, error: legacyError } = await supabase
+          .from('v2_user_exercise_prs')
+          .select(CACHED_PR_SELECT_LEGACY)
+          .eq('user_id', userId)
+          .order('weight', { ascending: false, nullsFirst: false })
+          .order('reps', { ascending: false, nullsFirst: false })
+          .limit(limit);
+        if (legacyError) {
+          if (__DEV__) {
+            devError('workout-query', legacyError, { userId, limit, action: 'getCachedTopPRs_legacy' });
+          }
+          return [];
+        }
+        return mapCachedPrRows(legacyData || [], true);
+      }
+      if (__DEV__) {
+        devError('workout-query', error, { userId, limit, action: 'getCachedTopPRs' });
+      }
+      return [];
+    }
+
+    return mapCachedPrRows(data || [], false);
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, limit, action: 'getCachedTopPRs_catch' });
     }
     return [];
   }
