@@ -65,9 +65,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       id: 'help',
       label: 'Help & Support',
       icon: HelpCircle,
-      onPress: () => {
-        // TODO: Implement help screen
-      },
+      onPress: () => handleNavigate('/help-support'),
     },
     {
       id: 'change-password',

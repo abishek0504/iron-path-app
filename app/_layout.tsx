@@ -92,6 +92,10 @@ export default function RootLayout() {
           name="prs"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
+        <Stack.Screen
+          name="help-support"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
       </Stack>
 
       {/* Global UI components */}

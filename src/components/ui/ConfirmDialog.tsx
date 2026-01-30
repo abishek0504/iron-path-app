@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   message?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** When true, styles the cancel button as destructive (red). */
+  cancelDestructive?: boolean;
   onConfirm: (event?: GestureResponderEvent) => void;
   onCancel: (event?: GestureResponderEvent) => void;
 }
@@ -22,9 +24,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   message = 'Unsaved changes will be lost.',
   confirmLabel = 'Discard',
   cancelLabel = 'Cancel',
+  cancelDestructive = false,
   onConfirm,
   onCancel,
 }) => {
+  const cancelButtonStyle = cancelDestructive ? styles.destructive : styles.secondary;
+  const cancelTextStyle = cancelDestructive ? styles.destructiveText : styles.secondaryText;
   return (
     <Modal
       transparent
@@ -37,8 +42,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
           <View style={styles.actions}>
-            <TouchableOpacity style={[styles.button, styles.secondary]} onPress={onCancel}>
-              <Text style={styles.secondaryText}>{cancelLabel}</Text>
+            <TouchableOpacity style={[styles.button, cancelButtonStyle]} onPress={onCancel}>
+              <Text style={cancelTextStyle}>{cancelLabel}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.button, styles.primary]} onPress={onConfirm}>
               <Text style={styles.primaryText}>{confirmLabel}</Text>
@@ -91,6 +96,15 @@ const styles = StyleSheet.create({
   },
   secondary: {
     backgroundColor: colors.card,
+  },
+  destructive: {
+    backgroundColor: colors.error,
+    borderColor: colors.error,
+  },
+  destructiveText: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
   },
   primary: {
     backgroundColor: colors.primary,

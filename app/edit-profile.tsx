@@ -3,7 +3,7 @@
  * Shared route reachable from all tabs via Settings bottom sheet.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,8 +15,11 @@ import {
   View,
   Switch,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
+import type { NavigationAction } from '@react-navigation/routers';
+import { X } from 'lucide-react-native';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from '../src/lib/supabase/client';
 import { updateUserProfile } from '../src/lib/supabase/queries/users';
@@ -32,8 +35,11 @@ import { DatePicker } from '../src/components/ui/DatePicker';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
 
+const FLOATING_SAVE_BAR_HEIGHT = 56;
+
 export default function EditProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const cachedProfile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
   const showToast = useUIStore((state) => state.showToast);
@@ -54,6 +60,9 @@ export default function EditProfileScreen() {
   const [useImperial, setUseImperial] = useState(true);
   const [equipment, setEquipment] = useState<string[]>([]);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [allowCloseAfterSave, setAllowCloseAfterSave] = useState(false);
+  const pendingRemoveActionRef = useRef<NavigationAction | null>(null);
+  const navigation = useNavigation();
 
   useEffect(() => {
     const load = async () => {
@@ -139,6 +148,17 @@ export default function EditProfileScreen() {
     );
   }, [dateOfBirth, daysPerWeek, equipment, experienceLevel, firstName, lastName, profile, useImperial, weight]);
 
+  usePreventRemove(hasChanges && !allowCloseAfterSave, ({ data }) => {
+    pendingRemoveActionRef.current = data.action;
+    setShowDiscardConfirm(true);
+  });
+
+  useEffect(() => {
+    if (allowCloseAfterSave) {
+      navigateBackOrTabs();
+    }
+  }, [allowCloseAfterSave]);
+
   const navigateBackOrTabs = () => {
     const canGoBack = (router as any)?.canGoBack?.() ?? true;
     if (canGoBack) {
@@ -153,16 +173,66 @@ export default function EditProfileScreen() {
   };
 
   const safeClose = () => {
-    if (hasChanges) {
-      setShowDiscardConfirm(true);
+    if (!hasChanges) {
+      navigateBackOrTabs();
+      return;
+    }
+    router.back();
+  };
+
+  const handleKeepEditing = () => {
+    setShowDiscardConfirm(false);
+    pendingRemoveActionRef.current = null;
+  };
+
+  const handleDiscard = () => {
+    setShowDiscardConfirm(false);
+    const action = pendingRemoveActionRef.current;
+    pendingRemoveActionRef.current = null;
+    if (action) {
+      navigation.dispatch(action);
     } else {
       navigateBackOrTabs();
     }
   };
 
-  const handleDiscard = () => {
+  const handleSaveAndClose = async () => {
+    if (!profile) return;
     setShowDiscardConfirm(false);
-    navigateBackOrTabs();
+    setSaving(true);
+    try {
+      const updates: Partial<UserProfile> = {
+        first_name: firstName.trim() || undefined,
+        last_name: lastName.trim() || undefined,
+        date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
+        experience_level: experienceLevel.trim() || undefined,
+        days_per_week: daysPerWeek ? parseInt(daysPerWeek, 10) || undefined : undefined,
+        use_imperial: useImperial,
+        current_weight: weight,
+        equipment_access: equipment,
+      };
+      const success = await updateUserProfile(profile.id, updates);
+      if (!success) {
+        Alert.alert('Error', 'Failed to save profile.');
+        return;
+      }
+      invalidateProfileCache(profile.id);
+      setProfile({ ...profile, ...updates });
+      if (__DEV__) devLog('edit-profile', { action: 'saveAndClose', updateKeys: Object.keys(updates) });
+      showToast('Profile saved', 'success');
+      const action = pendingRemoveActionRef.current;
+      pendingRemoveActionRef.current = null;
+      if (action) {
+        navigation.dispatch(action);
+      } else {
+        navigateBackOrTabs();
+      }
+    } catch (error) {
+      if (__DEV__) devError('edit-profile', error);
+      Alert.alert('Error', 'An error occurred while saving.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -188,11 +258,12 @@ export default function EditProfileScreen() {
       invalidateProfileCache(profile.id);
 
       setProfile({ ...profile, ...updates });
+      setLocalProfile((prev) => (prev ? { ...prev, ...updates } : prev));
       if (__DEV__) {
         devLog('edit-profile', { action: 'save', updateKeys: Object.keys(updates) });
       }
       showToast('Profile saved', 'success');
-      navigateBackOrTabs();
+      setAllowCloseAfterSave(true);
     } catch (error) {
       if (__DEV__) {
         devError('edit-profile', error);
@@ -200,14 +271,6 @@ export default function EditProfileScreen() {
       Alert.alert('Error', 'An error occurred while saving.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleChangePassword = async () => {
-    try {
-      router.push('/auth/forgot-password');
-    } catch {
-      router.replace('/auth/forgot-password');
     }
   };
 
@@ -224,12 +287,18 @@ export default function EditProfileScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Edit Profile</Text>
-        <TouchableOpacity onPress={safeClose} style={styles.headerButton}>
-          <Text style={styles.headerButtonText}>Close</Text>
+        <TouchableOpacity onPress={safeClose} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Close">
+          <X size={24} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: FLOATING_SAVE_BAR_HEIGHT + insets.bottom + spacing.lg },
+        ]}
+      >
         {/* Account */}
         <View style={styles.card}>
           <Text style={styles.label}>Account</Text>
@@ -350,15 +419,6 @@ export default function EditProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Change password */}
-        <View style={styles.card}>
-          <Text style={styles.label}>Change Password</Text>
-          <Text style={styles.helperText}>We’ll email you a reset link to set a new password.</Text>
-          <TouchableOpacity style={styles.saveButton} onPress={handleChangePassword} activeOpacity={0.85}>
-            <Text style={styles.saveButtonText}>Send reset link</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Equipment */}
         <View style={styles.card}>
           <Text style={styles.label}>Equipment Access</Text>
@@ -382,20 +442,25 @@ export default function EditProfileScreen() {
             })}
           </View>
         </View>
-
-        {/* Save button */}
-        <TouchableOpacity
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color={colors.background} />
-          ) : (
-            <Text style={styles.saveButtonText}>Save</Text>
-          )}
-        </TouchableOpacity>
       </ScrollView>
+
+      {/* Floating Save button */}
+      <TouchableOpacity
+        style={[
+          styles.floatingSaveButton,
+          { bottom: insets.bottom },
+          saving && styles.saveButtonDisabled,
+        ]}
+        onPress={handleSave}
+        disabled={saving}
+        activeOpacity={0.85}
+      >
+        {saving ? (
+          <ActivityIndicator color={colors.background} />
+        ) : (
+          <Text style={styles.saveButtonText}>Save</Text>
+        )}
+      </TouchableOpacity>
 
       {/* Date Picker Bottom Sheet */}
       <DatePicker
@@ -435,12 +500,13 @@ export default function EditProfileScreen() {
 
       <ConfirmDialog
         visible={showDiscardConfirm}
-        title="Discard changes?"
-        message="You have unsaved changes. Do you want to discard them?"
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
-        onConfirm={handleDiscard}
-        onCancel={() => setShowDiscardConfirm(false)}
+        title="Would you like to save changes?"
+        message="Your changes will be lost if you don't save."
+        confirmLabel="Keep editing"
+        cancelLabel="Discard"
+        cancelDestructive
+        onConfirm={handleKeepEditing}
+        onCancel={handleDiscard}
       />
     </SafeAreaView>
   );
@@ -463,33 +529,40 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
+  },
+  headerButton: {
+    padding: spacing.sm,
+    borderRadius: borderRadius.sm,
   },
   title: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
   },
-  headerButton: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  headerButtonText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
   scroll: {
     flex: 1,
   },
   content: {
     padding: spacing.lg,
-    paddingBottom: spacing.xxl,
     gap: spacing.md,
+  },
+  floatingSaveButton: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   card: {
     backgroundColor: colors.card,
@@ -610,7 +683,6 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.medium,
   },
   saveButton: {
-    marginTop: spacing.lg,
     backgroundColor: colors.primary,
     borderRadius: borderRadius.lg,
     paddingVertical: spacing.md,
