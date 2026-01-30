@@ -72,7 +72,7 @@ export default function PRsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TabHeader title="PRs" tabId="dashboard" />
+      <TabHeader title="PRs" tabId="dashboard" showSettings={false} />
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.primary} />

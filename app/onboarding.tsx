@@ -217,6 +217,7 @@ export default function Onboarding() {
       setProfile({
         ...existingProfile,
         ...profilePayload,
+        days_per_week: profilePayload.days_per_week ?? undefined,
       });
 
       const templates = await getUserTemplates(userId);

@@ -13,9 +13,11 @@ import { devLog } from '../../lib/utils/logger';
 interface TabHeaderProps {
   title: string;
   tabId: 'workout' | 'plan' | 'progress' | 'dashboard';
+  /** When false, hides the settings button (e.g. PRs modal). Default: true only when tabId === 'dashboard'. */
+  showSettings?: boolean;
 }
 
-export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId }) => {
+export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId, showSettings: showSettingsProp }) => {
   const { openSheet } = useModal();
 
   const handleOpenSettings = () => {
@@ -25,8 +27,7 @@ export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId }) => {
     openSheet('settingsMenu');
   };
 
-  // Only show settings button on dashboard tab
-  const showSettings = tabId === 'dashboard';
+  const showSettings = showSettingsProp ?? (tabId === 'dashboard');
 
   return (
     <View style={styles.container}>
