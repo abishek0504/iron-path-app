@@ -12,6 +12,10 @@ import { colors, spacing, typography } from '../../lib/utils/theme';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
 import { supabase } from '../../lib/supabase/client';
 import { devError, devLog } from '../../lib/utils/logger';
+import {
+  getLastCompletedSessionId,
+  invokeUpdateMuscleFreshness,
+} from '../../lib/supabase/queries/workouts';
 
 const LEGEND_DROPDOWN_DURATION = 200;
 const LEGEND_CONTENT_MAX_HEIGHT = 130;
@@ -33,27 +37,13 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
   const [freshnessData, setFreshnessData] = useState<Record<string, number>>({});
   const [infoOpen, setInfoOpen] = useState(false);
   const infoDropdownAnim = useRef(new Animated.Value(0)).current;
+  const backfillAttemptedRef = useRef(false);
 
   useEffect(() => {
-    loadMuscleFreshness();
+    backfillAttemptedRef.current = false;
   }, [userId]);
 
-  useEffect(() => {
-    Animated.timing(infoDropdownAnim, {
-      toValue: infoOpen ? 1 : 0,
-      duration: LEGEND_DROPDOWN_DURATION,
-      useNativeDriver: false,
-    }).start();
-  }, [infoOpen, infoDropdownAnim]);
-
-  // Refresh when screen comes into focus (e.g., after completing a workout)
-  useFocusEffect(
-    useCallback(() => {
-      loadMuscleFreshness();
-    }, [userId])
-  );
-
-  const loadMuscleFreshness = async () => {
+  const loadMuscleFreshness = useCallback(async () => {
     setLoading(true);
     try {
       if (__DEV__) {
@@ -69,7 +59,6 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
 
       const freshnessMap: Record<string, number> = {};
       for (const row of data || []) {
-        // Important: preserve 0 values (fully fatigued) instead of falling back to 100.
         const value =
           row.freshness === null || row.freshness === undefined
             ? 100
@@ -84,8 +73,23 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
           userId,
           rowCount: (data || []).length,
           muscleCount: Object.keys(freshnessMap).length,
-          sampleMuscles: Object.entries(freshnessMap).slice(0, 5).map(([k, v]) => ({ key: k, freshness: v })),
         });
+      }
+
+      // If empty but user has a completed session, backfill once (Edge Function may not have run)
+      if (Object.keys(freshnessMap).length === 0 && !backfillAttemptedRef.current) {
+        backfillAttemptedRef.current = true;
+        const lastSessionId = await getLastCompletedSessionId(userId);
+        if (lastSessionId) {
+          if (__DEV__) {
+            devLog('workout-heatmap', { action: 'backfill:invoke', sessionId: lastSessionId });
+          }
+          const ok = await invokeUpdateMuscleFreshness(userId, lastSessionId);
+          if (ok) {
+            await loadMuscleFreshness();
+            return;
+          }
+        }
       }
     } catch (error) {
       if (__DEV__) {
@@ -94,7 +98,26 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    loadMuscleFreshness();
+  }, [loadMuscleFreshness]);
+
+  useEffect(() => {
+    Animated.timing(infoDropdownAnim, {
+      toValue: infoOpen ? 1 : 0,
+      duration: LEGEND_DROPDOWN_DURATION,
+      useNativeDriver: false,
+    }).start();
+  }, [infoOpen, infoDropdownAnim]);
+
+  // Refresh when screen comes into focus (e.g., after completing a workout)
+  useFocusEffect(
+    useCallback(() => {
+      loadMuscleFreshness();
+    }, [loadMuscleFreshness])
+  );
 
   if (loading) {
     return (

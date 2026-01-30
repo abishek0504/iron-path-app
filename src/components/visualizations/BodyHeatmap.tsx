@@ -5,10 +5,24 @@
  * and maps our v2_muscles keys to the library's body part slugs.
  * Region color = average fatigue of all muscles in that group.
  * Tap a region to see individual muscle fatigues.
+ *
+ * Platform: Dev build/simulator = Body (react-native-body-highlighter). Web and Expo Go = list
+ * fallback (muscle groups + %) with "Full heatmap on mobile (dev build). Web and Expo Go are for preview."
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, Dimensions, Pressable, Modal, Text, TouchableOpacity } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  Dimensions,
+  Pressable,
+  Modal,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
+} from 'react-native';
+import Constants from 'expo-constants';
 import { RotateCcw, X } from 'lucide-react-native';
 import Body from 'react-native-body-highlighter';
 import { useUserStore } from '../../stores/userStore';
@@ -38,6 +52,11 @@ function freshnessToIntensity(freshness: number | null | undefined): number | nu
   return 4; // fully fatigued
 }
 
+const INTENSITY_COLORS = ['#22c55e', '#eab308', '#f97316', '#ef4444'] as const;
+function intensityToColor(intensity: number): string {
+  return INTENSITY_COLORS[Math.min(intensity - 1, 3)] ?? INTENSITY_COLORS[0];
+}
+
 export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   freshnessData,
   width = Dimensions.get('window').width - 32,
@@ -55,7 +74,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   const gender: 'male' | 'female' =
     (profile?.gender?.toLowerCase() === 'female' ? 'female' : 'male');
 
-  const bodyData: Array<{ slug: string; intensity: number }> = useMemo(() => {
+  const bodyData: Array<{ slug: string; intensity: number; avgFreshness: number }> = useMemo(() => {
     const slugToFreshnessSum = new Map<string, { sum: number; count: number }>();
 
     for (const [muscleKey, freshness] of Object.entries(freshnessData)) {
@@ -71,13 +90,13 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
       }
     }
 
-    const parts: Array<{ slug: string; intensity: number }> = [];
+    const parts: Array<{ slug: string; intensity: number; avgFreshness: number }> = [];
     for (const [slug, { sum, count }] of slugToFreshnessSum.entries()) {
       if (count === 0) continue;
       const avgFreshness = sum / count;
       const intensity = freshnessToIntensity(avgFreshness);
       if (intensity !== null) {
-        parts.push({ slug, intensity });
+        parts.push({ slug, intensity, avgFreshness });
       }
     }
 
@@ -104,8 +123,16 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
     }));
   }, [selectedSlug, freshnessData]);
 
+  const isExpoGo = Constants.appOwnership === 'expo';
+  const isWeb = Platform.OS === 'web';
+  const isListFallback = isExpoGo || isWeb;
+
+  const containerStyle = isListFallback
+    ? [styles.container, styles.listFallbackContainer]
+    : [styles.container, { width, height }];
+
   return (
-    <View style={[styles.container, { width, height }]}>
+    <View style={containerStyle}>
       {!isControlled && (
         <Pressable
           style={styles.toggleButton}
@@ -117,15 +144,50 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
         </Pressable>
       )}
       <View style={styles.bodyWrapper}>
-        <Body
-          data={bodyData as any}
-          side={side}
-          gender={gender}
-          scale={1.2}
-          colors={['#22c55e', '#eab308', '#f97316', '#ef4444']}
-          border="#4b5563"
-          onBodyPartPress={(bodyPart) => setSelectedSlug(bodyPart.slug ?? null)}
-        />
+        {isListFallback ? (
+          <ScrollView
+            style={styles.expoGoListScroll}
+            contentContainerStyle={styles.expoGoListContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.previewMessageText}>
+              Full heatmap on mobile (dev build). Web and Expo Go are for preview.
+            </Text>
+            <Text style={styles.expoGoListTitle}>Muscle freshness</Text>
+            {bodyData.length === 0 ? (
+              <Text style={styles.expoGoListEmpty}>No muscle data in this view.</Text>
+            ) : (
+              <View style={styles.expoGoListGrid}>
+                {bodyData.map(({ slug, intensity, avgFreshness }) => (
+                  <View key={slug} style={styles.expoGoListCell}>
+                    <View
+                      style={[
+                        styles.expoGoListColorBar,
+                        { backgroundColor: intensityToColor(intensity) },
+                      ]}
+                    />
+                    <View style={styles.expoGoListCellText}>
+                      <Text style={styles.expoGoListLabel} numberOfLines={1}>
+                        {SLUG_TO_LABEL[slug] ?? slug}
+                      </Text>
+                      <Text style={styles.expoGoListPct}>{Math.round(avgFreshness)}%</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        ) : (
+          <Body
+            data={bodyData.map(({ slug, intensity }) => ({ slug, intensity })) as any}
+            side={side}
+            gender={gender}
+            scale={1.2}
+            colors={['#22c55e', '#eab308', '#f97316', '#ef4444']}
+            border="#4b5563"
+            onBodyPartPress={(bodyPart) => setSelectedSlug(bodyPart.slug ?? null)}
+          />
+        )}
       </View>
 
       <Modal
@@ -186,6 +248,11 @@ const styles = StyleSheet.create({
     position: 'static',
     paddingTop: spacing.sm,
   },
+  listFallbackContainer: {
+    width: '100%',
+    maxWidth: '100%',
+    overflow: 'hidden',
+  },
   toggleButton: {
     position: 'absolute',
     top: 0,
@@ -204,6 +271,80 @@ const styles = StyleSheet.create({
     paddingVertical: BODY_VERTICAL_PADDING,
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
+    maxWidth: '100%',
+    overflow: 'hidden',
+  },
+  expoGoListScroll: {
+    width: '100%',
+    maxWidth: '100%',
+    maxHeight: 300,
+    overflow: 'hidden',
+  },
+  expoGoListContent: {
+    paddingHorizontal: spacing.xs,
+    paddingBottom: spacing.sm,
+    width: '100%',
+    maxWidth: '100%',
+  },
+  previewMessageText: {
+    fontSize: typography.sizes.xs,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  expoGoListTitle: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  expoGoListEmpty: {
+    fontSize: typography.sizes.sm,
+    color: colors.textMuted,
+  },
+  expoGoListGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+    width: '100%',
+    maxWidth: '100%',
+  },
+  expoGoListCell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '47%',
+    maxWidth: '47%',
+    minHeight: 36,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: 'rgba(39, 39, 42, 0.6)',
+    borderRadius: borderRadius.sm,
+    gap: spacing.sm,
+  },
+  expoGoListColorBar: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  expoGoListCellText: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minWidth: 0,
+  },
+  expoGoListLabel: {
+    fontSize: typography.sizes.sm,
+    color: colors.textPrimary,
+    flex: 1,
+    marginRight: spacing.xs,
+  },
+  expoGoListPct: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.semibold,
+    color: colors.textSecondary,
   },
   modalOverlay: {
     flex: 1,

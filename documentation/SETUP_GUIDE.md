@@ -150,6 +150,8 @@ npm run android
 2. Scan QR code from terminal/browser
 3. App loads on device
 
+**Note:** The Dashboard muscle heatmap (Muscle status) shows the full body view on a development build or simulator. In Expo Go, a list fallback (muscle groups + freshness %) is shown so the data is visible; the body silhouette uses native modules and is only rendered in dev builds.
+
 ### Production Builds
 
 **Build for iOS:**

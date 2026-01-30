@@ -314,7 +314,7 @@
 - ✅ Added suggested_weight_lbs/kg to v2_exercise_prescriptions
 - ✅ Seeded realistic starting weights for 45 exercises
 - ✅ Created interactive RPE slider with color zones
-- ✅ Built Skia-powered muscle heatmap (28 muscles, GPU-accelerated)
+- ✅ Built muscle heatmap (28 muscles; uses react-native-body-highlighter). **Platform:** Dev build/simulator = full body view. Expo Go = list fallback (muscle groups + %) so heatmap data is visible without native body highlighter. Web = "Please open on mobile to see full heatmap."
 - ✅ Implemented Smart Adjust apply logic (catch-up exercises)
 - ✅ Installed @shopify/flash-list and @shopify/react-native-skia
 - ✅ Added keyboard dismiss functionality (Done/Next buttons)

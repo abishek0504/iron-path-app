@@ -108,6 +108,65 @@ export async function getLastCompletedWorkoutAt(
 }
 
 /**
+ * Get id of the most recent completed session (for muscle freshness backfill).
+ */
+export async function getLastCompletedSessionId(
+  userId: string
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data?.id) return null;
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Invoke update-muscle-freshness Edge Function (used after completing a workout and for heatmap backfill).
+ */
+export async function invokeUpdateMuscleFreshness(
+  userId: string,
+  sessionId: string
+): Promise<boolean> {
+  try {
+    const { error: fnError } = await supabase.functions.invoke('update-muscle-freshness', {
+      body: { user_id: userId, session_id: sessionId },
+    });
+    if (fnError) {
+      if (__DEV__) {
+        devError('workout-query', fnError, {
+          action: 'invoke_update_muscle_freshness_failed',
+          sessionId,
+        });
+      }
+      return false;
+    }
+    if (__DEV__) {
+      devLog('workout-query', { action: 'invoke_update_muscle_freshness_ok', sessionId });
+    }
+    return true;
+  } catch (invokeError) {
+    if (__DEV__) {
+      devError('workout-query', invokeError, {
+        action: 'invoke_update_muscle_freshness_exception',
+        sessionId,
+      });
+    }
+    return false;
+  }
+}
+
+/**
  * Get active session for user
  */
 export async function getActiveSession(userId: string): Promise<WorkoutSession | null> {
@@ -172,30 +231,7 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
 
     // Fallback: call Edge Function directly (DB trigger may not be configured)
     if (userId) {
-      try {
-        const { error: fnError } = await supabase.functions.invoke('update-muscle-freshness', {
-          body: { user_id: userId, session_id: sessionId },
-        });
-
-        if (fnError && __DEV__) {
-          devError('workout-query', fnError, {
-            action: 'invoke_update_muscle_freshness_failed',
-            sessionId,
-          });
-        } else if (__DEV__) {
-          devLog('workout-query', {
-            action: 'invoke_update_muscle_freshness_ok',
-            sessionId,
-          });
-        }
-      } catch (invokeError) {
-        if (__DEV__) {
-          devError('workout-query', invokeError, {
-            action: 'invoke_update_muscle_freshness_exception',
-            sessionId,
-          });
-        }
-      }
+      await invokeUpdateMuscleFreshness(userId, sessionId);
     } else if (__DEV__) {
       devLog('workout-query', {
         action: 'invoke_update_muscle_freshness_skipped_no_user',
