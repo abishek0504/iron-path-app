@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight, RotateCcw } from 'lucide-react-native';
 import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
@@ -13,11 +13,16 @@ import {
   getSessionsInRange,
   getRecentSessions,
   getTopPRs,
+  getYearToDateStats,
+  getStreak,
   type TopPR,
 } from '../../src/lib/supabase/queries/workouts';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
+
+/** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
+const LBS_PER_KG = 2.20462;
 
 type SessionSummary = {
   id: string;
@@ -34,12 +39,20 @@ export default function DashboardTab() {
   const [loading, setLoading] = useState(true);
   const [weekCompleted, setWeekCompleted] = useState<number>(0);
   const [weekTarget, setWeekTarget] = useState<number>(0);
+  const [yearDaysWorkedOut, setYearDaysWorkedOut] = useState<number>(0);
+  const [yearTotalVolume, setYearTotalVolume] = useState<number>(0);
   const [streak, setStreak] = useState<number>(0);
   const [recentSessions, setRecentSessionsState] = useState<SessionSummary[]>([]);
   const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
+  const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
+  const displayVolume = useMemo(() => {
+    const useImperial = profile?.use_imperial ?? true;
+    const raw = yearTotalVolume;
+    return useImperial ? raw : raw / LBS_PER_KG;
+  }, [profile?.use_imperial, yearTotalVolume]);
 
   /**
    * Calculate Sunday-Saturday week range for the current week
@@ -59,30 +72,6 @@ export default function DashboardTab() {
     end.setDate(start.getDate() + 6); // Saturday (6 days after Sunday)
     end.setHours(23, 59, 59, 999);
     return { start, end };
-  };
-
-  const calculateStreak = (sessions: SessionSummary[]) => {
-    if (!sessions.length) return 0;
-    const dates = Array.from(
-      new Set(
-        sessions
-          .map((s) => (s.completed_at ? new Date(s.completed_at).toDateString() : null))
-          .filter(Boolean) as string[]
-      )
-    )
-      .map((d) => new Date(d))
-      .sort((a, b) => b.getTime() - a.getTime());
-
-    let streakCount = 0;
-    let cursor = new Date();
-    cursor.setHours(0, 0, 0, 0);
-
-    const dateSet = new Set(dates.map((d) => d.toDateString()));
-    while (dateSet.has(cursor.toDateString())) {
-      streakCount += 1;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-    return streakCount;
   };
 
   const load = useCallback(async () => {
@@ -106,9 +95,13 @@ export default function DashboardTab() {
       const targetDays = userProfile?.days_per_week ?? 0;
 
       const { start, end } = getWeekRange();
-      const thisWeek = await getSessionsInRange(userId, start.toISOString(), end.toISOString());
-      const recent = await getRecentSessions(userId, 7);
-      const topPrs = await getTopPRs(userId, 3);
+      const [thisWeek, recent, topPrs, yearStats, streakCount] = await Promise.all([
+        getSessionsInRange(userId, start.toISOString(), end.toISOString()),
+        getRecentSessions(userId, 7),
+        getTopPRs(userId, 3),
+        getYearToDateStats(userId),
+        getStreak(userId),
+      ]);
 
       // Muscle freshness data is now loaded by WorkoutHeatmap component
 
@@ -127,8 +120,10 @@ export default function DashboardTab() {
 
       setWeekCompleted(thisWeek.length);
       setWeekTarget(targetDays);
+      setYearDaysWorkedOut(yearStats.daysWorkedOut);
+      setYearTotalVolume(yearStats.totalVolume);
+      setStreak(streakCount);
       setRecentSessionsState(recent);
-      setStreak(calculateStreak(recent));
       setPrs(
         topPrs.map((p) => ({
           ...p,
@@ -141,7 +136,9 @@ export default function DashboardTab() {
           action: 'load:done',
           weekCompleted: thisWeek.length,
           weekTarget: targetDays,
-          streak: calculateStreak(recent),
+          yearDaysWorkedOut: yearStats.daysWorkedOut,
+          yearTotalVolume: yearStats.totalVolume,
+          streak: streakCount,
           prs: topPrs.length,
           recentCount: recent.length,
         });
@@ -188,25 +185,70 @@ export default function DashboardTab() {
       <TabHeader title="Dashboard" tabId="dashboard" />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Muscle status</Text>
-          {profile?.id && <WorkoutHeatmap userId={profile.id} />}
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Muscle status</Text>
+            <Pressable
+              style={styles.bodySwitcherButton}
+              onPress={() => setBodySide((s) => (s === 'front' ? 'back' : 'front'))}
+              accessibilityLabel={bodySide === 'front' ? 'Show back view' : 'Show front view'}
+              accessibilityRole="button"
+            >
+              <RotateCcw size={20} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+          {profile?.id && (
+            <WorkoutHeatmap
+              userId={profile.id}
+              bodySide={bodySide}
+              onBodySideChange={setBodySide}
+            />
+          )}
         </View>
 
-        <View style={styles.row}>
-          <View style={[styles.card, styles.flex1]}>
-            <Text style={styles.cardTitle}>This week</Text>
-            <Text style={styles.metric}>{weekCompleted}/{weekTarget || '—'}</Text>
-            <Text style={styles.metricSub}>Completed workouts</Text>
-            <View style={styles.progressBarTrack}>
-              <View
-                style={[styles.progressBarFill, { width: `${weekTarget ? progressPct : 0}%` }]}
-              />
+        <View style={styles.statGrid}>
+          <View style={styles.statRow}>
+            <View style={[styles.card, styles.statCard]}>
+              <View style={styles.weekCardTop}>
+                <Text style={styles.cardTitle}>This week</Text>
+                <Text style={styles.metric}>{weekCompleted}/{weekTarget || '—'}</Text>
+              </View>
+              <View style={styles.weekCardBottom}>
+                <Text style={styles.metricSub}>Completed workouts</Text>
+                <View style={styles.progressBarTrack}>
+                  <View
+                    style={[styles.progressBarFill, { width: `${weekTarget ? progressPct : 0}%` }]}
+                  />
+                </View>
+              </View>
+            </View>
+            <View style={[styles.card, styles.statCard]}>
+              <Text style={styles.cardTitle}>This year</Text>
+              <View style={styles.metricRow}>
+                <Text style={styles.metric}>{yearDaysWorkedOut}</Text>
+                <Text style={styles.metric}> days</Text>
+              </View>
+              <Text style={styles.metricSub}>Worked out</Text>
             </View>
           </View>
-          <View style={[styles.card, styles.flex1]}>
-            <Text style={styles.cardTitle}>Streak</Text>
-            <Text style={styles.metric}>{streak} days</Text>
-            <Text style={styles.metricSub}>Consecutive active days</Text>
+          <View style={styles.statRow}>
+            <View style={[styles.card, styles.statCard]}>
+              <Text style={styles.cardTitle}>Total volume</Text>
+              <View style={styles.metricRow}>
+                <Text style={styles.metric}>
+                  {displayVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </Text>
+                <Text style={styles.metric}> {unitsLabel}</Text>
+              </View>
+              <Text style={styles.metricSub}>This year</Text>
+            </View>
+            <View style={[styles.card, styles.statCard]}>
+              <Text style={styles.cardTitle}>Streak</Text>
+              <View style={styles.metricRow}>
+                <Text style={styles.metric}>{streak}</Text>
+                <Text style={styles.metric}> days</Text>
+              </View>
+              <Text style={styles.metricSub}>Consecutively</Text>
+            </View>
           </View>
         </View>
 
@@ -310,6 +352,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
   },
+  statGrid: {
+    gap: spacing.md,
+  },
+  statRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  statCard: {
+    flex: 1,
+  },
   flex1: {
     flex: 1,
   },
@@ -331,14 +383,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  bodySwitcherButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.cardBorder,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   metric: {
     color: colors.textPrimary,
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
   },
+  metricRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+  },
   metricSub: {
     color: colors.textSecondary,
     fontSize: typography.sizes.sm,
+  },
+  weekCardTop: {
+    gap: spacing.xs,
+  },
+  weekCardBottom: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+    alignSelf: 'stretch',
   },
   progressBarTrack: {
     height: 8,

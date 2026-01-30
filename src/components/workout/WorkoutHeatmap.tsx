@@ -1,6 +1,6 @@
 /**
  * Workout Heatmap
- * High-performance muscle visualization using Skia
+ * High-performance muscle visualization
  * Displays muscle freshness from v2_muscle_freshness table
  */
 
@@ -14,13 +14,21 @@ import { supabase } from '../../lib/supabase/client';
 import { devError, devLog } from '../../lib/utils/logger';
 
 const LEGEND_DROPDOWN_DURATION = 200;
-const LEGEND_CONTENT_MAX_HEIGHT = 160;
+const LEGEND_CONTENT_MAX_HEIGHT = 130;
+
+type BodySide = 'front' | 'back';
 
 interface WorkoutHeatmapProps {
   userId: string;
+  bodySide?: BodySide;
+  onBodySideChange?: (side: BodySide) => void;
 }
 
-export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
+export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
+  userId,
+  bodySide = 'front',
+  onBodySideChange,
+}) => {
   const [loading, setLoading] = useState(true);
   const [freshnessData, setFreshnessData] = useState<Record<string, number>>({});
   const [infoOpen, setInfoOpen] = useState(false);
@@ -112,7 +120,11 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
   return (
     <View style={styles.container}>
       <View style={styles.heatmapContainer}>
-        <BodyHeatmap freshnessData={freshnessData} />
+        <BodyHeatmap
+          freshnessData={freshnessData}
+          side={bodySide}
+          onSideChange={onBodySideChange}
+        />
       </View>
 
       <View style={styles.footerRow}>
@@ -123,7 +135,7 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({ userId }) => {
           accessibilityLabel="Toggle muscle status legend"
           accessibilityRole="button"
         >
-          <Info size={22} color={colors.textSecondary} />
+          <Info size={25} color={colors.textSecondary} />
         </Pressable>
       </View>
 
@@ -231,8 +243,8 @@ const styles = StyleSheet.create({
   },
   legend: {
     gap: spacing.xs,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.sm,
+    paddingTop: spacing.lg,
+    paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: colors.cardBorder,
   },

@@ -293,6 +293,171 @@ export async function saveSessionSet(
   }
 }
 
+export interface YearToDateStats {
+  daysWorkedOut: number;
+  totalVolume: number;
+}
+
+/**
+ * Get year-to-date stats: distinct days worked out and total volume (weight × reps) for the current year.
+ */
+export async function getYearToDateStats(userId: string): Promise<YearToDateStats> {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+  const endOfYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+  const startIso = startOfYear.toISOString();
+  const endIso = endOfYear.toISOString();
+
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getYearToDateStats', userId, startIso, endIso });
+  }
+
+  try {
+    const { data: sessions, error: sessionsError } = await supabase
+      .from('v2_workout_sessions')
+      .select('id, completed_at')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .gte('completed_at', startIso)
+      .lte('completed_at', endIso);
+
+    if (sessionsError) {
+      if (__DEV__) {
+        devError('workout-query', sessionsError, { userId, action: 'getYearToDateStats_sessions' });
+      }
+      return { daysWorkedOut: 0, totalVolume: 0 };
+    }
+
+    const sessionList = sessions || [];
+    const uniqueDates = new Set<string>();
+    for (const s of sessionList) {
+      if (s.completed_at) {
+        uniqueDates.add(s.completed_at.split('T')[0]);
+      }
+    }
+
+    const sessionIds = sessionList.map((s) => s.id);
+    if (sessionIds.length === 0) {
+      return { daysWorkedOut: uniqueDates.size, totalVolume: 0 };
+    }
+
+    const { data: sessionExercises, error: seError } = await supabase
+      .from('v2_session_exercises')
+      .select('id')
+      .in('session_id', sessionIds);
+
+    if (seError) {
+      if (__DEV__) {
+        devError('workout-query', seError, { userId, action: 'getYearToDateStats_sessionExercises' });
+      }
+      return { daysWorkedOut: uniqueDates.size, totalVolume: 0 };
+    }
+
+    const seIds = (sessionExercises || []).map((se) => se.id);
+    if (seIds.length === 0) {
+      return { daysWorkedOut: uniqueDates.size, totalVolume: 0 };
+    }
+
+    const { data: sets, error: setsError } = await supabase
+      .from('v2_session_sets')
+      .select('weight, reps')
+      .in('session_exercise_id', seIds)
+      .not('performed_at', 'is', null);
+
+    if (setsError) {
+      if (__DEV__) {
+        devError('workout-query', setsError, { userId, action: 'getYearToDateStats_sets' });
+      }
+      return { daysWorkedOut: uniqueDates.size, totalVolume: 0 };
+    }
+
+    let totalVolume = 0;
+    for (const row of sets || []) {
+      const w = typeof row.weight === 'number' ? row.weight : row.weight != null ? Number(row.weight) : null;
+      const r = typeof row.reps === 'number' ? row.reps : row.reps != null ? Number(row.reps) : null;
+      if (w != null && r != null && !Number.isNaN(w) && !Number.isNaN(r)) {
+        totalVolume += w * r;
+      }
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'getYearToDateStats_result',
+        userId,
+        daysWorkedOut: uniqueDates.size,
+        totalVolume,
+      });
+    }
+
+    return { daysWorkedOut: uniqueDates.size, totalVolume };
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, action: 'getYearToDateStats_catch' });
+    }
+    return { daysWorkedOut: 0, totalVolume: 0 };
+  }
+}
+
+/**
+ * Get current streak: consecutive days with at least one completed workout, counting backwards from today.
+ */
+export async function getStreak(userId: string): Promise<number> {
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - 365);
+  start.setHours(0, 0, 0, 0);
+  const endIso = now.toISOString();
+  const startIso = start.toISOString();
+
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getStreak', userId, startIso, endIso });
+  }
+
+  try {
+    const { data: sessions, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('completed_at')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .not('completed_at', 'is', null)
+      .gte('completed_at', startIso)
+      .lte('completed_at', endIso);
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { userId, action: 'getStreak' });
+      }
+      return 0;
+    }
+
+    const dateSet = new Set<string>();
+    for (const s of sessions || []) {
+      if (s.completed_at) {
+        dateSet.add(s.completed_at.split('T')[0]);
+      }
+    }
+
+    let cursor = new Date();
+    cursor.setHours(0, 0, 0, 0);
+    let streakCount = 0;
+    while (dateSet.has(cursor.toISOString().split('T')[0])) {
+      streakCount += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', { action: 'getStreak_result', userId, streakCount });
+    }
+    return streakCount;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { userId, action: 'getStreak_catch' });
+    }
+    return 0;
+  }
+}
+
 /**
  * Get completed sessions in a date range (inclusive)
  * Filters by completed_at timestamp to accurately count completed workouts

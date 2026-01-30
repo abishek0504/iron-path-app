@@ -50,21 +50,28 @@ const MUSCLE_KEY_TO_SLUG: Record<string, string> = {
   tibialis_anterior: 'tibialis',
 };
 
+type BodySide = 'front' | 'back';
+
 interface BodyHeatmapProps {
   freshnessData: Record<string, number | null | undefined>;
   width?: number;
   height?: number;
+  side?: BodySide;
+  onSideChange?: (side: BodySide) => void;
 }
-
-type BodySide = 'front' | 'back';
 
 export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   freshnessData,
   width = Dimensions.get('window').width - 32,
   height = (Dimensions.get('window').width - 32) * 0.85,
+  side: controlledSide,
+  onSideChange,
 }) => {
   const profile = useUserStore((state) => state.profile);
-  const [side, setSide] = useState<BodySide>('front');
+  const [internalSide, setInternalSide] = useState<BodySide>('front');
+  const isControlled = controlledSide !== undefined && onSideChange !== undefined;
+  const side = isControlled ? controlledSide : internalSide;
+  const setSide = isControlled ? onSideChange : setInternalSide;
 
   const gender: 'male' | 'female' =
     (profile?.gender?.toLowerCase() === 'female' ? 'female' : 'male');
@@ -114,20 +121,22 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
 
   return (
     <View style={[styles.container, { width, height }]}>
-      <Pressable
-        style={styles.toggleButton}
-        onPress={() => setSide((s) => (s === 'front' ? 'back' : 'front'))}
-        accessibilityLabel={side === 'front' ? 'Show back view' : 'Show front view'}
-        accessibilityRole="button"
-      >
-        <RotateCcw size={18} color="#e5e7eb" />
-      </Pressable>
+      {!isControlled && (
+        <Pressable
+          style={styles.toggleButton}
+          onPress={() => setSide(side === 'front' ? 'back' : 'front')}
+          accessibilityLabel={side === 'front' ? 'Show back view' : 'Show front view'}
+          accessibilityRole="button"
+        >
+          <RotateCcw size={20} color="#e5e7eb" />
+        </Pressable>
+      )}
       <View style={styles.bodyWrapper}>
         <Body
           data={bodyData as any}
           side={side}
           gender={gender}
-          scale={1.3}
+          scale={1.2}
           colors={['#22c55e', '#eab308', '#f97316', '#ef4444']}
           border="#4b5563"
         />
@@ -136,19 +145,19 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   );
 };
 
-const TOGGLE_BUTTON_SIZE = 44;
-const BODY_VERTICAL_PADDING = 24;
+const TOGGLE_BUTTON_SIZE = 45;
+const BODY_VERTICAL_PADDING = 30;
 
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
+    position: 'static',
     paddingTop: spacing.sm,
   },
   toggleButton: {
     position: 'absolute',
-    top: spacing.sm,
+    top: 0,
     right: spacing.sm,
     zIndex: 1,
     width: TOGGLE_BUTTON_SIZE,
