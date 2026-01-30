@@ -37,7 +37,8 @@ import {
   invalidateTemplates,
   invalidateTemplate,
 } from '../../src/lib/cache/templateCache';
-import { getMergedExercise, listMergedExercises } from '../../src/lib/supabase/queries/exercises';
+import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
+import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import {
   selectExerciseTargets,
   type ExerciseTarget,
