@@ -19,7 +19,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Plus } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../src/lib/utils/theme';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
-import { listMergedExercises, type MergedExercise } from '../src/lib/supabase/queries/exercises';
+import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
 import { getExerciseHistory } from '../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../src/lib/utils/logger';
 
@@ -73,7 +73,7 @@ export default function AddExerciseScreen() {
     setLoading(true);
     if (__DEV__) devLog('add-exercise', { action: 'loadExercises_start', userId });
     try {
-      const list = await listMergedExercises(userId);
+      const list = await listMergedExercisesCached(userId);
       setExercises(list.sort((a, b) => a.name.localeCompare(b.name)));
       if (__DEV__) devLog('add-exercise', { action: 'loadExercises_result', count: list.length });
     } catch (e) {

@@ -33,6 +33,7 @@ import {
   completeWorkoutSession,
   getLastCompletedWorkoutAt,
 } from '../../../src/lib/supabase/queries/workouts';
+import { invalidateSessionsInRangeForUser } from '../../../src/lib/cache/sessionsCache';
 import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
 import { useUserStore } from '../../../src/stores/userStore';
@@ -500,6 +501,8 @@ export default function ActiveWorkoutScreen() {
 
     const success = await completeWorkoutSession(sessionId);
     if (success) {
+      const userId = useUserStore.getState().profile?.id;
+      if (userId) invalidateSessionsInRangeForUser(userId);
       toast.success('Workout completed!');
       goBack();
     } else {

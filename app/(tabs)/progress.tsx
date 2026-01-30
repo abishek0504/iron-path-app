@@ -12,7 +12,8 @@ import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { colors, spacing, layout, typography, borderRadius } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { supabase } from '../../src/lib/supabase/client';
-import { getSessionsInRange, type WorkoutSession } from '../../src/lib/supabase/queries/workouts';
+import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
+import type { WorkoutSession } from '../../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { useUIStore } from '../../src/stores/uiStore';
 import { ProgressCalendar } from '../../src/components/progress/ProgressCalendar';
@@ -81,7 +82,7 @@ export default function ProgressTab() {
 
       const [start, end] = getDateRange(currentDate, viewMode);
 
-      const sessions: WorkoutSession[] = await getSessionsInRange(
+      const sessions: WorkoutSession[] = await getSessionsInRangeCached(
         userId,
         start.toISOString(),
         end.toISOString()

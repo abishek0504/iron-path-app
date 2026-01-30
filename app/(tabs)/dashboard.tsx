@@ -7,10 +7,8 @@ import { colors, spacing, layout, borderRadius, typography } from '../../src/lib
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
-import { getUserProfile } from '../../src/lib/supabase/queries/users';
-import { listMergedExercises } from '../../src/lib/supabase/queries/exercises';
+import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import {
-  getSessionsInRange,
   getRecentSessions,
   formatPRDisplay,
   type TopPR,
@@ -19,7 +17,9 @@ import {
   getYearToDateStatsCached,
   getStreakCached,
   getCachedTopPRsCached,
+  getUserProfileCached,
 } from '../../src/lib/cache/dashboardStatsCache';
+import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
@@ -94,14 +94,14 @@ export default function DashboardTab() {
 
       let userProfile = profile;
       if (!userProfile) {
-        userProfile = await getUserProfile(userId);
+        userProfile = await getUserProfileCached(userId);
         if (userProfile) setProfile(userProfile);
       }
       const targetDays = userProfile?.days_per_week ?? 0;
 
       const { start, end } = getWeekRange();
       const [thisWeek, recent, topPrs, yearStats, streakCount] = await Promise.all([
-        getSessionsInRange(userId, start.toISOString(), end.toISOString()),
+        getSessionsInRangeCached(userId, start.toISOString(), end.toISOString()),
         getRecentSessions(userId, 3),
         getCachedTopPRsCached(userId, 3),
         getYearToDateStatsCached(userId),
@@ -130,7 +130,7 @@ export default function DashboardTab() {
         .filter(Boolean) as string[];
       if (exerciseIds.length) {
         try {
-          const merged = await listMergedExercises(userId, exerciseIds);
+          const merged = await listMergedExercisesCached(userId, exerciseIds);
           const mergedNames = merged.reduce<Record<string, string>>((acc, ex) => {
             acc[ex.id] = ex.name || 'Exercise';
             return acc;

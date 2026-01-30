@@ -8,7 +8,7 @@
  */
 
 import { getExerciseHistory } from '../supabase/queries/workouts';
-import { getUserProfile } from '../supabase/queries/users';
+import { getUserProfileCached } from '../cache/dashboardStatsCache';
 import { supabase } from '../supabase/client';
 import { devLog } from './logger';
 
@@ -91,7 +91,7 @@ export async function calculateWeightSuggestion(
 
   // No history - use prescription bodyweight multiplier (always a number, no NULLs)
   if (referenceId && mode === 'reps') {
-    const experience = experienceLevel ?? (await getUserProfile(userId))?.experience_level ?? 'beginner';
+    const experience = experienceLevel ?? (await getUserProfileCached(userId))?.experience_level ?? 'beginner';
     const { data: prescription } = await supabase
       .from('v2_exercise_prescriptions')
       .select('suggested_weight_multiplier_bw')
@@ -103,7 +103,7 @@ export async function calculateWeightSuggestion(
 
     if (prescription && typeof prescription.suggested_weight_multiplier_bw === 'number') {
       const multiplier = prescription.suggested_weight_multiplier_bw;
-      const profile = await getUserProfile(userId);
+      const profile = await getUserProfileCached(userId);
       const bw = profile?.current_weight ?? (useImperial ? DEFAULT_BW_LBS : DEFAULT_BW_KG);
       const raw = bw * multiplier;
       const weight = Math.round(raw * 2) / 2;

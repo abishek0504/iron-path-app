@@ -17,7 +17,7 @@ import { supabase } from '../supabase/client';
 import { devLog, devError } from '../utils/logger';
 import type { FullTemplate } from '../supabase/queries/templates';
 import type { UserProfile } from '../../stores/userStore';
-import { listMergedExercises } from '../supabase/queries/exercises';
+import { listMergedExercisesCached } from '../cache/exerciseCache';
 import {
   getMuscleStressStats,
   type MuscleStressMap,
@@ -166,7 +166,7 @@ export async function generateWeekForTemplate(
     const exerciseIds = aiExercises.map((row) => row.exercise_id);
 
     // 2) Load merged exercise metadata for biomechanics
-    const mergedExercises = await listMergedExercises(userId, exerciseIds);
+    const mergedExercises = await listMergedExercisesCached(userId, exerciseIds);
     const mergedMap = new Map(mergedExercises.map((ex) => [ex.id, ex]));
 
     // 3) Load current fatigue (performed truth) over the last 48h

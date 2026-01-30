@@ -1,6 +1,7 @@
 /**
- * Short-TTL in-memory cache for dashboard stats.
+ * Short-TTL in-memory cache for dashboard stats and user profile.
  * Reduces refetches when switching back to the Dashboard tab.
+ * Call invalidateProfileCache after updateUserProfile.
  */
 
 import {
@@ -10,6 +11,8 @@ import {
   type YearToDateStats,
   type TopPR,
 } from '../supabase/queries/workouts';
+import { getUserProfile } from '../supabase/queries/users';
+import type { UserProfile } from '../../stores/userStore';
 
 const TTL_MS = 90 * 1000; // 90 seconds
 
@@ -39,4 +42,13 @@ export function getStreakCached(userId: string): Promise<number> {
 
 export function getCachedTopPRsCached(userId: string, limit: number): Promise<TopPR[]> {
   return getOrSet(`topPrs:${userId}:${limit}`, () => getCachedTopPRs(userId, limit));
+}
+
+export function getUserProfileCached(userId: string): Promise<UserProfile | null> {
+  return getOrSet(`profile:${userId}`, () => getUserProfile(userId));
+}
+
+/** Call after updateUserProfile so the next fetch returns fresh data. */
+export function invalidateProfileCache(userId: string): void {
+  cache.delete(`profile:${userId}`);
 }

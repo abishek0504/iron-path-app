@@ -19,7 +19,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from '../src/lib/supabase/client';
-import { getUserProfile, updateUserProfile } from '../src/lib/supabase/queries/users';
+import { updateUserProfile } from '../src/lib/supabase/queries/users';
+import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore, type UserProfile } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
@@ -76,7 +77,7 @@ export default function EditProfileScreen() {
 
         let p = cachedProfile;
         if (!p) {
-          p = await getUserProfile(userId);
+          p = await getUserProfileCached(userId);
           if (p) {
             setProfile(p);
           }
@@ -184,6 +185,7 @@ export default function EditProfileScreen() {
         Alert.alert('Error', 'Failed to save profile.');
         return;
       }
+      invalidateProfileCache(profile.id);
 
       setProfile({ ...profile, ...updates });
       if (__DEV__) {

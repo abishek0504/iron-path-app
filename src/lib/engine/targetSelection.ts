@@ -7,7 +7,7 @@
 import { getExercisePrescription } from '../supabase/queries/prescriptions';
 import { getMergedExercise } from '../supabase/queries/exercises';
 import { getExerciseHistory } from '../supabase/queries/workouts';
-import { getUserProfile } from '../supabase/queries/users';
+import { getUserProfileCached } from '../cache/dashboardStatsCache';
 import { devLog, devError } from '../utils/logger';
 
 /** Fallback bodyweight (lbs) when profile has no current_weight. */
@@ -202,7 +202,7 @@ export async function selectExerciseTargets(
           const multiplier = prescription.suggested_weight_multiplier_bw;
           let bw: number = context.current_weight ?? 0;
           if (bw <= 0) {
-            const profile = await getUserProfile(userId);
+            const profile = await getUserProfileCached(userId);
             bw = profile?.current_weight ?? (context.use_imperial === false ? DEFAULT_BW_KG : DEFAULT_BW_LBS);
           }
           const raw = bw * multiplier;

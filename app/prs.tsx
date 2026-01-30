@@ -7,8 +7,9 @@ import { TabHeader } from '../src/components/ui/TabHeader';
 import { useUIStore } from '../src/stores/uiStore';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
-import { listMergedExercises } from '../src/lib/supabase/queries/exercises';
-import { getCachedTopPRs, formatPRDisplay, type TopPR } from '../src/lib/supabase/queries/workouts';
+import { listMergedExercisesCached } from '../src/lib/cache/exerciseCache';
+import { getCachedTopPRsCached } from '../src/lib/cache/dashboardStatsCache';
+import { formatPRDisplay, type TopPR } from '../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../src/lib/utils/logger';
 
 export default function PRsScreen() {
@@ -33,14 +34,14 @@ export default function PRsScreen() {
         return;
       }
 
-      const topPrs = await getCachedTopPRs(userId, 50);
+      const topPrs = await getCachedTopPRsCached(userId, 50);
       const exerciseIds = topPrs
         .map((p) => p.exercise_id || p.custom_exercise_id)
         .filter(Boolean) as string[];
 
       let mergedNames: Record<string, string> = {};
       if (exerciseIds.length) {
-        const merged = await listMergedExercises(userId, exerciseIds);
+        const merged = await listMergedExercisesCached(userId, exerciseIds);
         mergedNames = merged.reduce<Record<string, string>>((acc, ex) => {
           acc[ex.id] = ex.name || 'Exercise';
           return acc;

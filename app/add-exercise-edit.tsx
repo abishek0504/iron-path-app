@@ -31,6 +31,7 @@ import {
   applyStructureEditToTemplate,
   getTemplateSlotsForDay,
 } from '../src/lib/supabase/queries/templates';
+import { invalidateTemplate } from '../src/lib/cache/templateCache';
 import {
   getUserExerciseDefaults,
   upsertUserExerciseDefaults,
@@ -282,6 +283,7 @@ export default function AddExerciseEditScreen() {
     try {
       const success = await applyStructureEditToTemplate(templateId, { type: 'removeSlot', slotId: editSlotId });
       if (success) {
+        invalidateTemplate(templateId);
         useUIStore.getState().setPlannerNeedsRefetch(true);
         toast.success('Removed from routine');
         router.replace('/(tabs)/planner');
@@ -413,6 +415,7 @@ export default function AddExerciseEditScreen() {
           customExerciseId: customExerciseIdVal,
           sortOrder,
         });
+        if (success) invalidateTemplate(templateId);
         if (!success) {
           toast.error('Failed to add to routine');
           return;

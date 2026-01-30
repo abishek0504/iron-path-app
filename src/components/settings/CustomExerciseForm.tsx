@@ -24,7 +24,7 @@ export const CustomExerciseForm: React.FC<CustomExerciseFormProps> = () => {
   //   - reps_min, reps_max (required if mode='reps')
   //   - duration_sec_min, duration_sec_max (required if mode='timed')
   // - Uses validateCustomExerciseTargets() helper
-  // - Saves to v2_user_custom_exercises
+  // - Saves via createUserCustomExercise/updateUserCustomExercise from src/lib/supabase/queries/customExerciseMutations (cache is invalidated there)
 
   return (
     <View style={styles.container}>

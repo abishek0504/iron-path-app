@@ -24,15 +24,16 @@ import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 import { useUserStore } from '../src/stores/userStore';
 import {
-  getUserProfile,
   createUserProfile,
   updateUserProfile,
 } from '../src/lib/supabase/queries/users';
+import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/dashboardStatsCache';
 import {
   getUserTemplates,
   createTemplate,
   ensureTemplateHasWeekDays,
 } from '../src/lib/supabase/queries/templates';
+import { invalidateTemplates, invalidateTemplate } from '../src/lib/cache/templateCache';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { useToast } from '../src/hooks/useToast';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
@@ -84,7 +85,7 @@ export default function Onboarding() {
       }
 
       const userId = session.user.id;
-      const profile = await getUserProfile(userId);
+      const profile = await getUserProfileCached(userId);
 
       if (profile) {
         setFirstName(profile.first_name || '');
@@ -201,7 +202,7 @@ export default function Onboarding() {
         id: userId,
       };
 
-      const existingProfile = await getUserProfile(userId);
+      const existingProfile = await getUserProfileCached(userId);
       const saveOk = existingProfile
         ? await updateUserProfile(userId, profilePayload)
         : await createUserProfile(userId, profilePayload);
@@ -211,6 +212,7 @@ export default function Onboarding() {
         toast.error('Failed to save profile');
         return;
       }
+      invalidateProfileCache(userId);
 
       setProfile({
         ...existingProfile,
@@ -224,10 +226,12 @@ export default function Onboarding() {
       if (!templateId) {
         const created = await createTemplate(userId);
         templateId = created?.id ?? null;
+        if (created) invalidateTemplates(userId);
       }
 
       if (templateId) {
         await ensureTemplateHasWeekDays(templateId);
+        invalidateTemplate(templateId);
       }
 
       if (__DEV__) {

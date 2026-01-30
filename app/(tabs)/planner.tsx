@@ -24,8 +24,6 @@ import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
 import { supabase } from '../../src/lib/supabase/client';
 import {
-  getUserTemplates,
-  getTemplateWithDaysAndSlots,
   createTemplate,
   upsertTemplateDay,
   ensureTemplateHasWeekDays,
@@ -33,6 +31,12 @@ import {
   type TemplateSlot,
   type TemplateDay,
 } from '../../src/lib/supabase/queries/templates';
+import {
+  getUserTemplatesCached,
+  getTemplateWithDaysAndSlotsCached,
+  invalidateTemplates,
+  invalidateTemplate,
+} from '../../src/lib/cache/templateCache';
 import { getMergedExercise, listMergedExercises } from '../../src/lib/supabase/queries/exercises';
 import {
   selectExerciseTargets,
@@ -306,10 +310,11 @@ export default function PlannerTab() {
 
       setIsLoadingTemplate(true);
       try {
-        // Ensure all 7 weekdays exist
+        // Ensure all 7 weekdays exist (invalidates cache so next fetch is fresh)
         await ensureTemplateHasWeekDays(templateId);
+        invalidateTemplate(templateId);
 
-        const fullTemplate = await getTemplateWithDaysAndSlots(templateId);
+        const fullTemplate = await getTemplateWithDaysAndSlotsCached(templateId);
         if (fullTemplate) {
           setTemplateData(fullTemplate);
           setActiveTemplateId(templateId);
@@ -346,7 +351,7 @@ export default function PlannerTab() {
                   count: exerciseIds.size,
                 });
               }
-              const exercises = await listMergedExercises(userId, Array.from(exerciseIds));
+              const exercises = await listMergedExercisesCached(userId, Array.from(exerciseIds));
               const nameMap = new Map<string, string>();
               exercises.forEach((ex) => {
                 nameMap.set(ex.id, ex.name);
@@ -406,7 +411,7 @@ export default function PlannerTab() {
 
       try {
         // Get user templates
-        const templates = await getUserTemplates(userId);
+        const templates = await getUserTemplatesCached(userId);
 
         if (templates.length === 0) {
           // Create default template
@@ -415,6 +420,7 @@ export default function PlannerTab() {
           }
 
           const newTemplate = await createTemplate(userId);
+          if (newTemplate) invalidateTemplates(userId);
           if (!newTemplate) {
             if (isMounted) {
               toast.error('Failed to create template');
@@ -482,7 +488,7 @@ export default function PlannerTab() {
               setIsLoadingTemplate(false);
               return;
             }
-            getUserTemplates(userId).then((templates) => {
+            getUserTemplatesCached(userId).then((templates) => {
               if (templates.length > 0) {
                 loadTemplate(templates[0].id);
               } else {
@@ -543,6 +549,7 @@ export default function PlannerTab() {
           sortOrder,
         });
         if (success) {
+          invalidateTemplate(activeTemplateId);
           await loadTemplate(activeTemplateId);
           toast.success('Added to routine for this day');
         } else {
@@ -581,6 +588,7 @@ export default function PlannerTab() {
         });
 
         if (success) {
+          invalidateTemplate(activeTemplateId);
           await loadTemplate(activeTemplateId);
           toast.success('Exercise removed from plan');
         } else {
@@ -866,7 +874,7 @@ export default function PlannerTab() {
                   );
 
                   if (success) {
-                    // Reload template to reflect changes
+                    invalidateTemplate(activeTemplateId);
                     await loadTemplate(activeTemplateId);
                     toast.success('Copied last week\'s structure to template');
                   } else {
@@ -972,6 +980,8 @@ export default function PlannerTab() {
                       exerciseIndex++;
                     }
                   }
+
+                  invalidateTemplate(activeTemplateId);
 
                   // Recalculate targets
                   if (templateData) {

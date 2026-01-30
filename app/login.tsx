@@ -10,7 +10,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
-import { getUserProfile } from '../src/lib/supabase/queries/users';
+import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
 import { devLog } from '../src/lib/utils/logger';
 
 export default function Login() {
@@ -44,7 +44,7 @@ export default function Login() {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         const userId = session.user.id;
-        const profile = await getUserProfile(userId);
+        const profile = await getUserProfileCached(userId);
 
         if (profile) {
           const hasRequired =

@@ -8,8 +8,9 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { Trash2 } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
 import { supabase } from '../../lib/supabase/client';
-import { getSessionsInRange, type WorkoutSession } from '../../lib/supabase/queries/workouts';
-import { listMergedExercises } from '../../lib/supabase/queries/exercises';
+import { getSessionsInRangeCached } from '../../lib/cache/sessionsCache';
+import type { WorkoutSession } from '../../lib/supabase/queries/workouts';
+import { listMergedExercisesCached } from '../../lib/cache/exerciseCache';
 import { devLog, devError } from '../../lib/utils/logger';
 import { useUserStore } from '../../stores/userStore';
 
@@ -52,7 +53,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       const end = new Date(selectedDate);
       end.setHours(23, 59, 59, 999);
 
-      const dateSessions = await getSessionsInRange(
+      const dateSessions = await getSessionsInRangeCached(
         userId,
         start.toISOString(),
         end.toISOString()
@@ -131,7 +132,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       let mergedExercises: Array<{ id: string; name: string }> = [];
 
       if (allExerciseIds.length > 0 || allCustomExerciseIds.length > 0) {
-        const merged = await listMergedExercises(userId, [
+        const merged = await listMergedExercisesCached(userId, [
           ...allExerciseIds,
           ...allCustomExerciseIds,
         ]);
@@ -216,7 +217,8 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
               // Remove from local state
               setSessions(prev => prev.filter(s => s.id !== sessionId));
-              
+              const userId = useUserStore.getState().profile?.id;
+              if (userId) invalidateSessionsInRangeForUser(userId);
               // Notify parent to refresh calendar
               if (onSessionDeleted) {
                 onSessionDeleted();

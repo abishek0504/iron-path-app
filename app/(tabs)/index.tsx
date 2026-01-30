@@ -25,9 +25,11 @@ import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
 import { createWorkoutSession, getActiveSession, prefillSessionSets } from '../../src/lib/supabase/queries/workouts';
-import { getTemplateWithDaysAndSlots } from '../../src/lib/supabase/queries/templates';
-import { getUserTemplates } from '../../src/lib/supabase/queries/templates';
-import { listMergedExercises } from '../../src/lib/supabase/queries/exercises';
+import {
+  getTemplateWithDaysAndSlotsCached,
+  getUserTemplatesCached,
+} from '../../src/lib/cache/templateCache';
+import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../src/lib/engine/targetSelection';
@@ -245,7 +247,7 @@ export default function WorkoutTab() {
 
       // First parallel batch: templates and active session (neither depends on the other)
       const [templatesResult, activeSession] = await Promise.all([
-        getUserTemplates(userId),
+        getUserTemplatesCached(userId),
         getActiveSession(userId),
       ]);
       const template = templatesResult.length > 0 ? templatesResult[0] : null;
@@ -265,7 +267,7 @@ export default function WorkoutTab() {
       setActiveTemplate(template);
 
       // Get full template with days and slots (depends on template)
-      const fullTemplate = await getTemplateWithDaysAndSlots(template.id);
+      const fullTemplate = await getTemplateWithDaysAndSlotsCached(template.id);
       if (!fullTemplate) {
         setTemplateDays([]);
         setSelectedDayExercises([]);
@@ -366,7 +368,7 @@ export default function WorkoutTab() {
                 .flatMap((se) => [se.exercise_id, se.custom_exercise_id].filter(Boolean) as string[])
             ),
           ];
-          const merged = exerciseIds.length > 0 ? await listMergedExercises(userId, exerciseIds) : [];
+          const merged = exerciseIds.length > 0 ? await listMergedExercisesCached(userId, exerciseIds) : [];
           const nameByExerciseId = new Map(merged.map((e) => [e.id, e.name]));
           const namesMap = new Map<string, string>();
           for (const se of sessionExercises) {
@@ -398,7 +400,7 @@ export default function WorkoutTab() {
             )
           ),
         ];
-        const merged = slotIds.length > 0 ? await listMergedExercises(userId, slotIds) : [];
+        const merged = slotIds.length > 0 ? await listMergedExercisesCached(userId, slotIds) : [];
         const nameByExerciseId = new Map(merged.map((e) => [e.id, e.name]));
         const namesMap = new Map<string, string>();
         for (const slot of selectedDay.slots) {

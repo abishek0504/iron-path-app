@@ -8,7 +8,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing } from '../src/lib/utils/theme';
-import { getUserProfile } from '../src/lib/supabase/queries/users';
+import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore } from '../src/stores/userStore';
 
 export default function Index() {
@@ -27,7 +27,7 @@ export default function Index() {
 
       if (session) {
         const userId = session.user.id;
-        const profile = await getUserProfile(userId);
+        const profile = await getUserProfileCached(userId);
 
         if (profile) {
           setProfile(profile);
