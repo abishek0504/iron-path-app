@@ -3,52 +3,22 @@
  *
  * Uses react-native-body-highlighter to render body silhouettes
  * and maps our v2_muscles keys to the library's body part slugs.
+ * Region color = average fatigue of all muscles in that group.
+ * Tap a region to see individual muscle fatigues.
  */
 
 import React, { useMemo, useState } from 'react';
-import { View, StyleSheet, Dimensions, Pressable } from 'react-native';
-import { RotateCcw } from 'lucide-react-native';
+import { View, StyleSheet, Dimensions, Pressable, Modal, Text, TouchableOpacity } from 'react-native';
+import { RotateCcw, X } from 'lucide-react-native';
 import Body from 'react-native-body-highlighter';
 import { useUserStore } from '../../stores/userStore';
-import { spacing } from '../../lib/utils/theme';
-
-// Map our v2_muscles keys to react-native-body-highlighter slugs.
-// Library slug list: https://github.com/HichamELBSI/react-native-body-highlighter
-const MUSCLE_KEY_TO_SLUG: Record<string, string> = {
-  chest: 'chest',
-  upper_chest: 'chest',
-  lower_chest: 'chest',
-  anterior_deltoids: 'deltoids',
-  lateral_deltoids: 'deltoids',
-  posterior_deltoids: 'deltoids',
-  triceps: 'triceps',
-
-  lats: 'upper-back',
-  upper_back: 'upper-back',
-  lower_back: 'lower-back',
-  traps: 'trapezius',
-  biceps: 'biceps',
-  forearms: 'forearm',
-
-  abs: 'abs',
-  transverse_abdominis: 'abs',
-  obliques: 'obliques',
-  serratus_anterior: 'obliques',
-
-  quads: 'quadriceps',
-  hip_flexors: 'adductors',
-
-  hamstrings: 'hamstring',
-  glutes: 'gluteal',
-  glute_medius: 'gluteal',
-  glute_minimus: 'gluteal',
-  piriformis: 'gluteal',
-  calves: 'calves',
-  soleus: 'calves',
-
-  rotator_cuff: 'deltoids',
-  tibialis_anterior: 'tibialis',
-};
+import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
+import {
+  MUSCLE_KEY_TO_SLUG,
+  SLUG_TO_MUSCLE_KEYS,
+  MUSCLE_KEY_TO_DISPLAY_NAME,
+  SLUG_TO_LABEL,
+} from '../../lib/constants/muscleHeatmapSlugs';
 
 type BodySide = 'front' | 'back';
 
@@ -60,6 +30,14 @@ interface BodyHeatmapProps {
   onSideChange?: (side: BodySide) => void;
 }
 
+function freshnessToIntensity(freshness: number | null | undefined): number | null {
+  if (freshness === null || freshness === undefined) return null;
+  if (freshness >= 81) return 1; // fully recovered
+  if (freshness >= 61) return 2; // light fatigue
+  if (freshness >= 31) return 3; // moderate fatigue
+  return 4; // fully fatigued
+}
+
 export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   freshnessData,
   width = Dimensions.get('window').width - 32,
@@ -69,6 +47,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
 }) => {
   const profile = useUserStore((state) => state.profile);
   const [internalSide, setInternalSide] = useState<BodySide>('front');
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const isControlled = controlledSide !== undefined && onSideChange !== undefined;
   const side = isControlled ? controlledSide : internalSide;
   const setSide = isControlled ? onSideChange : setInternalSide;
@@ -77,31 +56,29 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
     (profile?.gender?.toLowerCase() === 'female' ? 'female' : 'male');
 
   const bodyData: Array<{ slug: string; intensity: number }> = useMemo(() => {
-    const slugToIntensity = new Map<string, number>();
-
-    const freshnessToIntensity = (freshness: number | null | undefined): number | null => {
-      if (freshness === null || freshness === undefined) return null;
-      if (freshness >= 81) return 1; // fully recovered
-      if (freshness >= 61) return 2; // light fatigue
-      if (freshness >= 31) return 3; // moderate fatigue
-      return 4; // fully fatigued
-    };
+    const slugToFreshnessSum = new Map<string, { sum: number; count: number }>();
 
     for (const [muscleKey, freshness] of Object.entries(freshnessData)) {
       const slug = MUSCLE_KEY_TO_SLUG[muscleKey];
-      const intensity = freshnessToIntensity(freshness);
-      if (intensity === null || !slug) continue;
+      if (!slug || freshness === null || freshness === undefined) continue;
 
-      const existing = slugToIntensity.get(slug);
-      // Keep the "worst" intensity (highest number)
-      if (!existing || intensity > existing) {
-        slugToIntensity.set(slug, intensity);
+      const existing = slugToFreshnessSum.get(slug);
+      if (!existing) {
+        slugToFreshnessSum.set(slug, { sum: freshness, count: 1 });
+      } else {
+        existing.sum += freshness;
+        existing.count += 1;
       }
     }
 
     const parts: Array<{ slug: string; intensity: number }> = [];
-    for (const [slug, intensity] of slugToIntensity.entries()) {
-      parts.push({ slug, intensity });
+    for (const [slug, { sum, count }] of slugToFreshnessSum.entries()) {
+      if (count === 0) continue;
+      const avgFreshness = sum / count;
+      const intensity = freshnessToIntensity(avgFreshness);
+      if (intensity !== null) {
+        parts.push({ slug, intensity });
+      }
     }
 
     if (__DEV__) {
@@ -111,13 +88,21 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
         totalMuscleKeys: Object.keys(freshnessData).length,
         mappedSlugs: parts.length,
         sampleParts: parts.slice(0, 5),
-        bicepsFreshness: freshnessData.biceps,
-        bicepsIntensity: slugToIntensity.get('biceps'),
       });
     }
 
     return parts;
   }, [freshnessData]);
+
+  const detailMuscles = useMemo(() => {
+    if (!selectedSlug) return [];
+    const keys = SLUG_TO_MUSCLE_KEYS[selectedSlug] ?? [];
+    return keys.map((key) => ({
+      key,
+      name: MUSCLE_KEY_TO_DISPLAY_NAME[key] ?? key,
+      freshness: freshnessData[key],
+    }));
+  }, [selectedSlug, freshnessData]);
 
   return (
     <View style={[styles.container, { width, height }]}>
@@ -139,8 +124,54 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
           scale={1.2}
           colors={['#22c55e', '#eab308', '#f97316', '#ef4444']}
           border="#4b5563"
+          onBodyPartPress={(bodyPart) => setSelectedSlug(bodyPart.slug ?? null)}
         />
       </View>
+
+      <Modal
+        visible={selectedSlug !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedSlug(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setSelectedSlug(null)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            style={styles.modalContent}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedSlug ? SLUG_TO_LABEL[selectedSlug] ?? selectedSlug : ''}
+              </Text>
+              <Pressable
+                onPress={() => setSelectedSlug(null)}
+                style={styles.modalCloseButton}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+              >
+                <X size={22} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+            <View style={styles.modalBody}>
+              {detailMuscles.map(({ key, name, freshness }) => (
+                <View key={key} style={styles.detailRow}>
+                  <Text style={styles.detailName}>{name}</Text>
+                  <Text style={styles.detailFreshness}>
+                    {freshness !== null && freshness !== undefined
+                      ? `${Math.round(freshness)}%`
+                      : '—'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -169,15 +200,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toggleButtonText: {
-    fontSize: 12,
-    color: '#e5e7eb',
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
   bodyWrapper: {
     paddingVertical: BODY_VERTICAL_PADDING,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    width: '100%',
+    maxWidth: 320,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  modalTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
+  },
+  modalCloseButton: {
+    padding: spacing.xs,
+  },
+  modalBody: {
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  detailName: {
+    fontSize: typography.sizes.base,
+    color: colors.textPrimary,
+  },
+  detailFreshness: {
+    fontSize: typography.sizes.base,
+    color: colors.textSecondary,
+    fontWeight: typography.weights.medium,
   },
 });
