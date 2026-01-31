@@ -21,10 +21,10 @@ Apply migrations in this exact order:
 13. **20260128000001_seed_ai_recommended_exercises.sql** - Seeds AI allow-list with priority_order and notes (all exercises with prescriptions)
 14. **20260128000002_seed_prescription_source_notes.sql** - Seeds source_notes explaining prescription rationale
 15. **20260128000003_add_bw_multiplier_prescriptions.sql** - Adds suggested_weight_multiplier_bw (bodyweight-based default; no NULLs)
+16. **20260130000001_add_fk_covering_indexes.sql** - Adds covering indexes for FK columns that lacked them (v2_user_exercise_prs, v2_workout_templates, v2_template_slots, v2_workout_sessions, v2_session_exercises); improves JOIN and CASCADE performance
+17. **20260130000002_add_remaining_fk_indexes_and_prs_pk.sql** - Adds covering indexes for remaining FKs (muscle_key on v2_daily_muscle_stress/v2_muscle_freshness, custom_exercise_id on v2_template_slots, exercise_id on v2_user_exercise_overrides/v2_user_exercise_prs, custom_exercise_id on v2_user_exercise_prs); adds id PRIMARY KEY to v2_user_exercise_prs
 
-##
-
- Table Relationships
+## Table Relationships
 
 ```
 v2_muscles (canonical reference)
@@ -578,10 +578,10 @@ LIMIT 100;
 ## Performance Considerations
 
 ### Indexes Created
-All indexes listed in base migration. Key indexes:
-- Foreign keys (template_id, day_id, session_id, etc.)
+Base migration and later migrations create indexes for:
+- **Foreign keys**: Every FK column has a covering index (FK column as leftmost column). Migrations `20260130000001_add_fk_covering_indexes.sql` and `20260130000002_add_remaining_fk_indexes_and_prs_pk.sql` add indexes for all FKs (e.g. `v2_user_exercise_prs` session_exercise_id, session_id, set_id, exercise_id, custom_exercise_id; `v2_daily_muscle_stress`/`v2_muscle_freshness` muscle_key; `v2_template_slots` custom_exercise_id; `v2_user_exercise_overrides` exercise_id). Improves JOIN and CASCADE performance.
 - Query-heavy columns (user_id, started_at, completed_at)
-- Composite indexes for complex queries
+- Composite indexes for complex lookups (e.g. prescription lookup, session_exercises by session_id + sort_order)
 
 ### RLS Policy Performance
 - Policies use indexed columns (user_id, id)

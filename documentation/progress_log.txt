@@ -5,6 +5,19 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-30 - FK covering indexes (advisor fix)
+-----------------------------------------------------------
+- Migration 20260130000001_add_fk_covering_indexes.sql: Added covering indexes for foreign key columns that had none, to avoid suboptimal JOIN/CASCADE performance.
+  - v2_user_exercise_prs: session_exercise_id, session_id, set_id
+  - v2_workout_templates: user_id
+  - v2_template_slots: day_id, exercise_id
+  - v2_workout_sessions: template_id
+  - v2_session_exercises: exercise_id, custom_exercise_id
+- Migration 20260130000002_add_remaining_fk_indexes_and_prs_pk.sql: Remaining linter fixes.
+  - Covering indexes: v2_daily_muscle_stress.muscle_key, v2_muscle_freshness.muscle_key, v2_template_slots.custom_exercise_id, v2_user_exercise_overrides.exercise_id, v2_user_exercise_prs.exercise_id and custom_exercise_id.
+  - v2_user_exercise_prs: added id uuid PRIMARY KEY (surrogate) so table has a primary key.
+- DATABASE_SCHEMA.md: Migration order updated (17); Performance / Indexes documents both FK migrations and PRs PK.
+
 2026-01-28 - Prescription rationale, research, and guidelines
 -----------------------------------------------------------
 - PRESCRIPTION_RATIONALE.md: New doc validating all prescription values against research, science, and biomechanics.
