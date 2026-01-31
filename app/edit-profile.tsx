@@ -7,6 +7,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  LayoutAnimation,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +16,7 @@ import {
   TouchableOpacity,
   View,
   Switch,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,6 +24,7 @@ import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import type { NavigationAction } from '@react-navigation/routers';
 import { X } from 'lucide-react-native';
 import { Picker } from '@react-native-picker/picker';
+import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
 import { updateUserProfile } from '../src/lib/supabase/queries/users';
 import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/dashboardStatsCache';
@@ -34,6 +38,12 @@ import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
+const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'];
+const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const FLOATING_SAVE_BAR_HEIGHT = 56;
 
@@ -53,10 +63,11 @@ export default function EditProfileScreen() {
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showWeightPicker, setShowWeightPicker] = useState(false);
-  const [weight, setWeight] = useState<number>(70);
+  const [showGenderPicker, setShowGenderPicker] = useState(false);
+  const [gender, setGender] = useState('');
   const [experienceLevel, setExperienceLevel] = useState('');
-  const [daysPerWeek, setDaysPerWeek] = useState('');
+  const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
+  const [workoutDays, setWorkoutDays] = useState<string[]>([]);
   const [useImperial, setUseImperial] = useState(true);
   const [equipment, setEquipment] = useState<string[]>([]);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -107,10 +118,11 @@ export default function EditProfileScreen() {
         if (p.date_of_birth) {
           setDateOfBirth(new Date(p.date_of_birth));
         }
+        setGender(p.gender ?? '');
         setExperienceLevel(p.experience_level ?? '');
-        setDaysPerWeek(p.days_per_week != null ? String(p.days_per_week) : '');
+        setDaysPerWeekSlider(p.days_per_week ?? 0);
+        setWorkoutDays(p.workout_days ?? []);
         setUseImperial(p.use_imperial ?? true);
-        setWeight(p.current_weight != null ? p.current_weight : 70);
         setEquipment(p.equipment_access ?? []);
 
         if (__DEV__) {
@@ -131,22 +143,26 @@ export default function EditProfileScreen() {
 
   const hasChanges = useMemo(() => {
     if (!profile) return false;
-    const daysNum = daysPerWeek ? parseInt(daysPerWeek, 10) || undefined : undefined;
     const profileDob = profile.date_of_birth ? new Date(profile.date_of_birth).toISOString().split('T')[0] : null;
     const currentDob = dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : null;
     const equipChanged =
       (profile.equipment_access ?? []).join('|') !== (equipment ?? []).join('|');
+    const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
+    const workoutDaysMatch =
+      (profile.workout_days ?? []).length === workoutDays.length &&
+      (profile.workout_days ?? []).every((d, i) => d === workoutDays[i]);
     return (
       (profile.first_name ?? '') !== firstName ||
       (profile.last_name ?? '') !== lastName ||
       profileDob !== currentDob ||
+      (profile.gender ?? '') !== gender ||
       (profile.experience_level ?? '') !== experienceLevel ||
       (profile.days_per_week ?? undefined) !== daysNum ||
+      !workoutDaysMatch ||
       (profile.use_imperial ?? true) !== useImperial ||
-      (profile.current_weight ?? undefined) !== weight ||
       equipChanged
     );
-  }, [dateOfBirth, daysPerWeek, equipment, experienceLevel, firstName, lastName, profile, useImperial, weight]);
+  }, [dateOfBirth, daysPerWeekSlider, equipment, experienceLevel, firstName, gender, lastName, profile, useImperial, workoutDays]);
 
   usePreventRemove(hasChanges && !allowCloseAfterSave, ({ data }) => {
     pendingRemoveActionRef.current = data.action;
@@ -201,14 +217,16 @@ export default function EditProfileScreen() {
     setShowDiscardConfirm(false);
     setSaving(true);
     try {
+      const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
       const updates: Partial<UserProfile> = {
         first_name: firstName.trim() || undefined,
         last_name: lastName.trim() || undefined,
         date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
+        gender: gender || undefined,
         experience_level: experienceLevel.trim() || undefined,
-        days_per_week: daysPerWeek ? parseInt(daysPerWeek, 10) || undefined : undefined,
+        days_per_week: daysNum,
+        workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
         use_imperial: useImperial,
-        current_weight: weight,
         equipment_access: equipment,
       };
       const success = await updateUserProfile(profile.id, updates);
@@ -239,14 +257,16 @@ export default function EditProfileScreen() {
     if (!profile) return;
     setSaving(true);
     try {
+      const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
       const updates: Partial<UserProfile> = {
         first_name: firstName.trim() || undefined,
         last_name: lastName.trim() || undefined,
         date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
+        gender: gender || undefined,
         experience_level: experienceLevel.trim() || undefined,
-        days_per_week: daysPerWeek ? parseInt(daysPerWeek, 10) || undefined : undefined,
+        days_per_week: daysNum,
+        workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
         use_imperial: useImperial,
-        current_weight: weight,
         equipment_access: equipment,
       };
 
@@ -334,35 +354,34 @@ export default function EditProfileScreen() {
           </View>
         </View>
 
-        {/* Date of Birth & days per week */}
-        <View style={styles.row}>
-          <View style={[styles.card, styles.rowItem]}>
-            <Text style={styles.label}>Date of Birth</Text>
-            <TouchableOpacity
-              onPress={() => setShowDatePicker(true)}
-              style={styles.datePickerButton}
-            >
-              <Text style={[styles.datePickerText, !dateOfBirth && styles.datePickerPlaceholder]}>
-                {dateOfBirth ? formatDateOfBirth(dateOfBirth) : 'Select date of birth'}
-              </Text>
-            </TouchableOpacity>
-            {dateOfBirth && (
-              <Text style={styles.ageDisplayText}>
-                Age: {calculateAge(dateOfBirth) ?? 'N/A'} years old
-              </Text>
-            )}
-          </View>
-          <View style={[styles.card, styles.rowItem]}>
-            <Text style={styles.label}>Days / Week</Text>
-            <TextInput
-              value={daysPerWeek}
-              onChangeText={setDaysPerWeek}
-              placeholder="e.g. 3"
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-              keyboardType="number-pad"
-            />
-          </View>
+        {/* Date of Birth */}
+        <View style={styles.card}>
+          <Text style={styles.label}>Date of Birth</Text>
+          <TouchableOpacity
+            onPress={() => setShowDatePicker(true)}
+            style={styles.datePickerButton}
+          >
+            <Text style={[styles.datePickerText, !dateOfBirth && styles.datePickerPlaceholder]}>
+              {dateOfBirth ? formatDateOfBirth(dateOfBirth) : 'Select date of birth'}
+            </Text>
+          </TouchableOpacity>
+          {dateOfBirth && (
+            <Text style={styles.ageDisplayText}>
+              Age: {calculateAge(dateOfBirth) ?? 'N/A'} years old
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.label}>Gender</Text>
+          <TouchableOpacity
+            onPress={() => setShowGenderPicker(true)}
+            style={styles.datePickerButton}
+          >
+            <Text style={[styles.datePickerText, !gender && styles.datePickerPlaceholder]}>
+              {gender || 'Select gender'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
@@ -374,6 +393,76 @@ export default function EditProfileScreen() {
             placeholderTextColor={colors.textMuted}
             style={styles.input}
           />
+        </View>
+
+        {/* Days per week + preferred days */}
+        <View style={styles.card}>
+          <View style={styles.daysSliderHeader}>
+            <Text style={styles.label}>Days per week</Text>
+            <Text style={styles.daysSliderValue}>
+              {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'}
+            </Text>
+          </View>
+          <Slider
+            style={styles.slider}
+            minimumValue={0}
+            maximumValue={7}
+            step={1}
+            value={daysPerWeekSlider}
+            onValueChange={(value) => {
+              const n = Math.round(value);
+              setDaysPerWeekSlider(n);
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              if (n < workoutDays.length) {
+                setWorkoutDays((prev) => prev.slice(0, n));
+              }
+            }}
+            minimumTrackTintColor={colors.primary}
+            maximumTrackTintColor={colors.border}
+            thumbTintColor={colors.primary}
+          />
+          {daysPerWeekSlider > 0 && (
+            <View style={styles.preferredDaysSection}>
+              <Text style={styles.label}>
+                Select {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'}
+              </Text>
+              <View style={styles.chipGroup}>
+                {WEEKDAY_OPTIONS.map((day) => {
+                  const selected = workoutDays.includes(day);
+                  const atLimit = workoutDays.length >= daysPerWeekSlider && !selected;
+                  return (
+                    <TouchableOpacity
+                      key={day}
+                      style={[
+                        styles.chip,
+                        selected && styles.chipSelected,
+                        atLimit && styles.chipDisabled,
+                      ]}
+                      onPress={() => {
+                        if (selected) {
+                          setWorkoutDays((prev) => prev.filter((d) => d !== day));
+                        } else if (workoutDays.length < daysPerWeekSlider) {
+                          setWorkoutDays((prev) => [...prev, day]);
+                        }
+                      }}
+                      disabled={atLimit}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          selected && styles.chipTextSelected,
+                          atLimit && styles.chipTextDisabled,
+                        ]}
+                      >
+                        {day.slice(0, 3)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
         {/* Units toggle */}
@@ -389,34 +478,12 @@ export default function EditProfileScreen() {
               <Text style={styles.switchLabel}>Imperial</Text>
               <Switch
                 value={useImperial}
-                onValueChange={(value) => {
-                  setUseImperial(value);
-                  // Convert weight when switching units
-                  if (value) {
-                    // Convert kg to lbs
-                    setWeight(Math.round(weight * 2.20462));
-                  } else {
-                    // Convert lbs to kg
-                    setWeight(Math.round(weight / 2.20462));
-                  }
-                }}
+                onValueChange={setUseImperial}
                 thumbColor={useImperial ? colors.primary : colors.borderLight}
                 trackColor={{ true: colors.primaryDark, false: colors.border }}
               />
             </View>
           </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>Current Weight ({useImperial ? 'lbs' : 'kg'})</Text>
-          <TouchableOpacity
-            onPress={() => setShowWeightPicker(true)}
-            style={styles.weightPickerButton}
-          >
-            <Text style={styles.weightPickerButtonText}>
-              {weight} {useImperial ? 'lbs' : 'kg'}
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* Equipment */}
@@ -472,29 +539,22 @@ export default function EditProfileScreen() {
         minimumDate={new Date(1900, 0, 1)}
       />
 
-      {/* Weight Picker Bottom Sheet */}
+      {/* Gender Picker Bottom Sheet */}
       <BottomSheet
-        visible={showWeightPicker}
-        onClose={() => setShowWeightPicker(false)}
-        title={`Select Weight (${useImperial ? 'lbs' : 'kg'})`}
-        height={300}
+        visible={showGenderPicker}
+        onClose={() => setShowGenderPicker(false)}
+        title="Select gender"
+        height={280}
       >
         <Picker
-          selectedValue={weight}
-          onValueChange={(itemValue) => setWeight(itemValue)}
+          selectedValue={gender}
+          onValueChange={(itemValue) => setGender(itemValue)}
           style={styles.weightPicker}
           itemStyle={styles.weightPickerItem}
         >
-          {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => {
-            const value = i; // 0-600 lbs or 0-300 kg
-            return (
-              <Picker.Item
-                key={value}
-                label={`${value} ${useImperial ? 'lbs' : 'kg'}`}
-                value={value}
-              />
-            );
-          })}
+          {GENDER_OPTIONS.map((opt) => (
+            <Picker.Item key={opt} label={opt} value={opt} />
+          ))}
         </Picker>
       </BottomSheet>
 
@@ -607,24 +667,6 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     marginTop: spacing.xs,
   },
-  weightPickerButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  weightPickerButtonText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  weightPicker: {
-    height: 200,
-    width: '100%',
-  },
-  weightPickerItem: {
-    fontSize: typography.sizes.base,
-    color: colors.textPrimary,
-  },
   unitsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -667,6 +709,31 @@ const styles = StyleSheet.create({
   chipTextSelected: {
     color: colors.background,
     fontWeight: typography.weights.semibold,
+  },
+  chipDisabled: {
+    opacity: 0.5,
+  },
+  chipTextDisabled: {
+    color: colors.textMuted,
+  },
+  daysSliderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  daysSliderValue: {
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
+  },
+  slider: {
+    width: '100%',
+    height: 40,
+  },
+  preferredDaysSection: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
   },
   infoRow: {
     flexDirection: 'row',

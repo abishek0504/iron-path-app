@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, RotateCcw } from 'lucide-react-native';
+import { ChevronRight, RotateCcw, Activity, Calendar, CalendarCheck, BarChart2, Flame, Trophy, Clock, Heart } from 'lucide-react-native';
 import { colors, spacing, layout, borderRadius, typography } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
@@ -21,6 +21,7 @@ import {
 } from '../../src/lib/cache/dashboardStatsCache';
 import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
+import { WeightTrackerCard } from '../../src/components/ui/WeightTrackerCard';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
 
@@ -213,7 +214,10 @@ export default function DashboardTab() {
       >
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Muscle status</Text>
+            <View style={styles.cardTitleRow}>
+              <Activity size={20} color={colors.primary} />
+              <Text style={styles.cardTitle}>Muscle status</Text>
+            </View>
             <Pressable
               style={styles.bodySwitcherButton}
               onPress={() => setBodySide((s) => (s === 'front' ? 'back' : 'front'))}
@@ -237,11 +241,18 @@ export default function DashboardTab() {
           ) : null}
         </View>
 
+        {profile?.id && (
+          <WeightTrackerCard userId={profile.id} onRefresh={load} />
+        )}
+
         <View style={styles.statGrid}>
           <View style={styles.statRow}>
             <View style={[styles.card, styles.statCard]}>
               <View style={styles.weekCardTop}>
-                <Text style={styles.cardTitle}>This week</Text>
+                <View style={styles.cardTitleRow}>
+                  <Calendar size={18} color={colors.primary} />
+                  <Text style={styles.cardTitle}>This week</Text>
+                </View>
                 <Text style={styles.metric}>{weekCompleted}/{weekTarget || '—'}</Text>
               </View>
               <View style={styles.weekCardBottom}>
@@ -254,7 +265,10 @@ export default function DashboardTab() {
               </View>
             </View>
             <View style={[styles.card, styles.statCard]}>
-              <Text style={styles.cardTitle}>This year</Text>
+              <View style={styles.cardTitleRow}>
+                <CalendarCheck size={18} color={colors.primary} />
+                <Text style={styles.cardTitle}>This year</Text>
+              </View>
               <View style={styles.metricRow}>
                 <Text style={styles.metric}>{yearDaysWorkedOut}</Text>
                 <Text style={styles.metric}> days</Text>
@@ -264,7 +278,10 @@ export default function DashboardTab() {
           </View>
           <View style={styles.statRow}>
             <View style={[styles.card, styles.statCard]}>
-              <Text style={styles.cardTitle}>Total volume</Text>
+              <View style={styles.cardTitleRow}>
+                <BarChart2 size={18} color={colors.primary} />
+                <Text style={styles.cardTitle}>Total volume</Text>
+              </View>
               <View style={styles.metricRow}>
                 <Text style={styles.metric}>
                   {displayVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}
@@ -274,7 +291,10 @@ export default function DashboardTab() {
               <Text style={styles.metricSub}>This year</Text>
             </View>
             <View style={[styles.card, styles.statCard]}>
-              <Text style={styles.cardTitle}>Streak</Text>
+              <View style={styles.cardTitleRow}>
+                <Flame size={18} color={colors.primary} />
+                <Text style={styles.cardTitle}>Streak</Text>
+              </View>
               <View style={styles.metricRow}>
                 <Text style={styles.metric}>{streak}</Text>
                 <Text style={styles.metric}> days</Text>
@@ -286,7 +306,10 @@ export default function DashboardTab() {
 
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Top PRs</Text>
+            <View style={styles.cardTitleRow}>
+              <Trophy size={20} color={colors.primary} />
+              <Text style={styles.cardTitle}>Top PRs</Text>
+            </View>
             <TouchableOpacity
               onPress={() => router.push('/prs')}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -311,7 +334,10 @@ export default function DashboardTab() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Recent sessions</Text>
+          <View style={styles.cardTitleRow}>
+            <Clock size={20} color={colors.primary} />
+            <Text style={styles.cardTitle}>Recent sessions</Text>
+          </View>
           {recentSessions.length === 0 ? (
             <Text style={styles.emptyText}>No sessions yet</Text>
           ) : (
@@ -339,7 +365,10 @@ export default function DashboardTab() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Connect Health</Text>
+          <View style={styles.cardTitleRow}>
+            <Heart size={20} color={colors.primary} />
+            <Text style={styles.cardTitle}>Connect Health</Text>
+          </View>
           <Text style={styles.listSecondary}>Integrations coming soon</Text>
           <TouchableOpacity
             style={styles.actionButton}
@@ -396,6 +425,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.cardBorder,
     padding: spacing.md,
+    gap: spacing.sm,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.sm,
   },
   cardTitle: {
