@@ -1,7 +1,8 @@
 /**
  * Workout Heatmap
- * High-performance muscle visualization
- * Displays muscle freshness from v2_muscle_freshness table
+ * High-performance muscle visualization.
+ * Displays muscle freshness from v2_muscle_freshness; freshness is computed on read
+ * using the decay formula (last_trained_at + λ) so recovery shows over time on rest days.
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -12,6 +13,7 @@ import { colors, spacing, typography } from '../../lib/utils/theme';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
 import { supabase } from '../../lib/supabase/client';
 import { devError, devLog } from '../../lib/utils/logger';
+import { computeFreshnessNow } from '../../lib/utils/muscleFreshness';
 import {
   getLastCompletedSessionId,
   invokeUpdateMuscleFreshness,
@@ -52,17 +54,17 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
 
       const { data, error } = await supabase
         .from('v2_muscle_freshness')
-        .select('muscle_key, freshness')
+        .select('muscle_key, freshness, last_trained_at')
         .eq('user_id', userId);
 
       if (error) throw error;
 
       const freshnessMap: Record<string, number> = {};
       for (const row of data || []) {
-        const value =
-          row.freshness === null || row.freshness === undefined
-            ? 100
-            : Number(row.freshness);
+        const value = computeFreshnessNow(
+          row.muscle_key,
+          row.last_trained_at ?? null
+        );
         freshnessMap[row.muscle_key] = value;
       }
 

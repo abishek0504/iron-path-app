@@ -5,6 +5,20 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-31 - Plan tab: stop repeated planner/target-selection cascade
+----------------------------------------------------------------------
+- Symptom: [planner], [prescription-query], [exercise-query], [workout-query], [target-selection] logs repeated in console when viewing Plan tab with no user action.
+- Cause: useFocusEffect callback depended on loadTemplate, loadTodaySessionExercises, loadTodaySessions. loadTemplate is useCallback(..., [..., hasInitializedSelection]). When loadTemplate runs it calls setHasInitializedSelection(true), so loadTemplate gets a new reference. That recreated the useFocusEffect callback; React Navigation re-runs the effect when the callback identity changes, so loadTodaySessionExercises + loadTodaySessions ran again, causing repeated prescription/exercise/workout/target-selection queries and logs.
+- Fix: Refs (loadTemplateRef, loadTodaySessionExercisesRef, loadTodaySessionsRef) hold the latest load callbacks; useFocusEffect reads from refs and no longer lists those callbacks in its dependency array. Effect now runs only on actual focus or when plannerNeedsRefetch/activeTemplateId/templateData/todayTemplateKeys/etc. change, not when loadTemplate identity changes.
+- File: app/(tabs)/planner.tsx (refs, ref assignments after loadTemplate, useFocusEffect body and deps).
+
+2026-01-30 - Heatmap: compute freshness on read (decay formula)
+-----------------------------------------------------------
+- Heatmap now shows current muscle recovery on rest days without needing to complete another workout.
+- Added src/lib/utils/muscleFreshness.ts: MUSCLE_DECAY_LAMBDA (λ per muscle, matches Edge Function), computeFreshnessNow(muscle_key, last_trained_at) using Banister formula Freshness(t) = 100 - 100*e^(-λ*t).
+- WorkoutHeatmap: selects muscle_key, last_trained_at from v2_muscle_freshness; builds display map with computeFreshnessNow() instead of stored freshness. Backfill (invoke Edge Function when table empty) unchanged.
+- Docs: DATABASE_SCHEMA (v2_muscle_freshness status), ALGORITHMS (Heatmap: compute freshness on read), DATA_FLOWS (heatmap flow).
+
 2026-01-30 - RLS auth.uid() InitPlan (performance)
 -----------------------------------------------------------
 - Migration 20260130000003_rls_auth_uid_initplan.sql: Replaced auth.uid() with (select auth.uid()) in all owner RLS policies so PostgreSQL evaluates once (InitPlan) instead of per row. Fixes linter "Auth RLS Initialization Plan" performance warning.

@@ -145,7 +145,7 @@
 | PR recency sorting | ✅ Complete | Most recent first |
 | Muscle status button | ✅ Complete | Opens heatmap |
 | Heatmap display (Skia) | ✅ Complete | GPU-accelerated 28-muscle visualization |
-| Muscle freshness | ✅ Complete | Continuous decay via Edge Function |
+| Muscle freshness | ✅ Complete | Edge Function on session complete; heatmap computes freshness on read (decay from last_trained_at) so recovery shows on rest days |
 | Stress calculation | ✅ Complete | Weighted biomechanical model |
 | Empty states | ✅ Complete | No data messages |
 

@@ -333,16 +333,16 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 ### Derived Caches (Optional, Rebuildable)
 
 #### v2_muscle_freshness
-**Purpose**: Muscle recovery state (0-100). Rebuildable from v2_session_sets.
+**Purpose**: Muscle recovery state (0-100). Updated by Edge Function on session complete; heatmap computes current freshness on read from `last_trained_at` + decay formula so recovery shows on rest days.
 
 **Key Fields:**
 - PRIMARY KEY: `(user_id, muscle_key)`
-- `freshness` (0-100): 0 = fully fatigued, 100 = fully recovered
-- `last_trained_at`
+- `freshness` (0-100): value at last Edge Function run (used as cache)
+- `last_trained_at`: when this muscle was last trained (set on session complete); used with decay formula on read
 
 **RLS**: Owner CRUD
 
-**Status**: Table exists but no rebuild job implemented yet. Engine uses direct session analysis instead.
+**Status**: Edge Function `update-muscle-freshness` runs on session complete. Heatmap loads rows and uses `computeFreshnessNow(muscle_key, last_trained_at)` in `src/lib/utils/muscleFreshness.ts` (Banister decay) so the map reflects current recovery without needing another completed workout.
 
 #### v2_daily_muscle_stress
 **Purpose**: Daily muscle stress aggregation for heatmap. Rebuildable from v2_session_sets.

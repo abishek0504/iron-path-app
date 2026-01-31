@@ -130,6 +130,10 @@ export default function PlannerTab() {
   const recoveryAttemptedThisFocusRef = useRef(false);
   const lastRecoveryAttemptRef = useRef(0);
   const RECOVERY_THROTTLE_MS = 5000;
+  /** Refs for load callbacks so useFocusEffect doesn't re-run when their identity changes (e.g. loadTemplate when hasInitializedSelection flips). */
+  const loadTemplateRef = useRef<(id: string) => Promise<void>>(() => Promise.resolve());
+  const loadTodaySessionExercisesRef = useRef<(userId: string) => Promise<void>>(() => Promise.resolve());
+  const loadTodaySessionsRef = useRef<(_userId: string, _opts?: { forceRefresh?: boolean; templateExerciseKeys?: string[] }) => Promise<void>>(() => Promise.resolve());
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -558,6 +562,10 @@ export default function PlannerTab() {
     [toast, getCurrentUserId, calculateTargetsForSlots, hasInitializedSelection, loadTodaySessionExercises, loadTodaySessions]
   );
 
+  loadTemplateRef.current = loadTemplate;
+  loadTodaySessionExercisesRef.current = loadTodaySessionExercises;
+  loadTodaySessionsRef.current = loadTodaySessions;
+
   // Initialize: load or create template
   useEffect(() => {
     let isMounted = true;
@@ -635,8 +643,13 @@ export default function PlannerTab() {
   );
 
   // Refetch when needed: flag set (e.g. after add/remove in add-exercise-edit), or templateData lost (e.g. back from workout). Throttle recovery to avoid infinite retry when load fails.
+  // Uses refs for loadTemplate/loadTodaySessionExercises/loadTodaySessions so callback identity doesn't change when e.g. hasInitializedSelection flips (which would re-run this effect and re-trigger loadTodaySessionExercises/loadTodaySessions repeatedly).
   useFocusEffect(
     useCallback(() => {
+      const loadTemplate = loadTemplateRef.current;
+      const loadTodaySessionExercises = loadTodaySessionExercisesRef.current;
+      const loadTodaySessions = loadTodaySessionsRef.current;
+
       if (plannerNeedsRefetch) {
         setPlannerNeedsRefetch(false);
         if (activeTemplateId) {
@@ -697,7 +710,7 @@ export default function PlannerTab() {
       return () => {
         recoveryAttemptedThisFocusRef.current = false;
       };
-    }, [plannerNeedsRefetch, activeTemplateId, loadTemplate, setPlannerNeedsRefetch, selectedDay?.day.day_name, loadTodaySessionExercises, loadTodaySessions, getCurrentUserId, templateData, isLoadingTemplate, todayTemplateKeys])
+    }, [plannerNeedsRefetch, activeTemplateId, setPlannerNeedsRefetch, selectedDay?.day.day_name, getCurrentUserId, templateData, isLoadingTemplate, todayTemplateKeys])
   );
   const dateContext = useDateContext(selectedDay?.day.day_name);
 

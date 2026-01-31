@@ -337,6 +337,18 @@ Fatigue(24) = 100 × e^(-0.041 × 24)
 Freshness = 100 - 37.4 = 62.6% recovered
 ```
 
+**Heatmap: compute freshness on read**
+
+**Location**: `src/lib/utils/muscleFreshness.ts`, `src/components/workout/WorkoutHeatmap.tsx`
+
+The heatmap shows current recovery (0–100) per muscle. So that recovery updates on rest days (without completing another workout), freshness is **computed on read** from `last_trained_at` using the same decay formula:
+
+- Load rows from `v2_muscle_freshness` (muscle_key, last_trained_at).
+- For each row: `freshness_now = computeFreshnessNow(muscle_key, last_trained_at)`.
+- Formula: at `last_trained_at`, fatigue = 100 (freshness 0). Fatigue(t) = 100 × e^(-λ × t), Freshness(t) = 100 - Fatigue(t). λ from `MUSCLE_DECAY_LAMBDA` (matches Edge Function).
+
+So the heatmap reflects current recovery even when the user has not completed a workout since the last one; no scheduled job is required.
+
 ### Auto-Regulation Data Input
 
 **Location**: `src/components/workout/RPESlider.tsx`

@@ -21,7 +21,7 @@ import {
 } from '../../src/lib/cache/dashboardStatsCache';
 import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
-import { WeightTrackerCard } from '../../src/components/ui/WeightTrackerCard';
+import { WeightTrackerCard } from '@/components/ui/WeightTrackerCard';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
 

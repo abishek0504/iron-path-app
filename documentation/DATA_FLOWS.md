@@ -112,7 +112,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 - **Focus throttle (Workout tab):** `useFocusEffect` only triggers reload if last focus load was more than 4s ago.
 - **Stable callbacks:** Load functions use minimal deps (e.g. `[profile]` only) and functional state updates where they merge into existing state, so effect loops (e.g. “load → set state → callback recreated → effect runs again”) do not occur.
 
-**Planner-specific:** `loadTodaySessionExercises` uses functional updates for `setExerciseNames` / `setSlotTargets` and depends only on `[profile]`; `loadTemplateInFlightRef` and `recoveryAttemptedThisFocusRef` plus 5s throttle prevent failed-to-load infinite retry.
+**Planner-specific:** `loadTodaySessionExercises` uses functional updates for `setExerciseNames` / `setSlotTargets` and depends only on `[profile]`; `loadTemplateInFlightRef` and `recoveryAttemptedThisFocusRef` plus 5s throttle prevent failed-to-load infinite retry. **Plan tab useFocusEffect** reads `loadTemplate` / `loadTodaySessionExercises` / `loadTodaySessions` from refs (not from the effect’s dependency array) so the effect does not re-run when those callback identities change (e.g. when `hasInitializedSelection` flips and recreates `loadTemplate`), which would otherwise re-trigger the prescription/exercise/workout/target-selection cascade repeatedly.
 
 ## Cache and invalidation
 
@@ -438,19 +438,11 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 
 2. User taps muscle status icon (heatmap)
    └→ Open muscleStatus bottom sheet
-   └→ Calculate stress for display
-       └→ getMuscleStressStats(userId, startIso, endIso)
-           └→ SELECT sessions + exercises + sets in range
-           └→ For each set:
-               ├→ Calculate stimulus from RPE/RIR (or default 0.6)
-               ├→ Get exercise metadata (primary_muscles, implicit_hits)
-               ├→ Normalize muscle weights
-               └→ Accumulate: stress[m] += stimulus * normalized_weight
-           └→ Return Map<muscle_key, stress_value>
-       └→ Fetch v2_muscles for display_name
-       └→ Pass to WorkoutHeatmap component as stressData
-   └→ WorkoutHeatmap renders (purely presentational)
-       └→ Color each muscle by stress value (theme tokens)
+   └→ WorkoutHeatmap loads freshness and renders
+       └→ SELECT v2_muscle_freshness (muscle_key, last_trained_at) for user_id
+       └→ For each row: computeFreshnessNow(muscle_key, last_trained_at) using Banister decay (src/lib/utils/muscleFreshness.ts) so recovery shows on rest days
+       └→ If table empty but user has completed session: invoke update-muscle-freshness Edge Function once (backfill), then reload
+       └→ BodyHeatmap colors muscles by freshness (0 = fatigued, 100 = recovered)
 ```
 
 ## Bottom Sheet State Machine
