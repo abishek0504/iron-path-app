@@ -32,7 +32,8 @@ import {
   createUserProfile,
   updateUserProfile,
 } from '../src/lib/supabase/queries/users';
-import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/dashboardStatsCache';
+import { getUserProfileCached, invalidateProfileCache, invalidateWeightCache } from '../src/lib/cache/dashboardStatsCache';
+import { insertWeightLog } from '../src/lib/supabase/queries/weight';
 import {
   getUserTemplates,
   createTemplate,
@@ -265,6 +266,10 @@ export default function Onboarding() {
         return;
       }
       invalidateProfileCache(userId);
+      if (currentWeight != null && currentWeight > 0) {
+        await insertWeightLog(userId, currentWeight, { current_weight: currentWeight });
+        invalidateWeightCache(userId);
+      }
 
       setProfile({
         ...existingProfile,

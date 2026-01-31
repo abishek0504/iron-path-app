@@ -63,9 +63,7 @@ export default function EditProfileScreen() {
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showWeightPicker, setShowWeightPicker] = useState(false);
   const [showGenderPicker, setShowGenderPicker] = useState(false);
-  const [weight, setWeight] = useState<number>(70);
   const [gender, setGender] = useState('');
   const [experienceLevel, setExperienceLevel] = useState('');
   const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
@@ -125,7 +123,6 @@ export default function EditProfileScreen() {
         setDaysPerWeekSlider(p.days_per_week ?? 0);
         setWorkoutDays(p.workout_days ?? []);
         setUseImperial(p.use_imperial ?? true);
-        setWeight(p.current_weight != null ? p.current_weight : 70);
         setEquipment(p.equipment_access ?? []);
 
         if (__DEV__) {
@@ -163,10 +160,9 @@ export default function EditProfileScreen() {
       (profile.days_per_week ?? undefined) !== daysNum ||
       !workoutDaysMatch ||
       (profile.use_imperial ?? true) !== useImperial ||
-      (profile.current_weight ?? undefined) !== weight ||
       equipChanged
     );
-  }, [dateOfBirth, daysPerWeekSlider, equipment, experienceLevel, firstName, gender, lastName, profile, useImperial, weight, workoutDays]);
+  }, [dateOfBirth, daysPerWeekSlider, equipment, experienceLevel, firstName, gender, lastName, profile, useImperial, workoutDays]);
 
   usePreventRemove(hasChanges && !allowCloseAfterSave, ({ data }) => {
     pendingRemoveActionRef.current = data.action;
@@ -231,7 +227,6 @@ export default function EditProfileScreen() {
         days_per_week: daysNum,
         workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
         use_imperial: useImperial,
-        current_weight: weight,
         equipment_access: equipment,
       };
       const success = await updateUserProfile(profile.id, updates);
@@ -272,7 +267,6 @@ export default function EditProfileScreen() {
         days_per_week: daysNum,
         workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
         use_imperial: useImperial,
-        current_weight: weight,
         equipment_access: equipment,
       };
 
@@ -484,34 +478,12 @@ export default function EditProfileScreen() {
               <Text style={styles.switchLabel}>Imperial</Text>
               <Switch
                 value={useImperial}
-                onValueChange={(value) => {
-                  setUseImperial(value);
-                  // Convert weight when switching units
-                  if (value) {
-                    // Convert kg to lbs
-                    setWeight(Math.round(weight * 2.20462));
-                  } else {
-                    // Convert lbs to kg
-                    setWeight(Math.round(weight / 2.20462));
-                  }
-                }}
+                onValueChange={setUseImperial}
                 thumbColor={useImperial ? colors.primary : colors.borderLight}
                 trackColor={{ true: colors.primaryDark, false: colors.border }}
               />
             </View>
           </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>Current Weight ({useImperial ? 'lbs' : 'kg'})</Text>
-          <TouchableOpacity
-            onPress={() => setShowWeightPicker(true)}
-            style={styles.weightPickerButton}
-          >
-            <Text style={styles.weightPickerButtonText}>
-              {weight} {useImperial ? 'lbs' : 'kg'}
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* Equipment */}
@@ -566,32 +538,6 @@ export default function EditProfileScreen() {
         maximumDate={new Date()}
         minimumDate={new Date(1900, 0, 1)}
       />
-
-      {/* Weight Picker Bottom Sheet */}
-      <BottomSheet
-        visible={showWeightPicker}
-        onClose={() => setShowWeightPicker(false)}
-        title={`Select Weight (${useImperial ? 'lbs' : 'kg'})`}
-        height={300}
-      >
-        <Picker
-          selectedValue={weight}
-          onValueChange={(itemValue) => setWeight(itemValue)}
-          style={styles.weightPicker}
-          itemStyle={styles.weightPickerItem}
-        >
-          {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => {
-            const value = i;
-            return (
-              <Picker.Item
-                key={value}
-                label={`${value} ${useImperial ? 'lbs' : 'kg'}`}
-                value={value}
-              />
-            );
-          })}
-        </Picker>
-      </BottomSheet>
 
       {/* Gender Picker Bottom Sheet */}
       <BottomSheet
@@ -720,24 +666,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: typography.sizes.sm,
     marginTop: spacing.xs,
-  },
-  weightPickerButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  weightPickerButtonText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  weightPicker: {
-    height: 200,
-    width: '100%',
-  },
-  weightPickerItem: {
-    fontSize: typography.sizes.base,
-    color: colors.textPrimary,
   },
   unitsRow: {
     flexDirection: 'row',

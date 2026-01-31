@@ -12,6 +12,7 @@ import {
   type TopPR,
 } from '../supabase/queries/workouts';
 import { getUserProfile } from '../supabase/queries/users';
+import { getWeightHistory, type WeightLog } from '../supabase/queries/weight';
 import type { UserProfile } from '../../stores/userStore';
 
 const TTL_MS = 90 * 1000; // 90 seconds
@@ -51,4 +52,13 @@ export function getUserProfileCached(userId: string): Promise<UserProfile | null
 /** Call after updateUserProfile so the next fetch returns fresh data. */
 export function invalidateProfileCache(userId: string): void {
   cache.delete(`profile:${userId}`);
+}
+
+export function getWeightHistoryCached(userId: string, limit = 90): Promise<WeightLog[]> {
+  return getOrSet(`weightHistory:${userId}:${limit}`, () => getWeightHistory(userId, limit));
+}
+
+/** Call after insertWeightLog so the next fetch returns fresh data. */
+export function invalidateWeightCache(userId: string): void {
+  cache.delete(`weightHistory:${userId}:90`);
 }
