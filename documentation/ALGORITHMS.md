@@ -160,6 +160,25 @@ Calculation:
 Output: { exercise_id, sets: 3, duration_sec: 55, mode: 'timed' }
 ```
 
+### Suggested Weight and Progression Rationale
+
+**Full rationale, research, and guidelines**: See [PRESCRIPTION_RATIONALE.md](PRESCRIPTION_RATIONALE.md).
+
+**Suggested weight (no history):**
+```
+weight = round(bw × suggested_weight_multiplier_bw × 2) / 2
+```
+- `bw` = user's current_weight from profile, or fallback 150 lb / 70 kg.
+- Multiplier = **working weight** as fraction of BW for the prescribed rep range (not 1RM). Bodyweight-only exercises use 0.
+
+**Weight progression (with history, when user hits top of rep band at acceptable RPE):**
+```
+weight = lastWeight + max(lastWeight × 0.025, 2.5)
+```
+- Minimum increase 2.5 lb; otherwise 2.5% of last weight. Rounded to nearest 0.5. Aligns with evidence-based 2–10% load progression (ACSM, NASM).
+
+**Duration progression (timed):** `duration_sec = min(lastDuration + 5, duration_sec_max)`.
+
 ## Fatigue Model (Stress Calculation)
 
 **Location**: `src/lib/supabase/queries/workouts.ts` (`getMuscleStressStats`)

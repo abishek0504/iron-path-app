@@ -5,6 +5,18 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-28 - Prescription rationale, research, and guidelines
+-----------------------------------------------------------
+- PRESCRIPTION_RATIONALE.md: New doc validating all prescription values against research, science, and biomechanics.
+  - Definition: suggested_weight_multiplier_bw = working weight as fraction of BW (for prescribed rep range), not 1RM. Conversion from 1RM standards: working ≈ 70–80% 1RM for 8–12 reps.
+  - Rep/set bands: 3×8–12 / 3–4×6–10 / 4–5×5–8 (beginner/intermediate/advanced) aligned with hypertrophy meta-analyses (3–5 sets, 5–30 reps effective).
+  - Validated multipliers by category: compound barbell (Deadlift, Squat, Bench, OHP, Row, RDL, Hip Thrust), machine/cable (Leg Press, Lat Pulldown, Seated Cable Row), isolation (DB press/fly, lateral raise, curls, tricep, leg ext/curl, face pull), unilateral/bodyweight (BSS, lunge, calf; pull-up, push-up, etc. = 0).
+  - Progression: weight = last + max(2.5% last, 2.5 lb); duration +5 s; research: 2–10% load increase when exceeding target (ACSM, NASM).
+  - Guidelines for future exercises: how to derive multiplier (compare to similar movement, 1RM×0.7–0.8 for working), rep/set bands, checklist.
+- ALGORITHMS.md: Added "Suggested weight and progression rationale" with formulas and link to PRESCRIPTION_RATIONALE.
+- 00_INDEX.md: Added PRESCRIPTION_RATIONALE to core docs and "For Understanding Algorithms".
+- DATABASE_SCHEMA.md: Prescription section now references PRESCRIPTION_RATIONALE for research and guidelines.
+
 2026-01-30 - Doc: Supabase-only vs AsyncStorage for app data
 -----------------------------------------------------------
 - DATA_FLOWS.md: expanded "Persistent source of truth" with why no AsyncStorage for app data (single source of truth, simplicity) and when to add it (offline or faster perceived load). IMPLEMENTATION_STATUS: "State persistence" note corrected to "Auth session only; app data in-memory".

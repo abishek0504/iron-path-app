@@ -113,7 +113,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `sets_min/max` (1-10)
 - `reps_min/max` (1-50, only if mode='reps')
 - `duration_sec_min/max` (5-3600, only if mode='timed')
-- `suggested_weight_multiplier_bw`: **Bodyweight multiplier for suggested weight (no NULLs).** suggested_weight = current_weight × this. Single default per exercise/experience (no ranges). Based on average lifting benchmarks (e.g. Deadlift ~1.0/1.5/2.0× BW, Squat ~0.85/1.5/1.75×, Bench ~0.65/1.25/1.5×). Bodyweight exercises (chin-up, pull-up, dip, push-up) = 0. Seeded in 20260128000003.
+- `suggested_weight_multiplier_bw`: **Bodyweight multiplier for suggested weight (no NULLs).** suggested_weight = current_weight × this. Single default per exercise/experience (no ranges). Represents **working weight** for the prescribed rep range (not 1RM). Research, rationale, and guidelines for all multipliers and for adding new exercises: see [PRESCRIPTION_RATIONALE.md](PRESCRIPTION_RATIONALE.md). Seeded in 20260128000003.
 - `suggested_weight_lbs/kg`: Legacy fixed weights (nullable); runtime prefers multiplier × profile.current_weight with fallback 150 lb / 70 kg.
 - `source_notes`: Research-backed notes explaining prescription rationale (seeded 2026-01-28)
 

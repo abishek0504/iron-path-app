@@ -9,9 +9,10 @@
 1. **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** - Core principles, data layering, architectural decisions (WHY)
 2. **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** - Complete schema, migrations, RLS policies (WHAT tables, relationships)
 3. **[ALGORITHMS.md](ALGORITHMS.md)** - Mathematical formulas and algorithms with worked examples (HOW calculations work)
-4. **[DATA_FLOWS.md](DATA_FLOWS.md)** - How components/queries/stores connect, user flows (HOW things connect)
-5. **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Environment setup, running the app, type generation (HOW to get started)
-6. **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - What's complete, what's TODO, known issues (WHAT state we're in)
+4. **[PRESCRIPTION_RATIONALE.md](PRESCRIPTION_RATIONALE.md)** - Research, science, and guidelines for prescription values (multipliers, rep/set bands, progression) and adding new exercises
+5. **[DATA_FLOWS.md](DATA_FLOWS.md)** - How components/queries/stores connect, user flows (HOW things connect)
+6. **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Environment setup, running the app, type generation (HOW to get started)
+7. **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - What's complete, what's TODO, known issues (WHAT state we're in)
 
 ## Quick Reference
 
@@ -34,6 +35,7 @@
 
 ### For Understanding Algorithms
 - `ALGORITHMS.md` - formulas with examples
+- `PRESCRIPTION_RATIONALE.md` - rationale for prescription multipliers, rep/set bands, and progression; guidelines for new exercises
 - Engine files in `src/lib/engine/` - actual implementation
 - Query functions provide data inputs
 
@@ -78,6 +80,9 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 Old documentation archived in [`archive/`](archive/) with timestamps.
 
 ## Recent Updates
+
+### 2026-01-28: Prescription Rationale and Guidelines
+- **PRESCRIPTION_RATIONALE.md**: New doc with research, science, and biomechanics behind every prescription value. Defines suggested_weight_multiplier_bw as **working weight** (fraction of BW for prescribed rep range, not 1RM); validates rep/set bands and progression formulas against meta-analyses and strength standards; provides guidelines for adding future exercises (how to derive multiplier, rep/set bands, checklist). ALGORITHMS.md: added "Suggested weight and progression rationale" with formulas and link to PRESCRIPTION_RATIONALE. 00_INDEX: added PRESCRIPTION_RATIONALE to core docs and "For Understanding Algorithms".
 
 ### 2026-01-28: Bodyweight Multiplier for Suggested Weight (No NULLs)
 - **suggested_weight_multiplier_bw**: New column on v2_exercise_prescriptions. Suggested weight = current_weight × multiplier (fallback 150 lb / 70 kg). Single value per exercise/experience from average lifting benchmarks (Deadlift ~1.0/1.5/2.0× BW, Squat ~0.85/1.5/1.75×, Bench ~0.65/1.25/1.5×; bodyweight exercises = 0). No NULLs: always a calculated default; user enters actual value when working out.
