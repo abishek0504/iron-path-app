@@ -127,8 +127,6 @@ The application follows a strict 6-layer data model:
 - **Zustand Stores**: Lightweight, performant state management
   - `uiStore`: Global UI state (bottom sheets, toasts, dialogs)
   - `userStore`: User profile and preferences cache
-  - `exerciseStore`: Exercise search and selection state
-  - `workoutStore`: Active workout session state
 
 ### Security & Data Integrity
 - **Row Level Security (RLS)**: All database access controlled via RLS policies

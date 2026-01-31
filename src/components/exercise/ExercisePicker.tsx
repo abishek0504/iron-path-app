@@ -16,11 +16,10 @@ import {
 } from 'react-native';
 import { Search, X } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase/client';
-import { useExerciseStore } from '../../stores/exerciseStore';
 import { useUIStore } from '../../stores/uiStore';
 import { colors, spacing, borderRadius } from '../../lib/utils/theme';
 import { devLog, devError } from '../../lib/utils/logger';
-import type { Exercise } from '../../stores/exerciseStore';
+import type { Exercise } from '../../types/exercisePicker';
 
 interface ExercisePickerProps {
   onSelect?: (exercise: Exercise) => void;
@@ -34,8 +33,7 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [filteredExercises, setFilteredExercises] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(true);
-  const searchQuery = useExerciseStore((state) => state.searchQuery);
-  const setSearchQuery = useExerciseStore((state) => state.setSearchQuery);
+  const [searchQuery, setSearchQuery] = useState('');
   const closeBottomSheet = useUIStore((state) => state.closeBottomSheet);
   const showToast = useUIStore((state) => state.showToast);
 

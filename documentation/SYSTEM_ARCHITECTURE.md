@@ -235,16 +235,6 @@ To visualize the 28-muscle freshness state without dropping frames during naviga
 - Avoids repeated queries
 - Cleared on logout
 
-**`exerciseStore`**: Exercise selection
-- Search query
-- Selected exercises
-- Used by picker only
-
-**`workoutStore`**: Active session
-- Current workout state
-- Progress tracking
-- **STATUS**: Currently unused (sessions fetched directly via queries)
-
 ### State Update Pattern
 
 ```typescript

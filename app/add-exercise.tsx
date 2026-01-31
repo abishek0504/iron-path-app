@@ -102,7 +102,7 @@ export default function AddExerciseScreen() {
         } else if (s.duration_sec != null) {
           setLastPerformed((prev) => ({
             ...prev,
-            [exerciseId]: `${Math.round(s.duration_sec / 60)} min`,
+            [exerciseId]: `${Math.round((s.duration_sec ?? 0) / 60)} min`,
           }));
         } else {
           setLastPerformed((prev) => ({ ...prev, [exerciseId]: 'Last performed' }));

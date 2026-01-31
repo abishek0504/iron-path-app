@@ -5,6 +5,44 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-30 - Doc: Supabase-only vs AsyncStorage for app data
+-----------------------------------------------------------
+- DATA_FLOWS.md: expanded "Persistent source of truth" with why no AsyncStorage for app data (single source of truth, simplicity) and when to add it (offline or faster perceived load). IMPLEMENTATION_STATUS: "State persistence" note corrected to "Auth session only; app data in-memory".
+
+2026-01-30 - Remove workoutStore and exerciseStore
+-------------------------------------------------
+- Removed src/stores/workoutStore.ts and src/stores/exerciseStore.ts to avoid confusion; current implementation (local state for active workout and for exercise picker/add-exercise) is preferred.
+- Added src/types/exercisePicker.ts with Exercise interface for picker; ExercisePicker and useExercisePicker now use this type. ExercisePicker uses local useState for searchQuery instead of exerciseStore.
+- Docs: DATA_FLOWS.md (stores table now only userStore/uiStore; note that active workout and exercise selection use local state), README.md (removed exerciseStore/workoutStore from State Management), IMPLEMENTATION_STATUS.md (removed store rows and "workoutStore Unused" known issue; renumbered Low Priority items), SYSTEM_ARCHITECTURE.md (removed exerciseStore and workoutStore subsections).
+
+2026-01-30 - Stores (workoutStore, exerciseStore) rationale
+---------------------------------------------------------
+- Clarified why workoutStore and exerciseStore are unused/reserved and why the current implementation is preferred (see DATA_FLOWS.md "Why workoutStore and exerciseStore are reserved"). workoutStore: active workout screen keeps execution state local to avoid store/DB sync and drift. exerciseStore: only used by ExercisePicker; live Add Exercise flow is full-page add-exercise with local search; picker not opened by any screen. (Subsequently removed both stores.)
+
+2026-01-30 - Audit: state, cache, cleanup, formulae; fixes
+---------------------------------------------------------
+AUDIT:
+- **State:** Stores (userStore, uiStore) and local state. Load guards (in-flight refs, focus throttle) and stable callbacks in place. Planner trims session-derived names/targets on load.
+- **Cache:** templateCache, sessionsCache, exerciseCache, dashboardStatsCache. Invalidation wired: template on template/slot mutations; sessions on complete/delete; exercise on custom exercise mutations; profile/weight on profile/weight mutations.
+- **Cleanup:** deleteSessionWithExercises removes session_exercises then session; invalidateSessionsInRangeForUser after complete/delete. Planner trim keeps only current sessions + today template keys.
+- **DB:** Supabase as source of truth; no AsyncStorage for app data. Mutations invalidate caches as above.
+- **Formulae:** targetSelection (reps/duration bands, progressive overload, BW multiplier), weightSuggestions (history, prescription BW multiplier, fallback). Null/undefined guarded.
+
+FIXES APPLIED:
+- **dashboardStatsCache.invalidateWeightCache:** Now invalidates all keys with prefix `weightHistory:${userId}:` so any limit (90, 30, etc.) is cleared after insertWeightLog; previously only deleted limit 90.
+- **weightSuggestions.formatWeightSuggestion:** Use `suggestion.duration_sec != null` instead of truthy check so zero duration displays as "0:00" instead of "Enter weight".
+
+DOCS:
+- DATA_FLOWS.md: added "Cache and invalidation" section (cache keys, when to invalidate, persistent source of truth, cleanup).
+
+FILES:
+- src/lib/cache/dashboardStatsCache.ts (invalidateWeightCache by prefix)
+- src/lib/utils/weightSuggestions.ts (duration_sec != null)
+- documentation/DATA_FLOWS.md (Cache and invalidation section)
+- documentation/progress_log.txt (this entry)
+
+---
+
 2026-01-30 - Progress tab: show correct workout count (2 workouts) after completing multiple
 --------------------------------------------------------------------------------------------
 IMPLEMENTED:
@@ -155,7 +193,7 @@ FILES:
 --------------------------------------------------
 - **Login:** Set profile in userStore after successful login (setProfile(profile)) so store is populated before redirect; index still fetches and sets on entry.
 - **Dashboard:** Added loadInFlightRef so load() does not run again while a previous load is in progress; early return on !userId clears ref. Reduces overlapping fetches when switching to Dashboard tab repeatedly.
-- **Documentation:** DATA_FLOWS.md now has a "State management" section: stores (userStore, uiStore, workoutStore, exerciseStore), who uses them, profile flow, fetch-on-mount + guards (in-flight ref, focus throttle, stable callbacks), Planner-specific guards. Notes that workoutStore and exerciseStore are not currently used by any screen (reserved).
+- **Documentation:** DATA_FLOWS.md has a "State management" section: stores (userStore, uiStore), profile flow, fetch-on-mount + guards. workoutStore and exerciseStore were later removed; active workout and exercise selection use local state.
 
 ---
 

@@ -4,7 +4,7 @@
  */
 
 import { useUIStore } from '../stores/uiStore';
-import type { Exercise } from '../stores/exerciseStore';
+import type { Exercise } from '../types/exercisePicker';
 
 export function useExercisePicker() {
   const openBottomSheet = useUIStore((state) => state.openBottomSheet);

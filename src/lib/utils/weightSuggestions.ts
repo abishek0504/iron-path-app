@@ -155,7 +155,7 @@ export function formatWeightSuggestion(
     return `${suggestion.weight} ${unit}`;
   }
 
-  if (suggestion.duration_sec) {
+  if (suggestion.duration_sec != null) {
     const mins = Math.floor(suggestion.duration_sec / 60);
     const secs = suggestion.duration_sec % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;

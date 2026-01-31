@@ -60,5 +60,8 @@ export function getWeightHistoryCached(userId: string, limit = 90): Promise<Weig
 
 /** Call after insertWeightLog so the next fetch returns fresh data. */
 export function invalidateWeightCache(userId: string): void {
-  cache.delete(`weightHistory:${userId}:90`);
+  const prefix = `weightHistory:${userId}:`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
 }

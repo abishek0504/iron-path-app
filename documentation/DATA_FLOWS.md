@@ -102,8 +102,8 @@ const handleAddExercise = async (exercise) => {
 |-------|---------|--------|
 | **userStore** | Profile (id, experience_level, current_weight, use_imperial, etc.). Single source of truth for current user. | index (set after auth), login (set after login), onboarding, edit-profile, dashboard, planner, workout active, add-exercise, add-exercise-edit, prs |
 | **uiStore** | Bottom sheets (exercisePicker, planDayPicker, etc.), toasts, `plannerNeedsRefetch` flag. Prevents modal-in-modal. | Planner, Workout tab, add-exercise-edit, dashboard, progress, edit-profile, auth screens |
-| **workoutStore** | Active session (sessionId, currentExerciseIndex, etc.). | **Not used by any screen.** Active workout screen uses local state + fetch-on-mount. Reserved for future or alternate flows. |
-| **exerciseStore** | Search query, selected exercises. | **Not used by any screen.** Reserved for future exercise-picker or multi-select flows. |
+
+Active workout and exercise selection use **local state** (no workoutStore or exerciseStore): the active workout screen owns execution state; the add-exercise screen and the ExercisePicker component use local search state.
 
 **Profile flow:** Set in store by: root index (after auth), login (after sign-in), onboarding (after save), edit-profile (after load/update), dashboard (if missing, fetch and set). Other screens read `useUserStore((s) => s.profile)` and optionally `setProfile` / `updateProfile`.
 
@@ -113,6 +113,23 @@ const handleAddExercise = async (exercise) => {
 - **Stable callbacks:** Load functions use minimal deps (e.g. `[profile]` only) and functional state updates where they merge into existing state, so effect loops (e.g. “load → set state → callback recreated → effect runs again”) do not occur.
 
 **Planner-specific:** `loadTodaySessionExercises` uses functional updates for `setExerciseNames` / `setSlotTargets` and depends only on `[profile]`; `loadTemplateInFlightRef` and `recoveryAttemptedThisFocusRef` plus 5s throttle prevent failed-to-load infinite retry.
+
+## Cache and invalidation
+
+**Caches** live in `src/lib/cache/`. All use short TTL (90s) and in-memory Maps. Mutations must invalidate so the next read is fresh.
+
+| Cache | Keys | Invalidate when |
+|-------|------|------------------|
+| **templateCache** | `templates:${userId}`, `template:${templateId}` | Template/slot mutations: `invalidateTemplate(templateId)` or `invalidateTemplates(userId)`. Called from planner (add/remove slot, delete session, generate AI, copy last week), add-exercise-edit (add to template, edit slot), onboarding (create template). |
+| **sessionsCache** | `sessionsInRange:${userId}:${startIso}:${endIso}` | Session completed or deleted: `invalidateSessionsInRangeForUser(userId)`. Called from active workout (completeWorkoutSession), planner (delete container), SessionDetailSheet (delete session). |
+| **exerciseCache** | `mergedExercises:${userId}:...` | Custom exercise create/update/delete: `invalidateMergedExercisesForUser(userId)`. Called inside customExerciseMutations. |
+| **dashboardStatsCache** | `profile:${userId}`, `weightHistory:${userId}:${limit}`, `yearStats:${userId}`, etc. | Profile: `invalidateProfileCache(userId)` after updateUserProfile (edit-profile, onboarding). Weight: `invalidateWeightCache(userId)` after insertWeightLog (WeightTrackerCard, onboarding); invalidates all `weightHistory:${userId}:*` keys. |
+
+**Persistent source of truth:** Supabase (v2_* tables). Auth session is persisted by the Supabase client (AsyncStorage on native, localStorage on web) so users stay logged in. **App data (templates, sessions, exercises, profile) is not persisted to disk**—it lives in in-memory caches (90s TTL) and Zustand; screens fetch from Supabase on load.
+
+**Why no AsyncStorage for app data (current = best for this scope):** One source of truth avoids sync bugs, stale local data, and invalidation complexity. Cold start always shows fresh data from the server. Adding a persisted app-data layer is only worth it if you need **offline support** (show last-known data when network is down) or **faster perceived load** (paint from disk immediately, then revalidate). If you add it later: decide what to persist (e.g. profile, last template, recent sessions), a TTL or explicit invalidation, and a read-through pattern; document that strategy here.
+
+**Cleanup:** Planner trims `exerciseNames`/`slotTargets` to current sessions + today template when loading today's sessions (so deleted-session data does not linger). Session delete uses `deleteSessionWithExercises` (session_exercises then session) and invalidates sessions cache.
 
 ## Critical User Flows
 

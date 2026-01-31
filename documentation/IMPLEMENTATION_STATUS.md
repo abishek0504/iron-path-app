@@ -211,10 +211,8 @@
 |---------|--------|-------|
 | uiStore | ✅ Complete | Bottom sheets + toasts |
 | userStore | ✅ Complete | Profile cache |
-| exerciseStore | ✅ Complete | Picker state |
-| workoutStore | ⚠️ Unused | Created but not used |
 | Sheet queueing | ✅ Complete | Sequential opening |
-| State persistence | ⚠️ Partial | Only userStore persisted |
+| State persistence | ⚠️ Partial | Auth session only (Supabase client); app data in-memory |
 
 ### Database & Queries
 
@@ -262,39 +260,34 @@
    - **Status**: Engine complete, button/UI TODO
    - **Next**: Add "Generate with AI" button to Planner
 
-4. **workoutStore Unused**
-   - **Impact**: Store created but not used
-   - **Status**: Sessions fetched directly via queries
-   - **Decision**: Remove or implement active session tracking
-
-5. **TypeScript Types Manual**
+4. **TypeScript Types Manual**
    - **Impact**: Risk of schema drift
    - **Status**: Hand-typed interfaces in query files
    - **Fix**: Generate from schema regularly
 
 ### Low Priority
 
-6. **No Exercise Reordering**
+5. **No Exercise Reordering**
    - **Impact**: Can't rearrange exercise order in day
    - **Status**: TODO
    - **Next**: Add drag-and-drop UI
 
-7. **No Multi-Select in Exercise Picker**
+6. **No Multi-Select in Exercise Picker**
    - **Impact**: Must add exercises one by one
    - **Status**: TODO
    - **Next**: Add multi-select mode with batch addition
 
-8. **No Theme Toggle**
+7. **No Theme Toggle**
    - **Impact**: Always light mode
    - **Status**: Theme system exists, no toggle UI
    - **Next**: Add dark mode support
 
-9. **No Rest Timer**
+8. **No Rest Timer**
    - **Impact**: Manual timing between sets
    - **Status**: TODO
    - **Next**: Add automatic rest timer based on RPE
 
-10. **No Abandon Workout**
+9. **No Abandon Workout**
     - **Impact**: Active sessions stay active indefinitely
     - **Status**: TODO
     - **Next**: Add option to abandon workout (set status='abandoned')
