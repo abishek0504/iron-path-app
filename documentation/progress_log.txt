@@ -5,6 +5,13 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-30 - RLS auth.uid() InitPlan (performance)
+-----------------------------------------------------------
+- Migration 20260130000003_rls_auth_uid_initplan.sql: Replaced auth.uid() with (select auth.uid()) in all owner RLS policies so PostgreSQL evaluates once (InitPlan) instead of per row. Fixes linter "Auth RLS Initialization Plan" performance warning.
+  - Tables: v2_user_exercise_overrides, v2_user_custom_exercises, v2_profiles, v2_workout_templates, v2_template_days, v2_template_slots, v2_workout_sessions, v2_session_exercises, v2_session_sets, v2_muscle_freshness, v2_daily_muscle_stress, v2_user_exercise_prs, v2_support (insert + select), v2_weight_logs.
+- DATABASE_SCHEMA.md: Migration order #18; Performance / RLS Policy Performance notes (select auth.uid()); added "Conventions for new tables and migrations" (primary key, FK covering index, RLS (select auth.uid())) to avoid these issues in future.
+- 00_INDEX.md: "For Database Work" now points to Conventions for new tables and migrations.
+
 2026-01-30 - FK covering indexes (advisor fix)
 -----------------------------------------------------------
 - Migration 20260130000001_add_fk_covering_indexes.sql: Added covering indexes for foreign key columns that had none, to avoid suboptimal JOIN/CASCADE performance.

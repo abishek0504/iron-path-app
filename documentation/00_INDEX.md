@@ -30,6 +30,7 @@
 
 ### For Database Work
 - `DATABASE_SCHEMA.md` - migration order, RLS policies, relationships
+- **Conventions for new tables and migrations** (in DATABASE_SCHEMA.md) - primary key, FK covering indexes, RLS `(select auth.uid())`; follow these to avoid linter/advisor issues
 - Migrations in `supabase/migrations/` - actual SQL
 - Query functions in `src/lib/supabase/queries/` - usage patterns
 

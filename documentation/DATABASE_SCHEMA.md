@@ -23,6 +23,7 @@ Apply migrations in this exact order:
 15. **20260128000003_add_bw_multiplier_prescriptions.sql** - Adds suggested_weight_multiplier_bw (bodyweight-based default; no NULLs)
 16. **20260130000001_add_fk_covering_indexes.sql** - Adds covering indexes for FK columns that lacked them (v2_user_exercise_prs, v2_workout_templates, v2_template_slots, v2_workout_sessions, v2_session_exercises); improves JOIN and CASCADE performance
 17. **20260130000002_add_remaining_fk_indexes_and_prs_pk.sql** - Adds covering indexes for remaining FKs (muscle_key on v2_daily_muscle_stress/v2_muscle_freshness, custom_exercise_id on v2_template_slots, exercise_id on v2_user_exercise_overrides/v2_user_exercise_prs, custom_exercise_id on v2_user_exercise_prs); adds id PRIMARY KEY to v2_user_exercise_prs
+18. **20260130000003_rls_auth_uid_initplan.sql** - RLS: replace `auth.uid()` with `(select auth.uid())` in all owner policies so PostgreSQL evaluates once (InitPlan) instead of per row; fixes "Auth RLS Initialization Plan" performance warning
 
 ## Table Relationships
 
@@ -584,6 +585,7 @@ Base migration and later migrations create indexes for:
 - Composite indexes for complex lookups (e.g. prescription lookup, session_exercises by session_id + sort_order)
 
 ### RLS Policy Performance
+- **auth.uid() in policies**: Use `(select auth.uid())` so PostgreSQL evaluates it once (InitPlan) instead of per row. Migration `20260130000003_rls_auth_uid_initplan.sql` applies this to all owner policies; avoids "Auth RLS Initialization Plan" linter warning.
 - Policies use indexed columns (user_id, id)
 - Transitive policies may be slower (nested EXISTS queries)
 - Consider materialized user-permission views for complex policies (future optimization)
@@ -593,6 +595,16 @@ Base migration and later migrations create indexes for:
 - Fetch related data in one query where possible
 - Use indexes in WHERE clauses
 - Avoid SELECT * in production (but okay for small tables)
+
+## Conventions for new tables and migrations
+
+When adding new tables or RLS policies, follow these so the Supabase linter and advisor do not flag performance issues:
+
+1. **Primary key**: Every table must have a primary key (surrogate `id uuid PRIMARY KEY DEFAULT gen_random_uuid()` or a composite PK). Tables without a PK are inefficient at scale and trigger the "No Primary Key" linter warning.
+2. **Foreign key covering index**: For every `REFERENCES` column, create an index where that column is the **leftmost** column (e.g. `CREATE INDEX idx_tablename_fk_col ON tablename(fk_col);`). Composite indexes (e.g. `(user_id, exercise_id)`) only "cover" the first column for the FK on that column. If the FK is the second column, add a separate single-column index. This avoids "Unindexed foreign keys" and improves JOIN/CASCADE performance.
+3. **RLS and auth.uid()**: In policy expressions use `(select auth.uid())` instead of `auth.uid()` so PostgreSQL evaluates it once (InitPlan) instead of per row. Example: `USING (user_id = (select auth.uid()))`. Avoids "Auth RLS Initialization Plan" performance warning.
+
+**Check before merging**: Run the Supabase database linter (Dashboard → Database → Linter / Advisor) and fix any reported issues, or add a migration that addresses them.
 
 ## Database Maintenance
 
