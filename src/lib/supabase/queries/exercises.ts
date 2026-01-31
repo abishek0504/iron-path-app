@@ -416,4 +416,3 @@ export async function upsertUserExerciseDefaults(
   }
   return true;
 }
-

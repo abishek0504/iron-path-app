@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { colors, spacing, layout, typography, borderRadius } from '../../src/lib/utils/theme';
 import { TabHeader } from '../../src/components/ui/TabHeader';
@@ -122,9 +123,11 @@ export default function ProgressTab() {
     }
   }, [currentDate, viewMode, getDateRange, showToast]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);

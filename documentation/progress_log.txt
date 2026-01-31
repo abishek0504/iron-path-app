@@ -5,6 +5,88 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-30 - Progress tab: show correct workout count (2 workouts) after completing multiple
+--------------------------------------------------------------------------------------------
+IMPLEMENTED:
+- **Progress tab refetch on focus (app/(tabs)/progress.tsx):** Replaced mount-only load with useFocusEffect(load). When the tab gains focus we refetch sessions via getSessionsInRangeCached. After completing a workout we already call invalidateSessionsInRangeForUser so the cache is cleared; the next time the user opens the Progress tab we now reload and get the updated list (e.g. 2 completed sessions for the day), so the day shows "2 workouts" instead of "1 workout".
+
+FILES:
+- app/(tabs)/progress.tsx (useFocusEffect from expo-router; load on focus instead of useEffect on mount)
+
+---
+
+2026-01-30 - Start button double-tap: prevent duplicate sessions and double navigation
+------------------------------------------------------------------------------------
+IMPLEMENTED:
+- **Workout tab – double-tap guard (app/(tabs)/index.tsx):**
+  - Added isStartingWorkout state and startInProgressRef. At start of handleStartWorkout: if startInProgressRef.current return; startInProgressRef.current = true; setIsStartingWorkout(true). In finally: startInProgressRef.current = false; setIsStartingWorkout(false). Prevents a second tap from running while the first is in progress (no duplicate session creation, no double push).
+  - Start/Continue button disabled when isStartingWorkout; label shows "Starting..." while in progress so user sees feedback.
+- **Workout tab – Start on active session = open it (app/(tabs)/index.tsx):**
+  - When the selected workout is already an active session (no save point yet), we now just navigate to that session instead of deleting it and creating a new one. So "Start" on Workout 2 (active, no completed sets) opens Workout 2; we no longer replace it with a new session. Avoids duplicate sessions and extra workout containers when user taps Start on an existing active workout.
+
+FILES:
+- app/(tabs)/index.tsx (isStartingWorkout, startInProgressRef; early return when selectedSession?.status === 'active'; try/finally; disabled + "Starting..." on button)
+
+---
+
+2026-01-30 - State and data handling: delete refresh, trim session-derived state
+--------------------------------------------------------------------------------
+IMPLEMENTED:
+- **Planner delete (app/(tabs)/planner.tsx):** After deleting a workout container, call invalidateSessionsInRangeForUser(userId) so Progress tab and any cached session lists refresh, then await loadTodaySessions(userId, { forceRefresh: true }) so the list always updates (not skipped by in-flight guard). Ensures deleted workout and its contents disappear from the Plan tab and don't linger.
+- **loadTodaySessions trim (app/(tabs)/planner.tsx):** Accept optional templateExerciseKeys?: string[] (today's template slot exercise ids). When setting exerciseNames/slotTargets: (1) When sessions.length > 0, keep only keys in current session exerciseKeys union templateExerciseKeys; (2) When sessions.length === 0, if templateExerciseKeys provided, trim names/targets to only those keys. So deleted-session exercise names/targets are removed and don't "hang around" in state.
+- **Planner call sites:** All loadTodaySessions calls now pass templateExerciseKeys (todayTemplateKeys from useMemo, or from fullTemplate in loadTemplate). Ensures trim runs on every load so state stays in sync with current sessions + today template.
+
+FILES:
+- app/(tabs)/planner.tsx (invalidateSessionsInRangeForUser import and call on delete; loadTodaySessions options.templateExerciseKeys and trim logic; todayTemplateKeys useMemo; all call sites pass templateExerciseKeys)
+- src/lib/cache/sessionsCache.ts (already had invalidateSessionsInRangeForUser)
+
+---
+
+2026-01-30 - Second workout loading hang, Progress delete, loading performance
+--------------------------------------------------------------------------------
+IMPLEMENTED:
+- **Active workout – batch exercise meta (app/(stack)/workout/active.tsx):**
+  - Replaced sequential for-loop of getMergedExercise(ex) with a single listMergedExercisesCached(userId, exerciseIds) call. Collects all exercise ids from sessionData.exercises, fetches merged list in one request, builds metaById map, then maps to exercisesWithMeta. Fixes "second workout does not get past loading screen" (N sequential round trips were slow or could hang). Also reduces loading time for any workout with multiple exercises.
+- **Active workout – dev logs (app/(stack)/workout/active.tsx):**
+  - __DEV__ log at start of loadActiveSession (loadActiveSession_start, sessionId) and on success (loadActiveSession_done, exerciseCount). On error, devError instead of console.error. Helps diagnose hangs.
+- **Progress tab – delete confirmation (src/components/progress/SessionDetailSheet.tsx):**
+  - Replaced Alert.alert for delete confirmation with an in-app Modal (same pattern as Generate with AI). Alert.alert often does not show or work on web, so the delete button appeared to do nothing. Now: tap Delete opens Modal with "Delete Workout", message, Cancel and Delete buttons. Confirm runs deleteSessionWithExercises, updates local state, invalidates cache, calls onSessionDeleted. Modal works on web and native.
+
+FILES:
+- app/(stack)/workout/active.tsx (listMergedExercisesCached; __DEV__ logs in loadActiveSession)
+- src/components/progress/SessionDetailSheet.tsx (Modal for delete confirm; openDeleteConfirm, confirmDeleteSession, closeDeleteConfirm; removed Alert)
+
+---
+
+2026-01-30 - Add Workout: list disappeared, new container did not appear
+-----------------------------------------------------------------------
+IMPLEMENTED:
+- **createWorkoutSession (src/lib/supabase/queries/workouts.ts):** Explicitly set `started_at: new Date().toISOString()` on insert so the new session is in the client's "now" and within the same UTC day range used by getSessionsForToday. Avoids sessions missing from the day query due to server default timing.
+- **Add Workout handler (app/(tabs)/planner.tsx):** Await `loadTodaySessions(userId, { forceRefresh: true })` after creating a session so the list refresh always runs and is not skipped by the in-flight guard. forceRefresh ensures the refresh runs even if another load is in progress (e.g. from focus/effect).
+- **loadTodaySessions (app/(tabs)/planner.tsx):** Accept optional `options?: { forceRefresh?: boolean }`. When forceRefresh is true, do not return early on loadTodaySessionsInFlightRef; run the load so Add Workout gets an updated list. Added __DEV__ log when getSessionsForToday returns 0 sessions (loadTodaySessions_empty with startIso, endIsoExclusive) for diagnosis.
+
+FILES:
+- src/lib/supabase/queries/workouts.ts (started_at on insert)
+- app/(tabs)/planner.tsx (loadTodaySessions options.forceRefresh; await loadTodaySessions(..., { forceRefresh: true }); dev log on empty)
+
+---
+
+2026-01-30 - Plan tab empty / Workout tab too many exercises
+------------------------------------------------------------
+IMPLEMENTED:
+- **Plan tab – show template for Today when no sessions (app/(tabs)/planner.tsx):**
+  - When selected day is Today and sessionsTodayWithExercises.length === 0, the single "Workout 1" container now shows the template slots for today (selectedDay.slots) instead of only "No exercises in this workout". If the template has no slots for today, the empty state with Add Exercise is still shown. Fixes "nothing in the plan tab" when the user has a routine for today but has not started a session yet.
+- **Workout tab – explicit selected-session-only (app/(tabs)/index.tsx):**
+  - exercisesToShow is built only from exercisesForSelectedSessionOnly (session exercises for viewingSession.id). No mixing with other sessions or template. Added __DEV__ log: loadTodayWorkout_sessionExercises_loaded with sessionId, selectedWorkoutIndex, sessionExerciseCount.
+- **Planner – dev log (app/(tabs)/planner.tsx):**
+  - loadTodaySessions logs loadTodaySessions_result with sessionCount and perSessionExerciseCounts (sessionId + exerciseCount per session) in __DEV__ for diagnosing empty containers.
+
+FILES:
+- app/(tabs)/planner.tsx (Today + no sessions → render selectedDay.slots in Workout 1; dev log in loadTodaySessions)
+- app/(tabs)/index.tsx (exercisesForSelectedSessionOnly; dev log with selectedWorkoutIndex and count)
+
+---
+
 2026-01-30 - Multi-workout fixes + Generate with AI sessions-per-day
 ---------------------------------------------------------------------
 IMPLEMENTED:

@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
 import { supabase } from '../../lib/supabase/client';
@@ -29,6 +29,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionWithExercises[]>([]);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [sessionToDelete, setSessionToDelete] = useState<{ id: string; name: string } | null>(null);
   const profile = useUserStore((state) => state.profile);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
 
@@ -187,59 +188,53 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
     }
   };
 
-  const handleDeleteSession = async (sessionId: string, sessionName: string) => {
-    Alert.alert(
-      'Delete Workout',
-      `Are you sure you want to delete this workout (${sessionName})? This action cannot be undone.`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setDeletingSessionId(sessionId);
-            try {
-              const userId = useUserStore.getState().profile?.id;
-              if (!userId) {
-                Alert.alert('Error', 'Not signed in');
-                return;
-              }
-              const { error } = await deleteSessionWithExercises(userId, sessionId);
+  const openDeleteConfirm = (sessionId: string, sessionName: string) => {
+    setSessionToDelete({ id: sessionId, name: sessionName });
+  };
 
-              if (error) {
-                if (__DEV__) {
-                  devError('session-detail', error, { sessionId });
-                }
-                Alert.alert('Error', 'Failed to delete workout');
-                return;
-              }
+  const closeDeleteConfirm = () => {
+    setSessionToDelete(null);
+  };
 
-              // Remove from local state
-              setSessions(prev => prev.filter(s => s.id !== sessionId));
-              invalidateSessionsInRangeForUser(userId);
-              // Notify parent to refresh calendar
-              if (onSessionDeleted) {
-                onSessionDeleted();
-              }
+  const confirmDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    const { id: sessionId } = sessionToDelete;
+    setDeletingSessionId(sessionId);
+    try {
+      const userId = useUserStore.getState().profile?.id;
+      if (!userId) {
+        closeDeleteConfirm();
+        setDeletingSessionId(null);
+        return;
+      }
+      const { error } = await deleteSessionWithExercises(userId, sessionId);
 
-              if (__DEV__) {
-                devLog('session-detail', { action: 'delete_session', sessionId });
-              }
-            } catch (error) {
-              if (__DEV__) {
-                devError('session-detail', error, { action: 'delete_session', sessionId });
-              }
-              Alert.alert('Error', 'Failed to delete workout');
-            } finally {
-              setDeletingSessionId(null);
-            }
-          },
-        },
-      ]
-    );
+      if (error) {
+        if (__DEV__) {
+          devError('session-detail', error, { sessionId });
+        }
+        closeDeleteConfirm();
+        setDeletingSessionId(null);
+        return;
+      }
+
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      invalidateSessionsInRangeForUser(userId);
+      if (onSessionDeleted) {
+        onSessionDeleted();
+      }
+      if (__DEV__) {
+        devLog('session-detail', { action: 'delete_session', sessionId });
+      }
+      closeDeleteConfirm();
+    } catch (error) {
+      if (__DEV__) {
+        devError('session-detail', error, { action: 'delete_session', sessionId });
+      }
+      closeDeleteConfirm();
+    } finally {
+      setDeletingSessionId(null);
+    }
   };
 
   const formatDate = (date: Date): string => {
@@ -291,7 +286,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
             </View>
             <TouchableOpacity
               style={styles.deleteButton}
-              onPress={() => handleDeleteSession(session.id, session.day_name || 'Workout')}
+              onPress={() => openDeleteConfirm(session.id, session.day_name || 'Workout')}
               disabled={deletingSessionId === session.id}
             >
               <Trash2 
@@ -323,6 +318,41 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
           </View>
         </View>
       ))}
+
+      <Modal
+        visible={!!sessionToDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteConfirm}
+      >
+        <Pressable style={styles.deleteModalOverlay} onPress={closeDeleteConfirm}>
+          <Pressable style={styles.deleteModalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.deleteModalTitle}>Delete Workout</Text>
+            <Text style={styles.deleteModalMessage}>
+              {sessionToDelete
+                ? `Are you sure you want to delete this workout (${sessionToDelete.name})? This action cannot be undone.`
+                : ''}
+            </Text>
+            <View style={styles.deleteModalButtons}>
+              <Pressable
+                style={[styles.deleteModalButton, styles.deleteModalButtonCancel]}
+                onPress={closeDeleteConfirm}
+              >
+                <Text style={styles.deleteModalButtonTextCancel}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.deleteModalButton, styles.deleteModalButtonDestructive]}
+                onPress={confirmDeleteSession}
+                disabled={!!deletingSessionId}
+              >
+                <Text style={styles.deleteModalButtonTextDestructive}>
+                  {deletingSessionId ? 'Deleting...' : 'Delete'}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 };
@@ -427,6 +457,62 @@ const styles = StyleSheet.create({
   exerciseSummary: {
     color: colors.textSecondary,
     fontSize: typography.sizes.xs,
+  },
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  deleteModalCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    padding: spacing.xl,
+    minWidth: 280,
+    maxWidth: 360,
+  },
+  deleteModalTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  deleteModalMessage: {
+    fontSize: typography.sizes.base,
+    color: colors.textSecondary,
+    lineHeight: 22,
+    marginBottom: spacing.lg,
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'flex-end',
+  },
+  deleteModalButton: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+  },
+  deleteModalButtonCancel: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  deleteModalButtonTextCancel: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+  },
+  deleteModalButtonDestructive: {
+    backgroundColor: colors.error,
+  },
+  deleteModalButtonTextDestructive: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
   },
 });
 

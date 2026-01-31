@@ -25,7 +25,7 @@ import { ArrowLeft, CheckCircle, ChevronRight, Info, RefreshCcw } from 'lucide-r
 import { colors, spacing, borderRadius, typography } from '../../../src/lib/utils/theme';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
 import { RPESlider } from '../../../src/components/workout/RPESlider';
-import { getMergedExercise } from '../../../src/lib/supabase/queries/exercises';
+import { listMergedExercisesCached } from '../../../src/lib/cache/exerciseCache';
 import {
   getActiveSession,
   getSessionById,
@@ -145,6 +145,10 @@ export default function ActiveWorkoutScreen() {
     if (!userId) return;
 
     setLoading(true);
+    if (__DEV__) {
+      const { devLog } = require('../../../src/lib/utils/logger');
+      devLog('workout-active', { action: 'loadActiveSession_start', sessionId: params.sessionId });
+    }
     try {
       const session = params.sessionId
         ? await getSessionById(userId, params.sessionId)
@@ -165,13 +169,21 @@ export default function ActiveWorkoutScreen() {
         return;
       }
 
+      const exerciseIds = [
+        ...new Set(
+          sessionData.exercises
+            .flatMap((ex) => [ex.exercise_id, ex.custom_exercise_id].filter(Boolean) as string[])
+        ),
+      ];
+      const mergedList = exerciseIds.length > 0
+        ? await listMergedExercisesCached(userId, exerciseIds)
+        : [];
+      const metaById = new Map(mergedList.map((m) => [m.id, m]));
+
       const exercisesWithMeta: Exercise[] = [];
       for (const ex of sessionData.exercises) {
-        const exerciseRef = {
-          exerciseId: ex.exercise_id,
-          customExerciseId: ex.custom_exercise_id,
-        };
-        const meta = await getMergedExercise(exerciseRef, userId);
+        const key = ex.exercise_id || ex.custom_exercise_id;
+        const meta = key ? metaById.get(key) : null;
         if (meta) {
           exercisesWithMeta.push({
             id: ex.id,
@@ -180,7 +192,7 @@ export default function ActiveWorkoutScreen() {
             custom_exercise_id: ex.custom_exercise_id,
             mode: meta.is_timed ? 'timed' : 'reps',
             notes: ex.notes,
-            sets: ex.sets.map(s => ({ ...s, completed: !!s.performed_at })),
+            sets: ex.sets.map((s) => ({ ...s, completed: !!s.performed_at })),
           });
         }
       }
@@ -240,8 +252,15 @@ export default function ActiveWorkoutScreen() {
       } else {
         setStaleness(null);
       }
+      if (__DEV__) {
+        const { devLog } = require('../../../src/lib/utils/logger');
+        devLog('workout-active', { action: 'loadActiveSession_done', exerciseCount: exercisesWithMeta.length });
+      }
     } catch (error) {
-      console.error('Error loading active session:', error);
+      if (__DEV__) {
+        const { devError } = require('../../../src/lib/utils/logger');
+        devError('workout-active', error, { action: 'loadActiveSession' });
+      }
       toast.error('Failed to load workout');
     } finally {
       setLoading(false);

@@ -4,7 +4,7 @@
  * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–600.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -116,14 +116,29 @@ export default function AddExerciseEditScreen() {
     dayId,
     templateId,
     dayName,
-    sessionId,
     exerciseId,
     customExerciseId,
     exerciseName,
     isTimed,
     editSlotId,
   } = params;
+  // Expo Router can return string | string[] for query params; normalize to string | undefined
+  const sessionId =
+    typeof params.sessionId === 'string'
+      ? params.sessionId
+      : Array.isArray(params.sessionId)
+        ? params.sessionId[0]
+        : undefined;
   const isEditSlot = !!editSlotId;
+
+  if (__DEV__ && (params.sessionId !== undefined || sessionId !== undefined)) {
+    devLog('add-exercise-edit', {
+      action: 'sessionId_param',
+      raw: params.sessionId,
+      resolved: sessionId,
+      type: typeof params.sessionId,
+    });
+  }
   const [removing, setRemoving] = useState(false);
 
   const profileId = useUserStore((s) => s.profile?.id);
@@ -134,8 +149,9 @@ export default function AddExerciseEditScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sets, setSets] = useState<EditSet[]>([]);
-  // When adding from a specific workout container (sessionId), default to today only so the exercise lands in that session
-  const [todayOnly, setTodayOnly] = useState(!!params.sessionId);
+  const [todayOnly, setTodayOnly] = useState(false);
+  const todayOnlyRef = useRef(todayOnly);
+  todayOnlyRef.current = todayOnly;
 
   const exerciseIdVal = exerciseId || undefined;
   const customExerciseIdVal = customExerciseId || undefined;
@@ -361,38 +377,45 @@ export default function AddExerciseEditScreen() {
     }
     setSaving(true);
     try {
-      if (todayOnly) {
-        let session: { id: string } | null;
-        if (sessionId) {
-          const { data } = await supabase
-            .from('v2_workout_sessions')
-            .select('id')
-            .eq('id', sessionId)
-            .eq('user_id', userId)
-            .maybeSingle();
-          session = data;
-        } else {
-          session = await getOrCreateActiveSessionForToday(userId, dayName);
-        }
-        if (!session) {
-          toast.error(sessionId ? 'Workout not found' : 'Failed to get today\'s session');
+      const addToRoutineOnly = !todayOnlyRef.current;
+      // When sessionId is present (Add Exercise from a specific workout container), always add to that session so it appears in that container.
+      let targetSession: { id: string } | null = null;
+      if (sessionId) {
+        const { data } = await supabase
+          .from('v2_workout_sessions')
+          .select('id')
+          .eq('id', sessionId)
+          .eq('user_id', userId)
+          .maybeSingle();
+        targetSession = data ?? null;
+        if (!targetSession) {
+          toast.error('Workout not found');
           return;
         }
+      } else if (todayOnlyRef.current) {
+        targetSession = await getOrCreateActiveSessionForToday(userId, dayName);
+        if (!targetSession) {
+          toast.error('Failed to get today\'s session');
+          return;
+        }
+      }
+
+      if (targetSession) {
         const { data: existing } = await supabase
           .from('v2_session_exercises')
           .select('sort_order')
-          .eq('session_id', session.id)
+          .eq('session_id', targetSession.id)
           .order('sort_order', { ascending: false })
           .limit(1)
           .maybeSingle();
         const sortOrder = (existing?.sort_order ?? 0) + 1;
-        const created = await createSessionExercise(session.id, {
+        const created = await createSessionExercise(targetSession.id, {
           exerciseId: exerciseIdVal,
           customExerciseId: customExerciseIdVal,
           sortOrder,
         });
         if (!created) {
-          toast.error('Failed to add to today\'s session');
+          toast.error('Failed to add to workout');
           return;
         }
         for (const s of sets) {
@@ -418,9 +441,11 @@ export default function AddExerciseEditScreen() {
           }
         }
         if (__DEV__) devLog('add-exercise-edit', { action: 'sessionSetsInserted', count: sets.length });
-        toast.success('Added to today\'s session');
         useUIStore.getState().setPlannerNeedsRefetch(true);
-      } else {
+      }
+
+      // Add to routine (template) only when "today only" is OFF (use ref so checkbox state is current when Confirm is pressed)
+      if (addToRoutineOnly) {
         const slots = await getTemplateSlotsForDay(templateId, dayName);
         const sortOrder = slots.length + 1;
         const success = await applyStructureEditToTemplate(templateId, {
@@ -431,21 +456,22 @@ export default function AddExerciseEditScreen() {
           sortOrder,
         });
         if (success) invalidateTemplate(templateId);
-        if (!success) {
+        useUIStore.getState().setPlannerNeedsRefetch(true);
+        if (!success && !targetSession) {
           toast.error('Failed to add to routine');
           return;
         }
-        toast.success('Added to routine');
-        if (__DEV__) {
-          const before = useUIStore.getState().plannerNeedsRefetch;
-          devLog('add-exercise-edit', { action: 'setPlannerNeedsRefetch', before, settingTo: true });
+        if (!success && targetSession) {
+          toast.success('Added to workout');
+        } else if (success && targetSession) {
+          toast.success('Added to workout and routine');
+        } else {
+          toast.success('Added to routine');
         }
-        useUIStore.getState().setPlannerNeedsRefetch(true);
-        if (__DEV__) {
-          const after = useUIStore.getState().plannerNeedsRefetch;
-          devLog('add-exercise-edit', { action: 'setPlannerNeedsRefetch', after, success: after === true });
-        }
+      } else if (targetSession) {
+        toast.success('Added to today\'s session');
       }
+
       router.replace('/(tabs)/planner');
     } catch (e) {
       if (__DEV__) devError('add-exercise-edit', e);

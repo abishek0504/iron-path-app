@@ -56,6 +56,7 @@ export async function createWorkoutSession(
   }
 
   try {
+    const startedAt = new Date().toISOString();
     const { data, error } = await supabase
       .from('v2_workout_sessions')
       .insert({
@@ -63,6 +64,7 @@ export async function createWorkoutSession(
         template_id: templateId,
         day_name: dayName,
         status: 'active',
+        started_at: startedAt,
       })
       .select()
       .single();

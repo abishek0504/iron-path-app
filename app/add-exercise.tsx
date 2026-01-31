@@ -126,13 +126,15 @@ export default function AddExerciseScreen() {
   const handleAdd = (exercise: MergedExercise) => {
     if (!dayId || !templateId || !dayName) return;
     const isCustom = exercise.source === 'custom';
+    const resolvedSessionId =
+      typeof sessionId === 'string' ? sessionId : Array.isArray(sessionId) ? sessionId[0] : undefined;
     router.push({
       pathname: '/add-exercise-edit',
       params: {
         dayId,
         templateId,
         dayName,
-        ...(sessionId ? { sessionId } : {}),
+        ...(resolvedSessionId ? { sessionId: resolvedSessionId } : {}),
         exerciseId: isCustom ? '' : exercise.id,
         customExerciseId: isCustom ? exercise.id : '',
         exerciseName: exercise.name,
