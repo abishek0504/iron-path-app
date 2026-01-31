@@ -5,6 +5,15 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-01-31 - Plan tab: faster first load (parallelize + skip duplicate today load)
+----------------------------------------------------------------------------------
+- Goal: Reduce planner first-load time (many [planner], [template-query], [exercise-query], [workout-query], [target-selection] calls).
+- Changes:
+  1. **calculateTargetsForSlots**: Replaced sequential for-loop over slots with Promise.all(slotRefs.map(... selectExerciseTargets)). All slot target fetches now run in parallel (e.g. 20 slots → one batch instead of 20 sequential round-trips).
+  2. **loadTodaySessionExercises**: Replaced sequential for-loop over session exercises with Promise.all: per exercise run getMergedExercise and selectExerciseTargets in parallel, and all exercises in parallel.
+  3. **Skip duplicate today load**: loadTemplate already calls loadTodaySessionExercises + loadTodaySessions at the end. useFocusEffect and useEffect(selectedDayIndex) would run the same again. Added loadTemplateDidTodayLoadRef: set true after loadTemplate’s today load; useFocusEffect and useEffect skip the today branch when ref is true; cleanup (blur) sets ref false so next focus refreshes.
+- File: app/(tabs)/planner.tsx.
+
 2026-01-31 - Plan tab: stop repeated planner/target-selection cascade
 ----------------------------------------------------------------------
 - Symptom: [planner], [prescription-query], [exercise-query], [workout-query], [target-selection] logs repeated in console when viewing Plan tab with no user action.

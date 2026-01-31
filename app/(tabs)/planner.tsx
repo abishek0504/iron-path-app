@@ -134,6 +134,8 @@ export default function PlannerTab() {
   const loadTemplateRef = useRef<(id: string) => Promise<void>>(() => Promise.resolve());
   const loadTodaySessionExercisesRef = useRef<(userId: string) => Promise<void>>(() => Promise.resolve());
   const loadTodaySessionsRef = useRef<(_userId: string, _opts?: { forceRefresh?: boolean; templateExerciseKeys?: string[] }) => Promise<void>>(() => Promise.resolve());
+  /** Set by loadTemplate after it runs loadTodaySessionExercises + loadTodaySessions; cleared when useFocusEffect/useEffect would run the same. Skips duplicate today load on first focus. */
+  const loadTemplateDidTodayLoadRef = useRef(false);
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -169,55 +171,64 @@ export default function PlannerTab() {
         };
 
         const targetsMap = new Map<string, ExerciseTarget>();
-        let slotsWithPrescriptions = 0;
-        let slotsWithoutPrescriptions = 0;
-
-        // Calculate targets for each slot
         const slotDetails: Array<{ slotId: string; exerciseId?: string; customExerciseId?: string; hasTarget: boolean }> = [];
+
+        // Collect all slots with exercises and run selectExerciseTargets in parallel
+        const slotRefs: Array<{
+          slot: TemplateSlot;
+          context: TargetSelectionContext;
+        }> = [];
         for (const day of fullTemplate.days) {
           for (const slot of day.slots) {
             if (!slot.exercise_id && !slot.custom_exercise_id) continue;
-
-            // Use slot overrides if available, else use profile defaults
             const slotExperience = slot.experience || effectiveExperience;
-            const slotContext: TargetSelectionContext = {
-              experience: slotExperience,
-            };
+            slotRefs.push({
+              slot,
+              context: { experience: slotExperience },
+            });
+          }
+        }
 
-            const target = await selectExerciseTargets(
+        const targetResults = await Promise.all(
+          slotRefs.map(({ slot, context }) =>
+            selectExerciseTargets(
               {
                 exerciseId: slot.exercise_id || undefined,
                 customExerciseId: slot.custom_exercise_id || undefined,
               },
               userId,
-              slotContext,
-              0 // historyCount = 0 for now (can be enhanced later)
-            );
+              context,
+              0
+            ).then((target) => ({ slot, target }))
+          )
+        );
 
-            if (target) {
-              targetsMap.set(slot.id, target);
-              slotsWithPrescriptions++;
-              slotDetails.push({
-                slotId: slot.id,
+        let slotsWithPrescriptions = 0;
+        let slotsWithoutPrescriptions = 0;
+        for (const { slot, target } of targetResults) {
+          if (target) {
+            targetsMap.set(slot.id, target);
+            slotsWithPrescriptions++;
+            slotDetails.push({
+              slotId: slot.id,
+              exerciseId: slot.exercise_id,
+              customExerciseId: slot.custom_exercise_id,
+              hasTarget: true,
+            });
+          } else {
+            slotsWithoutPrescriptions++;
+            slotDetails.push({
+              slotId: slot.id,
+              exerciseId: slot.exercise_id,
+              customExerciseId: slot.custom_exercise_id,
+              hasTarget: false,
+            });
+            if (__DEV__) {
+              devError('planner', new Error('No prescription found for exercise'), {
                 exerciseId: slot.exercise_id,
                 customExerciseId: slot.custom_exercise_id,
-                hasTarget: true,
-              });
-            } else {
-              slotsWithoutPrescriptions++;
-              slotDetails.push({
                 slotId: slot.id,
-                exerciseId: slot.exercise_id,
-                customExerciseId: slot.custom_exercise_id,
-                hasTarget: false,
               });
-              if (__DEV__) {
-                devError('planner', new Error('No prescription found for exercise'), {
-                  exerciseId: slot.exercise_id,
-                  customExerciseId: slot.custom_exercise_id,
-                  slotId: slot.id,
-                });
-              }
             }
           }
         }
@@ -277,33 +288,29 @@ export default function PlannerTab() {
 
           if (sessionExercises && sessionExercises.length > 0) {
             const effectiveExperience = profile?.experience_level || 'beginner';
+            const effectiveContext = { experience: effectiveExperience };
+
+            const results = await Promise.all(
+              sessionExercises
+                .filter((se) => se.exercise_id || se.custom_exercise_id)
+                .map(async (se) => {
+                  const exerciseId = se.exercise_id || se.custom_exercise_id!;
+                  const ref = se.exercise_id
+                    ? { exerciseId: se.exercise_id }
+                    : { customExerciseId: se.custom_exercise_id! };
+                  const [exercise, target] = await Promise.all([
+                    getMergedExercise(ref, userId),
+                    selectExerciseTargets(ref, userId, effectiveContext, 0),
+                  ]);
+                  return { exerciseId, name: exercise?.name, target };
+                })
+            );
+
             const namesToAdd = new Map<string, string>();
             const targetsToAdd = new Map<string, ExerciseTarget>();
-
-            for (const se of sessionExercises) {
-              const exerciseId = se.exercise_id || se.custom_exercise_id;
-              if (!exerciseId) continue;
-
-              const exercise = await getMergedExercise(
-                se.exercise_id ? { exerciseId: se.exercise_id } : { customExerciseId: se.custom_exercise_id! },
-                userId
-              );
-              if (exercise) {
-                namesToAdd.set(exerciseId, exercise.name);
-              }
-
-              const target = await selectExerciseTargets(
-                {
-                  exerciseId: se.exercise_id || undefined,
-                  customExerciseId: se.custom_exercise_id || undefined,
-                },
-                userId,
-                { experience: effectiveExperience },
-                0
-              );
-              if (target) {
-                targetsToAdd.set(exerciseId, target);
-              }
+            for (const { exerciseId, name, target } of results) {
+              if (name) namesToAdd.set(exerciseId, name);
+              if (target) targetsToAdd.set(exerciseId, target);
             }
 
             setExerciseNames((prev) => {
@@ -542,6 +549,7 @@ export default function PlannerTab() {
               await loadTodaySessions(userId, {
                 templateExerciseKeys: fullTemplate.days.find((d) => d.day.day_name === getTodayDayName())?.slots.flatMap((s) => [s.exercise_id, s.custom_exercise_id].filter(Boolean)) ?? [],
               });
+              loadTemplateDidTodayLoadRef.current = true;
             } catch (sessionErr) {
               if (__DEV__) devError('planner', sessionErr, { action: 'loadTodaySessionExercises_inLoadTemplate' });
             }
@@ -699,16 +707,19 @@ export default function PlannerTab() {
           }).catch(() => setIsLoadingTemplate(false));
         });
       } else if (selectedDay?.day.day_name === getTodayDayName()) {
-        getCurrentUserId().then((id) => {
-          if (id) {
-            loadTodaySessionExercises(id);
-            loadTodaySessions(id, { templateExerciseKeys: todayTemplateKeys });
-          }
-        });
+        if (!loadTemplateDidTodayLoadRef.current) {
+          getCurrentUserId().then((id) => {
+            if (id) {
+              loadTodaySessionExercises(id);
+              loadTodaySessions(id, { templateExerciseKeys: todayTemplateKeys });
+            }
+          });
+        }
       }
 
       return () => {
         recoveryAttemptedThisFocusRef.current = false;
+        loadTemplateDidTodayLoadRef.current = false;
       };
     }, [plannerNeedsRefetch, activeTemplateId, setPlannerNeedsRefetch, selectedDay?.day.day_name, getCurrentUserId, templateData, isLoadingTemplate, todayTemplateKeys])
   );
@@ -716,7 +727,7 @@ export default function PlannerTab() {
 
   // When switching to today tab: load sessions and exercises for workout containers
   useEffect(() => {
-    if (selectedDay && selectedDay.day.day_name === getTodayDayName()) {
+    if (selectedDay && selectedDay.day.day_name === getTodayDayName() && !loadTemplateDidTodayLoadRef.current) {
       const userId = getCurrentUserId();
       userId.then((id) => {
         if (id) {
