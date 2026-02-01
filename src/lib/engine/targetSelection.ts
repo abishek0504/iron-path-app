@@ -5,7 +5,7 @@
  */
 
 import { getExercisePrescription } from '../supabase/queries/prescriptions';
-import { getMergedExercise } from '../supabase/queries/exercises';
+import { getMergedExercise, type MergedExercise } from '../supabase/queries/exercises';
 import { getExerciseHistory } from '../supabase/queries/workouts';
 import { getUserProfileCached } from '../cache/dashboardStatsCache';
 import { devLog, devError } from '../utils/logger';
@@ -40,12 +40,14 @@ export interface ExerciseIdentifier {
 /**
  * Select targets for a single exercise
  * Returns null if prescription is missing (data error)
+ * @param mergedExercise - Optional pre-fetched merged exercise to skip getMergedExercise (reduces DB calls when batching)
  */
 export async function selectExerciseTargets(
   exerciseRef: ExerciseIdentifier,
   userId: string,
   context: TargetSelectionContext,
-  historyCount: number = 0
+  historyCount: number = 0,
+  mergedExercise?: MergedExercise | null
 ): Promise<ExerciseTarget | null> {
   const hasExerciseId = !!exerciseRef.exerciseId;
   const hasCustomExerciseId = !!exerciseRef.customExerciseId;
@@ -74,8 +76,8 @@ export async function selectExerciseTargets(
     });
   }
 
-  // Get merged exercise to determine mode
-  const exercise = await getMergedExercise(exerciseRef, userId);
+  // Get merged exercise to determine mode (use pre-fetched if provided)
+  const exercise = mergedExercise ?? (await getMergedExercise(exerciseRef, userId));
   if (!exercise) {
     if (__DEV__) {
       devError('target-selection', new Error('Exercise not found'), {

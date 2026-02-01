@@ -46,7 +46,7 @@ export async function getExercisePrescription(
   try {
     const { data, error } = await supabase
       .from('v2_exercise_prescriptions')
-      .select('*')
+      .select('id, exercise_id, experience, mode, sets_min, sets_max, reps_min, reps_max, duration_sec_min, duration_sec_max, suggested_weight_lbs, suggested_weight_kg, suggested_weight_multiplier_bw, is_active, source_notes')
       .eq('exercise_id', exerciseId)
       .eq('experience', experience)
       .eq('mode', mode)
@@ -96,7 +96,7 @@ export async function getExercisePrescriptions(
   try {
     const { data, error } = await supabase
       .from('v2_exercise_prescriptions')
-      .select('*')
+      .select('id, exercise_id, experience, mode, sets_min, sets_max, reps_min, reps_max, duration_sec_min, duration_sec_max, suggested_weight_lbs, suggested_weight_kg, suggested_weight_multiplier_bw, is_active, source_notes')
       .eq('exercise_id', exerciseId)
       .eq('is_active', true)
       .order('experience', { ascending: true })
@@ -138,7 +138,7 @@ export async function getPrescriptionsForExercises(
   try {
     const { data, error } = await supabase
       .from('v2_exercise_prescriptions')
-      .select('*')
+      .select('id, exercise_id, experience, mode, sets_min, sets_max, reps_min, reps_max, duration_sec_min, duration_sec_max, suggested_weight_lbs, suggested_weight_kg, suggested_weight_multiplier_bw, is_active, source_notes')
       .in('exercise_id', exerciseIds)
       .eq('experience', experience)
       .eq('mode', mode)

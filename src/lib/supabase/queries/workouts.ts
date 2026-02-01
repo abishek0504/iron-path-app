@@ -303,7 +303,7 @@ export async function getSessionsForToday(
   try {
     const { data, error } = await supabase
       .from('v2_workout_sessions')
-      .select('*')
+      .select('id, user_id, template_id, day_name, status, started_at, completed_at')
       .eq('user_id', userId)
       .gte('started_at', dayStartIso)
       .lt('started_at', dayEndIsoExclusive)
@@ -635,7 +635,7 @@ export async function getSessionsInRange(
   try {
     const { data, error } = await supabase
       .from('v2_workout_sessions')
-      .select('*')
+      .select('id, user_id, template_id, day_name, status, started_at, completed_at')
       .eq('user_id', userId)
       .eq('status', 'completed')
       .not('completed_at', 'is', null)
@@ -673,7 +673,7 @@ export async function getRecentSessions(
   try {
     const { data, error } = await supabase
       .from('v2_workout_sessions')
-      .select('*')
+      .select('id, user_id, template_id, day_name, status, started_at, completed_at')
       .eq('user_id', userId)
       .eq('status', 'completed')
       .order('completed_at', { ascending: false, nullsFirst: false })

@@ -2,6 +2,7 @@
  * Exercise Picker
  * Bottom sheet component for selecting exercises
  * Reusable across all tabs
+ * Uses 5 min cache to reduce DB egress when picker is reopened.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -20,6 +21,41 @@ import { useUIStore } from '../../stores/uiStore';
 import { colors, spacing, borderRadius } from '../../lib/utils/theme';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { Exercise } from '../../types/exercisePicker';
+
+const EXERCISE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let exerciseCache: { value: Exercise[]; expiresAt: number } | null = null;
+
+async function loadExercisesCached(): Promise<Exercise[]> {
+  const now = Date.now();
+  if (exerciseCache && exerciseCache.expiresAt > now) {
+    return exerciseCache.value;
+  }
+
+  const { data, error } = await supabase
+    .from('v2_exercises')
+    .select('id, name, description, density_score, primary_muscles, implicit_hits, is_unilateral, setup_buffer_sec, avg_time_per_set_sec, is_timed, equipment_needed, movement_pattern')
+    .order('name', { ascending: true });
+
+  if (error) throw error;
+
+  const mapped: Exercise[] = (data || []).map((ex) => ({
+    id: ex.id,
+    name: ex.name,
+    description: ex.description,
+    density_score: ex.density_score ?? 0,
+    primary_muscles: ex.primary_muscles ?? [],
+    implicit_hits: ex.implicit_hits ?? {},
+    is_unilateral: ex.is_unilateral ?? false,
+    setup_buffer_sec: ex.setup_buffer_sec ?? 0,
+    avg_time_per_set_sec: ex.avg_time_per_set_sec ?? 0,
+    is_timed: ex.is_timed ?? false,
+    equipment_needed: ex.equipment_needed,
+    movement_pattern: ex.movement_pattern,
+  }));
+
+  exerciseCache = { value: mapped, expiresAt: now + EXERCISE_CACHE_TTL_MS };
+  return mapped;
+}
 
 interface ExercisePickerProps {
   onSelect?: (exercise: Exercise) => void;
@@ -52,41 +88,14 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('v2_exercises')
-        .select('*')
-        .order('name', { ascending: true });
-
-      if (error) {
-        if (__DEV__) {
-          devError('exercise-picker', error);
-        }
-        showToast('Failed to load exercises', 'error');
-        return;
-      }
-
-      const mappedExercises: Exercise[] = (data || []).map((ex) => ({
-        id: ex.id,
-        name: ex.name,
-        description: ex.description,
-        density_score: ex.density_score,
-        primary_muscles: ex.primary_muscles,
-        implicit_hits: ex.implicit_hits,
-        is_unilateral: ex.is_unilateral,
-        setup_buffer_sec: ex.setup_buffer_sec,
-        avg_time_per_set_sec: ex.avg_time_per_set_sec,
-        is_timed: ex.is_timed,
-        equipment_needed: ex.equipment_needed,
-        movement_pattern: ex.movement_pattern,
-      }));
-
+      const mappedExercises = await loadExercisesCached();
       setExercises(mappedExercises);
       setFilteredExercises(mappedExercises);
 
       if (__DEV__) {
-        devLog('exercise-picker', { 
-          action: 'loadExercises_result', 
-          count: mappedExercises.length 
+        devLog('exercise-picker', {
+          action: 'loadExercises_result',
+          count: mappedExercises.length,
         });
       }
     } catch (error) {

@@ -5,7 +5,7 @@
  * NOTE: Grouping is by completed_at date (performed truth), not day_name
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -33,6 +33,8 @@ export default function ProgressTab() {
   const [sessionsByDate, setSessionsByDate] = useState<Map<string, { count: number }>>(
     new Map()
   );
+  const lastFocusLoadRef = useRef(0);
+  const FOCUS_RELOAD_THROTTLE_MS = 4000;
 
   const getLocalDateKey = (date: Date): string => {
     const year = date.getFullYear();
@@ -125,6 +127,9 @@ export default function ProgressTab() {
 
   useFocusEffect(
     useCallback(() => {
+      const now = Date.now();
+      if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
+      lastFocusLoadRef.current = now;
       load();
     }, [load])
   );

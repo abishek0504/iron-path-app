@@ -40,8 +40,8 @@ import {
   invalidateTemplates,
   invalidateTemplate,
 } from '../../src/lib/cache/templateCache';
-import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
+import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
 import {
   selectExerciseTargets,
   type ExerciseTarget,
@@ -268,7 +268,7 @@ export default function PlannerTab() {
         const today = new Date().toISOString().split('T')[0];
         const { data: session } = await supabase
           .from('v2_workout_sessions')
-          .select('*')
+          .select('id, template_id, day_name, status, started_at, completed_at')
           .eq('user_id', userId)
           .eq('status', 'active')
           .gte('started_at', `${today}T00:00:00Z`)
@@ -289,6 +289,12 @@ export default function PlannerTab() {
           if (sessionExercises && sessionExercises.length > 0) {
             const effectiveExperience = profile?.experience_level || 'beginner';
             const effectiveContext = { experience: effectiveExperience };
+            const exerciseIds = sessionExercises
+              .filter((se) => se.exercise_id || se.custom_exercise_id)
+              .map((se) => se.exercise_id || se.custom_exercise_id!);
+
+            const mergedList = await listMergedExercisesCached(userId, exerciseIds);
+            const mergedMap = new Map(mergedList.map((e) => [e.id, e]));
 
             const results = await Promise.all(
               sessionExercises
@@ -298,11 +304,9 @@ export default function PlannerTab() {
                   const ref = se.exercise_id
                     ? { exerciseId: se.exercise_id }
                     : { customExerciseId: se.custom_exercise_id! };
-                  const [exercise, target] = await Promise.all([
-                    getMergedExercise(ref, userId),
-                    selectExerciseTargets(ref, userId, effectiveContext, 0),
-                  ]);
-                  return { exerciseId, name: exercise?.name, target };
+                  const merged = mergedMap.get(exerciseId) ?? null;
+                  const target = await selectExerciseTargets(ref, userId, effectiveContext, 0, merged);
+                  return { exerciseId, name: merged?.name, target };
                 })
             );
 

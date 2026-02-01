@@ -8,8 +8,10 @@ import {
   getYearToDateStats,
   getStreak,
   getCachedTopPRs,
+  getRecentSessions,
   type YearToDateStats,
   type TopPR,
+  type WorkoutSession,
 } from '../supabase/queries/workouts';
 import { getUserProfile } from '../supabase/queries/users';
 import { getWeightHistory, type WeightLog } from '../supabase/queries/weight';
@@ -43,6 +45,10 @@ export function getStreakCached(userId: string): Promise<number> {
 
 export function getCachedTopPRsCached(userId: string, limit: number): Promise<TopPR[]> {
   return getOrSet(`topPrs:${userId}:${limit}`, () => getCachedTopPRs(userId, limit));
+}
+
+export function getRecentSessionsCached(userId: string, limit: number): Promise<WorkoutSession[]> {
+  return getOrSet(`recentSessions:${userId}:${limit}`, () => getRecentSessions(userId, limit));
 }
 
 export function getUserProfileCached(userId: string): Promise<UserProfile | null> {

@@ -9,7 +9,6 @@ import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import {
-  getRecentSessions,
   formatPRDisplay,
   type TopPR,
 } from '../../src/lib/supabase/queries/workouts';
@@ -17,6 +16,7 @@ import {
   getYearToDateStatsCached,
   getStreakCached,
   getCachedTopPRsCached,
+  getRecentSessionsCached,
   getUserProfileCached,
 } from '../../src/lib/cache/dashboardStatsCache';
 import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
@@ -52,6 +52,9 @@ export default function DashboardTab() {
   const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
   const [showHeatmap, setShowHeatmap] = useState(false);
   const loadInFlightRef = useRef(false);
+  const lastFocusLoadRef = useRef(0);
+
+  const FOCUS_RELOAD_THROTTLE_MS = 4000;
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
@@ -107,7 +110,7 @@ export default function DashboardTab() {
       const { start, end } = getWeekRange();
       const [thisWeek, recent, topPrs, yearStats, streakCount] = await Promise.all([
         getSessionsInRangeCached(userId, start.toISOString(), end.toISOString()),
-        getRecentSessions(userId, 3),
+        getRecentSessionsCached(userId, 3),
         getCachedTopPRsCached(userId, 3),
         getYearToDateStatsCached(userId),
         getStreakCached(userId),
@@ -183,6 +186,9 @@ export default function DashboardTab() {
 
   useFocusEffect(
     useCallback(() => {
+      const now = Date.now();
+      if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
+      lastFocusLoadRef.current = now;
       load();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [load])

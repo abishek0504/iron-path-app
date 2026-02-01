@@ -3,6 +3,8 @@
  * High-performance muscle visualization.
  * Displays muscle freshness from v2_muscle_freshness; freshness is computed on read
  * using the decay formula (last_trained_at + λ) so recovery shows over time on rest days.
+ * Uses cached raw data (5 min TTL) and periodically recomputes freshness so the user
+ * sees muscles recovering over time without refetching from the DB.
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -11,16 +13,20 @@ import { useFocusEffect } from 'expo-router';
 import { Info } from 'lucide-react-native';
 import { colors, spacing, typography } from '../../lib/utils/theme';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
-import { supabase } from '../../lib/supabase/client';
 import { devError, devLog } from '../../lib/utils/logger';
 import { computeFreshnessNow } from '../../lib/utils/muscleFreshness';
 import {
   getLastCompletedSessionId,
   invokeUpdateMuscleFreshness,
 } from '../../lib/supabase/queries/workouts';
+import {
+  getMuscleFreshnessRawCached,
+  invalidateMuscleFreshnessCache,
+} from '../../lib/cache/muscleFreshnessCache';
 
 const LEGEND_DROPDOWN_DURATION = 200;
 const LEGEND_CONTENT_MAX_HEIGHT = 130;
+const DECAY_TICK_MS = 90 * 1000; // Recompute freshness every 90 sec (no DB)
 
 type BodySide = 'front' | 'back';
 
@@ -30,12 +36,21 @@ interface WorkoutHeatmapProps {
   onBodySideChange?: (side: BodySide) => void;
 }
 
+function computeFreshnessFromRaw(rows: { muscle_key: string; last_trained_at: string | null }[]): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const row of rows) {
+    map[row.muscle_key] = computeFreshnessNow(row.muscle_key, row.last_trained_at);
+  }
+  return map;
+}
+
 export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
   userId,
   bodySide = 'front',
   onBodySideChange,
 }) => {
   const [loading, setLoading] = useState(true);
+  const [lastTrainedByMuscle, setLastTrainedByMuscle] = useState<{ muscle_key: string; last_trained_at: string | null }[]>([]);
   const [freshnessData, setFreshnessData] = useState<Record<string, number>>({});
   const [infoOpen, setInfoOpen] = useState(false);
   const infoDropdownAnim = useRef(new Animated.Value(0)).current;
@@ -52,34 +67,22 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
         devLog('workout-heatmap', { action: 'loadMuscleFreshness:start', userId });
       }
 
-      const { data, error } = await supabase
-        .from('v2_muscle_freshness')
-        .select('muscle_key, freshness, last_trained_at')
-        .eq('user_id', userId);
+      const rows = await getMuscleFreshnessRawCached(userId);
+      const computed = computeFreshnessFromRaw(rows);
+      setLastTrainedByMuscle(rows);
+      setFreshnessData(computed);
 
-      if (error) throw error;
-
-      const freshnessMap: Record<string, number> = {};
-      for (const row of data || []) {
-        const value = computeFreshnessNow(
-          row.muscle_key,
-          row.last_trained_at ?? null
-        );
-        freshnessMap[row.muscle_key] = value;
-      }
-
-      setFreshnessData(freshnessMap);
       if (__DEV__) {
         devLog('workout-heatmap', {
           action: 'loadMuscleFreshness:done',
           userId,
-          rowCount: (data || []).length,
-          muscleCount: Object.keys(freshnessMap).length,
+          rowCount: rows.length,
+          muscleCount: Object.keys(computed).length,
         });
       }
 
       // If empty but user has a completed session, backfill once (Edge Function may not have run)
-      if (Object.keys(freshnessMap).length === 0 && !backfillAttemptedRef.current) {
+      if (rows.length === 0 && !backfillAttemptedRef.current) {
         backfillAttemptedRef.current = true;
         const lastSessionId = await getLastCompletedSessionId(userId);
         if (lastSessionId) {
@@ -88,6 +91,7 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
           }
           const ok = await invokeUpdateMuscleFreshness(userId, lastSessionId);
           if (ok) {
+            invalidateMuscleFreshnessCache(userId);
             await loadMuscleFreshness();
             return;
           }
@@ -105,6 +109,15 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
   useEffect(() => {
     loadMuscleFreshness();
   }, [loadMuscleFreshness]);
+
+  // Live decay: recompute freshness from cached last_trained_at every 90s (no DB)
+  useEffect(() => {
+    if (lastTrainedByMuscle.length === 0) return;
+    const interval = setInterval(() => {
+      setFreshnessData(computeFreshnessFromRaw(lastTrainedByMuscle));
+    }, DECAY_TICK_MS);
+    return () => clearInterval(interval);
+  }, [lastTrainedByMuscle]);
 
   useEffect(() => {
     Animated.timing(infoDropdownAnim, {
