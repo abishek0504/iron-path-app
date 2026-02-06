@@ -1085,6 +1085,142 @@ export async function getCachedTopPRs(
  * Get recent exercise history for progressive overload
  * Returns safe empty object when no data to avoid engine crashes
  */
+/**
+ * Get unique set/rep or set/duration combinations from history
+ * Returns array of unique variations (e.g., "3×10", "3×12", "4×8")
+ */
+export async function getUniqueSetRepCombinations(
+  exerciseId: string,
+  userId: string,
+  mode: 'reps' | 'timed'
+): Promise<Array<{ sets: number; reps?: number; duration_sec?: number }>> {
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'getUniqueSetRepCombinations',
+      exerciseId,
+      userId,
+      mode,
+    });
+  }
+
+  try {
+    // Get all completed sets for this exercise
+    const { data, error } = await supabase
+      .from('v2_session_sets')
+      .select(
+        `
+          session_exercise_id,
+          reps,
+          duration_sec,
+          v2_session_exercises!inner(
+            exercise_id,
+            custom_exercise_id,
+            session_id,
+            v2_workout_sessions!inner(user_id, status, completed_at)
+          )
+        `
+      )
+      .eq('v2_session_exercises.v2_workout_sessions.user_id', userId)
+      .eq('v2_session_exercises.v2_workout_sessions.status', 'completed')
+      .or(`exercise_id.eq.${exerciseId},custom_exercise_id.eq.${exerciseId}`, { foreignTable: 'v2_session_exercises' })
+      .not('performed_at', 'is', null);
+
+    if (error || !data || data.length === 0) {
+      if (__DEV__ && error) {
+        devError('workout-query', error, { exerciseId, userId });
+      }
+      if (__DEV__) {
+        devLog('workout-query', {
+          action: 'getUniqueSetRepCombinations_noData',
+          exerciseId,
+          dataLength: data?.length ?? 0,
+          error: error?.message,
+        });
+      }
+      return [];
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'getUniqueSetRepCombinations_rawData',
+        exerciseId,
+        totalSets: data.length,
+        sampleData: data.slice(0, 3),
+      });
+    }
+
+    // Group by session_exercise_id to count sets per exercise instance
+    const sessionExerciseMap = new Map<string, Array<{ reps?: number; duration_sec?: number }>>();
+    
+    for (const set of data) {
+      const sessionExerciseId = set.session_exercise_id;
+      if (!sessionExerciseId) continue;
+      
+      const key = sessionExerciseId;
+      
+      if (!sessionExerciseMap.has(key)) {
+        sessionExerciseMap.set(key, []);
+      }
+      
+      sessionExerciseMap.get(key)!.push({
+        reps: set.reps ?? undefined,
+        duration_sec: set.duration_sec ?? undefined,
+      });
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'getUniqueSetRepCombinations_grouped',
+        exerciseId,
+        sessionExerciseCount: sessionExerciseMap.size,
+      });
+    }
+
+    // Find unique combinations of (set_count, reps) or (set_count, duration)
+    const uniqueCombos = new Map<string, { sets: number; reps?: number; duration_sec?: number }>();
+    
+    for (const [_, sets] of sessionExerciseMap) {
+      const setCount = sets.length;
+      
+      if (mode === 'reps') {
+        // Get most common rep count in this session exercise
+        const repCounts = sets.map(s => s.reps).filter((r): r is number => r != null);
+        if (repCounts.length > 0) {
+          const avgReps = Math.round(repCounts.reduce((a, b) => a + b, 0) / repCounts.length);
+          const key = `${setCount}x${avgReps}`;
+          uniqueCombos.set(key, { sets: setCount, reps: avgReps });
+        }
+      } else {
+        // Get most common duration in this session exercise
+        const durations = sets.map(s => s.duration_sec).filter((d): d is number => d != null);
+        if (durations.length > 0) {
+          const avgDuration = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+          const key = `${setCount}x${avgDuration}s`;
+          uniqueCombos.set(key, { sets: setCount, duration_sec: avgDuration });
+        }
+      }
+    }
+
+    const result = Array.from(uniqueCombos.values());
+    
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'getUniqueSetRepCombinations_result',
+        exerciseId,
+        uniqueCount: result.length,
+        combinations: result,
+      });
+    }
+
+    return result;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { exerciseId, userId });
+    }
+    return [];
+  }
+}
+
 export async function getExerciseHistory(
   exerciseId: string,
   userId: string,

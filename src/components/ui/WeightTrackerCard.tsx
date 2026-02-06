@@ -232,7 +232,7 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
       ) : (
         <>
           <View style={styles.metricsRow}>
-            <View>
+            <View style={styles.metricBlock}>
               <Text style={styles.metricLabel}>Current</Text>
               <Text style={styles.metricValue}>
                 {(currentWeight ?? 0).toFixed(1)} {unitsLabel}
@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
   metricsRow: {
     flexDirection: 'row',
     gap: spacing.xl,
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
   },
   metricLabel: {
     color: colors.textSecondary,
@@ -387,11 +387,14 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     color: colors.textPrimary,
-    fontSize: typography.sizes['2xl'],
+    fontSize: 30,
     fontWeight: typography.weights.bold,
+    flexShrink: 1,
   },
   metricBlock: {
-    alignItems: 'flex-end',
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '48%',
   },
   metricPositive: {
     color: colors.success,
