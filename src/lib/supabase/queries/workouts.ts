@@ -39,24 +39,27 @@ export interface SessionSet {
 }
 
 /**
- * Create a new workout session
+ * Create a new workout session.
+ * @param startedAt - Optional ISO timestamp; when provided (e.g. for planned days), the session is scheduled for that time. Defaults to now.
  */
 export async function createWorkoutSession(
   userId: string,
   templateId?: string,
-  dayName?: string
+  dayName?: string,
+  startedAt?: string
 ): Promise<WorkoutSession | null> {
   if (__DEV__) {
-    devLog('workout-query', { 
-      action: 'createWorkoutSession', 
-      userId, 
-      templateId, 
-      dayName 
+    devLog('workout-query', {
+      action: 'createWorkoutSession',
+      userId,
+      templateId,
+      dayName,
+      startedAt: startedAt ?? 'now',
     });
   }
 
   try {
-    const startedAt = new Date().toISOString();
+    const resolvedStartedAt = startedAt ?? new Date().toISOString();
     const { data, error } = await supabase
       .from('v2_workout_sessions')
       .insert({
@@ -64,7 +67,7 @@ export async function createWorkoutSession(
         template_id: templateId,
         day_name: dayName,
         status: 'active',
-        started_at: startedAt,
+        started_at: resolvedStartedAt,
       })
       .select()
       .single();
@@ -1176,27 +1179,33 @@ export async function getUniqueSetRepCombinations(
       });
     }
 
-    // Find unique combinations of (set_count, reps) or (set_count, duration)
+    // Find unique combinations: per (set_count, rep) or (set_count, duration) so e.g. 8,8,9 → 2×8 and 1×9
     const uniqueCombos = new Map<string, { sets: number; reps?: number; duration_sec?: number }>();
-    
+
     for (const [_, sets] of sessionExerciseMap) {
-      const setCount = sets.length;
-      
       if (mode === 'reps') {
-        // Get most common rep count in this session exercise
-        const repCounts = sets.map(s => s.reps).filter((r): r is number => r != null);
-        if (repCounts.length > 0) {
-          const avgReps = Math.round(repCounts.reduce((a, b) => a + b, 0) / repCounts.length);
-          const key = `${setCount}x${avgReps}`;
-          uniqueCombos.set(key, { sets: setCount, reps: avgReps });
+        const byRep = new Map<number, number>();
+        for (const s of sets) {
+          const r = s.reps;
+          if (r != null) {
+            byRep.set(r, (byRep.get(r) ?? 0) + 1);
+          }
+        }
+        for (const [repValue, count] of byRep) {
+          const key = `${count}x${repValue}`;
+          uniqueCombos.set(key, { sets: count, reps: repValue });
         }
       } else {
-        // Get most common duration in this session exercise
-        const durations = sets.map(s => s.duration_sec).filter((d): d is number => d != null);
-        if (durations.length > 0) {
-          const avgDuration = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
-          const key = `${setCount}x${avgDuration}s`;
-          uniqueCombos.set(key, { sets: setCount, duration_sec: avgDuration });
+        const byDuration = new Map<number, number>();
+        for (const s of sets) {
+          const d = s.duration_sec;
+          if (d != null) {
+            byDuration.set(d, (byDuration.get(d) ?? 0) + 1);
+          }
+        }
+        for (const [durationValue, count] of byDuration) {
+          const key = `${count}x${durationValue}s`;
+          uniqueCombos.set(key, { sets: count, duration_sec: durationValue });
         }
       }
     }

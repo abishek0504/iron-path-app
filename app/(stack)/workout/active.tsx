@@ -120,6 +120,7 @@ export default function ActiveWorkoutScreen() {
   const [showRefreshSheet, setShowRefreshSheet] = useState(false);
   const [refreshPlan, setRefreshPlan] = useState<SmartRefreshPlan | null>(null);
   const [isApplyingRefresh, setIsApplyingRefresh] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -522,6 +523,8 @@ export default function ActiveWorkoutScreen() {
 
   const handleCompleteWorkout = async () => {
     if (!sessionId) return;
+    if (isCompleting) return;
+    setIsCompleting(true);
 
     const success = await completeWorkoutSession(sessionId);
     if (success) {
@@ -533,6 +536,7 @@ export default function ActiveWorkoutScreen() {
       toast.success('Workout completed!');
       goBack();
     } else {
+      setIsCompleting(false);
       toast.error('Failed to complete workout');
     }
   };
@@ -829,10 +833,17 @@ export default function ActiveWorkoutScreen() {
             <Text style={styles.completeTitle}>Workout Complete!</Text>
             <Text style={styles.completeText}>Great job today!</Text>
 
-            <TouchableOpacity style={styles.finishButton} onPress={handleCompleteWorkout}>
-              <CheckCircle size={24} color={colors.background} />
-              <Text style={styles.finishText}>Finish Workout</Text>
-            </TouchableOpacity>
+            {isCompleting ? (
+              <View style={styles.finishButton}>
+                <ActivityIndicator size="small" color={colors.background} />
+                <Text style={styles.finishText}>Saving…</Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.finishButton} onPress={handleCompleteWorkout} disabled={isCompleting}>
+                <CheckCircle size={24} color={colors.background} />
+                <Text style={styles.finishText}>Finish Workout</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </ScrollView>

@@ -149,6 +149,7 @@ export default function ProgressTab() {
     const newDate = new Date(currentDate);
     if (viewMode === 'week') {
       newDate.setDate(newDate.getDate() - 7);
+      setCurrentDate(newDate);
     } else {
       const year = newDate.getFullYear();
       const month = newDate.getMonth();
@@ -160,6 +161,7 @@ export default function ProgressTab() {
     const newDate = new Date(currentDate);
     if (viewMode === 'week') {
       newDate.setDate(newDate.getDate() + 7);
+      setCurrentDate(newDate);
     } else {
       const year = newDate.getFullYear();
       const month = newDate.getMonth();
