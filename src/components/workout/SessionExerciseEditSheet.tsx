@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Keyboard } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import { colors, spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { BottomSheet } from '../ui/BottomSheet';
@@ -48,6 +49,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [originalSetIds, setOriginalSetIds] = useState<string[]>([]);
+  const insets = useSafeAreaInsets();
 
   const weightUnit = useImperial ? 'lbs' : 'kg';
 
@@ -333,7 +335,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
           </ScrollView>
         )}
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           {onDelete && (
             <TouchableOpacity
               style={styles.deleteButton}

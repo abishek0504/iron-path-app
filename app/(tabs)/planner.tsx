@@ -130,6 +130,10 @@ export default function PlannerTab() {
   const [sessionsTodayWithExercises, setSessionsTodayWithExercises] = useState<
     Array<{ session: WorkoutSession; exercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string; sort_order: number }> }>
   >([]);
+  /** Per session-exercise set/rep variations (from this workout's sets), keyed by session_exercise id. */
+  const [sessionExerciseVariations, setSessionExerciseVariations] = useState<
+    Map<string, Array<{ sets: number; reps?: number; duration_sec?: number }>>
+  >(new Map());
   const [showSessionEditSheet, setShowSessionEditSheet] = useState(false);
   const [showSessionsPerDayPrompt, setShowSessionsPerDayPrompt] = useState(false);
   const [sessionsPerDayInput, setSessionsPerDayInput] = useState('1');
@@ -425,6 +429,7 @@ export default function PlannerTab() {
           }
           if (requestedDayName !== selectedDayNameRef.current) return;
           setSessionsTodayWithExercises([]);
+          setSessionExerciseVariations(new Map());
           if (options?.templateExerciseKeys && options.templateExerciseKeys.length > 0) {
             const keepKeys = new Set(options.templateExerciseKeys);
             setExerciseNames((prev) => {
@@ -481,8 +486,43 @@ export default function PlannerTab() {
           withExercises.push({ session, exercises });
         }
 
+        const sessionExerciseIds = withExercises.flatMap(({ exercises }) => exercises.map((e) => e.id));
+        const variationsBySessionExercise = new Map<string, Array<{ sets: number; reps?: number; duration_sec?: number }>>();
+        if (sessionExerciseIds.length > 0) {
+          const { data: setsRows } = await supabase
+            .from('v2_session_sets')
+            .select('session_exercise_id, reps, duration_sec')
+            .in('session_exercise_id', sessionExerciseIds);
+          const setsBySe = new Map<string, Array<{ reps?: number; duration_sec?: number }>>();
+          for (const row of setsRows || []) {
+            const id = row.session_exercise_id;
+            if (!id) continue;
+            if (!setsBySe.has(id)) setsBySe.set(id, []);
+            setsBySe.get(id)!.push({ reps: row.reps ?? undefined, duration_sec: row.duration_sec ?? undefined });
+          }
+          for (const [seId, sets] of setsBySe) {
+            const hasReps = sets.some((s) => s.reps != null);
+            if (hasReps) {
+              const byRep = new Map<number, number>();
+              for (const s of sets) {
+                if (s.reps != null) byRep.set(s.reps, (byRep.get(s.reps) ?? 0) + 1);
+              }
+              const arr = Array.from(byRep.entries()).map(([reps, count]) => ({ sets: count, reps }));
+              variationsBySessionExercise.set(seId, arr);
+            } else {
+              const byDuration = new Map<number, number>();
+              for (const s of sets) {
+                if (s.duration_sec != null) byDuration.set(s.duration_sec, (byDuration.get(s.duration_sec) ?? 0) + 1);
+              }
+              const arr = Array.from(byDuration.entries()).map(([duration_sec, count]) => ({ sets: count, duration_sec }));
+              variationsBySessionExercise.set(seId, arr);
+            }
+          }
+        }
+
         if (requestedDayName !== selectedDayNameRef.current) return;
         setSessionsTodayWithExercises(withExercises);
+        setSessionExerciseVariations(variationsBySessionExercise);
 
         if (__DEV__) {
           devLog('planner', {
@@ -518,25 +558,6 @@ export default function PlannerTab() {
             if (target && key) targetsToAdd.set(key, target);
           });
 
-          // Fetch unique variations for all session exercises
-          const variationsToAdd = new Map<string, Array<{ sets: number; reps?: number; duration_sec?: number }>>();
-          const variationResults = await Promise.all(
-            refList.map(async (ref, i) => {
-              const target = targetResults[i];
-              const key = ref.exerciseId || ref.customExerciseId;
-              if (!target || !key) return { key: '', variations: [] };
-              
-              const variations = await getUniqueSetRepCombinations(key, userId, target.mode);
-              return { key, variations };
-            })
-          );
-
-          for (const { key, variations } of variationResults) {
-            if (key && variations.length > 0) {
-              variationsToAdd.set(key, variations);
-            }
-          }
-
           const keepKeys = new Set<string>([
             ...exerciseKeys,
             ...(options?.templateExerciseKeys ?? []),
@@ -552,14 +573,6 @@ export default function PlannerTab() {
           setSlotTargets((prev) => {
             const next = new Map(prev);
             targetsToAdd.forEach((v, k) => next.set(k, v));
-            for (const k of next.keys()) {
-              if (!keepKeys.has(k)) next.delete(k);
-            }
-            return next;
-          });
-          setExerciseVariations((prev) => {
-            const next = new Map(prev);
-            variationsToAdd.forEach((v, k) => next.set(k, v));
             for (const k of next.keys()) {
               if (!keepKeys.has(k)) next.delete(k);
             }
@@ -1332,15 +1345,15 @@ export default function PlannerTab() {
                             const exerciseId = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
                             const exerciseName = exerciseId ? exerciseNames.get(exerciseId) || 'Loading...' : 'Unknown';
                             const target = exerciseId ? slotTargets.get(exerciseId) : null;
-                            const variations = exerciseId ? exerciseVariations.get(exerciseId) : null;
+                            const variations = sessionExerciseVariations.get(sessionExercise.id) ?? null;
                             
                             let targetContent: React.ReactNode;
                             if (variations && variations.length > 0) {
-                              // Show all unique variations from history, stacked
                               const variationStrings = variations.map(v => {
-                                if (target?.mode === 'reps' && v.reps) {
+                                if (v.reps != null) {
                                   return `${v.sets} sets × ${v.reps} reps`;
-                                } else if (target?.mode === 'timed' && v.duration_sec) {
+                                }
+                                if (v.duration_sec != null) {
                                   return `${v.sets} sets × ${Math.floor(v.duration_sec / 60)} min`;
                                 }
                                 return '';
