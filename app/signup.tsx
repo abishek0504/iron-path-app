@@ -13,7 +13,6 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
 import { Check, X, Eye, EyeOff } from 'lucide-react-native';
-import { AuthVideoBackground } from '../src/components/ui/AuthVideoBackground';
 
 export default function Signup() {
   const router = useRouter();
@@ -173,7 +172,6 @@ export default function Signup() {
 
   return (
     <View style={styles.container}>
-      <AuthVideoBackground />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"

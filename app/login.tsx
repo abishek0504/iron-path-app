@@ -13,7 +13,6 @@ import { colors, spacing, borderRadius, typography } from '../src/lib/utils/them
 import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore } from '../src/stores/userStore';
 import { devLog } from '../src/lib/utils/logger';
-import { AuthVideoBackground } from '../src/components/ui/AuthVideoBackground';
 
 export default function Login() {
   const router = useRouter();
@@ -91,7 +90,6 @@ export default function Login() {
 
   return (
     <View style={styles.container}>
-      <AuthVideoBackground />
       <View style={styles.content}>
       <View style={styles.card}>
         <Text style={styles.title}>Welcome back</Text>
