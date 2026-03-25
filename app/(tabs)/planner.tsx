@@ -1510,6 +1510,23 @@ export default function PlannerTab() {
                                 currentSessionIds: sessionsTodayWithExercises.map(({ session: s }) => s.id),
                               });
                             }
+                            
+                            const slotIdsToRemove: string[] = [];
+                            if (selectedDay && activeTemplateId) {
+                               const availableSlots = [...selectedDay.slots];
+                               for (const se of exercises) {
+                                  const key = se.exercise_id || se.custom_exercise_id;
+                                  if (!key) continue;
+                                  const matchIdx = availableSlots.findIndex(
+                                     (s) => (s.exercise_id || s.custom_exercise_id) === key
+                                  );
+                                  if (matchIdx !== -1) {
+                                     slotIdsToRemove.push(availableSlots[matchIdx].id);
+                                     availableSlots.splice(matchIdx, 1);
+                                  }
+                               }
+                            }
+
                             setSessionsTodayWithExercises((prev) =>
                               prev.filter(({ session: s }) => s.id !== sessionIdToRemove)
                             );
@@ -1529,6 +1546,18 @@ export default function PlannerTab() {
                               } else {
                                 toast.success('Workout removed');
                                 invalidateSessionsInRangeForUser(userId);
+                                
+                                if (activeTemplateId && slotIdsToRemove.length > 0) {
+                                  let templateChanged = false;
+                                  for (const sId of slotIdsToRemove) {
+                                    const success = await applyStructureEditToTemplate(activeTemplateId, { type: 'removeSlot', slotId: sId });
+                                    if (success) templateChanged = true;
+                                  }
+                                  if (templateChanged) {
+                                    invalidateTemplate(activeTemplateId);
+                                    await loadTemplate(activeTemplateId);
+                                  }
+                                }
                               }
                               await loadSessionsForDay(userId, { forceRefresh: true, dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
                               if (__DEV__) {

@@ -27,7 +27,7 @@ import {
   getOrCreateActiveSessionForToday,
   createSessionExercise,
 } from '../src/lib/supabase/queries/workouts_helpers';
-import { syncTemplateSlotToSessionsForDay } from '../src/lib/supabase/queries/workouts';
+
 import {
   applyStructureEditToTemplate,
   getTemplateSlotsForDay,
@@ -188,7 +188,7 @@ export default function AddExerciseEditScreen() {
       let restStr: string;
 
       if (exerciseIdVal) {
-        const userDefaults = await getUserExerciseDefaults(userId, exerciseIdVal);
+        const userDefaults = await getUserExerciseDefaults(userId!, exerciseIdVal);
         if (userDefaults && userDefaults.default_set_count >= 1) {
           count = userDefaults.default_set_count;
           weightStr =
@@ -207,7 +207,7 @@ export default function AddExerciseEditScreen() {
         } else {
           const target = await selectExerciseTargets(
             { exerciseId: exerciseIdVal, customExerciseId: customExerciseIdVal },
-            userId,
+            userId!,
             { experience },
             0
           );
@@ -225,7 +225,7 @@ export default function AddExerciseEditScreen() {
       } else {
         const target = await selectExerciseTargets(
           { exerciseId: exerciseIdVal, customExerciseId: customExerciseIdVal },
-          userId,
+          userId!,
           { experience },
           0
         );
@@ -392,8 +392,8 @@ export default function AddExerciseEditScreen() {
           toast.error('Workout not found');
           return;
         }
-      } else if (todayOnlyRef.current) {
-        targetSession = await getOrCreateActiveSessionForToday(userId, dayName);
+      } else {
+        targetSession = await getOrCreateActiveSessionForToday(userId!, dayName);
         if (!targetSession) {
           toast.error('Failed to get today\'s session');
           return;
@@ -412,19 +412,13 @@ export default function AddExerciseEditScreen() {
         });
         if (success) {
           invalidateTemplate(templateId);
-          await syncTemplateSlotToSessionsForDay(userId, dayName, {
-            exerciseId: exerciseIdVal,
-            customExerciseId: customExerciseIdVal,
-            experience,
-          });
-        }
-        useUIStore.getState().setPlannerNeedsRefetch(true);
-        if (!success) {
+        } else {
           toast.error('Failed to add to routine');
           return;
         }
-        toast.success('Added to routine');
-      } else if (targetSession) {
+      }
+
+      if (targetSession) {
         const { data: existing } = await supabase
           .from('v2_session_exercises')
           .select('sort_order')
@@ -466,7 +460,7 @@ export default function AddExerciseEditScreen() {
         }
         if (__DEV__) devLog('add-exercise-edit', { action: 'sessionSetsInserted', count: sets.length });
         useUIStore.getState().setPlannerNeedsRefetch(true);
-        toast.success('Added to today\'s session');
+        toast.success(addToRoutine ? 'Added to routine & workout' : 'Added to today\'s session');
       }
 
       router.replace('/(tabs)/planner');
