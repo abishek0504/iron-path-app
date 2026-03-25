@@ -26,6 +26,7 @@ import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
 import {
   createWorkoutSession,
+  deleteSessionWithExercises,
   getActiveSession,
   getSessionsForToday,
   prefillSessionSets,
@@ -36,6 +37,7 @@ import {
   getUserTemplatesCached,
   invalidateTemplate,
 } from '../../src/lib/cache/templateCache';
+import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
@@ -688,7 +690,8 @@ export default function WorkoutTab() {
           hasSavePoint = (count ?? 0) > 0;
         }
         if (!hasSavePoint) {
-          await supabase.from('v2_workout_sessions').delete().eq('id', existingSession.id);
+          const { error } = await deleteSessionWithExercises(userId, existingSession.id);
+          if (!error) invalidateSessionsInRangeForUser(userId);
         }
       }
 
@@ -844,14 +847,11 @@ export default function WorkoutTab() {
 
       // Reset only the selected workout (multi-workout-per-day)
       if (selectedSession?.id && selectedSession.status === 'active') {
-        const { error: deleteError } = await supabase
-          .from('v2_workout_sessions')
-          .delete()
-          .eq('id', selectedSession.id)
-          .eq('user_id', userId);
-
+        const { error: deleteError } = await deleteSessionWithExercises(userId, selectedSession.id);
         if (deleteError && __DEV__) {
           devError('workout-tab', deleteError, { action: 'handleResetWorkout', sessionId: selectedSession.id });
+        } else {
+          invalidateSessionsInRangeForUser(userId);
         }
       } else {
         const today = new Date();
@@ -859,9 +859,9 @@ export default function WorkoutTab() {
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
-        const { error: deleteError } = await supabase
+        const { data: sessionsToDelete } = await supabase
           .from('v2_workout_sessions')
-          .delete()
+          .select('id')
           .eq('user_id', userId)
           .eq('template_id', activeTemplate.id)
           .eq('day_name', currentDay)
@@ -869,8 +869,11 @@ export default function WorkoutTab() {
           .gte('started_at', today.toISOString())
           .lt('started_at', tomorrow.toISOString());
 
-        if (deleteError && __DEV__) {
-          devError('workout-tab', deleteError, { action: 'handleResetWorkout' });
+        for (const s of sessionsToDelete || []) {
+          await deleteSessionWithExercises(userId, s.id);
+        }
+        if ((sessionsToDelete?.length ?? 0) > 0) {
+          invalidateSessionsInRangeForUser(userId);
         }
       }
 

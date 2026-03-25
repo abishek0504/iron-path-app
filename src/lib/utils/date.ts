@@ -2,6 +2,25 @@
  * Date utility functions
  */
 
+const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Get ISO date bounds for a weekday name in the current week (Sun–Sat).
+ * Used to fetch sessions for a selected plan day.
+ */
+export function getDateBoundsForDayName(dayName: string): { startIso: string; endIsoExclusive: string } {
+  const now = new Date();
+  const todayIndex = now.getDay();
+  const targetIndex = WEEK_DAYS.indexOf(dayName as (typeof WEEK_DAYS)[number]);
+  const targetDate = new Date(now);
+  targetDate.setDate(now.getDate() + (targetIndex - todayIndex));
+  const dateKey = targetDate.toISOString().slice(0, 10);
+  const startIso = `${dateKey}T00:00:00.000Z`;
+  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY).toISOString();
+  return { startIso, endIsoExclusive };
+}
+
 /**
  * Calculate age from date of birth
  * @param dateOfBirth - Date of birth in YYYY-MM-DD format or Date object

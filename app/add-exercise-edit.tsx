@@ -27,6 +27,7 @@ import {
   getOrCreateActiveSessionForToday,
   createSessionExercise,
 } from '../src/lib/supabase/queries/workouts_helpers';
+import { syncTemplateSlotToSessionsForDay } from '../src/lib/supabase/queries/workouts';
 import {
   applyStructureEditToTemplate,
   getTemplateSlotsForDay,
@@ -377,8 +378,7 @@ export default function AddExerciseEditScreen() {
     }
     setSaving(true);
     try {
-      const addToRoutineOnly = !todayOnlyRef.current;
-      // When sessionId is present (Add Exercise from a specific workout container), always add to that session so it appears in that container.
+      const addToRoutine = !todayOnlyRef.current;
       let targetSession: { id: string } | null = null;
       if (sessionId) {
         const { data } = await supabase
@@ -400,7 +400,31 @@ export default function AddExerciseEditScreen() {
         }
       }
 
-      if (targetSession) {
+      if (addToRoutine) {
+        const slots = await getTemplateSlotsForDay(templateId, dayName);
+        const sortOrder = slots.length + 1;
+        const success = await applyStructureEditToTemplate(templateId, {
+          type: 'addSlot',
+          dayId,
+          exerciseId: exerciseIdVal,
+          customExerciseId: customExerciseIdVal,
+          sortOrder,
+        });
+        if (success) {
+          invalidateTemplate(templateId);
+          await syncTemplateSlotToSessionsForDay(userId, dayName, {
+            exerciseId: exerciseIdVal,
+            customExerciseId: customExerciseIdVal,
+            experience,
+          });
+        }
+        useUIStore.getState().setPlannerNeedsRefetch(true);
+        if (!success) {
+          toast.error('Failed to add to routine');
+          return;
+        }
+        toast.success('Added to routine');
+      } else if (targetSession) {
         const { data: existing } = await supabase
           .from('v2_session_exercises')
           .select('sort_order')
@@ -442,33 +466,6 @@ export default function AddExerciseEditScreen() {
         }
         if (__DEV__) devLog('add-exercise-edit', { action: 'sessionSetsInserted', count: sets.length });
         useUIStore.getState().setPlannerNeedsRefetch(true);
-      }
-
-      // Add to routine (template) only when "today only" is OFF (use ref so checkbox state is current when Confirm is pressed)
-      if (addToRoutineOnly) {
-        const slots = await getTemplateSlotsForDay(templateId, dayName);
-        const sortOrder = slots.length + 1;
-        const success = await applyStructureEditToTemplate(templateId, {
-          type: 'addSlot',
-          dayId,
-          exerciseId: exerciseIdVal,
-          customExerciseId: customExerciseIdVal,
-          sortOrder,
-        });
-        if (success) invalidateTemplate(templateId);
-        useUIStore.getState().setPlannerNeedsRefetch(true);
-        if (!success && !targetSession) {
-          toast.error('Failed to add to routine');
-          return;
-        }
-        if (!success && targetSession) {
-          toast.success('Added to workout');
-        } else if (success && targetSession) {
-          toast.success('Added to workout and routine');
-        } else {
-          toast.success('Added to routine');
-        }
-      } else if (targetSession) {
         toast.success('Added to today\'s session');
       }
 

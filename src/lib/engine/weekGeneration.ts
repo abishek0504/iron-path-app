@@ -186,13 +186,42 @@ function runOneSession(
  * When sessionsPerDay > 1, each day gets multiple "sessions" with muscle separation:
  * fatigue accumulates within the day so session 2 avoids muscles hit in session 1.
  */
+/**
+ * Generate exercises for a single day only.
+ * sessionsPerDay 0 = rest day (returns empty).
+ * sessionsPerDay 1-6 = exercises for that day.
+ */
+export async function generateDayForTemplate(
+  template: FullTemplate,
+  userId: string,
+  profile: UserProfile | null,
+  dayIndex: number,
+  options?: { sessionsPerDay?: number }
+): Promise<string[] | string[][]> {
+  const sessionsPerDay = Math.max(0, Math.min(6, options?.sessionsPerDay ?? 1));
+  if (sessionsPerDay === 0) {
+    if (__DEV__) devLog('week-generation', { action: 'generateDay_rest', dayIndex });
+    return [];
+  }
+  const result = await generateWeekForTemplate(template, userId, profile, {
+    ...options,
+    sessionsPerDay,
+    dayIndexOnly: dayIndex,
+  });
+  if (Array.isArray(result) && result.length > 0) {
+    return result as string[] | string[][];
+  }
+  return [];
+}
+
 export async function generateWeekForTemplate(
   template: FullTemplate,
   userId: string,
   profile: UserProfile | null,
-  options?: { sessionsPerDay?: number }
-): Promise<string[] | Array<Array<string[]>>> {
-  const sessionsPerDay = Math.max(1, Math.min(3, options?.sessionsPerDay ?? 1));
+  options?: { sessionsPerDay?: number; dayIndexOnly?: number }
+): Promise<string[] | string[][] | Array<Array<string[]>>> {
+  const sessionsPerDay = Math.max(1, Math.min(6, options?.sessionsPerDay ?? 1));
+  const dayIndexOnly = options?.dayIndexOnly;
 
   if (__DEV__) {
     devLog('week-generation', {
@@ -200,6 +229,7 @@ export async function generateWeekForTemplate(
       templateId: template.template.id,
       dayCount: template.days.length,
       sessionsPerDay,
+      dayIndexOnly,
     });
   }
 
@@ -279,6 +309,8 @@ export async function generateWeekForTemplate(
 
     const profiles = new Map<string, ExerciseStressProfile>();
     const excluded: string[] = [];
+    /** Exercises excluded due to missing prescription — we fail fast to surface data issues. */
+    const missingPrescription: Array<{ exerciseId: string; name: string; mode: 'reps' | 'timed' }> = [];
 
     for (const row of aiExercises) {
       const exerciseId = row.exercise_id;
@@ -289,17 +321,20 @@ export async function generateWeekForTemplate(
       }
 
       const isTimed = !!meta.is_timed;
+      const mode: 'reps' | 'timed' = isTimed ? 'timed' : 'reps';
       const rx = isTimed ? timedMap.get(exerciseId) : repsMap.get(exerciseId);
 
       if (!rx) {
+        missingPrescription.push({ exerciseId, name: meta.name ?? exerciseId, mode });
         if (__DEV__) {
           devError(
             'week-generation',
             new Error('Missing prescription for AI exercise'),
             {
               exerciseId,
+              exerciseName: meta.name,
               experience,
-              mode: isTimed ? 'timed' : 'reps',
+              mode,
             }
           );
         }
@@ -365,18 +400,35 @@ export async function generateWeekForTemplate(
       });
     }
 
+    // Fail fast when AI exercises lack prescriptions — surfaces data integrity issues
+    if (missingPrescription.length > 0) {
+      const details = missingPrescription
+        .map(({ name, mode }) => `${name} (${mode})`)
+        .join(', ');
+      const err = new Error(
+        `Missing prescriptions for AI exercises: ${details}. Add prescriptions in v2_exercise_prescriptions for experience="${experience}".`
+      );
+      if (__DEV__) {
+        devError('week-generation', err, {
+          missingPrescription,
+          experience,
+        });
+      }
+      throw err;
+    }
+
     const sim = new SimulatedFatigueState(currentStress);
     const remaining = new Set<string>(Array.from(profiles.keys()));
 
-    if (sessionsPerDay === 1) {
-      // Legacy: one flat list (greedy until no green/yellow left)
+    const dayIndices = dayIndexOnly !== undefined ? [dayIndexOnly] : template.days.map((_, i) => i);
+
+    if (sessionsPerDay === 1 && dayIndexOnly === undefined) {
       const result: string[] = [];
       while (remaining.size > 0) {
         const picked = runOneSession(sim, profiles, remaining, 50);
         if (picked.length === 0) break;
         result.push(...picked);
       }
-
       if (__DEV__) {
         devLog('week-generation', {
           action: 'generateWeekForTemplate_result',
@@ -391,9 +443,8 @@ export async function generateWeekForTemplate(
       return result;
     }
 
-    // Multi-session per day: per day, per session, pick 2–3 exercises (muscle separation within day)
     const resultPerDay: Array<Array<string[]>> = [];
-    for (let dayIndex = 0; dayIndex < template.days.length; dayIndex++) {
+    for (const dayIndex of dayIndices) {
       const daySessions: string[][] = [];
       for (let sessionIndex = 0; sessionIndex < sessionsPerDay; sessionIndex++) {
         const maxExercises = 2 + ((dayIndex * sessionsPerDay + sessionIndex) % 2);
@@ -401,6 +452,10 @@ export async function generateWeekForTemplate(
         daySessions.push(picked);
       }
       resultPerDay.push(daySessions);
+    }
+
+    if (dayIndexOnly !== undefined) {
+      return (resultPerDay[0] ?? []) as string[] | string[][];
     }
 
     if (__DEV__) {

@@ -112,7 +112,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 - **Focus throttle (Workout tab):** `useFocusEffect` only triggers reload if last focus load was more than 4s ago.
 - **Stable callbacks:** Load functions use minimal deps (e.g. `[profile]` only) and functional state updates where they merge into existing state, so effect loops (e.g. “load → set state → callback recreated → effect runs again”) do not occur.
 
-**Planner-specific:** `loadTodaySessionExercises` uses functional updates for `setExerciseNames` / `setSlotTargets` and depends only on `[profile]`; `loadTemplateInFlightRef` and `recoveryAttemptedThisFocusRef` plus 5s throttle prevent failed-to-load infinite retry. **Plan tab useFocusEffect** reads `loadTemplate` / `loadTodaySessionExercises` / `loadTodaySessions` from refs (not from the effect’s dependency array) so the effect does not re-run when those callback identities change (e.g. when `hasInitializedSelection` flips and recreates `loadTemplate`), which would otherwise re-trigger the prescription/exercise/workout/target-selection cascade repeatedly.
+**Planner-specific:** `loadTodaySessionExercises` uses functional updates for `setExerciseNames` / `setSlotTargets` and depends only on `[profile]`; `loadTemplateInFlightRef` and `recoveryAttemptedThisFocusRef` plus 5s throttle prevent failed-to-load infinite retry. **Plan tab useFocusEffect** reads `loadTemplate` / `loadTodaySessionExercises` / `loadTodaySessions` from refs (not from the effect’s dependency array) so the effect does not re-run when those callback identities change (e.g. when `hasInitializedSelection` flips and recreates `loadTemplate`), which would otherwise re-trigger the prescription/exercise/workout/target-selection cascade repeatedly. **loadTemplate** loads sessions for the selected day (not always today): uses `selectedDayNameRef` when `hasInitializedSelection`, else today/first day; sets `selectedDayNameRef` before `loadSessionsForDay` so the stale guard matches. **Refetch throttle:** `lastPlanRefetchRef` + `REFETCH_THROTTLE_MS` (3s) — plannerNeedsRefetch and recovery paths skip `loadTemplate` if within 3s to prevent loops when effect re-runs after `templateData` changes.
 
 ## Cache and invalidation
 
@@ -273,7 +273,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ "Change" opens WorkoutPicker only when more than one workout for the day (sessionsToday.length > 1); list "Workout 1", "Workout 2", … (✓ if completed); onSelect(index) → setSelectedWorkoutIndex(index); loadTodayWorkout(index)
    └→ Start/Continue/Complete: per selected workout. If selected session completed → greyed "Complete"; if active with save point → "Continue" (navigate with sessionId); else "Start" (create or use session, navigate with sessionId)
    └→ If user deletes a session in Progress tab, that session is removed from DB; next Workout tab load shows remaining sessions; deleted workout no longer appears (so it is "not done" and won’t be loaded as completed)
-   └→ Planner: When Today, workout containers (Workout 1, Workout 2, …). Each container has title, exercises, "Add Exercise" inside, and Delete (trash). "Add Workout" at top creates a new session (new container below). When Today and no sessions yet, the single "Workout 1" container shows the template slots for today (so the plan is visible before starting a session). When not Today, single "Workout 1" block with template slots + Add Exercise. Add-exercise/add-exercise-edit accept optional sessionId so Add Exercise in a container adds to that session.
+   └→ Planner: Unified flow — template is the plan. Add Exercise and Generate with AI both add to template; syncTemplateSlotToSessionsForDay syncs new slots to existing sessions for that day. Add Exercise available at template level (when no sessions or empty plan) and inside each workout container. Workout containers (Workout 1, Workout 2, …) show session exercises; when no sessions, template slots shown with Add Exercise. Add-exercise-edit: todayOnly off → add to template + sync to sessions; todayOnly on → add to session only.
    └→ Workout tab: exercises shown are always for the selected workout only (one session’s v2_session_exercises). No mixing with template or other sessions; when no sessions exist for today, template for the selected plan day is shown so user can Start.
    └→ workout/active: accepts sessionId route param; when present, getSessionById(userId, sessionId) instead of getActiveSession(userId)
 
@@ -382,9 +382,11 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ Distribute exercises across template days (2-3 per day)
    └→ For each exercise:
        └→ createTemplateSlot(dayId, { exerciseId, sortOrder })
+       └→ syncTemplateSlotToSessionsForDay(userId, dayName, { exerciseId, experience })
+           └→ Syncs new slot to existing sessions for that day (same as manual add)
    └→ Fetch exercise names
    └→ Calculate targets for all slots
-   └→ Reload template
+   └→ invalidateTemplate + invalidateSessionsInRangeForUser + Reload template
    └→ toast.success('Week generated')
 ```
 

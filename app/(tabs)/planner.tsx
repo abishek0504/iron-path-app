@@ -54,16 +54,18 @@ import {
   prefillSessionSets,
   getLast7DaysSessionStructure,
   getUniqueSetRepCombinations,
+  syncTemplateSlotToSessionsForDay,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { getOrCreateActiveSessionForToday, applyStructureEditToSession } from '../../src/lib/supabase/queries/workouts_helpers';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { getDateBoundsForDayName } from '../../src/lib/utils/date';
 import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, applySessionStructureToTemplate, createTemplateSlot } from '../../src/lib/supabase/queries/templates';
 import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
-import { generateWeekForTemplate } from '../../src/lib/engine/weekGeneration';
+import { generateDayForTemplate } from '../../src/lib/engine/weekGeneration';
 
 const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
@@ -82,19 +84,6 @@ function getTodayDayName(): string {
 function getTodayBoundsIso(): { startIso: string; endIsoExclusive: string } {
   const todayKey = new Date().toISOString().slice(0, 10);
   const startIso = `${todayKey}T00:00:00.000Z`;
-  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY).toISOString();
-  return { startIso, endIsoExclusive };
-}
-
-/** Date bounds for a given weekday in the current week (Sun–Sat). Used to fetch sessions for non-today selected day. */
-function getDateBoundsForDayName(dayName: string): { startIso: string; endIsoExclusive: string } {
-  const now = new Date();
-  const todayIndex = now.getDay();
-  const targetIndex = WEEK_DAYS.indexOf(dayName as (typeof WEEK_DAYS)[number]);
-  const targetDate = new Date(now);
-  targetDate.setDate(now.getDate() + (targetIndex - todayIndex));
-  const dateKey = targetDate.toISOString().slice(0, 10);
-  const startIso = `${dateKey}T00:00:00.000Z`;
   const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY).toISOString();
   return { startIso, endIsoExclusive };
 }
@@ -136,6 +125,7 @@ export default function PlannerTab() {
   >(new Map());
   const [showSessionEditSheet, setShowSessionEditSheet] = useState(false);
   const [showSessionsPerDayPrompt, setShowSessionsPerDayPrompt] = useState(false);
+  const [isLoadingSessionsForDay, setIsLoadingSessionsForDay] = useState(false);
   const [sessionsPerDayInput, setSessionsPerDayInput] = useState('1');
   const [editingSessionExercise, setEditingSessionExercise] = useState<{
     id: string;
@@ -149,6 +139,8 @@ export default function PlannerTab() {
   const recoveryAttemptedThisFocusRef = useRef(false);
   const lastRecoveryAttemptRef = useRef(0);
   const RECOVERY_THROTTLE_MS = 5000;
+  const lastPlanRefetchRef = useRef(0);
+  const REFETCH_THROTTLE_MS = 3000;
   /** Refs for load callbacks so useFocusEffect doesn't re-run when their identity changes (e.g. loadTemplate when hasInitializedSelection flips). */
   const loadTemplateRef = useRef<(id: string) => Promise<void>>(() => Promise.resolve());
   const loadTodaySessionExercisesRef = useRef<(userId: string) => Promise<void>>(() => Promise.resolve());
@@ -173,45 +165,46 @@ export default function PlannerTab() {
     }
   }, []);
 
-  // Calculate targets for all slots
+  // Calculate targets for slots (scoped to selected day to reduce work)
   const calculateTargetsForSlots = useCallback(
-    async (fullTemplate: FullTemplate, userId: string) => {
+    async (fullTemplate: FullTemplate, userId: string, dayName?: string) => {
       if (__DEV__) {
         devLog('planner', {
           action: 'calculateTargetsForSlots',
           templateId: fullTemplate.template.id,
+          dayName: dayName ?? 'all',
         });
       }
 
       setIsLoadingTargets(true);
       try {
-        // Get effective context from profile
         const effectiveExperience = profile?.experience_level || 'beginner';
-        const context: TargetSelectionContext = {
-          experience: effectiveExperience,
-        };
+        const context: TargetSelectionContext = { experience: effectiveExperience };
 
         const targetsMap = new Map<string, ExerciseTarget>();
         const slotDetails: Array<{ slotId: string; exerciseId?: string; customExerciseId?: string; hasTarget: boolean }> = [];
 
-        // Collect all slots with exercises and run selectExerciseTargets in parallel
-        const slotRefs: Array<{
-          slot: TemplateSlot;
-          context: TargetSelectionContext;
-        }> = [];
-        for (const day of fullTemplate.days) {
+        const daysToProcess = dayName
+          ? fullTemplate.days.filter((d) => d.day.day_name === dayName)
+          : fullTemplate.days;
+
+        const uniqueSlotsByExercise = new Map<string, { slot: TemplateSlot; context: TargetSelectionContext }>();
+        for (const day of daysToProcess) {
           for (const slot of day.slots) {
-            if (!slot.exercise_id && !slot.custom_exercise_id) continue;
+            const key = slot.exercise_id || slot.custom_exercise_id;
+            if (!key) continue;
+            if (uniqueSlotsByExercise.has(key)) continue;
             const slotExperience = slot.experience || effectiveExperience;
-            slotRefs.push({
+            uniqueSlotsByExercise.set(key, {
               slot,
               context: { experience: slotExperience },
             });
           }
         }
 
+        const uniqueRefs = Array.from(uniqueSlotsByExercise.entries()).map(([_, v]) => v);
         const targetResults = await Promise.all(
-          slotRefs.map(({ slot, context }) =>
+          uniqueRefs.map(({ slot, context }) =>
             selectExerciseTargets(
               {
                 exerciseId: slot.exercise_id || undefined,
@@ -227,8 +220,9 @@ export default function PlannerTab() {
         let slotsWithPrescriptions = 0;
         let slotsWithoutPrescriptions = 0;
         for (const { slot, target } of targetResults) {
-          if (target) {
-            targetsMap.set(slot.id, target);
+          const exerciseKey = slot.exercise_id || slot.custom_exercise_id;
+          if (target && exerciseKey) {
+            targetsMap.set(exerciseKey, target);
             slotsWithPrescriptions++;
             slotDetails.push({
               slotId: slot.id,
@@ -254,7 +248,11 @@ export default function PlannerTab() {
           }
         }
 
-        setSlotTargets(targetsMap);
+        setSlotTargets((prev) => {
+          const next = new Map(prev);
+          targetsMap.forEach((v, k) => next.set(k, v));
+          return next;
+        });
 
         // Fetch unique variations for all exercises
         const variationsMap = new Map<string, Array<{ sets: number; reps?: number; duration_sec?: number }>>();
@@ -403,6 +401,7 @@ export default function PlannerTab() {
   const loadSessionsForDay = useCallback(
     async (userId: string, options?: { forceRefresh?: boolean; templateExerciseKeys?: string[]; dayName?: string }) => {
       loadTodaySessionsInFlightRef.current = true;
+      setIsLoadingSessionsForDay(true);
       const dayName = options?.dayName ?? getTodayDayName();
       const requestedDayName = dayName;
       const { startIso, endIsoExclusive } = dayName === getTodayDayName() ? getTodayBoundsIso() : getDateBoundsForDayName(dayName);
@@ -455,6 +454,7 @@ export default function PlannerTab() {
             });
           }
           loadTodaySessionsInFlightRef.current = false;
+          if (requestedDayName === selectedDayNameRef.current) setIsLoadingSessionsForDay(false);
           return;
         }
 
@@ -583,6 +583,9 @@ export default function PlannerTab() {
         if (__DEV__) devError('planner', error, { action: 'loadSessionsForDay' });
       } finally {
         loadTodaySessionsInFlightRef.current = false;
+        if (requestedDayName === selectedDayNameRef.current) {
+          setIsLoadingSessionsForDay(false);
+        }
       }
     },
     [profile]
@@ -618,9 +621,19 @@ export default function PlannerTab() {
             setHasInitializedSelection(true);
           }
 
-          // Fetch exercise names for all slots
           const userId = await getCurrentUserId();
           if (userId) {
+            const todayDayName = getTodayDayName();
+            const todayIndex = fullTemplate.days.findIndex((d) => d.day.day_name === todayDayName);
+            const selectedIndex = hasInitializedSelection
+              ? undefined
+              : (todayIndex >= 0 ? todayIndex : 0);
+            const dayToLoad = selectedIndex !== undefined
+              ? fullTemplate.days[selectedIndex] ?? fullTemplate.days[0]
+              : fullTemplate.days.find((d) => d.day.day_name === selectedDayNameRef.current) ?? fullTemplate.days[0];
+            const dayName = dayToLoad?.day.day_name ?? todayDayName;
+            selectedDayNameRef.current = dayName;
+
             const exerciseIds = new Set<string>();
             fullTemplate.days.forEach((day) => {
               day.slots.forEach((slot) => {
@@ -653,19 +666,17 @@ export default function PlannerTab() {
                 });
               }
               setExerciseNames(nameMap);
-
-              // Calculate targets for all slots
-              await calculateTargetsForSlots(fullTemplate, userId);
+              await calculateTargetsForSlots(fullTemplate, userId, dayName);
             } else {
               if (__DEV__) devLog('planner', { action: 'loadTemplate_noExerciseIds' });
             }
 
-            // Load today's session exercises (don't fail template load if this errors)
             try {
-              await loadTodaySessionExercises(userId);
-              await loadSessionsForDay(userId, {
-                templateExerciseKeys: fullTemplate.days.find((d) => d.day.day_name === getTodayDayName())?.slots.flatMap((s) => [s.exercise_id, s.custom_exercise_id].filter((id): id is string => id != null)) ?? [],
-              });
+              const templateKeys = dayToLoad?.slots.flatMap((s) => [s.exercise_id, s.custom_exercise_id].filter((id): id is string => id != null)) ?? [];
+              if (dayName === todayDayName) {
+                await loadTodaySessionExercises(userId);
+              }
+              await loadSessionsForDay(userId, { dayName, templateExerciseKeys: templateKeys });
               loadTemplateDidTodayLoadRef.current = true;
             } catch (sessionErr) {
               if (__DEV__) devError('planner', sessionErr, { action: 'loadTodaySessionExercises_inLoadTemplate' });
@@ -783,6 +794,12 @@ export default function PlannerTab() {
 
       if (plannerNeedsRefetch) {
         setPlannerNeedsRefetch(false);
+        const now = Date.now();
+        if (now - lastPlanRefetchRef.current < REFETCH_THROTTLE_MS) {
+          if (__DEV__) devLog('planner', { action: 'useFocusEffect_refetchThrottled', elapsed: now - lastPlanRefetchRef.current });
+          return;
+        }
+        lastPlanRefetchRef.current = now;
         if (activeTemplateId) {
           loadTemplate(activeTemplateId);
         } else {
@@ -816,19 +833,24 @@ export default function PlannerTab() {
         now - lastRecoveryAttemptRef.current >= RECOVERY_THROTTLE_MS;
 
       if (mayRecover) {
-        recoveryAttemptedThisFocusRef.current = true;
-        lastRecoveryAttemptRef.current = now;
-        setIsLoadingTemplate(true);
-        getCurrentUserId().then((userId) => {
-          if (!userId) {
-            setIsLoadingTemplate(false);
-            return;
-          }
-          getUserTemplatesCached(userId).then((templates) => {
-            if (templates.length > 0) loadTemplate(templates[0].id);
-            else setIsLoadingTemplate(false);
-          }).catch(() => setIsLoadingTemplate(false));
-        });
+        if (now - lastPlanRefetchRef.current < REFETCH_THROTTLE_MS) {
+          if (__DEV__) devLog('planner', { action: 'useFocusEffect_recoveryThrottled', elapsed: now - lastPlanRefetchRef.current });
+        } else {
+          lastPlanRefetchRef.current = now;
+          recoveryAttemptedThisFocusRef.current = true;
+          lastRecoveryAttemptRef.current = now;
+          setIsLoadingTemplate(true);
+          getCurrentUserId().then((userId) => {
+            if (!userId) {
+              setIsLoadingTemplate(false);
+              return;
+            }
+            getUserTemplatesCached(userId).then((templates) => {
+              if (templates.length > 0) loadTemplate(templates[0].id);
+              else setIsLoadingTemplate(false);
+            }).catch(() => setIsLoadingTemplate(false));
+          });
+        }
       } else if (selectedDay) {
         if (!loadTemplateDidTodayLoadRef.current) {
           const dayName = selectedDay.day.day_name;
@@ -854,17 +876,19 @@ export default function PlannerTab() {
   );
   const dateContext = useDateContext(selectedDay?.day.day_name);
 
-  // When switching selected day: load sessions for that day (workout containers)
+  // When switching selected day: load sessions + targets for that day
   useEffect(() => {
-    if (!selectedDay) return;
+    if (!selectedDay || !templateData) return;
     selectedDayNameRef.current = selectedDay.day.day_name;
     const userId = getCurrentUserId();
-    userId.then((id) => {
-      if (id) {
-        if (selectedDay.day.day_name === getTodayDayName()) {
-          loadTodaySessionExercises(id);
-        }
-        loadSessionsForDay(id, { dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
+    userId.then(async (id) => {
+      if (!id) return;
+      if (selectedDay.day.day_name === getTodayDayName()) {
+        loadTodaySessionExercises(id);
+      }
+      await loadSessionsForDay(id, { dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
+      if (selectedDay.slots.length > 0) {
+        await calculateTargetsForSlots(templateData, id, selectedDay.day.day_name);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -955,8 +979,8 @@ export default function PlannerTab() {
 
   const runGenerateWithAI = useCallback(
     async (sessionsPerDay: number) => {
-      if (!templateData || !activeTemplateId) {
-        toast.error('No template loaded');
+      if (!templateData || !activeTemplateId || !selectedDay) {
+        toast.error('No template or day selected');
         return;
       }
       const userId = await getCurrentUserId();
@@ -964,119 +988,166 @@ export default function PlannerTab() {
         toast.error('Please log in');
         return;
       }
+      const dayIndex = templateData.days.findIndex((d) => d.day.id === selectedDay.day.id);
+      if (dayIndex < 0) {
+        toast.error('Selected day not found');
+        return;
+      }
       if (__DEV__) {
         devLog('planner-ai', {
-          action: 'generateWeek',
+          action: 'generateDay',
           templateId: activeTemplateId,
-          dayCount: templateData.days.length,
+          dayName: selectedDay.day.day_name,
+          dayIndex,
           sessionsPerDay,
         });
       }
       setIsGenerating(true);
       try {
-        const result = await generateWeekForTemplate(templateData, userId, profile, {
+        const result = await generateDayForTemplate(templateData, userId, profile, dayIndex, {
           sessionsPerDay,
         });
 
-        const slotsBefore = templateData.days.reduce(
-          (sum, day) => sum + day.slots.length,
-          0
-        );
+        if (sessionsPerDay === 0) {
+          toast.success(`${selectedDay.day.day_name} set as rest day`);
+          setIsGenerating(false);
+          return;
+        }
 
-        if (sessionsPerDay === 1) {
-          const exerciseIds = result as string[];
-          if (exerciseIds.length === 0) {
-            toast.error('No exercises available for AI generation');
-            return;
-          }
-          let exerciseIndex = 0;
-          for (const day of templateData.days) {
-            const exercisesPerDay = 2 + (exerciseIndex % 2);
-            for (let i = 0; i < exercisesPerDay && exerciseIndex < exerciseIds.length; i++) {
-              const exerciseId = exerciseIds[exerciseIndex];
-              const sortOrder = day.slots.length + i + 1;
-              const newSlot = await createTemplateSlot(day.day.id, {
-                exerciseId,
-                experience: null,
-                notes: null,
-                sortOrder,
-              });
-              if (newSlot) {
-                const mergedExercise = await getMergedExercise({ exerciseId }, userId);
-                if (mergedExercise) {
-                  setExerciseNames((prev) => {
-                    const next = new Map(prev);
-                    next.set(exerciseId, mergedExercise.name);
-                    return next;
-                  });
-                }
-                setTemplateData((prev) => {
-                  if (!prev) return prev;
-                  return {
-                    ...prev,
-                    days: prev.days.map((d) =>
-                      d.day.id === day.day.id ? { ...d, slots: [...d.slots, newSlot] } : d
-                    ),
-                  };
-                });
-              }
-              exerciseIndex++;
+        const day = selectedDay;
+        const slotsBefore = day.slots.length;
+        let slotsCreated = 0;
+
+        const sessionGroups = (Array.isArray(result) && result.length > 0)
+          ? (typeof result[0] === 'string' ? [result as string[]] : result as string[][])
+          : [];
+
+        if (sessionGroups.length === 0 || sessionGroups.every(g => g.length === 0)) {
+          toast.error('No exercises available for AI generation');
+          return;
+        }
+
+        let sortOrder = day.slots.length;
+        const exp = profile?.experience_level || 'beginner';
+
+        for (let sIdx = 0; sIdx < sessionGroups.length; sIdx++) {
+          const group = sessionGroups[sIdx];
+          if (!group || group.length === 0) continue;
+
+          let targetSessionId: string | null = null;
+          if (sessionsTodayWithExercises && sIdx < sessionsTodayWithExercises.length) {
+            targetSessionId = sessionsTodayWithExercises[sIdx].session.id;
+          } else {
+            const { startIso } = getDateBoundsForDayName(day.day.day_name);
+            const newSession = await createWorkoutSession(
+              userId,
+              activeTemplateId,
+              day.day.day_name,
+              startIso
+            );
+            if (newSession) {
+              targetSessionId = newSession.id;
             }
           }
-        } else {
-          const resultPerDay = result as Array<Array<string[]>>;
-          if (resultPerDay.length === 0) {
-            toast.error('No exercises available for AI generation');
-            return;
-          }
-          for (let dayIndex = 0; dayIndex < templateData.days.length; dayIndex++) {
-            const day = templateData.days[dayIndex];
-            const daySessions = resultPerDay[dayIndex] ?? [];
-            let sortOrder = day.slots.length;
-            for (const sessionExercises of daySessions) {
-              for (const exerciseId of sessionExercises) {
-                sortOrder += 1;
-                const newSlot = await createTemplateSlot(day.day.id, {
-                  exerciseId,
-                  experience: null,
-                  notes: null,
-                  sortOrder,
+
+          const sessionExercises: Array<{ id: string; exercise_id?: string }> = [];
+          const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
+
+          for (const exerciseId of group) {
+            sortOrder += 1;
+            
+            const newSlot = await createTemplateSlot(day.day.id, {
+              exerciseId,
+              experience: null,
+              notes: null,
+              sortOrder,
+            });
+
+            if (newSlot) {
+              slotsCreated++;
+              
+              const mergedExercise = await getMergedExercise({ exerciseId }, userId);
+              if (mergedExercise) {
+                setExerciseNames((prev) => {
+                  const next = new Map(prev);
+                  next.set(exerciseId, mergedExercise.name);
+                  return next;
                 });
-                if (newSlot) {
-                  const mergedExercise = await getMergedExercise({ exerciseId }, userId);
-                  if (mergedExercise) {
-                    setExerciseNames((prev) => {
-                      const next = new Map(prev);
-                      next.set(exerciseId, mergedExercise.name);
-                      return next;
+              }
+              
+              setTemplateData((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  days: prev.days.map((d) =>
+                    d.day.id === day.day.id ? { ...d, slots: [...d.slots, newSlot] } : d
+                  ),
+                };
+              });
+
+              if (targetSessionId) {
+                const { data: se, error: seErr } = await supabase
+                  .from('v2_session_exercises')
+                  .insert({
+                    session_id: targetSessionId,
+                    exercise_id: exerciseId,
+                    custom_exercise_id: null,
+                    sort_order: sortOrder,
+                  })
+                  .select()
+                  .single();
+
+                if (!seErr && se) {
+                  sessionExercises.push(se);
+
+                  const target = await selectExerciseTargets(
+                    { exerciseId },
+                    userId,
+                    { experience: exp },
+                    0
+                  );
+                  if (target) {
+                    targetsMap.set(exerciseId, {
+                      sets: target.sets,
+                      reps: target.reps,
+                      duration_sec: target.duration_sec,
+                      weight: target.weight
                     });
                   }
-                  setTemplateData((prev) => {
-                    if (!prev) return prev;
-                    return {
-                      ...prev,
-                      days: prev.days.map((d) =>
-                        d.day.id === day.day.id ? { ...d, slots: [...d.slots, newSlot] } : d
-                      ),
-                    };
-                  });
+                } else if (__DEV__) {
+                   devError('planner-ai', seErr || new Error('Failed to create session exercise'), { sessionId: targetSessionId, exerciseId });
                 }
               }
+
+            } else if (__DEV__) {
+              devError('planner-ai', new Error('createTemplateSlot returned null'), { dayId: day.day.id, exerciseId, sortOrder });
             }
           }
+
+          if (targetSessionId && sessionExercises.length > 0 && targetsMap.size > 0) {
+            await prefillSessionSets(targetSessionId, sessionExercises, targetsMap);
+          }
+        }
+
+        if (slotsCreated === 0) {
+          if (__DEV__) devLog('planner-ai', { action: 'generateDay_noSlotsCreated', templateId: activeTemplateId, dayName: day.day.day_name });
+          toast.error('No exercises were added. Check the console for details.');
+          return;
         }
 
         invalidateTemplate(activeTemplateId);
+        invalidateSessionsInRangeForUser(userId);
         await loadTemplate(activeTemplateId);
+        useUIStore.getState().setPlannerNeedsRefetch(true);
         if (__DEV__) {
           devLog('planner-ai', {
-            action: 'generateWeek_result',
+            action: 'generateDay_result',
             templateId: activeTemplateId,
-            slotCountBefore: slotsBefore,
-            sessionsPerDay,
+            dayName: day.day.day_name,
+            slotsCreated,
           });
         }
-        toast.success('Week generated with AI');
+        toast.success(`${day.day.day_name} generated with AI`);
       } catch (error) {
         if (__DEV__) {
           devError('planner-ai', error, {
@@ -1092,6 +1163,7 @@ export default function PlannerTab() {
     [
       templateData,
       activeTemplateId,
+      selectedDay,
       profile,
       getCurrentUserId,
       loadTemplate,
@@ -1193,6 +1265,38 @@ export default function PlannerTab() {
                         selectedDay.day.day_name
                       );
                       if (session) {
+                        const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+                        const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
+                        for (const slot of selectedDay.slots) {
+                          const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+                          if (!exerciseId) continue;
+                          const { data: se, error: seErr } = await supabase
+                            .from('v2_session_exercises')
+                            .insert({
+                              session_id: session.id,
+                              exercise_id: slot.exercise_id || null,
+                              custom_exercise_id: slot.custom_exercise_id || null,
+                              sort_order: slot.sort_order,
+                            })
+                            .select()
+                            .single();
+                          if (seErr || !se) {
+                            if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
+                            continue;
+                          }
+                          sessionExercises.push(se);
+                          const effectiveExperience = profile?.experience_level || 'beginner';
+                          const target = await selectExerciseTargets(
+                            { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
+                            userId,
+                            { experience: slot.experience || effectiveExperience },
+                            0
+                          );
+                          if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
+                        }
+                        if (sessionExercises.length > 0 && targetsMap.size > 0) {
+                          await prefillSessionSets(session.id, sessionExercises, targetsMap);
+                        }
                         toast.success('Workout added');
                         setPlannerNeedsRefetch(true);
                         await loadSessionsForDay(userId, { forceRefresh: true, dayName: selectedDay.day.day_name, templateExerciseKeys: todayTemplateKeys });
@@ -1221,6 +1325,38 @@ export default function PlannerTab() {
                         startIso
                       );
                       if (session) {
+                        const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+                        const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
+                        for (const slot of selectedDay.slots) {
+                          const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+                          if (!exerciseId) continue;
+                          const { data: se, error: seErr } = await supabase
+                            .from('v2_session_exercises')
+                            .insert({
+                              session_id: session.id,
+                              exercise_id: slot.exercise_id || null,
+                              custom_exercise_id: slot.custom_exercise_id || null,
+                              sort_order: slot.sort_order,
+                            })
+                            .select()
+                            .single();
+                          if (seErr || !se) {
+                            if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
+                            continue;
+                          }
+                          sessionExercises.push(se);
+                          const effectiveExperience = profile?.experience_level || 'beginner';
+                          const target = await selectExerciseTargets(
+                            { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
+                            userId,
+                            { experience: slot.experience || effectiveExperience },
+                            0
+                          );
+                          if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
+                        }
+                        if (sessionExercises.length > 0 && targetsMap.size > 0) {
+                          await prefillSessionSets(session.id, sessionExercises, targetsMap);
+                        }
                         toast.success('Workout added');
                         invalidateSessionsInRangeForUser(userId);
                         await loadSessionsForDay(userId, {
@@ -1248,13 +1384,110 @@ export default function PlannerTab() {
 
             {/* Workout containers for selected day (sessions for today or chosen weekday) */}
             <>
-              {sessionsTodayWithExercises.length === 0 ? (
+              {isLoadingSessionsForDay ? (
                 <View style={styles.emptySlotsContainer}>
-                  <Text style={styles.emptySlotsText}>
-                    {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
-                  </Text>
-                  <Text style={styles.emptySlotsSubtext}>Add a workout to get started</Text>
+                  <ActivityIndicator size="small" color={colors.primary} style={{ marginBottom: spacing.sm }} />
+                  <Text style={styles.emptySlotsSubtext}>Loading workouts...</Text>
                 </View>
+              ) : sessionsTodayWithExercises.length === 0 ? (
+                selectedDay.slots.length > 0 ? (
+                  <View style={styles.workoutContainer}>
+                    <View style={styles.workoutContainerHeader}>
+                      <Text style={styles.planForDayHeader}>Plan for {selectedDay.day.day_name}</Text>
+                    </View>
+                    <View style={[styles.slotsList, styles.workoutContainerContent]}>
+                      {selectedDay.slots.map((slot) => {
+                        const key = slot.exercise_id || slot.custom_exercise_id;
+                        const name = key ? exerciseNames.get(key) || 'Loading...' : 'Unknown';
+                        const target = key ? slotTargets.get(key) : null;
+                        const targetText = target
+                          ? target.mode === 'reps'
+                            ? `${target.sets} sets × ${target.reps} reps`
+                            : `${target.sets} sets × ${Math.floor((target.duration_sec || 0) / 60)} min`
+                          : null;
+                        return (
+                          <View key={slot.id} style={styles.slotCard}>
+                            <View style={styles.slotContent}>
+                              <Text style={styles.slotExerciseName}>{name}</Text>
+                              {targetText && <Text style={styles.slotTargets}>{targetText}</Text>}
+                            </View>
+                            <TouchableOpacity
+                              style={[styles.deleteButton, styles.editButton]}
+                              onPress={async () => {
+                                if (!activeTemplateId || isSaving) return;
+                                setIsSaving(true);
+                                try {
+                                  const success = await applyStructureEditToTemplate(activeTemplateId, { type: 'removeSlot', slotId: slot.id });
+                                  if (success) {
+                                    invalidateTemplate(activeTemplateId);
+                                    await loadTemplate(activeTemplateId);
+                                    toast.success('Exercise removed from plan');
+                                  } else {
+                                    toast.error('Failed to remove');
+                                  }
+                                } catch (e) {
+                                  if (__DEV__) devError('planner', e, { action: 'removeTemplateSlot' });
+                                  toast.error('Failed to remove');
+                                } finally {
+                                  setIsSaving(false);
+                                }
+                              }}
+                              disabled={isSaving}
+                            >
+                              <Trash2 size={16} color={colors.errorText} />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.addButton, styles.addExerciseInContent]}
+                      onPress={() => {
+                        if (!activeTemplateId || !selectedDay) return;
+                        router.push({
+                          pathname: '/add-exercise',
+                          params: {
+                            dayId: selectedDay.day.id,
+                            templateId: activeTemplateId,
+                            dayName: selectedDay.day.day_name,
+                          },
+                        });
+                      }}
+                      disabled={isSaving}
+                    >
+                      <Plus size={20} color={colors.primary} />
+                      <Text style={styles.addExerciseButtonText}>Add Exercise</Text>
+                    </TouchableOpacity>
+                    <View style={[styles.emptySlotsContainer, { paddingTop: 0 }]}>
+                      <Text style={styles.emptySlotsSubtext}>Add a workout to begin</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.emptySlotsContainer}>
+                    <Text style={styles.emptySlotsText}>
+                      {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
+                    </Text>
+                    <Text style={styles.emptySlotsSubtext}>Add exercises or generate with AI to get started</Text>
+                    <TouchableOpacity
+                      style={[styles.addButton, styles.addExerciseInContent, { marginTop: spacing.md }]}
+                      onPress={() => {
+                        if (!activeTemplateId || !selectedDay) return;
+                        router.push({
+                          pathname: '/add-exercise',
+                          params: {
+                            dayId: selectedDay.day.id,
+                            templateId: activeTemplateId,
+                            dayName: selectedDay.day.day_name,
+                          },
+                        });
+                      }}
+                      disabled={isSaving}
+                    >
+                      <Plus size={20} color={colors.primary} />
+                      <Text style={styles.addExerciseButtonText}>Add Exercise</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
               ) : (
                   sessionsTodayWithExercises.map(({ session, exercises }, idx) => (
                     <View key={session.id} style={styles.workoutContainer}>
@@ -1529,10 +1762,10 @@ export default function PlannerTab() {
           style={styles.sessionsPerDayOverlay}
           onPress={() => setShowSessionsPerDayPrompt(false)}
         >
-          <Pressable style={styles.sessionsPerDayCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sessionsPerDayTitle}>How many workout sessions per day?</Text>
+            <Pressable style={styles.sessionsPerDayCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.sessionsPerDayTitle}>Sessions for {selectedDay?.day.day_name ?? 'this day'}</Text>
             <Text style={styles.sessionsPerDaySubtitle}>
-              e.g. morning and evening = 2. Enter 1–6.
+              0 = rest day (no exercises). 1–6 = workout sessions. e.g. morning + evening = 2.
             </Text>
             <TextInput
               style={styles.sessionsPerDayInput}
@@ -1556,7 +1789,7 @@ export default function PlannerTab() {
               <TouchableOpacity
                 style={styles.sessionsPerDayButton}
                 onPress={() => {
-                  const n = Math.min(6, Math.max(1, parseInt(sessionsPerDayInput, 10) || 1));
+                  const n = Math.min(6, Math.max(0, parseInt(sessionsPerDayInput, 10) ?? 1));
                   setShowSessionsPerDayPrompt(false);
                   setSessionsPerDayInput('1');
                   runGenerateWithAI(n);
@@ -2015,6 +2248,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
     backgroundColor: colors.background,
+  },
+  planForDayHeader: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.textSecondary,
   },
   workoutContainerTitleRow: {
     flexDirection: 'row',

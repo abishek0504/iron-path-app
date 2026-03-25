@@ -5,6 +5,80 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-03-12 - Planner: "Plan for {Day}" header when showing template with no sessions
+------------------------------------------------------------------------
+- When sessions are deleted, planner shows template slots (plan). User may think delete failed because exercises still visible. Added "Plan for {day_name}" header to distinguish plan from workout containers. Makes clear these are planned exercises, not the deleted workout.
+- File: app/(tabs)/planner.tsx.
+
+2026-03-12 - Session delete: explicit cascade order, consolidate all paths
+------------------------------------------------------------------------
+- deleteSessionWithExercises: Explicit order session_sets -> session_exercises -> session. Ensures all child rows deleted before parent; handles RLS and any missing DB CASCADE.
+- Workout tab (index.tsx): Replace direct v2_workout_sessions delete with deleteSessionWithExercises. Start-fresh and handleResetWorkout both use it. Invalidate sessions cache after delete.
+- Planner and SessionDetailSheet already used deleteSessionWithExercises.
+- Files: src/lib/supabase/queries/workouts.ts, app/(tabs)/index.tsx.
+
+2026-03-12 - Planner: performance, single-day generation, slotTargets fix
+------------------------------------------------------------------------
+- slotTargets key: Store by exerciseId (not slot.id) so template slots find targets. Fixes "Loading targets..." stuck state.
+- calculateTargetsForSlots: Deduplicate by exerciseId; scope to selected day only; merge into slotTargets (don't replace).
+- loadTemplate: Compute dayToLoad first; pass dayName to calculateTargetsForSlots; loadSessionsForDay always runs.
+- Day switch: Call calculateTargetsForSlots for new day when switching.
+- Generate with AI: One day only. generateDayForTemplate(dayIndex, sessionsPerDay). 0=rest day, 1-6=sessions. Modal: "Sessions for {dayName}".
+- weekGeneration: dayIndexOnly option; generateDayForTemplate wrapper.
+- Template slots (no sessions): Add Trash2 remove button per slot to fix stuck exercises.
+- Files: app/(tabs)/planner.tsx, src/lib/engine/weekGeneration.ts.
+
+2026-03-12 - Unified flow: manual add and Generate with AI use same path
+------------------------------------------------------------------------
+- Manual add and AI generation both write to template slots; both sync to existing sessions for the selected day. Single flow: template is the plan; Add Exercise and Generate with AI add there; sessions stay in sync.
+- syncTemplateSlotToSessionsForDay (workouts.ts): When adding to template (manual or AI), syncs new slot to all sessions for that day. Uses getDateBoundsForDayName, getSessionsForToday, create session_exercise + prefillSessionSets per session.
+- add-exercise-edit: When adding to routine (todayOnly off), adds to template then calls sync. When todayOnly on, adds to session only. Removed dual add-to-session-and-template; sync handles session updates.
+- runGenerateWithAI: After each createTemplateSlot success, calls syncTemplateSlotToSessionsForDay. Invalidates sessions cache and setPlannerNeedsRefetch so planner refetches.
+- Planner: Add Exercise at template level when no sessions (empty state and when template has slots). Both empty and non-empty template states now have Add Exercise.
+- getDateBoundsForDayName moved to src/lib/utils/date.ts for reuse.
+- Files: app/(tabs)/planner.tsx, app/add-exercise-edit.tsx, src/lib/supabase/queries/workouts.ts, src/lib/utils/date.ts.
+
+2026-03-12 - Plan tab: populate Add Workout from template slots
+--------------------------------------------------------------
+- Add Workout: Now populates new session with session_exercises from template slots (same pattern as Start workout). Creates v2_session_exercises for each slot, calls prefillSessionSets with selectExerciseTargets. Fixes empty workout container after Add Workout. Both today and other-day handlers updated.
+- Migrations: Run via Supabase MCP execute_sql for immediate effect. V-Sit intermediate/advanced prescriptions and AI cleanup migration executed.
+- File: app/(tabs)/planner.tsx.
+
+2026-03-12 - Checks to prevent missing prescription errors (AI generation)
+----------------------------------------------------------------------
+- Runtime: weekGeneration now fails fast when any AI exercise lacks a mode-specific prescription. Throws with clear message listing exercise names and mode. Replaces silent exclusion with explicit error.
+- Seed: 20260128000001 now requires mode-specific prescriptions (reps for is_timed=false, timed for is_timed=true). Prevents adding exercises that would fail at generation.
+- Migration 20260312000001: Removes from v2_ai_recommended_exercises any exercise without correct prescription. Cleans existing data.
+- Migration 20260312000000: Adds intermediate/advanced timed prescriptions for V-Sit; ensures V-Sit in AI list.
+- Files: src/lib/engine/weekGeneration.ts, supabase/migrations/20260128000001_seed_ai_recommended_exercises.sql, 20260312000000_add_vsit_timed_prescription.sql, 20260312000001_ensure_ai_exercises_have_mode_prescriptions.sql.
+
+2026-03-12 - Add missing V-Sit timed prescription for AI generation
+---------------------------------------------------------------
+- Symptom: [week-generation] ERROR: Missing prescription for AI exercise {exerciseId: '37deb97e-e1b6-47e2-a010-3136ffb9ee2e', experience: 'beginner', mode: 'timed'}
+- Cause: V-Sit (timed core exercise) was in v2_ai_recommended_exercises but had no timed prescription for beginner. getPrescriptionsForExercises returned foundCount: 4, requestedCount: 5 for timed mode.
+- Fix: Migration 20260312000000 adds timed prescription (3 sets, 20-30 sec) for V-Sit, matching other timed beginner exercises. Also applied via Supabase MCP execute_sql for immediate fix.
+- File: supabase/migrations/20260312000000_add_vsit_timed_prescription.sql.
+
+2026-03-12 - Plan tab: day-switch loading indicator + Generate AI error handling
+---------------------------------------------------------------------------
+- Day switching: Added isLoadingSessionsForDay state; show ActivityIndicator + "Loading workouts..." while loadSessionsForDay is in flight. Only clear loading when the completed request matches selectedDayNameRef (stale results don't clear it).
+- Generate with AI: Count slots actually created (slotsCreated). If 0, show error toast "No exercises were added. Check the console for details." instead of success. Add __DEV__ devError when createTemplateSlot returns null (dayId, exerciseId, sortOrder).
+- DB check (Supabase MCP): 45 AI exercises, 45 with beginner prescriptions (hypertrophy), templates exist. Data is consistent; "nothing added" likely from createTemplateSlot failing or generateWeekForTemplate returning empty.
+- File: app/(tabs)/planner.tsx.
+
+2026-03-12 - Plan tab: loadTemplate loads selected day + refetch throttle
+-------------------------------------------------------------------------
+- Symptom: Plan tab showed wrong day's workouts (loadTemplate always loaded today); refetch loops caused flicker.
+- Fix: (1) loadTemplate now loads sessions for the selected day (selectedDayNameRef when hasInitializedSelection, else today/first day). Sets selectedDayNameRef before loadSessionsForDay so stale guard matches. Calls loadTodaySessionExercises only when selected day is today. (2) Refetch throttle: lastPlanRefetchRef + REFETCH_THROTTLE_MS (3s). plannerNeedsRefetch and recovery paths skip loadTemplate if within 3s.
+- File: app/(tabs)/planner.tsx. Plan: documentation/PLAN_plan_tab_data_flow_fix.md.
+
+2026-03-12 - Plan tab: fix exercises loading in/out (flickering)
+----------------------------------------------------------------
+- Symptom: Exercises in Plan tab flicker — appear then disappear repeatedly.
+- Cause (DB check via Supabase MCP): Data is consistent; issue is client-side. useFocusEffect depends on templateData. When loadTemplate completes it sets templateData → effect re-runs → calls loadTemplate again (refetch) → infinite loop. Also: loadTemplate and selectedDay block both call loadSessionsForDay on focus, causing race where one returns empty and one returns sessions → state flips.
+- Fix: (1) Throttle refetch: only refetch when now - lastPlanRefetchRef >= 3s. (2) When invoking refetch, set loadTemplateDidTodayLoadRef = true so selectedDay block skips (avoids duplicate loadSessionsForDay).
+- File: app/(tabs)/planner.tsx. Plan: documentation/PLAN_exercises_loading_in_out.md.
+
 2026-01-31 - Plan tab: faster first load (parallelize + skip duplicate today load)
 ----------------------------------------------------------------------------------
 - Goal: Reduce planner first-load time (many [planner], [template-query], [exercise-query], [workout-query], [target-selection] calls).

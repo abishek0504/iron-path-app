@@ -10,7 +10,8 @@
 -- 31-40: Isolation exercises
 -- 41+: Advanced/specialized exercises
 
--- Insert all exercises that have prescriptions (AI can only use exercises with prescriptions)
+-- Insert exercises that have mode-specific prescriptions (reps exercises need 'reps', timed need 'timed')
+-- Prevents "Missing prescription for AI exercise" at runtime
 INSERT INTO v2_ai_recommended_exercises (exercise_id, is_active, priority_order, notes)
 SELECT 
   e.id,
@@ -128,10 +129,16 @@ SELECT
     ELSE 'AI-recommended exercise for balanced programming.'
   END as notes
 FROM v2_exercises e
-WHERE EXISTS (
-  SELECT 1 FROM v2_exercise_prescriptions p
-  WHERE p.exercise_id = e.id
-  AND p.is_active = true
+WHERE (
+  (e.is_timed = false AND EXISTS (
+    SELECT 1 FROM v2_exercise_prescriptions p
+    WHERE p.exercise_id = e.id AND p.mode = 'reps' AND p.is_active = true
+  ))
+  OR
+  (e.is_timed = true AND EXISTS (
+    SELECT 1 FROM v2_exercise_prescriptions p
+    WHERE p.exercise_id = e.id AND p.mode = 'timed' AND p.is_active = true
+  ))
 )
 ON CONFLICT (exercise_id) DO UPDATE SET
   priority_order = EXCLUDED.priority_order,

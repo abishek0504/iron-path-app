@@ -5,6 +5,8 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
+import { getDateBoundsForDayName } from '../../utils/date';
+import { selectExerciseTargets } from '../../engine/targetSelection';
 
 export interface WorkoutSession {
   id: string;
@@ -207,8 +209,10 @@ export async function getSessionById(
 }
 
 /**
- * Delete a workout session and its exercises/sets explicitly (ensures cleanup even if CASCADE is missing).
- * Deletes session_exercises for the session first (DB CASCADE removes session_sets), then the session.
+ * Delete a workout session and all its exercises/sets.
+ * Order: session_sets (via session_exercise_ids) -> session_exercises -> session.
+ * Explicit order ensures RLS allows all deletes; DB CASCADE would work for session->exercises
+ * but we delete children first so any RLS on child tables is satisfied.
  */
 export async function deleteSessionWithExercises(
   userId: string,
@@ -219,15 +223,31 @@ export async function deleteSessionWithExercises(
   }
 
   try {
+    const { data: sessionExerciseIds } = await supabase
+      .from('v2_session_exercises')
+      .select('id')
+      .eq('session_id', sessionId);
+
+    const ids = (sessionExerciseIds || []).map((r) => r.id);
+    if (ids.length > 0) {
+      const { error: setsError } = await supabase
+        .from('v2_session_sets')
+        .delete()
+        .in('session_exercise_id', ids);
+
+      if (setsError) {
+        if (__DEV__) devError('workout-query', setsError, { action: 'deleteSessionWithExercises_sets', sessionId });
+        return { error: setsError };
+      }
+    }
+
     const { error: exError } = await supabase
       .from('v2_session_exercises')
       .delete()
       .eq('session_id', sessionId);
 
     if (exError) {
-      if (__DEV__) {
-        devError('workout-query', exError, { action: 'deleteSessionWithExercises_exercises', sessionId });
-      }
+      if (__DEV__) devError('workout-query', exError, { action: 'deleteSessionWithExercises_exercises', sessionId });
       return { error: exError };
     }
 
@@ -238,20 +258,14 @@ export async function deleteSessionWithExercises(
       .eq('user_id', userId);
 
     if (sessionError) {
-      if (__DEV__) {
-        devError('workout-query', sessionError, { action: 'deleteSessionWithExercises_session', sessionId });
-      }
+      if (__DEV__) devError('workout-query', sessionError, { action: 'deleteSessionWithExercises_session', sessionId });
       return { error: sessionError };
     }
 
-    if (__DEV__) {
-      devLog('workout-query', { action: 'deleteSessionWithExercises_ok', sessionId });
-    }
+    if (__DEV__) devLog('workout-query', { action: 'deleteSessionWithExercises_ok', sessionId });
     return { error: null };
   } catch (error) {
-    if (__DEV__) {
-      devError('workout-query', error, { action: 'deleteSessionWithExercises_exception', sessionId });
-    }
+    if (__DEV__) devError('workout-query', error, { action: 'deleteSessionWithExercises_exception', sessionId });
     return { error: error instanceof Error ? error : new Error(String(error)) };
   }
 }
@@ -325,6 +339,71 @@ export async function getSessionsForToday(
       devError('workout-query', error, { userId, dayStartIso, dayEndIsoExclusive });
     }
     return [];
+  }
+}
+
+/**
+ * Sync a new template slot to existing sessions for a given day.
+ * When adding to template (manual or AI), existing sessions for that day get the exercise too
+ * so manual and generated flows stay unified.
+ */
+export async function syncTemplateSlotToSessionsForDay(
+  userId: string,
+  dayName: string,
+  input: {
+    exerciseId?: string;
+    customExerciseId?: string;
+    experience?: string;
+  }
+): Promise<void> {
+  const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
+  const sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
+  if (sessions.length === 0) return;
+
+  const exerciseId = input.exerciseId;
+  const customExerciseId = input.customExerciseId;
+  const experience = input.experience || 'beginner';
+
+  const target = await selectExerciseTargets(
+    { exerciseId, customExerciseId },
+    userId,
+    { experience },
+    0
+  );
+  if (!target) return;
+
+  const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
+  const key = exerciseId || customExerciseId;
+  if (key) targetsMap.set(key, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
+
+  for (const session of sessions) {
+    const { data: existing } = await supabase
+      .from('v2_session_exercises')
+      .select('sort_order')
+      .eq('session_id', session.id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sortOrder = (existing?.sort_order ?? 0) + 1;
+
+    const { data: se, error: seErr } = await supabase
+      .from('v2_session_exercises')
+      .insert({
+        session_id: session.id,
+        exercise_id: exerciseId || null,
+        custom_exercise_id: customExerciseId || null,
+        sort_order: sortOrder,
+      })
+      .select()
+      .single();
+    if (seErr || !se) {
+      if (__DEV__) devError('workout-query', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
+      continue;
+    }
+    await prefillSessionSets(session.id, [se], targetsMap);
+  }
+  if (__DEV__) {
+    devLog('workout-query', { action: 'syncTemplateSlotToSessionsForDay', dayName, sessionCount: sessions.length, exerciseId: exerciseId || customExerciseId });
   }
 }
 
