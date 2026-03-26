@@ -1267,32 +1267,34 @@ export default function PlannerTab() {
                       if (session) {
                         const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
                         const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
-                        for (const slot of selectedDay.slots) {
-                          const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-                          if (!exerciseId) continue;
-                          const { data: se, error: seErr } = await supabase
-                            .from('v2_session_exercises')
-                            .insert({
-                              session_id: session.id,
-                              exercise_id: slot.exercise_id || null,
-                              custom_exercise_id: slot.custom_exercise_id || null,
-                              sort_order: slot.sort_order,
-                            })
-                            .select()
-                            .single();
-                          if (seErr || !se) {
-                            if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
-                            continue;
+                        if (sessionsTodayWithExercises.length === 0) {
+                          for (const slot of selectedDay.slots) {
+                            const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+                            if (!exerciseId) continue;
+                            const { data: se, error: seErr } = await supabase
+                              .from('v2_session_exercises')
+                              .insert({
+                                session_id: session.id,
+                                exercise_id: slot.exercise_id || null,
+                                custom_exercise_id: slot.custom_exercise_id || null,
+                                sort_order: slot.sort_order,
+                              })
+                              .select()
+                              .single();
+                            if (seErr || !se) {
+                              if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
+                              continue;
+                            }
+                            sessionExercises.push(se);
+                            const effectiveExperience = profile?.experience_level || 'beginner';
+                            const target = await selectExerciseTargets(
+                              { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
+                              userId,
+                              { experience: slot.experience || effectiveExperience },
+                              0
+                            );
+                            if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
                           }
-                          sessionExercises.push(se);
-                          const effectiveExperience = profile?.experience_level || 'beginner';
-                          const target = await selectExerciseTargets(
-                            { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
-                            userId,
-                            { experience: slot.experience || effectiveExperience },
-                            0
-                          );
-                          if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
                         }
                         if (sessionExercises.length > 0 && targetsMap.size > 0) {
                           await prefillSessionSets(session.id, sessionExercises, targetsMap);
@@ -1327,32 +1329,34 @@ export default function PlannerTab() {
                       if (session) {
                         const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
                         const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
-                        for (const slot of selectedDay.slots) {
-                          const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-                          if (!exerciseId) continue;
-                          const { data: se, error: seErr } = await supabase
-                            .from('v2_session_exercises')
-                            .insert({
-                              session_id: session.id,
-                              exercise_id: slot.exercise_id || null,
-                              custom_exercise_id: slot.custom_exercise_id || null,
-                              sort_order: slot.sort_order,
-                            })
-                            .select()
-                            .single();
-                          if (seErr || !se) {
-                            if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
-                            continue;
+                        if (sessionsTodayWithExercises.length === 0) {
+                          for (const slot of selectedDay.slots) {
+                            const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+                            if (!exerciseId) continue;
+                            const { data: se, error: seErr } = await supabase
+                              .from('v2_session_exercises')
+                              .insert({
+                                session_id: session.id,
+                                exercise_id: slot.exercise_id || null,
+                                custom_exercise_id: slot.custom_exercise_id || null,
+                                sort_order: slot.sort_order,
+                              })
+                              .select()
+                              .single();
+                            if (seErr || !se) {
+                              if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
+                              continue;
+                            }
+                            sessionExercises.push(se);
+                            const effectiveExperience = profile?.experience_level || 'beginner';
+                            const target = await selectExerciseTargets(
+                              { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
+                              userId,
+                              { experience: slot.experience || effectiveExperience },
+                              0
+                            );
+                            if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
                           }
-                          sessionExercises.push(se);
-                          const effectiveExperience = profile?.experience_level || 'beginner';
-                          const target = await selectExerciseTargets(
-                            { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
-                            userId,
-                            { experience: slot.experience || effectiveExperience },
-                            0
-                          );
-                          if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
                         }
                         if (sessionExercises.length > 0 && targetsMap.size > 0) {
                           await prefillSessionSets(session.id, sessionExercises, targetsMap);
