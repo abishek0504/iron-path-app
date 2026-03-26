@@ -64,6 +64,29 @@ This curated approach ensures users never see meaningless defaults—every numbe
 - **Session Tracking**: Comprehensive workout logging with sets, reps, weight, RPE, and RIR tracking
 - **Recovery Analytics**: Derived muscle freshness and stress metrics using validated fatigue decay formulas
 
+## 📸 App Showcase
+
+> **Note:** These screenshots were captured using a local web preview environment. IronPath is a meticulously designed native mobile application, so rendering, animations, and UI elements (like SVG timers and shadow formatting) may look slightly different on physical iOS and Android devices.
+
+### 1. Intelligent User Dashboard
+The dashboard dynamically updates to reflect your latest readiness and muscle freshness based on decay algorithms.
+<img src="./docs/screenshots/mobile_dashboard_1774509424542.png" width="300" />
+
+### 2. Adaptive Weekly Planner & AI Generation
+Start with a clean slate or let the AI cascade your fatigue metrics across the week to prescribe optimal routines.
+<img src="./docs/screenshots/mobile_planner_1774509439239.png" width="300" />
+
+### 3. Active Workout Tracking
+The Daily Workout tab natively hosts your active workout containers for the day. Click "Start" to immerse yourself into the execution interface.
+<img src="./docs/screenshots/mobile_workout_tab_1774509795071.png" width="300" />
+
+Execute your session cleanly with built-in rest timers, real-time history tracking, and inline RPE/RIR logging. You can even easily add ad-hoc "Today Only" exercises to your active container mid-workout without permanently mutating your master weekly blueprint!
+<img src="./docs/screenshots/mobile_logging_screen_1774509878376.png" width="300" />
+
+### 4. Mathematical Progress Tracking
+All executed volume is natively indexed into your tracking timeline. The Engine uses your logged 'Rate of Perceived Exertion' (RPE) against your prescribed rep bands to automatically stair-step your targets for next week!
+<img src="./docs/screenshots/mobile_progress_1774509482471.png" width="300" />
+
 ## 🛠️ Tech Stack
 
 ### Frontend
