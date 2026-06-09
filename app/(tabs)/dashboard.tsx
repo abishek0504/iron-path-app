@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, RotateCcw, Activity, Calendar, CalendarCheck, BarChart2, Flame, Trophy, Clock, Heart } from 'lucide-react-native';
-import { colors, spacing, layout, borderRadius, typography } from '../../src/lib/utils/theme';
+import { spacing, layout, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
+import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
@@ -40,8 +41,11 @@ export default function DashboardTab() {
   const showToast = useUIStore((state) => state.showToast);
   const profile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [weekCompleted, setWeekCompleted] = useState<number>(0);
   const [weekTarget, setWeekTarget] = useState<number>(0);
   const [yearDaysWorkedOut, setYearDaysWorkedOut] = useState<number>(0);
@@ -194,6 +198,22 @@ export default function DashboardTab() {
     }, [load])
   );
 
+  /**
+   * Pull-to-refresh: re-runs the same `load` pipeline, but bypasses both the in-flight guard
+   * and the focus-throttle so a deliberate user gesture always re-fetches.
+   */
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    loadInFlightRef.current = false;
+    lastFocusLoadRef.current = 0;
+    try {
+      await load();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, load]);
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -217,6 +237,14 @@ export default function DashboardTab() {
           styles.content,
           { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
         ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
@@ -373,12 +401,14 @@ export default function DashboardTab() {
         <View style={styles.card}>
           <View style={styles.cardTitleRow}>
             <Heart size={20} color={colors.primary} />
-            <Text style={styles.cardTitle}>Connect Health</Text>
+            <Text style={styles.cardTitle}>Apple Health</Text>
           </View>
-          <Text style={styles.listSecondary}>Integrations coming soon</Text>
+          <Text style={styles.listSecondary}>
+            Sync completed workouts and body weight with Apple Health
+          </Text>
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => showToast('Coming soon', 'info')}
+            onPress={() => router.push('/health-connect')}
             activeOpacity={0.85}
           >
             <Text style={styles.actionButtonText}>Connect</Text>
@@ -389,7 +419,7 @@ export default function DashboardTab() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -533,6 +563,6 @@ const styles = StyleSheet.create({
   fullWidth: {
     width: '100%',
   },
-});
+  }); }
 
 

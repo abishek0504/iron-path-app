@@ -253,7 +253,7 @@ export async function getRebalanceExercises(
 
     for (const ex of exercises) {
       const primaryMuscles = ex.primary_muscles || [];
-      const musclesCovered = primaryMuscles.filter(m =>
+      const musclesCovered = primaryMuscles.filter((m: string) =>
         missedMuscles.includes(m)
       );
 

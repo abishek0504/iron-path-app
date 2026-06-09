@@ -5,6 +5,10 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
+import { writeBodyMassToHealth } from '../../health/healthIntegration';
+
+/** Convert stored display weight from lb to kg for HealthKit. */
+const LB_TO_KG = 0.45359237;
 
 export type WeightLog = {
   id: string;
@@ -19,7 +23,8 @@ export type WeightLog = {
 export async function insertWeightLog(
   userId: string,
   weight: number,
-  profileUpdates: { current_weight: number }
+  profileUpdates: { current_weight: number },
+  healthDisplayUnit?: 'imperial' | 'metric',
 ): Promise<{ success: boolean; log?: WeightLog }> {
   if (__DEV__) {
     devLog('weight-query', { action: 'insertWeightLog', userId, weight });
@@ -51,6 +56,15 @@ export async function insertWeightLog(
     if (updateError) {
       if (__DEV__) devError('weight-query', updateError);
       return { success: false };
+    }
+
+    if (logData && healthDisplayUnit) {
+      const weightKg = healthDisplayUnit === 'imperial' ? weight * LB_TO_KG : weight;
+      void writeBodyMassToHealth({
+        logId: logData.id as string,
+        weightKg,
+        recordedAtIso: logData.recorded_at as string,
+      });
     }
 
     return {

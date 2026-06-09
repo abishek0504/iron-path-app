@@ -10,7 +10,7 @@
  * fallback (muscle groups + %) with "Full heatmap on mobile (dev build). Web and Expo Go are for preview."
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -22,11 +22,12 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { RotateCcw, X } from 'lucide-react-native';
 import Body from 'react-native-body-highlighter';
 import { useUserStore } from '../../stores/userStore';
-import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import {
   MUSCLE_KEY_TO_SLUG,
   SLUG_TO_MUSCLE_KEYS,
@@ -52,11 +53,6 @@ function freshnessToIntensity(freshness: number | null | undefined): number | nu
   return 4; // fully fatigued
 }
 
-const INTENSITY_COLORS = ['#22c55e', '#eab308', '#f97316', '#ef4444'] as const;
-function intensityToColor(intensity: number): string {
-  return INTENSITY_COLORS[Math.min(intensity - 1, 3)] ?? INTENSITY_COLORS[0];
-}
-
 export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   freshnessData,
   width = Dimensions.get('window').width - 32,
@@ -64,6 +60,18 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   side: controlledSide,
   onSideChange,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const heatIntensityColors = useMemo(
+    () => [colors.success, colors.warningText, colors.heatAccent, colors.error] as string[],
+    [colors],
+  );
+
+  const intensityToColor = useCallback(
+    (intensity: number) => heatIntensityColors[Math.min(intensity - 1, 3)] ?? heatIntensityColors[0],
+    [heatIntensityColors],
+  );
+
   const profile = useUserStore((state) => state.profile);
   const [internalSide, setInternalSide] = useState<BodySide>('front');
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
@@ -123,7 +131,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
     }));
   }, [selectedSlug, freshnessData]);
 
-  const isExpoGo = Constants.appOwnership === 'expo';
+  const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
   const isWeb = Platform.OS === 'web';
   const isListFallback = isExpoGo || isWeb;
 
@@ -140,7 +148,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
           accessibilityLabel={side === 'front' ? 'Show back view' : 'Show front view'}
           accessibilityRole="button"
         >
-          <RotateCcw size={20} color="#e5e7eb" />
+          <RotateCcw size={20} color={colors.textSecondary} />
         </Pressable>
       )}
       <View style={styles.bodyWrapper}>
@@ -183,8 +191,8 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
             side={side}
             gender={gender}
             scale={1.2}
-            colors={['#22c55e', '#eab308', '#f97316', '#ef4444']}
-            border="#4b5563"
+            colors={heatIntensityColors}
+            border={colors.borderLight}
             onBodyPartPress={(bodyPart) => setSelectedSlug(bodyPart.slug ?? null)}
           />
         )}
@@ -241,12 +249,13 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
 const TOGGLE_BUTTON_SIZE = 45;
 const BODY_VERTICAL_PADDING = 30;
 
-const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'static',
-    paddingTop: spacing.sm,
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'static',
+      paddingTop: spacing.sm,
   },
   listFallbackContainer: {
     width: '100%',
@@ -261,9 +270,9 @@ const styles = StyleSheet.create({
     width: TOGGLE_BUTTON_SIZE,
     height: TOGGLE_BUTTON_SIZE,
     borderRadius: TOGGLE_BUTTON_SIZE / 2,
-    backgroundColor: '#27272a',
+    backgroundColor: colors.mapControlSurface,
     borderWidth: 1,
-    borderColor: '#4b5563',
+    borderColor: colors.mapControlBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -319,7 +328,7 @@ const styles = StyleSheet.create({
     minHeight: 36,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
-    backgroundColor: 'rgba(39, 39, 42, 0.6)',
+    backgroundColor: colors.cardHover,
     borderRadius: borderRadius.sm,
     gap: spacing.sm,
   },
@@ -348,7 +357,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.modalBackdropTint,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
@@ -397,4 +406,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: typography.weights.medium,
   },
-});
+  });
+}

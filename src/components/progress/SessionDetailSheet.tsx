@@ -6,7 +6,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
-import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import { supabase } from '../../lib/supabase/client';
 import { getSessionsInRangeCached, invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
 import { deleteSessionWithExercises, type WorkoutSession } from '../../lib/supabase/queries/workouts';
@@ -26,6 +27,8 @@ type SessionWithExercises = WorkoutSession & {
 };
 
 export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onSessionDeleted }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionWithExercises[]>([]);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
@@ -96,7 +99,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       const sessionExerciseIds = (exerciseRows || []).map((r) => r.id as string);
       const { data: setRows, error: setError } = await supabase
         .from('v2_session_sets')
-        .select('session_exercise_id, weight, reps, rpe, performed_at')
+        .select('session_exercise_id, weight, reps, duration_sec, rpe, performed_at')
         .in('session_exercise_id', sessionExerciseIds)
         .not('performed_at', 'is', null);
 
@@ -104,27 +107,42 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         devError('session-detail', setError, { userId, selectedDate, step: 'setRows' });
       }
 
-      // For each sessionExerciseId, pick the best performed set (max weight, then max reps)
+      // Pick the "best" performed set per session_exercise.
+      // Ranking rules:
+      //   - If any set has weight > 0, prefer max weight, tie-break on reps (heaviest lift).
+      //   - Else if any set has duration_sec, prefer max duration (longest hold).
+      //   - Else if any set has reps, prefer max reps (bodyweight reps PR).
       const bestSetBySessionExercise = new Map<
         string,
-        { weight: number | null; reps: number | null; rpe: number | null }
+        { weight: number | null; reps: number | null; duration_sec: number | null; rpe: number | null }
       >();
       for (const row of setRows || []) {
         const seId = row.session_exercise_id as string;
         const weight = row.weight == null ? null : Number(row.weight);
         const reps = row.reps == null ? null : Number(row.reps);
+        const duration_sec = row.duration_sec == null ? null : Number(row.duration_sec);
         const rpe = row.rpe == null ? null : Number(row.rpe);
         const existing = bestSetBySessionExercise.get(seId);
         if (!existing) {
-          bestSetBySessionExercise.set(seId, { weight, reps, rpe });
+          bestSetBySessionExercise.set(seId, { weight, reps, duration_sec, rpe });
           continue;
         }
         const wA = existing.weight ?? -1;
         const wB = weight ?? -1;
+        const dA = existing.duration_sec ?? -1;
+        const dB = duration_sec ?? -1;
         const rA = existing.reps ?? -1;
         const rB = reps ?? -1;
-        if (wB > wA || (wB === wA && rB > rA)) {
-          bestSetBySessionExercise.set(seId, { weight, reps, rpe });
+        let winner = false;
+        if (wB > 0 || wA > 0) {
+          winner = wB > wA || (wB === wA && rB > rA);
+        } else if (dB > 0 || dA > 0) {
+          winner = dB > dA;
+        } else {
+          winner = rB > rA;
+        }
+        if (winner) {
+          bestSetBySessionExercise.set(seId, { weight, reps, duration_sec, rpe });
         }
       }
 
@@ -153,12 +171,20 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
             const best = bestSetBySessionExercise.get(sessionExerciseId);
             if (!best) return { name };
 
-            const weightStr =
-              best.weight == null ? null : best.weight === 0 ? 'Bodyweight' : `${Math.round(best.weight)} ${unitsLabel}`;
-            const repsStr = best.reps == null ? null : `${Math.round(best.reps)} reps`;
+            // Timed summary takes precedence when no weight was lifted.
+            let primary: string | null = null;
+            if (best.duration_sec != null && best.duration_sec > 0 && (best.weight == null || best.weight === 0)) {
+              primary = formatDuration(best.duration_sec);
+            } else if (best.weight != null) {
+              const weightStr = best.weight === 0 ? 'Bodyweight' : `${Math.round(best.weight)} ${unitsLabel}`;
+              const repsStr = best.reps == null ? null : `${Math.round(best.reps)} reps`;
+              primary = repsStr ? `${weightStr} × ${repsStr.replace(' reps', '')} reps` : weightStr;
+            } else if (best.reps != null) {
+              primary = `${Math.round(best.reps)} reps`;
+            }
             const rpeStr = best.rpe == null ? null : `RPE ${Math.round(best.rpe)}`;
 
-            const parts = [weightStr, repsStr, rpeStr].filter(Boolean) as string[];
+            const parts = [primary, rpeStr].filter(Boolean) as string[];
             return { name, summary: parts.length ? parts.join(' • ') : undefined };
           })
           .slice(0, 6);
@@ -252,6 +278,13 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       hour: 'numeric',
       minute: '2-digit',
     });
+  };
+
+  const formatDuration = (seconds: number): string => {
+    if (seconds < 60) return `${seconds} sec hold`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return secs === 0 ? `${mins}:00 hold` : `${mins}:${secs.toString().padStart(2, '0')} hold`;
   };
 
   if (loading) {
@@ -357,12 +390,13 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    gap: spacing.md,
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    content: {
+      gap: spacing.md,
     paddingBottom: spacing.lg,
   },
   loadingContainer: {
@@ -514,5 +548,6 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.semibold,
   },
-});
+  });
+}
 

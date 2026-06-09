@@ -3,7 +3,7 @@
  * Non-blocking overlay showing proposed changes (additions, removals, adjustments) and Apply Updates
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { X } from 'lucide-react-native';
-import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import type { SmartRefreshPlan } from '../../lib/supabase/queries/workouts_helpers';
 
 interface SmartRefreshConfirmationSheetProps {
@@ -32,6 +33,77 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
   onApply,
   applying,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => StyleSheet.create({
+    overlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+      alignItems: 'stretch',
+    },
+    container: {
+      backgroundColor: colors.background,
+      borderTopLeftRadius: borderRadius.lg,
+      borderTopRightRadius: borderRadius.lg,
+      padding: spacing.lg,
+      maxHeight: '70%',
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.md,
+    },
+    title: {
+      fontSize: typography.sizes.lg,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    closeBtn: {
+      padding: spacing.xs,
+    },
+    scroll: {
+      maxHeight: 280,
+    },
+    scrollContent: {
+      paddingBottom: spacing.md,
+    },
+    section: {
+      marginBottom: spacing.md,
+    },
+    sectionTitle: {
+      fontSize: typography.sizes.sm,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginBottom: spacing.xs,
+    },
+    bullet: {
+      fontSize: typography.sizes.sm,
+      color: colors.textPrimary,
+      marginLeft: spacing.sm,
+    },
+    noChanges: {
+      fontSize: typography.sizes.sm,
+      color: colors.textSecondary,
+      fontStyle: 'italic',
+    },
+    applyButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+      marginTop: spacing.sm,
+    },
+    applyButtonDisabled: {
+      opacity: 0.7,
+    },
+    applyButtonText: {
+      color: colors.background,
+      fontSize: typography.sizes.md,
+      fontWeight: '600',
+    },
+  }), [colors]);
+
   if (!visible) return null;
 
   const hasChanges =
@@ -104,73 +176,3 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
     </Modal>
   );
 };
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-    alignItems: 'stretch',
-  },
-  container: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: borderRadius.lg,
-    borderTopRightRadius: borderRadius.lg,
-    padding: spacing.lg,
-    maxHeight: '70%',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  title: {
-    fontSize: typography.sizes.lg,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  closeBtn: {
-    padding: spacing.xs,
-  },
-  scroll: {
-    maxHeight: 280,
-  },
-  scrollContent: {
-    paddingBottom: spacing.md,
-  },
-  section: {
-    marginBottom: spacing.md,
-  },
-  sectionTitle: {
-    fontSize: typography.sizes.sm,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  bullet: {
-    fontSize: typography.sizes.sm,
-    color: colors.textPrimary,
-    marginLeft: spacing.sm,
-  },
-  noChanges: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-    fontStyle: 'italic',
-  },
-  applyButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  applyButtonDisabled: {
-    opacity: 0.7,
-  },
-  applyButtonText: {
-    color: colors.background,
-    fontSize: typography.sizes.md,
-    fontWeight: '600',
-  },
-});

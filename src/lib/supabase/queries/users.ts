@@ -5,7 +5,7 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
-import type { UserProfile } from '../../stores/userStore';
+import type { UserProfile } from '../../../stores/userStore';
 
 /**
  * Get user profile
@@ -106,6 +106,86 @@ export async function createUserProfile(
   } catch (error) {
     if (__DEV__) {
       devError('user-query', error, { userId, profile });
+    }
+    return false;
+  }
+}
+
+/**
+ * Request account deletion via the delete-account Edge Function.
+ * On success the user is signed out across devices and the row is marked with
+ * deleted_at + scheduled_purge_at. The user can sign in again during the grace
+ * period to restore via `restoreAccount`.
+ */
+export async function requestAccountDeletion(): Promise<
+  | { success: true; scheduled_purge_at: string; grace_days: number }
+  | { success: false; error: string }
+> {
+  if (__DEV__) {
+    devLog('user-query', { action: 'requestAccountDeletion' });
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke<{
+      success?: boolean;
+      scheduled_purge_at?: string;
+      grace_days?: number;
+      error?: string;
+    }>('delete-account', { body: {} });
+
+    if (error || !data?.success || !data.scheduled_purge_at || data.grace_days == null) {
+      const message = error?.message || data?.error || 'Failed to request account deletion';
+      if (__DEV__) {
+        devError('user-query', error || new Error(message), { action: 'requestAccountDeletion' });
+      }
+      return { success: false, error: message };
+    }
+
+    return {
+      success: true,
+      scheduled_purge_at: data.scheduled_purge_at,
+      grace_days: data.grace_days,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to request account deletion';
+    if (__DEV__) {
+      devError('user-query', error, { action: 'requestAccountDeletion' });
+    }
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Restore an account that is in the soft-delete grace period.
+ * Clears deleted_at + scheduled_purge_at on the caller's profile row.
+ * RLS already restricts updates to the owner; the explicit eq('id', userId) is
+ * a belt-and-braces ownership check.
+ */
+export async function restoreAccount(userId: string): Promise<boolean> {
+  if (__DEV__) {
+    devLog('user-query', { action: 'restoreAccount', userId });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('v2_profiles')
+      .update({
+        deleted_at: null,
+        scheduled_purge_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      if (__DEV__) {
+        devError('user-query', error, { userId, action: 'restoreAccount' });
+      }
+      return false;
+    }
+    return true;
+  } catch (error) {
+    if (__DEV__) {
+      devError('user-query', error, { userId, action: 'restoreAccount' });
     }
     return false;
   }

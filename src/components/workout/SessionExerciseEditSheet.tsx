@@ -5,14 +5,25 @@
  * Pre-fills weight, reps, and duration so minimal typing is needed during workout
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
-import { colors, spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import { BottomSheet } from '../ui/BottomSheet';
 import { supabase } from '../../lib/supabase/client';
 import { devLog, devError } from '../../lib/utils/logger';
+import type { SetType } from '../../lib/supabase/queries/workouts';
+
+const SET_TYPE_CYCLE: SetType[] = ['normal', 'warmup', 'drop', 'failure'];
+
+const SET_TYPE_LABELS: Record<SetType, string> = {
+  normal: 'Normal',
+  warmup: 'Warm-up',
+  drop: 'Drop set',
+  failure: 'Failure',
+};
 
 interface SessionSet {
   id: string;
@@ -21,6 +32,7 @@ interface SessionSet {
   reps?: number;
   duration_sec?: number;
   rpe?: number;
+  set_type?: SetType;
   isNew?: boolean;
 }
 
@@ -45,10 +57,13 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   mode,
   useImperial,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [sets, setSets] = useState<SessionSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [originalSetIds, setOriginalSetIds] = useState<string[]>([]);
+  const [restSec, setRestSec] = useState<string>('');
   const insets = useSafeAreaInsets();
 
   const weightUnit = useImperial ? 'lbs' : 'kg';
@@ -66,11 +81,18 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('v2_session_sets')
-        .select('id, set_number, weight, reps, duration_sec, rpe')
-        .eq('session_exercise_id', sessionExerciseId)
-        .order('set_number', { ascending: true });
+      const [{ data, error }, { data: exerciseRow }] = await Promise.all([
+        supabase
+          .from('v2_session_sets')
+          .select('id, set_number, weight, reps, duration_sec, rpe, set_type')
+          .eq('session_exercise_id', sessionExerciseId)
+          .order('set_number', { ascending: true }),
+        supabase
+          .from('v2_session_exercises')
+          .select('rest_sec')
+          .eq('id', sessionExerciseId)
+          .maybeSingle(),
+      ]);
 
       if (error) {
         if (__DEV__) {
@@ -82,6 +104,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
       const loaded = (data || []) as SessionSet[];
       setSets(loaded);
       setOriginalSetIds(loaded.map((s) => s.id));
+      setRestSec(exerciseRow?.rest_sec != null ? String(exerciseRow.rest_sec) : '');
     } catch (error) {
       if (__DEV__) {
         devError('session-edit', error, { action: 'loadSets' });
@@ -131,6 +154,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
               reps: set.reps || null,
               duration_sec: set.duration_sec || null,
               rpe: set.rpe || null,
+              set_type: set.set_type || 'normal',
             });
 
           if (error && __DEV__) {
@@ -149,6 +173,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
               reps: set.reps || null,
               duration_sec: set.duration_sec || null,
               rpe: set.rpe || null,
+              set_type: set.set_type || 'normal',
             })
             .eq('id', set.id);
 
@@ -159,6 +184,17 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
             });
           }
         }
+      }
+
+      // Persist the per-exercise rest override (empty input clears it)
+      const parsedRest = restSec.trim() === '' ? null : parseInt(restSec, 10);
+      const { error: restError } = await supabase
+        .from('v2_session_exercises')
+        .update({ rest_sec: parsedRest != null && !isNaN(parsedRest) ? parsedRest : null })
+        .eq('id', sessionExerciseId);
+
+      if (restError && __DEV__) {
+        devError('session-edit', restError, { action: 'updateRestSec', sessionExerciseId });
       }
 
       onSave();
@@ -247,10 +283,52 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
             contentContainerStyle={styles.setsContainer}
             keyboardShouldPersistTaps="handled"
           >
+            <View style={styles.restRow}>
+              <View style={styles.restLabelGroup}>
+                <Text style={styles.inputLabel}>Rest between sets (sec)</Text>
+                <Text style={styles.restHint}>Leave empty for default (90s)</Text>
+              </View>
+              <TextInput
+                style={[styles.input, styles.restInput]}
+                placeholder="90"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="numeric"
+                value={restSec}
+                onChangeText={setRestSec}
+                maxLength={4}
+              />
+            </View>
+
             {sets.map((set, index) => (
               <View key={set.id} style={styles.setCard}>
                 <View style={styles.setHeaderRow}>
-                  <Text style={styles.setNumber}>Set {set.set_number}</Text>
+                  <View style={styles.setHeaderLeft}>
+                    <Text style={styles.setNumber}>Set {set.set_number}</Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.setTypeChip,
+                        (set.set_type ?? 'normal') !== 'normal' && styles.setTypeChipActive,
+                      ]}
+                      onPress={() => {
+                        setSets((prev) =>
+                          prev.map((s) => {
+                            if (s.id !== set.id) return s;
+                            const cycleIdx = SET_TYPE_CYCLE.indexOf(s.set_type ?? 'normal');
+                            return { ...s, set_type: SET_TYPE_CYCLE[(cycleIdx + 1) % SET_TYPE_CYCLE.length] };
+                          })
+                        );
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.setTypeChipText,
+                          (set.set_type ?? 'normal') !== 'normal' && styles.setTypeChipTextActive,
+                        ]}
+                      >
+                        {SET_TYPE_LABELS[set.set_type ?? 'normal']}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                   {sets.length > 1 && (
                     <TouchableOpacity
                       onPress={() => handleRemoveSet(set.id)}
@@ -363,10 +441,11 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -482,6 +561,52 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
+  setHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  setTypeChip: {
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  setTypeChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '15',
+  },
+  setTypeChipText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+    fontWeight: typography.weights.medium,
+  },
+  setTypeChipTextActive: {
+    color: colors.primary,
+  },
+  restRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  restLabelGroup: {
+    flex: 1,
+  },
+  restHint: {
+    fontSize: typography.sizes.sm,
+    color: colors.textMuted,
+  },
+  restInput: {
+    width: 80,
+    textAlign: 'center',
+  },
   removeSetText: {
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
@@ -512,4 +637,5 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.semibold,
     color: colors.error,
   },
-});
+  });
+}

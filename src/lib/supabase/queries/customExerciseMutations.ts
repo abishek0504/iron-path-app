@@ -1,7 +1,7 @@
 /**
  * Create/update/delete user custom exercises.
  * Each mutation invalidates the merged-exercise cache so listMergedExercisesCached stays correct.
- * Use these from CustomExerciseForm or any UI that mutates v2_user_custom_exercises.
+ * Use these from any UI that mutates v2_user_custom_exercises.
  */
 
 import { supabase } from '../client';

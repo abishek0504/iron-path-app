@@ -4,7 +4,7 @@
  * Reusable across all tabs
  */
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -12,19 +12,33 @@ import {
   StyleSheet,
   ScrollView,
 } from 'react-native';
-import { Settings, User, Bell, HelpCircle, LogOut, Mail, Shield } from 'lucide-react-native';
-import { colors, spacing, borderRadius } from '../../lib/utils/theme';
+import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sun, Moon, Monitor } from 'lucide-react-native';
+import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/uiStore';
+import { useUserStore } from '../../stores/userStore';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { LegalLinks } from '../ui/LegalLinks';
+import { requestAccountDeletion } from '../../lib/supabase/queries/users';
+import { invalidateProfileCache } from '../../lib/cache/dashboardStatsCache';
 
 interface SettingsMenuProps {
   onClose?: () => void;
 }
 
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { themeMode, setThemeMode } = useThemeMode();
   const router = useRouter();
   const showToast = useUIStore((state) => state.showToast);
+  const profile = useUserStore((state) => state.profile);
+  const clearProfile = useUserStore((state) => state.clearProfile);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleNavigate = (path: string) => {
     if (onClose) {
@@ -46,20 +60,70 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     router.replace('/login');
   };
 
+  const handleDeleteAccount = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    try {
+      const result = await requestAccountDeletion();
+      if (!result.success) {
+        showToast(result.error || 'Unable to delete account', 'error');
+        return;
+      }
+
+      // Sign out locally regardless (Edge Function also revokes tokens)
+      await supabase.auth.signOut().catch(() => undefined);
+      if (profile?.id) {
+        invalidateProfileCache(profile.id);
+      }
+      clearProfile();
+
+      setShowDeleteConfirm(false);
+      if (onClose) {
+        onClose();
+      }
+      showToast(
+        `Account scheduled for deletion in ${result.grace_days} days. Sign in before then to restore.`,
+        'success',
+      );
+      router.replace('/login');
+    } catch {
+      showToast('Unable to delete account', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const themeIcon = themeMode === 'dark' ? Moon : themeMode === 'light' ? Sun : Monitor;
+  const themeModeLabel = themeMode === 'dark' ? 'Dark' : themeMode === 'light' ? 'Light' : 'System';
+  const nextThemeMode = themeMode === 'dark' ? 'light' : themeMode === 'light' ? 'system' : 'dark';
+
   const menuItems = [
     {
       id: 'profile',
       label: 'Edit Profile',
+      sublabel: undefined as string | undefined,
       icon: User,
       onPress: () => handleNavigate('/edit-profile'),
     },
     {
+      id: 'appearance',
+      label: 'Appearance',
+      sublabel: themeModeLabel,
+      icon: themeIcon,
+      onPress: () => setThemeMode(nextThemeMode),
+    },
+    {
       id: 'notifications',
-      label: 'Notifications',
+      label: 'Workout Reminders',
+      sublabel: undefined,
       icon: Bell,
-      onPress: () => {
-        // TODO: Implement notifications settings
-      },
+      onPress: () => handleNavigate('/workout-reminders'),
+    },
+    {
+      id: 'apple-health',
+      label: 'Apple Health',
+      icon: Heart,
+      onPress: () => handleNavigate('/health-connect'),
     },
     {
       id: 'help',
@@ -71,7 +135,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       id: 'change-password',
       label: 'Change Password',
       icon: Shield,
-      onPress: () => handleNavigate('/auth/forgot-password'),
+      onPress: () => handleNavigate('/auth/change-password'),
     },
     {
       id: 'change-email',
@@ -88,35 +152,75 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   ];
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {menuItems.map((item) => {
-        const Icon = item.icon;
-        return (
+    <>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.menuItem}
+              onPress={item.onPress}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={item.label}
+            >
+              <View style={styles.iconContainer}>
+                <Icon size={24} color={colors.primary} />
+              </View>
+              <Text style={styles.menuLabel}>{item.label}</Text>
+              {'sublabel' in item && item.sublabel != null && (
+                <Text style={styles.menuSublabel}>{item.sublabel}</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+
+        <View style={styles.dangerSection}>
+          <Text style={styles.dangerHeading}>Danger zone</Text>
           <TouchableOpacity
-            key={item.id}
-            style={styles.menuItem}
-            onPress={item.onPress}
+            style={[styles.menuItem, styles.menuItemDanger]}
+            onPress={() => setShowDeleteConfirm(true)}
             activeOpacity={0.7}
           >
-            <View style={styles.iconContainer}>
-              <Icon size={24} color={colors.primary} />
+            <View style={[styles.iconContainer, styles.iconContainerDanger]}>
+              <Trash2 size={24} color={colors.error} />
             </View>
-            <Text style={styles.menuLabel}>{item.label}</Text>
+            <Text style={[styles.menuLabel, styles.menuLabelDanger]}>Delete Account</Text>
           </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
+          <Text style={styles.dangerHelp}>
+            Soft-deletes your account with a 30-day grace period. Sign in within
+            30 days to restore. After that, all of your data is permanently erased.
+          </Text>
+        </View>
+
+        <View style={styles.legalContainer}>
+          <LegalLinks compact />
+        </View>
+      </ScrollView>
+
+      <ConfirmDialog
+        visible={showDeleteConfirm}
+        title="Delete account?"
+        message="Your account will be marked for deletion. You have 30 days to sign in and restore it. After that, all workout sessions, plans, and progress are permanently erased."
+        confirmLabel={isDeleting ? 'Deleting…' : 'Delete account'}
+        cancelLabel="Cancel"
+        onConfirm={handleDeleteAccount}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+    </>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    content: {
+      padding: spacing.lg,
+      gap: spacing.sm,
+    },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -127,6 +231,9 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.md,
   },
+  menuItemDanger: {
+    borderColor: colors.error,
+  },
   iconContainer: {
     width: 40,
     height: 40,
@@ -135,11 +242,43 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  iconContainerDanger: {
+    backgroundColor: `${colors.error}20`,
+  },
   menuLabel: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.textPrimary,
     flex: 1,
   },
-});
-
+  menuSublabel: {
+    fontSize: typography.sizes.sm,
+    color: colors.textMuted,
+  },
+  menuLabelDanger: {
+    color: colors.error,
+  },
+  dangerSection: {
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  dangerHeading: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginLeft: spacing.xs,
+  },
+  dangerHelp: {
+    fontSize: typography.sizes.xs,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.xs,
+    lineHeight: 16,
+  },
+  legalContainer: {
+    marginTop: spacing.xl,
+    alignItems: 'center',
+  },
+  });
+}

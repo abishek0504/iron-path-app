@@ -1,17 +1,15 @@
 /**
  * RPE Slider Component
- * 
+ *
  * Interactive slider for Rate of Perceived Exertion (1-10)
  * Provides visual feedback with color gradient and qualitative labels
- * 
- * Usage:
- * <RPESlider value={8} onChange={(value) => setRpe(value)} />
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { colors, spacing, typography } from '../../lib/utils/theme';
+import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 interface RPESliderProps {
   value: number; // 1-10
@@ -19,33 +17,16 @@ interface RPESliderProps {
   disabled?: boolean;
 }
 
-// Label mapping for different RPE ranges
 const RPE_LABELS: Record<number, string> = {
-  1: 'Warmup',
-  2: 'Warmup',
-  3: 'Warmup',
-  4: 'Warmup',
-  5: 'Warmup',
-  6: 'Easy',
-  7: 'Moderate',
-  8: 'Hard',
-  9: 'Very Hard',
-  10: 'Max Effort',
+  1: 'Warmup', 2: 'Warmup', 3: 'Warmup', 4: 'Warmup', 5: 'Warmup',
+  6: 'Easy', 7: 'Moderate', 8: 'Hard', 9: 'Very Hard', 10: 'Max Effort',
 };
 
-// Color mapping for RPE zones
-const RPE_COLORS: Record<string, string> = {
-  warmup: '#22c55e', // Green (1-5)
-  easy: '#eab308', // Yellow (6-7)
-  hard: '#f97316', // Orange (8-9)
-  max: '#ef4444', // Red (10)
-};
-
-function getRPEColor(rpe: number): string {
-  if (rpe <= 5) return RPE_COLORS.warmup;
-  if (rpe <= 7) return RPE_COLORS.easy;
-  if (rpe <= 9) return RPE_COLORS.hard;
-  return RPE_COLORS.max;
+function getRPEColor(rpe: number, c: ThemeColors): string {
+  if (rpe <= 5) return c.heatmapFullyRecovered;
+  if (rpe <= 7) return c.heatmapLightFatigue;
+  if (rpe <= 9) return c.heatmapModerateFatigue;
+  return c.heatmapFullyFatigued;
 }
 
 function getRPEZoneLabel(rpe: number): string {
@@ -60,13 +41,83 @@ export const RPESlider: React.FC<RPESliderProps> = ({
   onChange,
   disabled = false,
 }) => {
-  const rpeColor = getRPEColor(value);
+  const colors = useTheme();
+  const rpeColor = getRPEColor(value, colors);
   const rpeLabel = RPE_LABELS[value] || 'Unknown';
   const rpeZone = getRPEZoneLabel(value);
 
+  const styles = useMemo(() => StyleSheet.create({
+    container: {
+      paddingVertical: spacing.md,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.sm,
+    },
+    label: {
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+      color: colors.textSecondary,
+    },
+    valueBox: {
+      minWidth: 40,
+      height: 32,
+      borderRadius: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: spacing.sm,
+    },
+    valueText: {
+      fontSize: typography.sizes.lg,
+      fontWeight: typography.weights.bold,
+      color: colors.background,
+    },
+    slider: {
+      width: '100%',
+      height: 40,
+    },
+    footer: {
+      marginTop: spacing.xs,
+      gap: spacing.xs,
+    },
+    labelText: {
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    descriptionText: {
+      fontSize: typography.sizes.sm,
+      color: colors.textMuted,
+      fontStyle: 'italic',
+    },
+    legend: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.md,
+      marginTop: spacing.md,
+      paddingTop: spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: colors.cardBorder,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    legendDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+    },
+    legendText: {
+      fontSize: typography.sizes.xs,
+      color: colors.textSecondary,
+    },
+  }), [colors]);
+
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.label}>RPE (Rate of Perceived Exertion)</Text>
         <View style={[styles.valueBox, { backgroundColor: rpeColor }]}>
@@ -74,7 +125,6 @@ export const RPESlider: React.FC<RPESliderProps> = ({
         </View>
       </View>
 
-      {/* Slider */}
       <Slider
         style={styles.slider}
         minimumValue={1}
@@ -88,7 +138,6 @@ export const RPESlider: React.FC<RPESliderProps> = ({
         disabled={disabled}
       />
 
-      {/* Labels */}
       <View style={styles.footer}>
         <Text style={[styles.labelText, { color: rpeColor, fontWeight: '600' }]}>
           {rpeLabel}
@@ -96,95 +145,24 @@ export const RPESlider: React.FC<RPESliderProps> = ({
         <Text style={styles.descriptionText}>{rpeZone}</Text>
       </View>
 
-      {/* Legend */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: RPE_COLORS.warmup }]} />
+          <View style={[styles.legendDot, { backgroundColor: colors.heatmapFullyRecovered }]} />
           <Text style={styles.legendText}>1-5: Warmup</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: RPE_COLORS.easy }]} />
+          <View style={[styles.legendDot, { backgroundColor: colors.heatmapLightFatigue }]} />
           <Text style={styles.legendText}>6-7: Easy/Moderate</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: RPE_COLORS.hard }]} />
+          <View style={[styles.legendDot, { backgroundColor: colors.heatmapModerateFatigue }]} />
           <Text style={styles.legendText}>8-9: Hard</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: RPE_COLORS.max }]} />
+          <View style={[styles.legendDot, { backgroundColor: colors.heatmapFullyFatigued }]} />
           <Text style={styles.legendText}>10: Max</Text>
         </View>
       </View>
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    paddingVertical: spacing.md,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  label: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-    color: colors.textSecondary,
-  },
-  valueBox: {
-    minWidth: 40,
-    height: 32,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing.sm,
-  },
-  valueText: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
-    color: colors.background,
-  },
-  slider: {
-    width: '100%',
-    height: 40,
-  },
-  footer: {
-    marginTop: spacing.xs,
-    gap: spacing.xs,
-  },
-  labelText: {
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  descriptionText: {
-    fontSize: typography.sizes.sm,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-  },
-  legend: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.cardBorder,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  legendText: {
-    fontSize: typography.sizes.xs,
-    color: colors.textSecondary,
-  },
-});

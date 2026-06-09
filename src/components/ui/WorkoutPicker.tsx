@@ -3,9 +3,10 @@
  * Choose which workout (session) within the day to view/start/continue
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { colors, spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 export type WorkoutItem = {
   index: number;
@@ -24,10 +25,56 @@ export const WorkoutPicker: React.FC<Props> = ({
   selectedIndex,
   onSelect,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => StyleSheet.create({
+    container: {
+      gap: spacing.md,
+    },
+    chipRow: {
+      paddingVertical: spacing.xs,
+      gap: spacing.sm,
+    },
+    chip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      backgroundColor: colors.card,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    chipSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary + '20',
+    },
+    chipText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+    chipTextSelected: {
+      color: colors.primary,
+      fontWeight: typography.weights.semibold,
+    },
+    completedBadge: {
+      fontSize: typography.sizes.sm,
+      color: colors.primary,
+      fontWeight: typography.weights.bold,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+      textAlign: 'center',
+      padding: spacing.md,
+    },
+  }), [colors]);
+
   if (workouts.length === 0) {
     return (
       <View style={styles.container}>
-        <Text style={styles.emptyText}>No workouts yet. Tap "Add Workout" to start.</Text>
+        <Text style={styles.emptyText}>No workouts yet. Tap &quot;Add Workout&quot; to start.</Text>
       </View>
     );
   }
@@ -66,48 +113,3 @@ export const WorkoutPicker: React.FC<Props> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.md,
-  },
-  chipRow: {
-    paddingVertical: spacing.xs,
-    gap: spacing.sm,
-  },
-  chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  chipSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary + '20',
-  },
-  chipText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-  },
-  chipTextSelected: {
-    color: colors.primary,
-    fontWeight: typography.weights.semibold,
-  },
-  completedBadge: {
-    fontSize: typography.sizes.sm,
-    color: colors.primary,
-    fontWeight: typography.weights.bold,
-  },
-  emptyText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    textAlign: 'center',
-    padding: spacing.md,
-  },
-});

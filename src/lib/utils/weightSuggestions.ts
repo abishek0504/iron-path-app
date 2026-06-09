@@ -52,16 +52,24 @@ export async function calculateWeightSuggestion(
   const referenceId = exerciseId || customExerciseId!;
   const history = await getExerciseHistory(referenceId, userId, 5);
 
-  if (history && history.length > 0) {
+  if (history && history.sets.length > 0) {
     // Find most recent similar set (same set number or close)
-    const recentSet = history.find(h => h.set_number === setNumber) || history[0];
+    const recentSet = history.sets.find(h => h.set_number === setNumber) || history.sets[0];
 
     if (mode === 'reps') {
       // Progressive overload: if last time hit target reps cleanly, suggest 2.5-5% increase
       if (recentSet.reps && targetReps && recentSet.reps >= targetReps && recentSet.weight) {
-        const increment = recentSet.weight >= 100 ? 5 : 2.5; // 5 lbs for heavy, 2.5 for light
+        const increment =
+          useImperial
+            ? recentSet.weight >= 100
+              ? 5
+              : 2.5
+            : recentSet.weight >= 45
+              ? 2.5
+              : 1.25;
+        const precision = useImperial ? 2 : 4;
         return {
-          weight: Math.round((recentSet.weight + increment) * 2) / 2, // Round to nearest 0.5
+          weight: Math.round((recentSet.weight + increment) * precision) / precision,
           reps: targetReps,
           source: 'history',
           confidence: 'high',
@@ -106,7 +114,8 @@ export async function calculateWeightSuggestion(
       const profile = await getUserProfileCached(userId);
       const bw = profile?.current_weight ?? (useImperial ? DEFAULT_BW_LBS : DEFAULT_BW_KG);
       const raw = bw * multiplier;
-      const weight = Math.round(raw * 2) / 2;
+      const precision = useImperial ? 2 : 4;
+      const weight = Math.round(raw * precision) / precision;
 
       if (__DEV__) {
         devLog('weight-suggestion', {

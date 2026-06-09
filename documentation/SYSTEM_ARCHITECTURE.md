@@ -258,20 +258,21 @@ type WorkoutPhase = 'execution' | 'rest' | 'logging' | 'complete';
 ### Phase Transitions
 
 **EXECUTION Phase** (performing sets):
-- Display current exercise with all sets
+- Display current exercise, set type badge (warm-up/drop/failure), previous performance ("Last time"), and superset position when grouped
 - User adjusts RPE slider for active set
-- User taps "Complete Set" button
+- User taps "Complete Set" (on-screen or on the paired Apple Watch)
 - `markSetComplete(setId, { reps, weight, rpe })` called
   - **CRITICAL**: Always sets `performed_at = NOW()` to mark set as complete
-- Transition:
-  - If last set of exercise → LOGGING phase
-  - Else → REST phase
+- Transition via `findNextStep` ([`src/lib/engine/workoutFlow.ts`](../src/lib/engine/workoutFlow.ts)):
+  - Superset member with incomplete sets remaining mid-round → EXECUTION on the partner exercise, no rest
+  - Round wrapped (or solo exercise, next set) → REST phase
+  - Group/exercise fully complete → LOGGING phase
 
 **REST Phase** (between sets):
-- Automatic countdown timer (90-180s based on RPE)
+- Automatic countdown timer; duration resolves per-exercise `rest_sec` → per-set `rest_sec` → 90s default (`resolveRestSec`)
 - User can skip or wait
 - Transition:
-  - Timer ends or skip pressed → EXECUTION phase (next set)
+  - Timer ends or skip pressed → EXECUTION phase (next set, possibly on the next superset member)
 
 **LOGGING Phase** (batch editing after exercise):
 - Display all sets for current exercise
@@ -291,7 +292,25 @@ type WorkoutPhase = 'execution' | 'rest' | 'logging' | 'complete';
 - `completeWorkoutSession(sessionId)` called
   - UPDATE v2_workout_sessions SET status='completed', completed_at=NOW()
   - Database trigger fires Edge Function for muscle freshness update
+  - `writeCompletedWorkoutToHealth(sessionId)` mirrors the session to Apple Health as an HKWorkout (traditional strength training) when access is granted
 - Navigate back to Workout tab
+
+### Apple Health integration (architecture)
+
+**JS entry:** [`src/lib/health/healthIntegration.ts`](../src/lib/health/healthIntegration.ts), implemented on `@kingstinct/react-native-healthkit` (lazy-loaded; no-ops in Expo Go/web/Android). `completeWorkoutSession` calls `writeCompletedWorkoutToHealth`; [`insertWeightLog`](../src/lib/supabase/queries/weight.ts) calls `writeBodyMassToHealth` with kg converted from the user’s display unit (`healthDisplayUnit`). `importHealthSamplesForDashboard` pulls the last 30 days of external body-mass samples into `v2_weight_logs` (converted to the user's display unit) and runs after a successful connect on [`app/health-connect.tsx`](../app/health-connect.tsx).
+
+**DB linkage:** Columns `hk_workout_uuid`, `hk_sample_uuid`, ledger `v2_health_sync` (`supabase/migrations/20260510000000_health_hk_links_session_validation.sql`). Writes are idempotent: rows already carrying an HK UUID are never re-exported, and imports skip known sample UUIDs.
+
+**Native config:** the `@kingstinct/react-native-healthkit` Expo plugin adds the HealthKit entitlement and usage strings at prebuild (`app.json`); versions are pinned (`react-native-nitro-modules@0.32.0`, healthkit `13.1.4`) for Expo SDK 54 compatibility.
+
+### watchOS companion (architecture)
+
+Native SwiftUI mirror app managed by `@bacons/apple-targets` (sources in `targets/watch/`, survive `prebuild --clean`). The iPhone side is a local Expo Module (`modules/watch-connectivity/`) wrapping `WCSession`:
+
+- Phone → watch: [`active.tsx`](../app/(stack)/workout/active.tsx) pushes the workout state (exercise, set X of Y, target, phase, rest end, next up, superset position) via `updateApplicationContext` on every phase change.
+- Watch → phone: Complete Set sends `sendMessage` when reachable, else `transferUserInfo` (offline queue); the RN listener feeds the same `handleCompleteSet` path as the on-screen button. **The phone remains the canonical Supabase writer.**
+
+See [`native/watch/README.md`](../native/watch/README.md) for build steps.
 
 ### Set Completion Tracking
 

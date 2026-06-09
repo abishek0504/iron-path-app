@@ -3,9 +3,10 @@
  * Displays weekly or monthly calendar view with completed workout sessions marked
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 type ViewMode = 'week' | 'month';
 
@@ -48,6 +49,8 @@ export const ProgressCalendar: React.FC<Props> = ({
   onDateSelect,
   selectedDate,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -265,10 +268,11 @@ export const ProgressCalendar: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.md,
-  },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      gap: spacing.md,
+    },
   headerLabel: {
     color: colors.textPrimary,
     fontSize: typography.sizes.lg,
@@ -408,5 +412,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: typography.sizes.sm,
   },
-});
+  });
+}
 

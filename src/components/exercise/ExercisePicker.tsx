@@ -5,7 +5,7 @@
  * Uses 5 min cache to reduce DB egress when picker is reopened.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,10 +15,11 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { Search, X } from 'lucide-react-native';
+import { Check, Search, X } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/uiStore';
-import { colors, spacing, borderRadius } from '../../lib/utils/theme';
+import { spacing, borderRadius, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { Exercise } from '../../types/exercisePicker';
 
@@ -59,17 +60,23 @@ async function loadExercisesCached(): Promise<Exercise[]> {
 
 interface ExercisePickerProps {
   onSelect?: (exercise: Exercise) => void;
+  /** Multi-select mode: tap to toggle, confirm with the footer button. */
+  onSelectMultiple?: (exercises: Exercise[]) => void;
   multiSelect?: boolean;
 }
 
 export const ExercisePicker: React.FC<ExercisePickerProps> = ({
   onSelect,
+  onSelectMultiple,
   multiSelect = false,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [filteredExercises, setFilteredExercises] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const closeBottomSheet = useUIStore((state) => state.closeBottomSheet);
   const showToast = useUIStore((state) => state.showToast);
 
@@ -139,41 +146,69 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
       });
     }
 
+    if (multiSelect) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(exercise.id)) {
+          next.delete(exercise.id);
+        } else {
+          next.add(exercise.id);
+        }
+        return next;
+      });
+      return;
+    }
+
     if (onSelect) {
       onSelect(exercise);
     }
 
-    if (!multiSelect) {
-      closeBottomSheet();
-    }
+    closeBottomSheet();
   };
 
-  const renderExercise = ({ item }: { item: Exercise }) => (
-    <TouchableOpacity
-      style={styles.exerciseItem}
-      onPress={() => handleSelect(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.exerciseContent}>
-        <Text style={styles.exerciseName}>{item.name}</Text>
-        {item.description && (
-          <Text style={styles.exerciseDescription} numberOfLines={2}>
-            {item.description}
-          </Text>
-        )}
-        <View style={styles.exerciseMeta}>
-          <Text style={styles.metaText}>
-            Density: {item.density_score.toFixed(1)}
-          </Text>
-          {item.primary_muscles.length > 0 && (
-            <Text style={styles.metaText}>
-              {item.primary_muscles.slice(0, 3).join(', ')}
-            </Text>
-          )}
+  const handleConfirmMultiple = () => {
+    const selected = exercises.filter((ex) => selectedIds.has(ex.id));
+    if (__DEV__) {
+      devLog('exercise-picker', { action: 'confirmMultiple', count: selected.length });
+    }
+    if (onSelectMultiple) {
+      onSelectMultiple(selected);
+    }
+    closeBottomSheet();
+  };
+
+  const renderExercise = ({ item }: { item: Exercise }) => {
+    const isSelected = multiSelect && selectedIds.has(item.id);
+    return (
+      <TouchableOpacity
+        style={[styles.exerciseItem, isSelected && styles.exerciseItemSelected]}
+        onPress={() => handleSelect(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.exerciseRow}>
+          <View style={styles.exerciseContent}>
+            <Text style={styles.exerciseName}>{item.name}</Text>
+            {item.description && (
+              <Text style={styles.exerciseDescription} numberOfLines={2}>
+                {item.description}
+              </Text>
+            )}
+            <View style={styles.exerciseMeta}>
+              <Text style={styles.metaText}>
+                Density: {item.density_score.toFixed(1)}
+              </Text>
+              {item.primary_muscles.length > 0 && (
+                <Text style={styles.metaText}>
+                  {item.primary_muscles.slice(0, 3).join(', ')}
+                </Text>
+              )}
+            </View>
+          </View>
+          {isSelected && <Check size={20} color={colors.primary} />}
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -214,14 +249,29 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
           }
         />
       )}
+
+      {multiSelect && (
+        <TouchableOpacity
+          style={[styles.confirmButton, selectedIds.size === 0 && styles.confirmButtonDisabled]}
+          onPress={handleConfirmMultiple}
+          disabled={selectedIds.size === 0}
+        >
+          <Text style={styles.confirmButtonText}>
+            {selectedIds.size === 0
+              ? 'Select exercises'
+              : `Add ${selectedIds.size} exercise${selectedIds.size === 1 ? '' : 's'}`}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -255,8 +305,33 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
+  exerciseItemSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '10',
+  },
+  exerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   exerciseContent: {
+    flex: 1,
     gap: spacing.xs,
+  },
+  confirmButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  confirmButtonDisabled: {
+    opacity: 0.5,
+  },
+  confirmButtonText: {
+    color: colors.background,
+    fontSize: 16,
+    fontWeight: '600',
   },
   exerciseName: {
     fontSize: 16,
@@ -284,5 +359,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textSecondary,
   },
-});
+  });
+}
 

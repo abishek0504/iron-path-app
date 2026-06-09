@@ -1,15 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
-import { colors, spacing, borderRadius, typography } from '../../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
+import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const showToast = useUIStore((state) => state.showToast);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
@@ -47,15 +50,15 @@ export default function ForgotPasswordScreen() {
         if (__DEV__) devError('forgot-password', error, { email });
         return;
       }
-      
+
       // Close the modal first, then show toast
       router.back();
-      
+
       // Show toast after a brief delay to ensure modal closes first
       setTimeout(() => {
         showToast('Password reset sent', 'success');
       }, 300);
-      
+
       if (__DEV__) devLog('forgot-password', { action: 'reset-email-sent', redirectTo });
     } catch (error) {
       setInfo('Unable to send reset email.');
@@ -108,75 +111,75 @@ export default function ForgotPasswordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    padding: spacing.lg,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  title: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-  },
-  fieldGroup: {
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    color: colors.textPrimary,
-    backgroundColor: colors.background,
-    fontSize: typography.sizes.base,
-  },
-  infoText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  button: {
-    marginTop: spacing.sm,
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  linkWrap: {
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  linkText: {
-    color: colors.textSecondary,
-  },
-});
-
-
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      padding: spacing.lg,
+    },
+    card: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: borderRadius.lg,
+      padding: spacing.lg,
+      gap: spacing.md,
+    },
+    title: {
+      fontSize: typography.sizes.xl,
+      fontWeight: typography.weights.semibold,
+      color: colors.textPrimary,
+    },
+    subtitle: {
+      fontSize: typography.sizes.sm,
+      color: colors.textSecondary,
+    },
+    fieldGroup: {
+      gap: spacing.xs,
+    },
+    label: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: borderRadius.md,
+      padding: spacing.md,
+      color: colors.textPrimary,
+      backgroundColor: colors.background,
+      fontSize: typography.sizes.base,
+    },
+    infoText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    button: {
+      marginTop: spacing.sm,
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    buttonDisabled: {
+      opacity: 0.6,
+    },
+    buttonText: {
+      color: colors.background,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    linkWrap: {
+      alignItems: 'center',
+      marginTop: spacing.sm,
+    },
+    linkText: {
+      color: colors.textSecondary,
+    },
+  });
+}

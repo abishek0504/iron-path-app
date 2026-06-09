@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
-import { colors, spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 type DayItem = {
   dayName: string;
@@ -22,6 +23,83 @@ export const PlanDayPicker: React.FC<Props> = ({
   onSelect,
   onResetToToday,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => StyleSheet.create({
+    container: {
+      gap: spacing.md,
+    },
+    chipRow: {
+      paddingVertical: spacing.xs,
+      gap: spacing.sm,
+    },
+    chip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      backgroundColor: colors.card,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    chipSelected: {
+      borderColor: colors.primary,
+      backgroundColor: `${colors.primary}26`,
+    },
+    chipToday: {
+      borderColor: colors.borderLight,
+    },
+    chipRest: {
+      opacity: 0.7,
+    },
+    chipText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+    chipTextSelected: {
+      color: colors.primary,
+      fontWeight: typography.weights.semibold,
+    },
+    chipTextToday: {
+      color: colors.textSecondary,
+    },
+    dot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.primary,
+    },
+    actions: {
+      gap: spacing.sm,
+    },
+    primaryButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    primaryButtonText: {
+      color: '#000',
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    secondaryButton: {
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+      backgroundColor: colors.card,
+    },
+    secondaryButtonText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+  }), [colors]);
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -69,80 +147,3 @@ export const PlanDayPicker: React.FC<Props> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.md,
-  },
-  chipRow: {
-    paddingVertical: spacing.xs,
-    gap: spacing.sm,
-  },
-  chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  chipSelected: {
-    borderColor: colors.primary,
-    backgroundColor: 'rgba(163, 230, 53, 0.15)',
-  },
-  chipToday: {
-    borderColor: colors.borderLight,
-  },
-  chipRest: {
-    opacity: 0.7,
-  },
-  chipText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-  },
-  chipTextSelected: {
-    color: colors.primary,
-    fontWeight: typography.weights.semibold,
-  },
-  chipTextToday: {
-    color: colors.textSecondary,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
-  },
-  actions: {
-    gap: spacing.sm,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  primaryButtonText: {
-    color: '#000',
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    backgroundColor: colors.card,
-  },
-  secondaryButtonText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-  },
-});
-

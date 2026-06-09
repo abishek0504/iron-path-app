@@ -3,10 +3,11 @@
  * Shared header for main tabs with title + top-right settings gear.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Settings } from 'lucide-react-native';
-import { colors, spacing, typography } from '../../lib/utils/theme';
+import { spacing, typography } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import { useModal } from '../../hooks/useModal';
 import { devLog } from '../../lib/utils/logger';
 
@@ -18,6 +19,7 @@ interface TabHeaderProps {
 }
 
 export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId, showSettings: showSettingsProp }) => {
+  const colors = useTheme();
   const { openSheet } = useModal();
 
   const handleOpenSettings = () => {
@@ -28,6 +30,26 @@ export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId, showSettings
   };
 
   const showSettings = showSettingsProp ?? (tabId === 'dashboard');
+
+  const styles = useMemo(() => StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    title: {
+      fontSize: typography.sizes['2xl'],
+      fontWeight: typography.weights.bold,
+      color: colors.primary,
+    },
+    iconButton: {
+      padding: spacing.sm,
+      borderRadius: 999,
+    },
+  }), [colors]);
 
   return (
     <View style={styles.container}>
@@ -46,25 +68,3 @@ export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId, showSettings
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  title: {
-    fontSize: typography.sizes['2xl'],
-    fontWeight: typography.weights.bold,
-    color: colors.primary,
-  },
-  iconButton: {
-    padding: spacing.sm,
-    borderRadius: 999,
-  },
-});
-
-

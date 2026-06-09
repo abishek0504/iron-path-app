@@ -3,7 +3,7 @@
  * Contact form with name, email, and message. Submits to v2_support.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,15 +18,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { X } from 'lucide-react-native';
-import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { supabase } from '../src/lib/supabase/client';
+import { LegalLinks } from '../src/components/ui/LegalLinks';
 
 export default function HelpSupportScreen() {
   const router = useRouter();
   const profile = useUserStore((state) => state.profile);
   const showToast = useUIStore((state) => state.showToast);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [name, setName] = useState('');
@@ -112,7 +116,7 @@ export default function HelpSupportScreen() {
       >
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.intro}>
-            Got questions or concerns? We're here to help. Reach out and we'll get back to you.
+            Got questions or concerns? We&apos;re here to help. Reach out and we&apos;ll get back to you.
           </Text>
 
           <View style={styles.card}>
@@ -167,97 +171,107 @@ export default function HelpSupportScreen() {
               <Text style={styles.sendButtonText}>Send</Text>
             )}
           </TouchableOpacity>
+
+          <View style={styles.legalContainer}>
+            <LegalLinks />
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  title: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.bold,
-    color: colors.textPrimary,
-  },
-  headerButton: {
-    padding: spacing.sm,
-    borderRadius: borderRadius.sm,
-  },
-  scroll: {
-    flex: 1,
-  },
-  keyboardAvoid: {
-    flex: 1,
-  },
-  content: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  intro: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    lineHeight: 22,
-    marginBottom: spacing.sm,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  input: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    paddingVertical: spacing.xs,
-  },
-  messageInput: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    paddingVertical: spacing.sm,
-    minHeight: 140,
-    maxHeight: 200,
-  },
-  sendButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.sm,
-  },
-  sendButtonDisabled: {
-    opacity: 0.7,
-  },
-  sendButtonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.bold,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+    },
+    title: {
+      fontSize: typography.sizes.xl,
+      fontWeight: typography.weights.bold,
+      color: colors.textPrimary,
+    },
+    headerButton: {
+      padding: spacing.sm,
+      borderRadius: borderRadius.sm,
+    },
+    scroll: {
+      flex: 1,
+    },
+    keyboardAvoid: {
+      flex: 1,
+    },
+    content: {
+      padding: spacing.lg,
+      gap: spacing.md,
+      paddingBottom: spacing.xxl,
+    },
+    intro: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+      lineHeight: 22,
+      marginBottom: spacing.sm,
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.md,
+      gap: spacing.xs,
+    },
+    label: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    input: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      paddingVertical: spacing.xs,
+    },
+    messageInput: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      paddingVertical: spacing.sm,
+      minHeight: 140,
+      maxHeight: 200,
+    },
+    sendButton: {
+      backgroundColor: colors.primary,
+      borderRadius: borderRadius.lg,
+      paddingVertical: spacing.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: spacing.sm,
+    },
+    sendButtonDisabled: {
+      opacity: 0.7,
+    },
+    sendButtonText: {
+      color: colors.background,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.bold,
+    },
+    legalContainer: {
+      marginTop: spacing.lg,
+      alignItems: 'center',
+    },
+  });
+}

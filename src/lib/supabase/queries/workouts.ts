@@ -7,6 +7,18 @@ import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
 import { getDateBoundsForDayName } from '../../utils/date';
 import { selectExerciseTargets } from '../../engine/targetSelection';
+import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
+
+/**
+ * Defensive caps on aggregate-style queries. These exist to bound query payload + memory in
+ * pathological cases (corrupt data, very long-time users, malicious replication). Realistic
+ * upper bounds: ~365 sessions/yr, ~30 sets/session, ~50 customs/user.
+ */
+const MAX_YTD_SESSIONS = 1000;
+const MAX_YTD_SESSION_EXERCISES = 20000;
+const MAX_YTD_SETS = 100000;
+const MAX_SESSIONS_IN_RANGE = 1000;
+const MAX_UNIQUE_COMBO_SETS = 5000;
 
 export interface WorkoutSession {
   id: string;
@@ -24,7 +36,11 @@ export interface SessionExercise {
   exercise_id?: string;
   custom_exercise_id?: string;
   sort_order: number;
+  superset_group?: number | null;
+  rest_sec?: number | null;
 }
+
+export type SetType = 'normal' | 'warmup' | 'drop' | 'failure';
 
 export interface SessionSet {
   id: string;
@@ -36,6 +52,7 @@ export interface SessionSet {
   rir?: number;
   duration_sec?: number;
   rest_sec?: number;
+  set_type?: SetType;
   notes?: string;
   performed_at: string;
 }
@@ -376,32 +393,50 @@ export async function syncTemplateSlotToSessionsForDay(
   const key = exerciseId || customExerciseId;
   if (key) targetsMap.set(key, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
 
-  for (const session of sessions) {
-    const { data: existing } = await supabase
-      .from('v2_session_exercises')
-      .select('sort_order')
-      .eq('session_id', session.id)
-      .order('sort_order', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const sortOrder = (existing?.sort_order ?? 0) + 1;
-
-    const { data: se, error: seErr } = await supabase
-      .from('v2_session_exercises')
-      .insert({
-        session_id: session.id,
-        exercise_id: exerciseId || null,
-        custom_exercise_id: customExerciseId || null,
-        sort_order: sortOrder,
-      })
-      .select()
-      .single();
-    if (seErr || !se) {
-      if (__DEV__) devError('workout-query', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
-      continue;
-    }
-    await prefillSessionSets(session.id, [se], targetsMap);
+  // Single batched query for current max(sort_order) per session, replacing a per-session
+  // SELECT round-trip. Supabase JS does not support GROUP BY directly; we fetch the candidate
+  // rows once and tally in JS. This is cheap because each session has at most a few dozen exercises.
+  const sessionIds = sessions.map((s) => s.id);
+  const maxSortBySession = new Map<string, number>();
+  const { data: existingRows, error: existingErr } = await supabase
+    .from('v2_session_exercises')
+    .select('session_id, sort_order')
+    .in('session_id', sessionIds);
+  if (existingErr && __DEV__) {
+    devError('workout-query', existingErr, { dayName, action: 'syncTemplateSlot_existing' });
   }
+  for (const row of existingRows || []) {
+    const prev = maxSortBySession.get(row.session_id) ?? 0;
+    if ((row.sort_order ?? 0) > prev) {
+      maxSortBySession.set(row.session_id, row.sort_order ?? 0);
+    }
+  }
+
+  // Insert one v2_session_exercises row per session in a single batch, then prefill in parallel.
+  const insertRows = sessions.map((session) => ({
+    session_id: session.id,
+    exercise_id: exerciseId || null,
+    custom_exercise_id: customExerciseId || null,
+    sort_order: (maxSortBySession.get(session.id) ?? 0) + 1,
+  }));
+
+  const { data: insertedRows, error: insertErr } = await supabase
+    .from('v2_session_exercises')
+    .insert(insertRows)
+    .select();
+  if (insertErr || !insertedRows) {
+    if (__DEV__) {
+      devError('workout-query', insertErr || new Error('Failed to insert session exercises'), {
+        dayName,
+        action: 'syncTemplateSlot_insert',
+      });
+    }
+    return;
+  }
+
+  await Promise.all(
+    insertedRows.map((se) => prefillSessionSets(se.session_id, [se], targetsMap)),
+  );
   if (__DEV__) {
     devLog('workout-query', { action: 'syncTemplateSlotToSessionsForDay', dayName, sessionCount: sessions.length, exerciseId: exerciseId || customExerciseId });
   }
@@ -446,11 +481,46 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
       });
     }
 
+    void writeCompletedWorkoutToHealth(sessionId);
+
     return true;
   } catch (error) {
     if (__DEV__) {
       devError('workout-query', error, { sessionId });
     }
+    return false;
+  }
+}
+
+/**
+ * Mark a session as abandoned. Used when the user explicitly bails out of a workout
+ * mid-session. Schema already supports this status; we set completed_at to capture when
+ * the abandon happened (analytics) without changing the "completed" semantics elsewhere.
+ *
+ * Unlike completeWorkoutSession, we do NOT trigger muscle-freshness updates because the
+ * user did not finish the planned stimulus.
+ */
+export async function abandonWorkoutSession(sessionId: string): Promise<boolean> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'abandonWorkoutSession', sessionId });
+  }
+
+  try {
+    const { error } = await supabase
+      .from('v2_workout_sessions')
+      .update({
+        status: 'abandoned',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', sessionId);
+
+    if (error) {
+      if (__DEV__) devError('workout-query', error, { sessionId });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    if (__DEV__) devError('workout-query', error, { sessionId });
     return false;
   }
 }
@@ -563,7 +633,8 @@ export async function getYearToDateStats(userId: string): Promise<YearToDateStat
       .eq('status', 'completed')
       .not('completed_at', 'is', null)
       .gte('completed_at', startIso)
-      .lte('completed_at', endIso);
+      .lte('completed_at', endIso)
+      .limit(MAX_YTD_SESSIONS);
 
     if (sessionsError) {
       if (__DEV__) {
@@ -588,7 +659,8 @@ export async function getYearToDateStats(userId: string): Promise<YearToDateStat
     const { data: sessionExercises, error: seError } = await supabase
       .from('v2_session_exercises')
       .select('id')
-      .in('session_id', sessionIds);
+      .in('session_id', sessionIds)
+      .limit(MAX_YTD_SESSION_EXERCISES);
 
     if (seError) {
       if (__DEV__) {
@@ -606,7 +678,9 @@ export async function getYearToDateStats(userId: string): Promise<YearToDateStat
       .from('v2_session_sets')
       .select('weight, reps')
       .in('session_exercise_id', seIds)
-      .not('performed_at', 'is', null);
+      .not('performed_at', 'is', null)
+      .neq('set_type', 'warmup')
+      .limit(MAX_YTD_SETS);
 
     if (setsError) {
       if (__DEV__) {
@@ -723,7 +797,8 @@ export async function getSessionsInRange(
       .not('completed_at', 'is', null)
       .gte('completed_at', startIso)
       .lte('completed_at', endIso)
-      .order('completed_at', { ascending: false });
+      .order('completed_at', { ascending: false })
+      .limit(MAX_SESSIONS_IN_RANGE);
 
     if (error) {
       if (__DEV__) {
@@ -954,8 +1029,14 @@ export interface ExerciseHistory {
 export type MuscleStressMap = Record<string, number>;
 
 /**
- * Get top PR sets (weight-based and duration-based) for a user's recent sessions
- * Returns hybrid PRs: both weight-based (reps exercises) and duration-based (timed exercises)
+ * @deprecated Use `getCachedTopPRs` instead, which reads the maintained
+ * `v2_user_exercise_prs` table (kept up-to-date by the upsert trigger) and
+ * supports all three PR types (`weight`, `reps_only`, `timed`).
+ *
+ * This legacy implementation computes only weight-based PRs by scanning the
+ * last 500 completed sessions and skipping rows where weight is null, so it
+ * does not surface bodyweight-reps PRs or timed-hold PRs. It is kept as a
+ * fallback for backfills only and is not invoked from app code.
  */
 export async function getTopPRs(
   userId: string,
@@ -1205,7 +1286,8 @@ export async function getUniqueSetRepCombinations(
       .eq('v2_session_exercises.v2_workout_sessions.user_id', userId)
       .eq('v2_session_exercises.v2_workout_sessions.status', 'completed')
       .or(`exercise_id.eq.${exerciseId},custom_exercise_id.eq.${exerciseId}`, { foreignTable: 'v2_session_exercises' })
-      .not('performed_at', 'is', null);
+      .not('performed_at', 'is', null)
+      .limit(MAX_UNIQUE_COMBO_SETS);
 
     if (error || !data || data.length === 0) {
       if (__DEV__ && error) {
@@ -1306,6 +1388,96 @@ export async function getUniqueSetRepCombinations(
       devError('workout-query', error, { exerciseId, userId });
     }
     return [];
+  }
+}
+
+export interface PreviousPerformance {
+  performed_at: string;
+  sets: Array<{
+    set_number: number;
+    weight?: number;
+    reps?: number;
+    duration_sec?: number;
+    set_type?: SetType;
+  }>;
+}
+
+/**
+ * Get the user's most recent performance of an exercise: all completed working
+ * sets from the latest session in which the exercise was performed. Used to
+ * show "previous" values inline during set execution/logging (Hevy-style).
+ */
+export async function getPreviousExercisePerformance(
+  exerciseId: string,
+  userId: string
+): Promise<PreviousPerformance | null> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'getPreviousExercisePerformance', exerciseId, userId });
+  }
+
+  try {
+    // Pull the most recent completed sets for this exercise (any session), newest
+    // first, then keep only the sets belonging to the newest session exercise.
+    const { data, error } = await supabase
+      .from('v2_session_sets')
+      .select(
+        `
+          session_exercise_id,
+          set_number,
+          weight,
+          reps,
+          duration_sec,
+          set_type,
+          performed_at,
+          v2_session_exercises!inner(
+            exercise_id,
+            custom_exercise_id,
+            v2_workout_sessions!inner(user_id, status)
+          )
+        `
+      )
+      .eq('v2_session_exercises.v2_workout_sessions.user_id', userId)
+      .eq('v2_session_exercises.v2_workout_sessions.status', 'completed')
+      .or(`exercise_id.eq.${exerciseId},custom_exercise_id.eq.${exerciseId}`, { foreignTable: 'v2_session_exercises' })
+      .not('performed_at', 'is', null)
+      .neq('set_type', 'warmup')
+      .order('performed_at', { ascending: false })
+      .limit(30);
+
+    if (error || !data || data.length === 0) {
+      if (__DEV__ && error) {
+        devError('workout-query', error, { exerciseId, userId, action: 'getPreviousExercisePerformance' });
+      }
+      return null;
+    }
+
+    const latestSessionExerciseId = data[0].session_exercise_id;
+    const sets = data
+      .filter((s) => s.session_exercise_id === latestSessionExerciseId)
+      .map((s) => ({
+        set_number: s.set_number,
+        weight: s.weight ?? undefined,
+        reps: s.reps ?? undefined,
+        duration_sec: s.duration_sec ?? undefined,
+        set_type: (s.set_type ?? undefined) as SetType | undefined,
+      }))
+      .sort((a, b) => a.set_number - b.set_number);
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'getPreviousExercisePerformance_result',
+        exerciseId,
+        setCount: sets.length,
+        performedAt: data[0].performed_at,
+      });
+    }
+
+    return { performed_at: data[0].performed_at as string, sets };
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { exerciseId, userId, action: 'getPreviousExercisePerformance' });
+    }
+    return null;
   }
 }
 
@@ -1516,7 +1688,8 @@ export async function getMuscleStressStats(
           )
         `
       )
-      .in('session_exercise_id', sessionExerciseIds);
+      .in('session_exercise_id', sessionExerciseIds)
+      .neq('set_type', 'warmup');
 
     if (setsError) {
       if (__DEV__) {
@@ -1799,7 +1972,7 @@ export async function prefillSessionSets(
  */
 export async function markSetComplete(
   setId: string,
-  values: { reps?: number; weight?: number; duration_sec?: number; rpe?: number }
+  values: { reps?: number; weight?: number; duration_sec?: number; rpe?: number; set_type?: SetType }
 ): Promise<boolean> {
   if (__DEV__) {
     devLog('workout-query', {
@@ -1856,6 +2029,8 @@ export async function getSessionWithSets(sessionId: string): Promise<{
     exercise_id?: string;
     custom_exercise_id?: string;
     sort_order: number;
+    superset_group?: number | null;
+    rest_sec?: number | null;
     notes?: string;
     sets: SessionSet[];
   }>;
@@ -1882,7 +2057,7 @@ export async function getSessionWithSets(sessionId: string): Promise<{
     // Fetch exercises
     const { data: sessionExercises, error: exercisesError } = await supabase
       .from('v2_session_exercises')
-      .select('id, exercise_id, custom_exercise_id, sort_order')
+      .select('id, exercise_id, custom_exercise_id, sort_order, superset_group, rest_sec')
       .eq('session_id', sessionId)
       .order('sort_order', { ascending: true });
 
@@ -1962,6 +2137,8 @@ export async function getSessionWithSets(sessionId: string): Promise<{
         exercise_id: se.exercise_id || undefined,
         custom_exercise_id: se.custom_exercise_id || undefined,
         sort_order: se.sort_order,
+        superset_group: se.superset_group ?? null,
+        rest_sec: se.rest_sec ?? null,
         notes: notes || undefined,
         sets: (sets || []).filter(s => s.session_exercise_id === se.id),
       };

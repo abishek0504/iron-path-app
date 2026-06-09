@@ -3,7 +3,7 @@
  * Replaces the modal picker: navigate from Planner with dayId, templateId, dayName.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, ChevronDown, ChevronUp, Plus } from 'lucide-react-native';
-import { colors, spacing, typography, borderRadius } from '../src/lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
@@ -41,6 +42,8 @@ export default function AddExerciseScreen() {
   const params = useLocalSearchParams<{ dayId: string; templateId: string; dayName: string; sessionId?: string }>();
   const { dayId, templateId, dayName, sessionId } = params;
   const profileId = useUserStore((s) => s.profile?.id);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [userId, setUserId] = useState<string | null>(profileId ?? null);
   const [exercises, setExercises] = useState<MergedExercise[]>([]);
@@ -256,108 +259,110 @@ export default function AddExerciseScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backBtn: {
-    padding: spacing.xs,
-    marginRight: spacing.sm,
-  },
-  headerTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  search: {
-    margin: spacing.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  listContent: {
-    paddingBottom: spacing.xl,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  rowMain: {
-    flex: 1,
-  },
-  rowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  name: {
-    fontSize: typography.sizes.base,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    flex: 1,
-  },
-  expanded: {
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-  },
-  detailLabel: {
-    fontSize: typography.sizes.sm,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-  detailText: {
-    fontSize: typography.sizes.sm,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
-  },
-  addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    marginLeft: spacing.sm,
-  },
-  addBtnText: {
-    color: colors.background,
-    fontSize: typography.sizes.sm,
-    fontWeight: '600',
-  },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  errorText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-  },
-  emptyText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    backBtn: {
+      padding: spacing.xs,
+      marginRight: spacing.sm,
+    },
+    headerTitle: {
+      fontSize: typography.sizes.lg,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    search: {
+      margin: spacing.md,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.md,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+    },
+    listContent: {
+      paddingBottom: spacing.xl,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    rowMain: {
+      flex: 1,
+    },
+    rowTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    name: {
+      fontSize: typography.sizes.base,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      flex: 1,
+    },
+    expanded: {
+      marginTop: spacing.sm,
+      paddingTop: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: colors.borderLight,
+    },
+    detailLabel: {
+      fontSize: typography.sizes.sm,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginTop: spacing.xs,
+    },
+    detailText: {
+      fontSize: typography.sizes.sm,
+      color: colors.textPrimary,
+      marginBottom: spacing.xs,
+    },
+    addBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.md,
+      marginLeft: spacing.sm,
+    },
+    addBtnText: {
+      color: colors.background,
+      fontSize: typography.sizes.sm,
+      fontWeight: '600',
+    },
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.lg,
+    },
+    errorText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+    },
+  });
+}

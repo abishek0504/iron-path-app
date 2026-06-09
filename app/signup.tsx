@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,15 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
-import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { Check, X, Eye, EyeOff } from 'lucide-react-native';
+import { LegalLinks } from '../src/components/ui/LegalLinks';
 
 export default function Signup() {
   const router = useRouter();
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,18 +29,18 @@ export default function Signup() {
   const [confirmPasswordFocused, setConfirmPasswordFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
+
   // Animation values for dropdowns
   const passwordDropdownAnim = useRef(new Animated.Value(0)).current;
   const confirmPasswordDropdownAnim = useRef(new Animated.Value(0)).current;
-  
+
   // Refs to preserve password values (workaround for React Native secureTextEntry bug)
   const passwordRef = useRef<string>('');
   const confirmPasswordRef = useRef<string>('');
 
   const getPasswordErrorMessage = (error: any): string => {
     const errorMessage = error?.message?.toLowerCase() || '';
-    
+
     // Map common Supabase password errors to user-friendly messages
     if (errorMessage.includes('password') && errorMessage.includes('weak')) {
       return 'Password is too weak. Use at least 8 characters with a mix of letters, numbers, and symbols.';
@@ -50,7 +54,7 @@ export default function Signup() {
     if (errorMessage.includes('password')) {
       return 'Password does not meet security requirements. Use at least 8 characters with a mix of letters, numbers, and symbols.';
     }
-    
+
     // Return original message for non-password errors
     return error?.message || 'Unable to sign up right now.';
   };
@@ -100,7 +104,7 @@ export default function Signup() {
 
   const validatePassword = (pwd: string): string | null => {
     const errors: string[] = [];
-    
+
     if (pwd.length < 8) {
       errors.push('at least 8 characters');
     }
@@ -116,11 +120,11 @@ export default function Signup() {
     if (!/[^a-zA-Z0-9]/.test(pwd)) {
       errors.push('one special character (e.g., !@#$%^&*)');
     }
-    
+
     if (errors.length > 0) {
       return `Password must contain: ${errors.join(', ')}.`;
     }
-    
+
     return null;
   };
 
@@ -347,6 +351,8 @@ export default function Signup() {
 
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
+        <LegalLinks intro="By signing up you agree to our" />
+
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleSignup}
@@ -368,117 +374,116 @@ export default function Signup() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-    minHeight: '100%',
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  title: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-  },
-  fieldGroup: {
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    color: colors.textPrimary,
-    backgroundColor: colors.background,
-    fontSize: typography.sizes.base,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.background,
-  },
-  inputWithIcon: {
-    flex: 1,
-    padding: spacing.md,
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  eyeButton: {
-    padding: spacing.md,
-    paddingLeft: spacing.sm,
-  },
-  button: {
-    marginTop: spacing.sm,
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: typography.sizes.sm,
-  },
-  linkText: {
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  requirementsBox: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-    gap: spacing.xs,
-    overflow: 'hidden',
-  },
-  requirementItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  requirementText: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.sm,
-  },
-  requirementTextMet: {
-    color: colors.textSecondary,
-  },
-});
-
-
-
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.lg,
+      minHeight: '100%',
+    },
+    card: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: borderRadius.lg,
+      padding: spacing.lg,
+      gap: spacing.md,
+    },
+    title: {
+      fontSize: typography.sizes.xl,
+      fontWeight: typography.weights.semibold,
+      color: colors.textPrimary,
+    },
+    subtitle: {
+      fontSize: typography.sizes.sm,
+      color: colors.textSecondary,
+    },
+    fieldGroup: {
+      gap: spacing.xs,
+    },
+    label: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: borderRadius.md,
+      padding: spacing.md,
+      color: colors.textPrimary,
+      backgroundColor: colors.background,
+      fontSize: typography.sizes.base,
+    },
+    inputContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: borderRadius.md,
+      backgroundColor: colors.background,
+    },
+    inputWithIcon: {
+      flex: 1,
+      padding: spacing.md,
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+    },
+    eyeButton: {
+      padding: spacing.md,
+      paddingLeft: spacing.sm,
+    },
+    button: {
+      marginTop: spacing.sm,
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    buttonDisabled: {
+      opacity: 0.6,
+    },
+    buttonText: {
+      color: colors.background,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    errorText: {
+      color: colors.error,
+      fontSize: typography.sizes.sm,
+    },
+    linkText: {
+      color: colors.textSecondary,
+      textAlign: 'center',
+      marginTop: spacing.sm,
+    },
+    requirementsBox: {
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      gap: spacing.xs,
+      overflow: 'hidden',
+    },
+    requirementItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    requirementText: {
+      color: colors.textMuted,
+      fontSize: typography.sizes.sm,
+    },
+    requirementTextMet: {
+      color: colors.textSecondary,
+    },
+  });
+}

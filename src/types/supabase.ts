@@ -1,25 +1,16 @@
 /**
- * Supabase TypeScript Types
- * 
- * This file should be generated from the database schema using:
- * 
- * npx supabase gen types typescript --project-id your_project_id > src/types/supabase.ts
- * 
- * Or with local Supabase:
- * 
- * supabase gen types typescript --local > src/types/supabase.ts
- * 
- * DO NOT manually edit this file. Always regenerate from the database schema.
- * 
- * See src/types/README.md for more information.
+ * Database types — generated output lives in `supabase.gen.ts`. Regenerate locally:
+ *
+ * npx supabase gen types typescript --project-id wmraczqltegkqbststik > src/types/supabase.gen.ts
  */
+export type {
+  CompositeTypes,
+  Database,
+  Enums,
+  Json,
+  Tables,
+  TablesInsert,
+  TablesUpdate,
+} from './supabase.gen';
 
-// Placeholder - replace with generated types
-export type Database = {
-  public: {
-    Tables: {
-      // Types will be generated here
-    };
-  };
-};
-
+export { Constants } from './supabase.gen';

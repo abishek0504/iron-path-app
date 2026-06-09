@@ -5,12 +5,13 @@
  * NOTE: Grouping is by completed_at date (performed truth), not day_name
  */
 
-import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from 'react-native';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
-import { colors, spacing, layout, typography, borderRadius } from '../../src/lib/utils/theme';
+import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
+import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TabHeader } from '../../src/components/ui/TabHeader';
 import { supabase } from '../../src/lib/supabase/client';
 import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
@@ -24,9 +25,13 @@ type ViewMode = 'week' | 'month';
 
 export default function ProgressTab() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const showToast = useUIStore((state) => state.showToast);
   const { openSheet } = useModal();
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -80,6 +85,7 @@ export default function ProgressTab() {
       const userId = session?.user?.id;
       if (!userId) {
         showToast('Please log in', 'error');
+        router.replace('/login');
         return;
       }
 
@@ -123,7 +129,7 @@ export default function ProgressTab() {
     } finally {
       setLoading(false);
     }
-  }, [currentDate, viewMode, getDateRange, showToast]);
+  }, [currentDate, viewMode, getDateRange, showToast, router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -133,6 +139,17 @@ export default function ProgressTab() {
       load();
     }, [load])
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    lastFocusLoadRef.current = 0;
+    try {
+      await load();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, load]);
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
@@ -187,6 +204,14 @@ export default function ProgressTab() {
             styles.content,
             { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
           ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
         >
           <View style={styles.controls}>
             <View style={styles.viewToggle}>
@@ -243,7 +268,7 @@ export default function ProgressTab() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -313,5 +338,5 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     padding: spacing.md,
   },
-});
+  }); }
 

@@ -43,6 +43,7 @@ export const ModalManager: React.FC = () => {
         >
           <ExercisePicker
             onSelect={bottomSheetProps.onSelect}
+            onSelectMultiple={bottomSheetProps.onSelectMultiple}
             multiSelect={bottomSheetProps.multiSelect}
           />
         </BottomSheet>

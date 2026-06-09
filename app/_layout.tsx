@@ -10,6 +10,9 @@ import { Platform } from 'react-native';
 import { useEffect } from 'react';
 import { ToastProvider } from '../src/components/ui/ToastProvider';
 import { ModalManager } from '../src/components/ui/ModalManager';
+import { ThemeProvider } from '../src/lib/utils/ThemeContext';
+import { initNotifications, setupNotificationResponseRouting } from '../src/lib/utils/notifications';
+import { initSentry } from '../src/lib/monitoring/initSentry';
 
 // Import web scrollbar styles
 if (Platform.OS === 'web') {
@@ -17,6 +20,13 @@ if (Platform.OS === 'web') {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    initSentry();
+    initNotifications();
+    const unsub = setupNotificationResponseRouting();
+    return unsub;
+  }, []);
+
   // Apply web-specific styles
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -48,16 +58,8 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
         <Stack.Screen name="auth/forgot-password" options={{ presentation: 'modal', gestureEnabled: true }} />
         <Stack.Screen name="auth/change-email" options={{ presentation: 'modal', gestureEnabled: true }} />
+        <Stack.Screen name="auth/change-password" options={{ presentation: 'modal', gestureEnabled: true }} />
         <Stack.Screen name="auth/callback" options={{ presentation: 'modal', gestureEnabled: true }} />
-        <Stack.Screen
-          name="planner-day"
-          options={{
-            gestureEnabled: true,
-            fullScreenGestureEnabled: false,
-            gestureDirection: 'horizontal',
-            animation: 'slide_from_right',
-          }}
-        />
         <Stack.Screen
           name="add-exercise"
           options={{
@@ -81,15 +83,19 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
-          name="exercise-detail"
-          options={{ presentation: 'modal', gestureEnabled: true }}
-        />
-        <Stack.Screen
           name="edit-profile"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
         <Stack.Screen
           name="prs"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="health-connect"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="workout-reminders"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
       </Stack>
@@ -102,9 +108,13 @@ export default function RootLayout() {
 
   // Wrap with GestureHandlerRootView for native platforms
   if (Platform.OS !== 'web') {
-    return <GestureHandlerRootView style={{ flex: 1 }}>{content}</GestureHandlerRootView>;
+    return (
+      <ThemeProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>{content}</GestureHandlerRootView>
+      </ThemeProvider>
+    );
   }
 
-  return content;
+  return <ThemeProvider>{content}</ThemeProvider>;
 }
 

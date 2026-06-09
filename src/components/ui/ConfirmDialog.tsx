@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, GestureResponderEvent } from 'react-native';
-import { colors, spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 interface ConfirmDialogProps {
   visible: boolean;
@@ -28,6 +29,74 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: spacing.lg,
+    },
+    card: {
+      width: '100%',
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.lg,
+      gap: spacing.md,
+    },
+    title: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.lg,
+      fontWeight: typography.weights.bold,
+    },
+    message: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+      lineHeight: 20,
+    },
+    actions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: spacing.sm,
+    },
+    button: {
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.md,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    secondary: {
+      backgroundColor: colors.card,
+    },
+    destructive: {
+      backgroundColor: colors.error,
+      borderColor: colors.error,
+    },
+    destructiveText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    primary: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    secondaryText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.medium,
+    },
+    primaryText: {
+      color: colors.background,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+  }), [colors]);
+
   const cancelButtonStyle = cancelDestructive ? styles.destructive : styles.secondary;
   const cancelTextStyle = cancelDestructive ? styles.destructiveText : styles.secondaryText;
   return (
@@ -54,72 +123,3 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     </Modal>
   );
 };
-
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  card: {
-    width: '100%',
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  title: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
-  },
-  message: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    lineHeight: 20,
-  },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.sm,
-  },
-  button: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  secondary: {
-    backgroundColor: colors.card,
-  },
-  destructive: {
-    backgroundColor: colors.error,
-    borderColor: colors.error,
-  },
-  destructiveText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  primary: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  secondaryText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.medium,
-  },
-  primaryText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-});
-
-

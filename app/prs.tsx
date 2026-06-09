@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { TabHeader } from '../src/components/ui/TabHeader';
 import { useUIStore } from '../src/stores/uiStore';
 import { useUserStore } from '../src/stores/userStore';
@@ -17,6 +18,8 @@ export default function PRsScreen() {
   const showToast = useUIStore((state) => state.showToast);
   const profile = useUserStore((state) => state.profile);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [loading, setLoading] = useState(true);
   const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
@@ -98,46 +101,47 @@ export default function PRsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-  },
-  content: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.sm,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  primary: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  secondary: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-});
-
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+    },
+    loadingText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+    },
+    content: {
+      padding: spacing.lg,
+      gap: spacing.md,
+      paddingBottom: spacing.xxl,
+    },
+    emptyText: {
+      color: colors.textMuted,
+      fontSize: typography.sizes.sm,
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.md,
+      gap: spacing.xs,
+    },
+    primary: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    secondary: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+  });
+}

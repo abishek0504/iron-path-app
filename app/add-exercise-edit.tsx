@@ -4,7 +4,7 @@
  * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–600.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft } from 'lucide-react-native';
-import { colors, spacing, typography, borderRadius } from '../src/lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { useToast } from '../src/hooks/useToast';
@@ -39,6 +40,7 @@ import {
 } from '../src/lib/supabase/queries/exercises';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
+import { WEEK_DAYS } from '../src/lib/utils/date';
 
 const DEFAULT_REST_SEC = 90;
 const REPS_MIN = 1;
@@ -102,6 +104,8 @@ function allSetsValid(sets: EditSet[], isTimedMode: boolean): boolean {
 export default function AddExerciseEditScreen() {
   const router = useRouter();
   const toast = useToast();
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const params = useLocalSearchParams<{
     dayId: string;
     templateId: string;
@@ -379,6 +383,16 @@ export default function AddExerciseEditScreen() {
     setSaving(true);
     try {
       const addToRoutine = !todayOnlyRef.current;
+      // Only touch a live session when the edited day is actually today (or the
+      // caller passed an explicit session). Future-day edits are template-only;
+      // previously this created/used today's active session by mistake.
+      const isEditingToday = dayName === WEEK_DAYS[new Date().getDay()];
+
+      if (!isEditingToday && !sessionId && !addToRoutine) {
+        toast.error('"Today only" is only available for today\'s workout');
+        return;
+      }
+
       let targetSession: { id: string } | null = null;
       if (sessionId) {
         const { data } = await supabase
@@ -392,7 +406,7 @@ export default function AddExerciseEditScreen() {
           toast.error('Workout not found');
           return;
         }
-      } else {
+      } else if (isEditingToday) {
         targetSession = await getOrCreateActiveSessionForToday(userId!, dayName);
         if (!targetSession) {
           toast.error('Failed to get today\'s session');
@@ -461,6 +475,10 @@ export default function AddExerciseEditScreen() {
         if (__DEV__) devLog('add-exercise-edit', { action: 'sessionSetsInserted', count: sets.length });
         useUIStore.getState().setPlannerNeedsRefetch(true);
         toast.success(addToRoutine ? 'Added to routine & workout' : 'Added to today\'s session');
+      } else {
+        // Future-day edit: template updated, no live session touched
+        useUIStore.getState().setPlannerNeedsRefetch(true);
+        toast.success('Added to routine');
       }
 
       router.replace('/(tabs)/planner');
@@ -644,7 +662,7 @@ export default function AddExerciseEditScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -805,4 +823,4 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     marginTop: spacing.xs,
   },
-});
+  }); }

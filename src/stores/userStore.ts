@@ -22,6 +22,9 @@ export interface UserProfile {
   preferred_training_style?: string;
   use_imperial?: boolean;
   avatar_url?: string;
+  // Soft-delete metadata (Phase 0 — App Store Guideline 5.1.1(v))
+  deleted_at?: string | null;
+  scheduled_purge_at?: string | null;
 }
 
 interface UserState {

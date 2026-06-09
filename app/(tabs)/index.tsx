@@ -3,8 +3,8 @@
  * Shows today's workout with pulsing start/continue button
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, {
@@ -20,7 +20,8 @@ import Animated, {
 import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
 import { Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
 import { supabase } from '../../src/lib/supabase/client';
-import { colors, spacing, layout, borderRadius, typography } from '../../src/lib/utils/theme';
+import { spacing, layout, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
+import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
@@ -40,10 +41,11 @@ import {
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { hapticMedium, hapticWarning } from '../../src/lib/utils/haptics';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../src/lib/engine/targetSelection';
+import { WEEK_DAYS, getUtcDayKey, getUtcDayBoundsIso } from '../../src/lib/utils/date';
 
-const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DAY_ORDER: Record<string, number> = {
   Sunday: 0,
   Monday: 1,
@@ -59,18 +61,6 @@ function getTodayDayName(): string {
   return WEEK_DAYS[dayIndex];
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-function getUtcDayKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function getUtcDayBoundsIso(dayKey: string): { startIso: string; endIsoExclusive: string } {
-  const startIso = `${dayKey}T00:00:00.000Z`;
-  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY).toISOString();
-  return { startIso, endIsoExclusive };
-}
-
 // Circular Button with Ripple Effect Component
 const CircularButton = ({
   onPress,
@@ -84,6 +74,8 @@ const CircularButton = ({
   isCompleted: boolean;
 }) => {
   const ripple = useSharedValue(0);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
     if (isCompleted || disabled) return;
@@ -130,8 +122,8 @@ const CircularButton = ({
           <Svg width={160} height={160} style={styles.rippleSvg}>
             <Defs>
               <LinearGradient id="rippleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <Stop offset="0%" stopColor="#06b6d4" stopOpacity="0.6" />
-                <Stop offset="50%" stopColor="#22d3ee" stopOpacity="0.4" />
+                <Stop offset="0%" stopColor={colors.accentCyan} stopOpacity="0.6" />
+                <Stop offset="50%" stopColor={colors.accentCyanBright} stopOpacity="0.4" />
                 <Stop offset="100%" stopColor={colors.primary} stopOpacity="0.6" />
               </LinearGradient>
             </Defs>
@@ -146,8 +138,8 @@ const CircularButton = ({
           <Svg width={164} height={164} style={styles.gradientBorderSvg} pointerEvents="none">
             <Defs>
               <LinearGradient id="buttonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <Stop offset="0%" stopColor="#06b6d4" stopOpacity="1" />
-                <Stop offset="50%" stopColor="#22d3ee" stopOpacity="1" />
+                <Stop offset="0%" stopColor={colors.accentCyan} stopOpacity="1" />
+                <Stop offset="50%" stopColor={colors.accentCyanBright} stopOpacity="1" />
                 <Stop offset="100%" stopColor={colors.primary} stopOpacity="1" />
               </LinearGradient>
             </Defs>
@@ -196,7 +188,9 @@ export default function WorkoutTab() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const modal = useModal();
-  const { profile } = useUserStore();
+  const profile = useUserStore((state) => state.profile);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [activeTemplate, setActiveTemplate] = useState<any>(null);
   const [templateDays, setTemplateDays] = useState<Array<{ day: { day_name: string }; slots: TemplateSlot[] }>>([]);
   const [selectedPlanDayName, setSelectedPlanDayName] = useState<string>(getTodayDayName());
@@ -212,6 +206,7 @@ export default function WorkoutTab() {
   const [sessionsToday, setSessionsToday] = useState<WorkoutSession[]>([]);
   const [selectedWorkoutIndex, setSelectedWorkoutIndex] = useState<number>(0);
   const [isStartingWorkout, setIsStartingWorkout] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
   const startInProgressRef = useRef(false);
@@ -481,7 +476,7 @@ export default function WorkoutTab() {
       setSelectedDayExercises(exercisesToShow);
 
       // Selected workout is completed when its session status is 'completed'
-      const isTrulyCompleted = viewingSession?.status === 'completed' ?? false;
+      const isTrulyCompleted = viewingSession?.status === 'completed';
       setIsWorkoutCompleted(isTrulyCompleted);
 
       if (__DEV__) {
@@ -535,6 +530,22 @@ export default function WorkoutTab() {
     }, [hasInitiallyLoaded])
   );
 
+  /**
+   * Pull-to-refresh: bypass focus throttle and in-flight guard so a deliberate user gesture
+   * always re-runs the load pipeline against the currently selected workout index.
+   */
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    loadInFlightRef.current = false;
+    lastFocusLoadRef.current = 0;
+    try {
+      await loadTodayWorkout(selectedWorkoutIndex);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, loadTodayWorkout, selectedWorkoutIndex]);
+
   const openPlanDayPicker = useCallback(() => {
     if (!templateDays.length) return;
     modal.openSheet('planDayPicker', {
@@ -577,6 +588,7 @@ export default function WorkoutTab() {
 
   const handleStartWorkout = async () => {
     if (startInProgressRef.current) return;
+    hapticMedium();
     startInProgressRef.current = true;
     setIsStartingWorkout(true);
     try {
@@ -721,6 +733,8 @@ export default function WorkoutTab() {
             exercise_id: slot.exercise_id || null,
             custom_exercise_id: slot.custom_exercise_id || null,
             sort_order: nextSortOrder++,
+            superset_group: slot.superset_group ?? null,
+            rest_sec: slot.rest_sec ?? null,
           })
           .select('id, exercise_id, custom_exercise_id')
           .single();
@@ -836,6 +850,7 @@ export default function WorkoutTab() {
   const handleResetWorkout = async () => {
     if (!activeTemplate || !currentDay) return;
 
+    hapticWarning();
     setIsResetting(true);
     try {
       const userId = await getCurrentUserId();
@@ -920,7 +935,8 @@ export default function WorkoutTab() {
           </View>
         </View>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.loadingText}>Loading workout...</Text>
         </View>
       </SafeAreaView>
     );
@@ -947,6 +963,14 @@ export default function WorkoutTab() {
           { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         {!activeTemplate ? (
           <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
@@ -973,7 +997,7 @@ export default function WorkoutTab() {
             ) : isRestDay ? (
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
                 <View style={styles.restDayIconContainer}>
-                  <Timer size={40} color="#22d3ee" />
+                  <Timer size={40} color={colors.accentCyanBright} />
                 </View>
                 <Text style={styles.restDayTitle}>Rest Day</Text>
                 <Text style={styles.restDayText}>Take it easy!</Text>
@@ -1000,7 +1024,7 @@ export default function WorkoutTab() {
                     )}
                   </View>
 
-                  <Text style={styles.workoutTitle}>Today's Workout</Text>
+                  <Text style={styles.workoutTitle}>Today&apos;s Workout</Text>
                   <Text style={styles.workoutSubtitle}>
                     Plan day: {selectedPlanDayName} • {selectedDayExercises.length} exercise
                     {selectedDayExercises.length !== 1 ? 's' : ''} scheduled
@@ -1008,7 +1032,7 @@ export default function WorkoutTab() {
 
                   {isBorrowingPlanDay && (
                     <Text style={styles.helperText}>
-                      Doing {selectedPlanDayName}'s workout today
+                      Doing {selectedPlanDayName}&apos;s workout today
                     </Text>
                   )}
 
@@ -1087,7 +1111,7 @@ export default function WorkoutTab() {
               )}
               {isBorrowingPlanDay && (
                 <Text style={styles.helperTextSmall}>
-                  Doing {selectedPlanDayName}'s workout today
+                  Doing {selectedPlanDayName}&apos;s workout today
                 </Text>
               )}
             </Animated.View>
@@ -1102,8 +1126,15 @@ export default function WorkoutTab() {
         animationType="fade"
         onRequestClose={() => setShowResetModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        {/* Backdrop tap to dismiss matches sheet behavior; tap on the dialog body itself
+            does not propagate to the dismiss handler. */}
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => {
+            if (!isResetting) setShowResetModal(false);
+          }}
+        >
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.modalTitle}>Reset Workout?</Text>
             <Text style={styles.modalMessage}>
               This will delete your current workout progress and allow you to start from the beginning.
@@ -1126,14 +1157,14 @@ export default function WorkoutTab() {
                 </Text>
               </Pressable>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1142,6 +1173,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.sm,
   },
   loadingText: {
     color: colors.textSecondary,
@@ -1166,7 +1198,7 @@ const styles = StyleSheet.create({
     right: -100,
     width: 400,
     height: 400,
-    backgroundColor: '#06b6d4',
+    backgroundColor: colors.accentCyan,
     opacity: 0.1,
     borderRadius: 200,
   },
@@ -1228,13 +1260,13 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+    backgroundColor: colors.accentCyanMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
   restDayTitle: {
-    color: '#22d3ee',
+    color: colors.accentCyanBright,
     fontSize: typography.sizes.xl,
     fontWeight: '700',
     marginBottom: spacing.md,
@@ -1254,7 +1286,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(39, 39, 42, 0.5)',
+    borderColor: colors.cardBorder,
   },
   workoutCardContent: {
     backgroundColor: colors.card,
@@ -1296,7 +1328,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(63, 63, 70, 0.3)',
   },
   badgeSecondaryText: {
-    color: '#d4d4d8',
+    color: colors.textSecondary,
     fontSize: typography.sizes.xs,
     fontWeight: '700',
     letterSpacing: 1.5,
@@ -1475,15 +1507,15 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: 'rgba(24, 24, 27, 0.7)',
+    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
   },
   circularButtonInnerCompleted: {
-    backgroundColor: 'rgba(24, 24, 27, 0.7)',
+    backgroundColor: colors.card,
   },
   circularButtonInnerDisabled: {
-    backgroundColor: 'rgba(24, 24, 27, 0.5)',
+    backgroundColor: colors.cardHover,
     opacity: 0.6,
   },
   circularButtonTextContainer: {
@@ -1498,9 +1530,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.5,
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
   circularButtonTextCompleted: {
     color: colors.textMuted,
@@ -1584,9 +1613,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   chooseWorkoutText: {
-    color: '#000',
+    color: colors.onPrimaryContrast,
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.semibold,
     textAlign: 'center',
   },
-});
+  }); }

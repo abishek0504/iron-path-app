@@ -1,15 +1,24 @@
 /**
  * Edge Function: Update Muscle Freshness
- * 
+ *
  * Triggered automatically when a workout session is marked as 'completed'.
  * Implements the Banister Impulse-Response model for continuous muscle recovery tracking.
- * 
+ *
  * Flow:
- * 1. Fetch session exercises and sets for the completed session
- * 2. Calculate stress per muscle using existing biomechanical model
- * 3. For muscles hit in session: Set freshness = 0 (fully fatigued)
- * 4. For all other muscles: Apply exponential decay based on time elapsed
- * 5. Upsert to v2_muscle_freshness table
+ * 1. Authenticate caller (service-role bearer for DB trigger; user JWT for client)
+ * 2. Verify session ownership (prevents cross-user freshness corruption)
+ * 3. Fetch session exercises and sets
+ * 4. Calculate stress per muscle using existing biomechanical model
+ * 5. Hit muscles → freshness = 0; non-hit muscles → Banister decay
+ * 6. Upsert all rows to v2_muscle_freshness in one batch
+ *
+ * Security model:
+ *   - Service-role bearer (SUPABASE_SERVICE_ROLE_KEY) is treated as trusted
+ *     (only the DB trigger uses this path).
+ *   - Any other bearer is treated as a user JWT and validated via auth.getUser().
+ *     The body's user_id is ignored in the user-JWT path; we always derive
+ *     user_id from the verified JWT.
+ *   - In both paths, session_id ownership is verified against v2_workout_sessions.
  */
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -20,7 +29,7 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
   // Slow recovery (λ=0.020, half-life ~35h)
   lower_back: 0.020,
   hamstrings: 0.020,
-  
+
   // Medium recovery (λ=0.041, half-life ~17h)
   chest: 0.041,
   upper_chest: 0.041,
@@ -32,7 +41,7 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
   traps: 0.041,
   abs: 0.041,
   obliques: 0.041,
-  
+
   // Fast recovery (λ=0.099, half-life ~7h)
   lateral_deltoids: 0.099,
   posterior_deltoids: 0.099,
@@ -42,7 +51,7 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
   calves: 0.099,
   soleus: 0.099,
   forearms: 0.099,
-  
+
   // Stabilizers (medium-fast, λ=0.060, half-life ~12h)
   rotator_cuff: 0.060,
   serratus_anterior: 0.060,
@@ -54,21 +63,19 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
   hip_flexors: 0.060,
 };
 
-// Normalize muscle labels coming from exercise metadata into canonical keys
-// used by v2_muscles (lowercase, snake_case).
+const DEFAULT_LAMBDA = 0.041;
+
 function normalizeMuscleKey(raw: unknown): string | null {
   if (!raw || typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  // Basic normalization covers values like "Biceps", "Lower Back", "Tibialis Anterior"
   return trimmed.toLowerCase().replace(/\s+/g, '_');
 }
 
-// Stimulus calculation (same as getMuscleStressStats)
 function calculateStimulus(rpe?: number | null, rir?: number | null): number {
   const RPE_THRESHOLD = 5;
   const DEFAULT_STIMULUS = 0.6;
-  
+
   if (rpe != null && typeof rpe === 'number') {
     return Math.max(0, Math.min(1, (rpe - RPE_THRESHOLD) / 5));
   } else if (rir != null && typeof rir === 'number') {
@@ -78,105 +85,155 @@ function calculateStimulus(rpe?: number | null, rir?: number | null): number {
   return DEFAULT_STIMULUS;
 }
 
-// Apply Banister decay formula
 function applyDecay(initialFatigue: number, hoursElapsed: number, lambda: number): number {
-  // Fatigue(t) = Fatigue₀ × e^(-λ × t)
   const fatigue = initialFatigue * Math.exp(-lambda * hoursElapsed);
   return Math.max(0, Math.min(100, fatigue));
 }
 
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req) => {
   try {
-    // Get request payload
-    const { user_id, session_id } = await req.json();
-    
-    if (!user_id || !session_id) {
-      return new Response(
-        JSON.stringify({ error: 'Missing user_id or session_id' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+      return jsonResponse({ error: 'Server misconfigured' }, 500);
     }
-    
-    // Create Supabase client with service role key
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // 1. Fetch session exercises for this session
-    const { data: sessionExercises, error: seError } = await supabase
+
+    const authHeader = req.headers.get('authorization') ?? '';
+    const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!bearer) {
+      return jsonResponse({ error: 'Missing Authorization header' }, 401);
+    }
+
+    const body = await req.json().catch(() => null) as
+      | { user_id?: unknown; session_id?: unknown }
+      | null;
+    const sessionIdRaw = body?.session_id;
+    if (typeof sessionIdRaw !== 'string' || !sessionIdRaw) {
+      return jsonResponse({ error: 'Missing or invalid session_id' }, 400);
+    }
+    const sessionId = sessionIdRaw;
+
+    // Service client bypasses RLS for the actual mutations / cross-table reads
+    const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // Resolve userId
+    //  - service-role bearer: trust body user_id (DB trigger path)
+    //  - any other bearer: verify it's a real user JWT, derive userId from it
+    let userId: string;
+    if (bearer === serviceRoleKey) {
+      const bodyUserId = body?.user_id;
+      if (typeof bodyUserId !== 'string' || !bodyUserId) {
+        return jsonResponse({ error: 'Missing user_id (service-role caller)' }, 400);
+      }
+      userId = bodyUserId;
+    } else {
+      const authClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: `Bearer ${bearer}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: userData, error: userErr } = await authClient.auth.getUser(bearer);
+      if (userErr || !userData?.user) {
+        return jsonResponse({ error: 'Invalid or expired token' }, 401);
+      }
+      userId = userData.user.id;
+    }
+
+    // Ownership check: session must belong to userId. Always enforced (both paths).
+    const { data: ownership, error: ownershipErr } = await serviceClient
+      .from('v2_workout_sessions')
+      .select('user_id')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (ownershipErr) {
+      return jsonResponse({ error: 'Failed to verify session ownership' }, 500);
+    }
+    if (!ownership) {
+      return jsonResponse({ error: 'Session not found' }, 404);
+    }
+    if (ownership.user_id !== userId) {
+      return jsonResponse({ error: 'Forbidden' }, 403);
+    }
+
+    // 1. Fetch session exercises
+    const { data: sessionExercises, error: seError } = await serviceClient
       .from('v2_session_exercises')
       .select('id, exercise_id, custom_exercise_id')
-      .eq('session_id', session_id);
-    
+      .eq('session_id', sessionId);
+
     if (seError) throw seError;
     if (!sessionExercises || sessionExercises.length === 0) {
-      return new Response(
-        JSON.stringify({ message: 'No exercises in session' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({ message: 'No exercises in session' }, 200);
     }
-    
+
     const sessionExerciseIds = sessionExercises.map(se => se.id);
-    
+
     // 2. Fetch sets for these exercises
-    const { data: sets, error: setsError } = await supabase
+    const { data: sets, error: setsError } = await serviceClient
       .from('v2_session_sets')
       .select('session_exercise_id, reps, weight, rpe, rir, duration_sec')
       .in('session_exercise_id', sessionExerciseIds);
-    
+
     if (setsError) throw setsError;
-    
-    // 3. Get exercise metadata (primary_muscles + implicit_hits)
+
+    // 3. Get exercise metadata in parallel
     const masterIds = new Set<string>();
     const customIds = new Set<string>();
-    
+
     for (const se of sessionExercises) {
       if (se.exercise_id) masterIds.add(se.exercise_id);
       if (se.custom_exercise_id) customIds.add(se.custom_exercise_id);
     }
-    
+
     const [masterMeta, customMeta] = await Promise.all([
       masterIds.size > 0
-        ? supabase
+        ? serviceClient
             .from('v2_exercises')
             .select('id, primary_muscles, implicit_hits')
             .in('id', Array.from(masterIds))
         : Promise.resolve({ data: [], error: null }),
       customIds.size > 0
-        ? supabase
+        ? serviceClient
             .from('v2_user_custom_exercises')
             .select('id, primary_muscles, implicit_hits')
             .in('id', Array.from(customIds))
         : Promise.resolve({ data: [], error: null })
     ]);
-    
+
     if (masterMeta.error) throw masterMeta.error;
     if (customMeta.error) throw customMeta.error;
-    
-    const exerciseMetaMap = new Map();
+
+    const exerciseMetaMap = new Map<string, { primary_muscles?: unknown; implicit_hits?: unknown }>();
     for (const ex of [...(masterMeta.data || []), ...(customMeta.data || [])]) {
       exerciseMetaMap.set(ex.id, ex);
     }
-    
-    // 4. Calculate stress per muscle for this session
+
+    // 4. Calculate stress per muscle
     const muscleStress: Record<string, number> = {};
-    
+
     for (const set of sets || []) {
       const se = sessionExercises.find(s => s.id === set.session_exercise_id);
       if (!se) continue;
-      
+
       const exerciseId = se.exercise_id || se.custom_exercise_id;
       if (!exerciseId) continue;
-      
+
       const meta = exerciseMetaMap.get(exerciseId);
       if (!meta) continue;
-      
-      // Calculate stimulus for this set
+
       const stimulus = calculateStimulus(set.rpe, set.rir);
-      
-      // Build muscle weights
       const muscleWeights = new Map<string, number>();
-      
+
       if (Array.isArray(meta.primary_muscles)) {
         for (const m of meta.primary_muscles) {
           const key = normalizeMuscleKey(m);
@@ -184,9 +241,9 @@ Deno.serve(async (req) => {
           muscleWeights.set(key, (muscleWeights.get(key) || 0) + 1);
         }
       }
-      
+
       if (meta.implicit_hits && typeof meta.implicit_hits === 'object') {
-        for (const [m, w] of Object.entries(meta.implicit_hits)) {
+        for (const [m, w] of Object.entries(meta.implicit_hits as Record<string, unknown>)) {
           const key = normalizeMuscleKey(m);
           if (!key) continue;
           const weight = typeof w === 'number' ? w : 0;
@@ -195,11 +252,10 @@ Deno.serve(async (req) => {
           }
         }
       }
-      
-      // Normalize weights
+
       let totalW = 0;
       for (const w of muscleWeights.values()) totalW += w;
-      
+
       if (totalW > 0) {
         for (const [muscle, w] of muscleWeights.entries()) {
           const normalized = w / totalW;
@@ -207,89 +263,94 @@ Deno.serve(async (req) => {
         }
       }
     }
-    
-    const musclesHit = Object.keys(muscleStress);
+
+    const musclesHit = new Set(Object.keys(muscleStress));
     const now = new Date();
-    
-    // 5. Get all canonical muscles
-    const { data: allMuscles, error: musclesError } = await supabase
-      .from('v2_muscles')
-      .select('key');
-    
-    if (musclesError) throw musclesError;
-    
-    // 6. Prepare freshness updates
-    const freshnessUpdates = [];
-    
-    for (const muscle of allMuscles || []) {
+
+    // 5. Get all canonical muscles AND existing freshness in parallel (single query each — no per-muscle SELECT loop)
+    const [musclesRes, existingRes] = await Promise.all([
+      serviceClient.from('v2_muscles').select('key'),
+      serviceClient
+        .from('v2_muscle_freshness')
+        .select('muscle_key, freshness, last_trained_at')
+        .eq('user_id', userId),
+    ]);
+
+    if (musclesRes.error) throw musclesRes.error;
+    if (existingRes.error) throw existingRes.error;
+
+    const existingByMuscle = new Map<string, { freshness: number | null; last_trained_at: string | null }>();
+    for (const row of existingRes.data || []) {
+      existingByMuscle.set(row.muscle_key, {
+        freshness: row.freshness,
+        last_trained_at: row.last_trained_at,
+      });
+    }
+
+    // 6. Build all updates in memory
+    const freshnessUpdates: Array<{
+      user_id: string;
+      muscle_key: string;
+      freshness: number;
+      last_trained_at: string | null;
+    }> = [];
+
+    for (const muscle of musclesRes.data || []) {
       const muscleKey = muscle.key;
-      
-      if (musclesHit.includes(muscleKey)) {
-        // Muscle was hit in this session - fully fatigued
+
+      if (musclesHit.has(muscleKey)) {
         freshnessUpdates.push({
-          user_id,
+          user_id: userId,
           muscle_key: muscleKey,
           freshness: 0,
-          last_trained_at: now.toISOString()
+          last_trained_at: now.toISOString(),
+        });
+        continue;
+      }
+
+      const current = existingByMuscle.get(muscleKey);
+      if (current && current.last_trained_at) {
+        const lastTrained = new Date(current.last_trained_at);
+        const hoursElapsed = (now.getTime() - lastTrained.getTime()) / (1000 * 60 * 60);
+        const lambda = MUSCLE_DECAY_CONSTANTS[muscleKey] ?? DEFAULT_LAMBDA;
+        const currentFatigue = 100 - (current.freshness ?? 0);
+        const newFatigue = applyDecay(currentFatigue, hoursElapsed, lambda);
+        const newFreshness = 100 - newFatigue;
+
+        freshnessUpdates.push({
+          user_id: userId,
+          muscle_key: muscleKey,
+          freshness: Math.round(newFreshness * 10) / 10,
+          last_trained_at: current.last_trained_at,
         });
       } else {
-        // Muscle not hit - apply decay formula
-        const { data: current } = await supabase
-          .from('v2_muscle_freshness')
-          .select('freshness, last_trained_at')
-          .eq('user_id', user_id)
-          .eq('muscle_key', muscleKey)
-          .maybeSingle();
-        
-        if (current && current.last_trained_at) {
-          const lastTrained = new Date(current.last_trained_at);
-          const hoursElapsed = (now.getTime() - lastTrained.getTime()) / (1000 * 60 * 60);
-          const lambda = MUSCLE_DECAY_CONSTANTS[muscleKey] || 0.041; // Default to medium
-          const currentFatigue = 100 - (current.freshness || 0);
-          const newFatigue = applyDecay(currentFatigue, hoursElapsed, lambda);
-          const newFreshness = 100 - newFatigue;
-          
-          freshnessUpdates.push({
-            user_id,
-            muscle_key: muscleKey,
-            freshness: Math.round(newFreshness * 10) / 10, // Round to 1 decimal
-            last_trained_at: current.last_trained_at // Keep original
-          });
-        } else {
-          // Never trained - keep at 100% fresh
-          freshnessUpdates.push({
-            user_id,
-            muscle_key: muscleKey,
-            freshness: 100,
-            last_trained_at: null
-          });
-        }
+        freshnessUpdates.push({
+          user_id: userId,
+          muscle_key: muscleKey,
+          freshness: 100,
+          last_trained_at: null,
+        });
       }
     }
-    
-    // 7. Upsert all freshness updates
-    const { error: upsertError } = await supabase
+
+    // 7. Single batch upsert
+    const { error: upsertError } = await serviceClient
       .from('v2_muscle_freshness')
-      .upsert(freshnessUpdates, {
-        onConflict: 'user_id,muscle_key'
-      });
-    
+      .upsert(freshnessUpdates, { onConflict: 'user_id,muscle_key' });
+
     if (upsertError) throw upsertError;
-    
-    return new Response(
-      JSON.stringify({
+
+    return jsonResponse(
+      {
         success: true,
-        musclesHit: musclesHit.length,
-        musclesUpdated: freshnessUpdates.length
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+        musclesHit: musclesHit.size,
+        musclesUpdated: freshnessUpdates.length,
+      },
+      200,
     );
-    
   } catch (error) {
-    console.error('Error updating muscle freshness:', error);
-    return new Response(
-      JSON.stringify({ error: error.message || 'Unknown error' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error updating muscle freshness:', message);
+    return jsonResponse({ error: message }, 500);
   }
 });

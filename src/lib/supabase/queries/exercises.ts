@@ -140,10 +140,12 @@ export async function getMergedExercise(
     }
 
     // Merge: master defaults ⊕ non-null overrides
+    // Note: v2_user_exercise_overrides does not currently support `description`;
+    // master.description is the single source of truth until a description_override column exists.
     const merged: MergedExercise = {
       id: masterExercise.id,
       name: masterExercise.name,
-      description: override?.description ?? masterExercise.description,
+      description: masterExercise.description,
       density_score: override?.density_score_override ?? masterExercise.density_score,
       primary_muscles: override?.primary_muscles_override ?? masterExercise.primary_muscles,
       secondary_muscles: masterExercise.secondary_muscles,
@@ -177,6 +179,13 @@ export async function getMergedExercise(
 }
 
 /**
+ * Defensive cap to prevent runaway reads if the user library somehow grows beyond expectations
+ * (master library is ~700 rows; user customs in practice are tiny). Callers can pass an explicit
+ * subset via `exerciseIds` when they know which IDs they need.
+ */
+const LIST_MERGED_EXERCISES_MAX_ROWS = 5000;
+
+/**
  * Get merged exercise view for multiple exercises (bulk)
  */
 export async function listMergedExercises(
@@ -192,11 +201,11 @@ export async function listMergedExercises(
   }
 
   try {
-    // Get all user custom exercises
     let customQuery = supabase
       .from('v2_user_custom_exercises')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .limit(LIST_MERGED_EXERCISES_MAX_ROWS);
 
     if (exerciseIds && exerciseIds.length > 0) {
       customQuery = customQuery.in('id', exerciseIds);
@@ -216,7 +225,8 @@ export async function listMergedExercises(
     // Get master exercises (excluding those with custom versions)
     let masterQuery = supabase
       .from('v2_exercises')
-      .select('*');
+      .select('*')
+      .limit(LIST_MERGED_EXERCISES_MAX_ROWS);
 
     if (masterIds && masterIds.length > 0) {
       masterQuery = masterQuery.in('id', masterIds);

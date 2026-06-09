@@ -3,15 +3,18 @@
  * Prompts user when muscle coverage gaps are detected before starting workout
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
-import { colors, spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 interface SmartAdjustPromptProps {
   visible: boolean;
   reasons: string[];
   onContinue: () => void;
   onSmartAdjust: () => void;
+  /** Close without starting a workout (shown as "Not now"). Falls back to onContinue. */
+  onDismiss?: () => void;
 }
 
 export const SmartAdjustPrompt: React.FC<SmartAdjustPromptProps> = ({
@@ -19,7 +22,80 @@ export const SmartAdjustPrompt: React.FC<SmartAdjustPromptProps> = ({
   reasons,
   onContinue,
   onSmartAdjust,
+  onDismiss,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => StyleSheet.create({
+    overlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.lg,
+    },
+    container: {
+      backgroundColor: colors.background,
+      borderRadius: borderRadius.lg,
+      padding: spacing.lg,
+      width: '100%',
+      maxWidth: 400,
+      maxHeight: '80%',
+    },
+    title: {
+      ...typography.h3,
+      color: colors.textPrimary,
+      marginBottom: spacing.md,
+    },
+    reasonsContainer: {
+      maxHeight: 150,
+      marginBottom: spacing.md,
+    },
+    reasonText: {
+      ...typography.body,
+      color: colors.textSecondary,
+      marginBottom: spacing.xs,
+    },
+    description: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginBottom: spacing.lg,
+    },
+    buttonContainer: {
+      gap: spacing.md,
+    },
+    button: {
+      padding: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    continueButton: {
+      backgroundColor: colors.cardBackground,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    continueButtonText: {
+      ...typography.body,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    smartAdjustButton: {
+      backgroundColor: colors.primary,
+    },
+    smartAdjustButtonText: {
+      ...typography.body,
+      fontWeight: '600',
+      color: colors.background,
+    },
+    dismissButton: {
+      alignItems: 'center',
+      padding: spacing.sm,
+    },
+    dismissButtonText: {
+      ...typography.body,
+      color: colors.textSecondary,
+    },
+  }), [colors]);
+
   if (!visible) return null;
 
   return (
@@ -27,12 +103,12 @@ export const SmartAdjustPrompt: React.FC<SmartAdjustPromptProps> = ({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onContinue}
+      onRequestClose={onDismiss ?? onContinue}
     >
       <View style={styles.overlay}>
         <View style={styles.container}>
           <Text style={styles.title}>Muscle Coverage Gap Detected</Text>
-          
+
           <ScrollView style={styles.reasonsContainer}>
             {reasons.map((reason, index) => (
               <Text key={index} style={styles.reasonText}>
@@ -59,73 +135,15 @@ export const SmartAdjustPrompt: React.FC<SmartAdjustPromptProps> = ({
             >
               <Text style={styles.smartAdjustButtonText}>Smart adjust</Text>
             </TouchableOpacity>
+
+            {onDismiss && (
+              <TouchableOpacity style={styles.dismissButton} onPress={onDismiss}>
+                <Text style={styles.dismissButtonText}>Not now</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
     </Modal>
   );
 };
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  container: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '80%',
-  },
-  title: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
-  },
-  reasonsContainer: {
-    maxHeight: 150,
-    marginBottom: spacing.md,
-  },
-  reasonText: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  description: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-  },
-  buttonContainer: {
-    gap: spacing.md,
-  },
-  button: {
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  continueButton: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  continueButtonText: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  smartAdjustButton: {
-    backgroundColor: colors.primary,
-  },
-  smartAdjustButtonText: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.background,
-  },
-});
-

@@ -1,26 +1,29 @@
 # Implementation Status
 
-**Last Updated**: 2026-01-21  
-**Purpose**: Track what's implemented, what's TODO, and known issues.
+**Last Updated**: 2026-06-09  
 
 ## Summary
 
-**Overall Progress**: ~95% of core features implemented
+**Overall progress**: Feature-complete for App Store submission. Remaining items are **external/manual**: Apple Developer enrollment (placeholders in `eas.json`/`app.json`), publishing legal pages (`legal/*.md` → ironpath.app), a Sentry DSN, the Supabase "leaked password protection" dashboard toggle, and the final TestFlight pass.
 
-**Core Systems**:
-- ✅ Database schema and RLS policies
-- ✅ Authentication and onboarding
-- ✅ Template management (Planner)
-- ✅ Target selection with progressive overload
-- ✅ Session creation and prefill
-- ✅ Dashboard metrics
-- ✅ Progress calendar views
-- ✅ Active workout execution (swipe-to-complete UI)
-- ✅ AI week generation (engine complete)
-- ✅ Rebalance detection and apply (Smart Adjust)
-- ✅ Advanced fatigue model (Banister continuous decay)
-- ✅ Weighted implicit hits (biomechanically accurate)
-- ✅ Skia-powered muscle heatmap visualization
+**Core systems**:
+
+- ✅ Database schema, RLS (including system-template tighten), migrations for Health linkage + audit tables
+- ✅ Auth, soft-delete grace + restore prompt on login; **pg_cron purge job** hard-deletes accounts past `scheduled_purge_at`
+- ✅ Onboarding (~5-step), edit profile
+- ✅ Planner with drag reorder, templates, superset chips, AI day generation (**Gemini** via Edge Function + local fallback; key re-verified live 2026-06-09)
+- ✅ Workout tab + active workout: per-exercise rest timers, set types (warm-up/drop/failure), supersets with alternating execution + shared rest, previous-performance inline, replace/reorder/add(multi-select) mid-workout
+- ✅ Smart Adjust wired: `needsRebalance` runs on planner load, prompts before today's first session
+- ✅ Dashboard / progress surfaces
+- ✅ Muscle heatmap via `react-native-body-highlighter` (Skia removed)
+- ✅ GitHub Actions workflow (TypeScript + Vitest on push/PR)
+- ✅ Theme tokens for heatmap / RPE zones + modal dimming across light/dark
+- ✅ Local reminders + tap deep-link to tabs
+- ✅ Sentry SDK + `@sentry/react-native/expo` plugin (dSYM upload; org/DSN placeholders pending)
+- ✅ Apple Health: `@kingstinct/react-native-healthkit` wired — real authorization, HKWorkout on completion, body mass on weight log, HK UUID dedupe, `v2_health_sync` ledger, 30-day body-mass import
+- ✅ watchOS companion mirror: `targets/watch/` SwiftUI app via `@bacons/apple-targets`, iPhone WCSession bridge (`modules/watch-connectivity/`), set-completion round trip with offline queue
+- ✅ Privacy manifest wired via `expo.ios.privacyManifests` in app.json
+- ✅ Supabase security advisors remediated (search_path pins, trigger fn EXECUTE revokes, avatars bucket policies, anon table grants revoked)
 
 ## Feature Matrix
 
@@ -41,7 +44,8 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Multi-step flow (3 steps) | ✅ Complete | Personal, Training, Equipment |
+| Multi-step flow (≈5 steps) | ✅ Complete | Profile, training, equipment, review |
+
 | First/last name | ✅ Complete | Split from full_name |
 | Date of birth | ✅ Complete | Calendar picker |
 | Weight input | ✅ Complete | Scrollable picker |
@@ -61,7 +65,7 @@
 | View template with days | ✅ Complete | Fetches full hierarchy |
 | Add exercise to day | ✅ Complete | Exercise picker |
 | Remove exercise | ✅ Complete | Swipe-to-delete |
-| Reorder exercises | ⚠️ TODO | Drag-and-drop |
+| Reorder exercises | ✅ Complete | Draggable list + `reorderTemplateSlots` |
 | Date context (Today vs Future) | ✅ Complete | useDateContext; no Edit Scope modal |
 | Target display | ✅ Complete | Shows sets/reps/duration from prescriptions |
 | Custom exercise creation | ✅ Complete | With target bands (Patch D) |
@@ -83,8 +87,9 @@
 | Zone detection | ✅ Complete | Green/yellow/red |
 | Prescription-based targets | ✅ Complete | Uses target bands |
 | Exercise distribution | ✅ Complete | 2-3 per day |
-| Generate button UI | ⚠️ TODO | Add to Planner |
-| Loading state | ⚠️ TODO | Show progress |
+| Gemini Edge generate-workout | ✅ Complete | Secrets + quota table; planner calls `generateAiDay` |
+| Generate button UI | ✅ Complete | Planner |
+| Loading state | ✅ Complete | Spinner while generating |
 | Error handling | ✅ Complete | Returns empty on error |
 
 ### Workout Execution
@@ -110,11 +115,17 @@
 | Weight suggestions | ✅ Complete | From history or prescription seed data |
 | Exercise info display | ✅ Complete | Shows target muscles and tips |
 | Keyboard dismiss | ✅ Complete | Done/Next buttons on inputs |
-| Rest timer | ⚠️ TODO | Automatic between sets |
+| Rest timer | ✅ Complete | Auto-start; per-exercise `rest_sec` → per-set → 90s default |
 | Exercise notes display | ✅ Complete | Shows slot notes from template |
-| Add exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
-| Remove exercise mid-workout | ⚠️ TODO | Dynamic structure edit |
-| Abandon workout | ⚠️ TODO | Update status to abandoned |
+| Add exercise mid-workout | ✅ Complete | Multi-select picker, batch prefill |
+| Remove exercise mid-workout | ✅ Complete | Overflow menu (completed-set guard) |
+| Replace exercise mid-workout | ✅ Complete | In-place swap, blocked once sets are completed |
+| Reorder exercises mid-workout | ✅ Complete | Modal with up/down controls |
+| Set types | ✅ Complete | Warm-up/drop/failure; warm-ups excluded from PRs + volume |
+| Supersets | ✅ Complete | `superset_group` on slots/session exercises; alternating execution, shared rest |
+| Previous performance inline | ✅ Complete | "Last time" in execution + logging phases |
+| Abandon workout | ✅ Complete | `abandonWorkoutSession` (status='abandoned') |
+| Apple Watch mirror | ✅ Complete | State pushed via WCSession; watch Complete Set reuses `handleCompleteSet` |
 | Smart Refresh staleness | ✅ Complete | Structural, target, biomechanical (optional) |
 | Smart Refresh button/sheet | ✅ Complete | Orange/Red; confirmation sheet + Apply |
 | Smart Refresh merge | ✅ Complete | Protect performed_at; delete divergent; insert from template |
@@ -144,7 +155,7 @@
 | Top PRs | ✅ Complete | Weight + duration PRs |
 | PR recency sorting | ✅ Complete | Most recent first |
 | Muscle status button | ✅ Complete | Opens heatmap |
-| Heatmap display (Skia) | ✅ Complete | GPU-accelerated 28-muscle visualization |
+| Heatmap display | ✅ Complete | `react-native-body-highlighter` 28-muscle visualization (Skia removed) |
 | Muscle freshness | ✅ Complete | Edge Function on session complete; heatmap computes freshness on read (decay from last_trained_at) so recovery shows on rest days |
 | Stress calculation | ✅ Complete | Weighted biomechanical model |
 | Empty states | ✅ Complete | No data messages |
@@ -155,7 +166,7 @@
 |---------|--------|-------|
 | Exercise picker | ✅ Complete | Global bottom sheet |
 | Search exercises | ✅ Complete | Filters by name |
-| Multi-select mode | ⚠️ TODO | Select multiple at once |
+| Multi-select mode | ✅ Complete | Checkmark selection + "Add N exercises" footer |
 | Exercise metadata display | ✅ Complete | Name, muscles |
 | Custom exercise creation | ✅ Complete | Full form with targets |
 | Custom exercise editing | ✅ Complete | In picker or planner |
@@ -184,11 +195,11 @@
 | Settings menu | ✅ Complete | Global bottom sheet |
 | Edit profile | ✅ Complete | Modal screen |
 | Change email | ✅ Complete | With re-auth |
-| Change password | ⚠️ TODO | Supabase endpoint exists |
+| Change password | ✅ Complete | `app/auth/change-password.tsx`, re-auth + update |
 | Logout | ✅ Complete | Clear session + stores |
 | Unit preference | ✅ Complete | Imperial/metric |
-| Theme toggle | ⚠️ TODO | Light/dark mode |
-| Notifications | ⚠️ TODO | Workout reminders |
+| Theme toggle | ✅ Complete | Light/Dark/System cycle in SettingsMenu (`ThemeContext`) |
+| Notifications | ✅ Complete | Workout reminders screen + local notifications with tab deep-link |
 
 ### Global UI Components
 
@@ -200,7 +211,7 @@
 | ToastProvider | ✅ Complete | Queue management |
 | DatePicker | ✅ Complete | Calendar interface |
 | PlanDayPicker | ✅ Complete | Day selection sheet |
-| EditScopePrompt | ✅ Complete | Today vs Next Week |
+| EditScopePrompt | ✅ Removed | Replaced by date-context model (Today vs Future) |
 | SmartAdjustPrompt | ✅ Complete | Continue vs Smart Adjust |
 | ConfirmDialog | ✅ Complete | Reusable confirmation |
 | TabHeader | ✅ Complete | Consistent tab headers |
@@ -223,8 +234,8 @@
 | Muscle seeding | ✅ Complete | 28 canonical muscles |
 | Query error handling | ✅ Complete | Try/catch + null returns |
 | Dev logging | ✅ Complete | `__DEV__` wrapped |
-| Type generation | ⚠️ Manual | Hand-typed interfaces |
-| Derived caches | ⚠️ Unused | Tables exist, no rebuild jobs |
+| Type generation | ✅ Complete | Generated `src/types/supabase.gen.ts` (`npx supabase gen types`) re-exported via `supabase.ts` |
+| Derived caches | ⚠️ Partial | Freshness via Edge Function; daily stress computed on-demand |
 
 ### Engine Algorithms
 
@@ -239,58 +250,20 @@
 | Rebalance apply | ✅ Complete | Adds catch-up exercises |
 | Time estimation | ⚠️ TODO | Formula defined, not implemented |
 
-## Known Issues
+## Known Issues / Remaining Manual Steps
 
-### High Priority
+### Blocking submission (external, not code)
 
-1. **System Templates RLS Risk**
-   - **Impact**: Clients could write to system templates (user_id IS NULL)
-   - **Status**: Current RLS: `USING (user_id = auth.uid() OR user_id IS NULL)`
-   - **Fix**: Tighten policy or remove system template concept
+1. **Apple Developer enrollment** — replace `REPLACE_WITH_APPLE_TEAM_ID` in `app.json` (`ios.appleTeamId`) and `eas.json` (`submit.production.ios.appleTeamId`/`ascAppId`) once enrolled and the ASC app record exists.
+2. **Legal pages** — publish `legal/privacy.md` and `legal/terms.md` at `ironpath.app/privacy` and `/terms` (URLs already referenced by `src/lib/utils/legal.ts`).
+3. **Sentry** — create the project, set `EXPO_PUBLIC_SENTRY_DSN` in `eas.json` production env, replace `REPLACE_WITH_SENTRY_ORG` in `app.json`, and add `SENTRY_AUTH_TOKEN` as an EAS secret for dSYM upload.
+4. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix.
 
-2. **Partial Derived Cache Implementation**
-   - **Impact**: v2_muscle_freshness now updated via Edge Function, v2_daily_muscle_stress still unused
-   - **Status**: Freshness cache active, daily stress cache still computed on-demand
+### Non-blocking
+
+5. **Partial Derived Cache Implementation**
+   - **Impact**: v2_muscle_freshness updated via Edge Function; v2_daily_muscle_stress still computed on-demand
    - **Future**: Add daily stress cache rebuild job if needed
-
-### Medium Priority
-
-3. **No AI Generation UI**
-   - **Impact**: Can't trigger AI generation from app
-   - **Status**: Engine complete, button/UI TODO
-   - **Next**: Add "Generate with AI" button to Planner
-
-4. **TypeScript Types Manual**
-   - **Impact**: Risk of schema drift
-   - **Status**: Hand-typed interfaces in query files
-   - **Fix**: Generate from schema regularly
-
-### Low Priority
-
-5. **No Exercise Reordering**
-   - **Impact**: Can't rearrange exercise order in day
-   - **Status**: TODO
-   - **Next**: Add drag-and-drop UI
-
-6. **No Multi-Select in Exercise Picker**
-   - **Impact**: Must add exercises one by one
-   - **Status**: TODO
-   - **Next**: Add multi-select mode with batch addition
-
-7. **No Theme Toggle**
-   - **Impact**: Always light mode
-   - **Status**: Theme system exists, no toggle UI
-   - **Next**: Add dark mode support
-
-8. **No Rest Timer**
-   - **Impact**: Manual timing between sets
-   - **Status**: TODO
-   - **Next**: Add automatic rest timer based on RPE
-
-9. **No Abandon Workout**
-    - **Impact**: Active sessions stay active indefinitely
-    - **Status**: TODO
-    - **Next**: Add option to abandon workout (set status='abandoned')
 
 ## Completed Features (Recent)
 
@@ -352,43 +325,43 @@
 
 ## Roadmap
 
-### Phase 1: Complete Core Workout Flow ✅ MOSTLY COMPLETE
+### Phase 1: Complete Core Workout Flow ✅ COMPLETE
 1. ✅ Build active workout UI
    - ✅ Interactive set editing (swipe-to-complete)
    - ✅ RPE input (slider with color zones)
-   - ⚠️ Rest timer (TODO)
-   - ✅ Exercise notes display (Complete)
+   - ✅ Rest timer (auto-start, per-exercise `rest_sec`)
+   - ✅ Exercise notes display
 2. ✅ Implement save/complete logic
-3. ⚠️ Add workout resumption (check for active on boot)
-4. ⚠️ Test end-to-end workout flow
+3. ✅ Add workout resumption (Continue button, resumes at first incomplete set)
+4. ✅ End-to-end workout flow (manual TestFlight pass still pending)
 
-### Phase 2: AI & Rebalance ✅ MOSTLY COMPLETE
-1. ⚠️ Add "Generate with AI" button to Planner (engine ready)
-2. ⚠️ Implement loading state for AI generation
-3. ✅ Implement rebalance apply logic
+### Phase 2: AI & Rebalance ✅ COMPLETE
+1. ✅ "Generate with AI" button in Planner (Gemini Edge Function + local fallback)
+2. ✅ Loading overlay + quota display for AI generation
+3. ✅ Implement rebalance apply logic (Smart Adjust wired on planner load)
 4. ✅ Advanced fatigue model (Banister continuous decay)
 5. ✅ Weighted implicit hits with biomechanical accuracy
 
-### Phase 3: UX Improvements
-1. Add exercise reordering (drag-and-drop)
-2. Add multi-select to exercise picker
-3. Add dark mode toggle
-4. Improve empty states
-5. Add workout history viewer
+### Phase 3: UX Improvements ✅ COMPLETE
+1. ✅ Exercise reordering (drag-and-drop in planner; reorder modal in active workout)
+2. ✅ Multi-select in exercise picker
+3. ✅ Dark mode toggle (Light/Dark/System)
+4. ✅ Empty states across tabs
+5. ✅ Workout history viewer (progress calendar + session detail sheet)
 
 ### Phase 4: Advanced Features
-1. Implement derived cache rebuild jobs
-2. Add PR tracking and history
-3. Add workout analytics
-4. Add exercise substitution suggestions
-5. Add workout templates library
+1. ⚠️ Implement derived cache rebuild jobs (daily stress still on-demand)
+2. ✅ PR tracking and history (`app/prs.tsx`, dashboard Top PRs, warm-ups excluded)
+3. ⚠️ Add workout analytics
+4. ⚠️ Add exercise substitution suggestions
+5. ⚠️ Add workout templates library
 
 ### Phase 5: Polish & Performance
-1. Add unit tests
-2. Optimize queries (pagination, indexes)
-3. Add offline support
-4. Improve error handling
-5. Add onboarding walkthrough
+1. ✅ Unit tests (Vitest: date utils, muscle freshness, workout flow; CI on push/PR)
+2. ⚠️ Optimize queries (pagination, indexes)
+3. ⚠️ Add offline support (watch set-completions queue offline; app itself is online-only)
+4. ✅ Error handling (toasts, auth-error surfacing, graceful AI fallback)
+5. ⚠️ Add onboarding walkthrough
 
 ## Testing Checklist
 
@@ -448,13 +421,13 @@ Target performance (not yet measured):
 - ✅ RLS policies implemented
 - ✅ Only anon key in client
 - ✅ Auth guards on routes
-- ⚠️ System template RLS needs tightening
+- ✅ JWT-hardened `update-muscle-freshness`; system templates read-only except owner writes
 - ⚠️ No rate limiting on queries
 - ⚠️ No input sanitization (rely on RLS)
 
 ## Accessibility Status
 
-- ⚠️ Not yet audited
+- ⚠️ Tab bar + settings rows labeled; full VoiceOver pass still recommended
 - ⚠️ No screen reader testing
 - ⚠️ No keyboard navigation testing
 - ⚠️ Color contrast not verified

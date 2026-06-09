@@ -7,7 +7,7 @@
  * Step 5: Review
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -26,7 +26,8 @@ import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
-import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import {
   createUserProfile,
@@ -41,6 +42,7 @@ import {
 } from '../src/lib/supabase/queries/templates';
 import { invalidateTemplates, invalidateTemplate } from '../src/lib/cache/templateCache';
 import { devLog, devError } from '../src/lib/utils/logger';
+import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { useToast } from '../src/hooks/useToast';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -61,6 +63,8 @@ export default function Onboarding() {
   const router = useRouter();
   const setProfile = useUserStore((state) => state.setProfile);
   const toast = useToast();
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -267,7 +271,12 @@ export default function Onboarding() {
       }
       invalidateProfileCache(userId);
       if (currentWeight != null && currentWeight > 0) {
-        await insertWeightLog(userId, currentWeight, { current_weight: currentWeight });
+        await insertWeightLog(
+          userId,
+          currentWeight,
+          { current_weight: currentWeight },
+          useImperial ? 'imperial' : 'metric',
+        );
         invalidateWeightCache(userId);
       }
 
@@ -278,6 +287,8 @@ export default function Onboarding() {
         workout_days: profilePayload.workout_days,
         gender: profilePayload.gender,
       });
+
+      await rescheduleRemindersAfterProfileWorkoutDays(profilePayload.workout_days);
 
       const templates = await getUserTemplates(userId);
       const userTemplates = (templates || []).filter((t) => t.user_id === userId);
@@ -752,7 +763,7 @@ export default function Onboarding() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1018,4 +1029,4 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: typography.sizes.sm,
   },
-});
+  }); }

@@ -26,7 +26,8 @@ import Animated, {
 import { Picker } from '@react-native-picker/picker';
 import Svg, { Path, G } from 'react-native-svg';
 import { Scale } from 'lucide-react-native';
-import { colors, spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { spacing, borderRadius, typography } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import { useUserStore } from '../../stores/userStore';
 import { useUIStore } from '../../stores/uiStore';
 import {
@@ -53,6 +54,7 @@ interface WeightTrackerCardProps {
 
 
 export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps) {
+  const colors = useTheme();
   const profile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
   const showToast = useUIStore((state) => state.showToast);
@@ -176,7 +178,7 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
       const weightToSave = selectedWeight;
       const { success } = await insertWeightLog(userId, weightToSave, {
         current_weight: weightToSave,
-      });
+      }, useImperial ? 'imperial' : 'metric');
       if (!success) {
         showToast('Failed to save weight', 'error');
         return;
@@ -199,6 +201,147 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
   const weightRange = useImperial
     ? Array.from({ length: 351 }, (_, i) => i + 50)
     : Array.from({ length: 156 }, (_, i) => i + 25);
+
+  const styles = useMemo(() => StyleSheet.create({
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.md,
+      gap: spacing.md,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    cardTitle: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    updateButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.md,
+    },
+    updateButtonDisabled: {
+      opacity: 0.7,
+    },
+    updateButtonText: {
+      color: colors.background,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.semibold,
+    },
+    metricsRow: {
+      flexDirection: 'row',
+      gap: spacing.xl,
+      alignItems: 'flex-start',
+    },
+    metricLabel: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    metricValue: {
+      color: colors.textPrimary,
+      fontSize: 30,
+      fontWeight: typography.weights.bold,
+      flexShrink: 1,
+    },
+    metricBlock: {
+      flexShrink: 1,
+      minWidth: 0,
+      maxWidth: '48%',
+    },
+    metricPositive: {
+      color: colors.success,
+    },
+    metricNegative: {
+      color: colors.warning,
+    },
+    percentText: {
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.medium,
+      color: colors.textSecondary,
+    },
+    chartContainer: {
+      height: CHART_HEIGHT,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    chartWrapper: {
+      overflow: 'hidden',
+      gap: spacing.xs,
+    },
+    chartWithAxes: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+    },
+    yAxisLabels: {
+      width: 48,
+      height: CHART_HEIGHT - 32,
+      justifyContent: 'space-between',
+    },
+    xAxisLabels: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingHorizontal: CHART_PAD.left + 4,
+    },
+    axisLabel: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.xs,
+    },
+    chartSvg: {
+      flex: 1,
+      overflow: 'visible',
+    },
+    emptyState: {
+      paddingVertical: spacing.xl,
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    emptyText: {
+      color: colors.textMuted,
+      fontSize: typography.sizes.base,
+    },
+    emptySubtext: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    pickerScroll: {
+      flex: 1,
+    },
+    pickerContainer: {
+      paddingHorizontal: spacing.md,
+      gap: spacing.md,
+    },
+    picker: {
+      height: 160,
+      width: '100%',
+    },
+    pickerItem: {
+      fontSize: typography.sizes.base,
+      color: colors.textPrimary,
+    },
+    confirmButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    confirmButtonText: {
+      color: colors.background,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+  }), [colors]);
 
   return (
     <View style={styles.card}>
@@ -338,143 +481,3 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  cardTitle: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  updateButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-  },
-  updateButtonDisabled: {
-    opacity: 0.7,
-  },
-  updateButtonText: {
-    color: colors.background,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.semibold,
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    gap: spacing.xl,
-    alignItems: 'flex-start',
-  },
-  metricLabel: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  metricValue: {
-    color: colors.textPrimary,
-    fontSize: 30,
-    fontWeight: typography.weights.bold,
-    flexShrink: 1,
-  },
-  metricBlock: {
-    flexShrink: 1,
-    minWidth: 0,
-    maxWidth: '48%',
-  },
-  metricPositive: {
-    color: colors.success,
-  },
-  metricNegative: {
-    color: colors.warning,
-  },
-  percentText: {
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.medium,
-    color: colors.textSecondary,
-  },
-  chartContainer: {
-    height: CHART_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chartWrapper: {
-    overflow: 'hidden',
-    gap: spacing.xs,
-  },
-  chartWithAxes: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-  },
-  yAxisLabels: {
-    width: 48,
-    height: CHART_HEIGHT - 32,
-    justifyContent: 'space-between',
-  },
-  xAxisLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: CHART_PAD.left + 4,
-  },
-  axisLabel: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.xs,
-  },
-  chartSvg: {
-    flex: 1,
-    overflow: 'visible',
-  },
-  emptyState: {
-    paddingVertical: spacing.xl,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.base,
-  },
-  emptySubtext: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  pickerScroll: {
-    flex: 1,
-  },
-  pickerContainer: {
-    paddingHorizontal: spacing.md,
-    gap: spacing.md,
-  },
-  picker: {
-    height: 160,
-    width: '100%',
-  },
-  pickerItem: {
-    fontSize: typography.sizes.base,
-    color: colors.textPrimary,
-  },
-  confirmButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  confirmButtonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-});

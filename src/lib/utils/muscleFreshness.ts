@@ -69,3 +69,15 @@ export function computeFreshnessNow(
   const freshness = 100 - fatigue;
   return Math.max(0, Math.min(100, Math.round(freshness * 10) / 10));
 }
+
+/** Build a `{ muscle_key -> freshnessNow }` map from raw freshness rows (no DB). */
+export function buildFreshnessMapFromRaw(
+  rows: { muscle_key: string; last_trained_at: string | null }[],
+  now: Date = new Date(),
+): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const row of rows) {
+    map[row.muscle_key] = computeFreshnessNow(row.muscle_key, row.last_trained_at, now);
+  }
+  return map;
+}

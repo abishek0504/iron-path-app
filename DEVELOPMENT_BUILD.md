@@ -1,148 +1,21 @@
-# Development Build Setup Guide
+# Development build notes (IronPath)
 
-This guide explains how to create a development build for IronPath, which is required for native modules like `react-native-reanimated` and `@shopify/react-native-skia`.
+## Native workflows
 
-## Prerequisites
+- Run `npx expo prebuild --platform ios` (or `npm run prebuild:ios`) whenever you add a config plugin or change `ios.*` in `app.json`.
+- Open `ios/*.xcworkspace` in Xcode for signing, HealthKit entitlements, and **watchOS** targets (watch is not managed by Expo — see `native/watch/README.md`).
 
-### For iOS:
-- macOS with Xcode installed
-- Xcode Command Line Tools: `xcode-select --install`
-- CocoaPods: `sudo gem install cocoapods`
-- iOS Simulator (comes with Xcode)
+## Apple Health (bidirectional)
 
-### For Android:
-- Android Studio installed
-- Android SDK configured
-- Java Development Kit (JDK)
+1. Add a HealthKit-capable native module (for example `react-native-health`) with an Expo config plugin, or maintain a small custom plugin that sets the HealthKit capability on the iPhone target and merges usage strings (`NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription`), also mirrored in `app.json` for prebuild.
+2. Columns `hk_workout_uuid` on `v2_workout_sessions`, `hk_sample_uuid` on `v2_weight_logs`, and ledger table `v2_health_sync` are created by migration `20260510000000_health_hk_links_session_validation.sql`.
+3. Use `requestAppleHealthAccess` in `src/lib/health/healthIntegration.ts` as the RN entry; replace the stub once the native SDK is wired.
 
-## Option 1: Local Development Build (Recommended)
+## Sentry / dSYMs
 
-### iOS Development Build
+- Set `EXPO_PUBLIC_SENTRY_DSN` via EAS env for production builds. `initSentry()` in `src/lib/monitoring/initSentry.ts` runs from the root layout when a DSN is present.
+- Follow EAS + Sentry docs to upload debug symbols for iOS.
 
-1. **Generate native iOS project** (if not already done):
-   ```bash
-   npx expo prebuild --platform ios
-   ```
+## EAS CLI without global install
 
-2. **Install iOS dependencies**:
-   ```bash
-   cd ios
-   pod install
-   cd ..
-   ```
-
-3. **Build and run on simulator**:
-   ```bash
-   npm run ios:dev
-   ```
-   
-   Or manually:
-   ```bash
-   npx expo run:ios
-   ```
-
-4. **Build and run on specific device**:
-   ```bash
-   npx expo run:ios --device "iPhone 17 Pro Max"
-   ```
-
-### Android Development Build
-
-1. **Generate native Android project**:
-   ```bash
-   npx expo prebuild --platform android
-   ```
-
-2. **Build and run**:
-   ```bash
-   npm run android:dev
-   ```
-   
-   Or manually:
-   ```bash
-   npx expo run:android
-   ```
-
-## Option 2: EAS Build (Cloud Build)
-
-EAS Build creates development builds in the cloud. Useful if you don't want to set up local build tools.
-
-### Setup EAS Build
-
-1. **Install EAS CLI**:
-   ```bash
-   npm install -g eas-cli
-   ```
-
-2. **Login to Expo**:
-   ```bash
-   eas login
-   ```
-
-3. **Configure EAS** (creates `eas.json`):
-   ```bash
-   eas build:configure
-   ```
-
-4. **Create development build**:
-   ```bash
-   eas build --profile development --platform ios
-   ```
-
-5. **Install on device**:
-   - Download the build from the EAS dashboard
-   - Install via TestFlight (iOS) or direct download (Android)
-
-## Running the Development Server
-
-After building, start the Metro bundler:
-
-```bash
-npm start
-```
-
-Or with specific options:
-```bash
-npx expo start --dev-client
-```
-
-The `--dev-client` flag tells Expo to connect to your development build instead of Expo Go.
-
-## Troubleshooting
-
-### iOS Issues
-
-**"No .xcworkspace found"**
-- Run `npx expo prebuild --platform ios` first
-
-**Pod install fails**
-- Update CocoaPods: `sudo gem install cocoapods`
-- Clean and retry: `cd ios && rm -rf Pods Podfile.lock && pod install`
-
-**Build errors**
-- Clean build folder: In Xcode, Product → Clean Build Folder (Shift+Cmd+K)
-- Reset Metro cache: `npx expo start --clear`
-
-### Android Issues
-
-**Gradle sync fails**
-- Ensure Android SDK is properly configured
-- Check `android/local.properties` has correct SDK path
-
-**Build fails**
-- Clean: `cd android && ./gradlew clean`
-- Rebuild: `npx expo run:android`
-
-## Development vs Production
-
-- **Development Build**: Includes debugging tools, hot reload, connects to Metro
-- **Production Build**: Optimized, no debugging, standalone app
-
-For development, always use development builds. For App Store/Play Store, create production builds.
-
-## Next Steps
-
-Once your development build is running:
-1. Start the Metro bundler: `npm start`
-2. The app will automatically connect to Metro
-3. You can now use all native modules (Reanimated, Skia, etc.)
+- Use `npm run eas:dev:ios`, which invokes `eas-cli` through `npx`.

@@ -13,7 +13,7 @@ import {
 } from './workouts';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../engine/targetSelection';
 import { getTemplateSlotsForDay } from './templates';
-import { getMergedExercise } from './exercises';
+import { listMergedExercises } from './exercises';
 
 /**
  * Get or create active session for today
@@ -143,7 +143,9 @@ export async function applyStructureEditToSession(
     targetSessionExerciseId?: string;
     newExerciseId?: string;
     newCustomExerciseId?: string;
-    // Update notes (future)
+    // Reorder slots: session exercise ids in desired final order
+    orderedSessionExerciseIds?: string[];
+    // Update notes
     notes?: string;
   }
 ): Promise<boolean> {
@@ -258,11 +260,56 @@ export async function applyStructureEditToSession(
       }
 
       return true;
-    }
+    } else if (edit.type === 'reorderSlots') {
+      if (!edit.orderedSessionExerciseIds || edit.orderedSessionExerciseIds.length === 0) {
+        if (__DEV__) {
+          devError('workout-query', new Error('orderedSessionExerciseIds required for reorderSlots'), { sessionId, edit });
+        }
+        return false;
+      }
 
-    // TODO: Implement reorderSlots and updateNotes
-    if (__DEV__) {
-      devLog('workout-query', { action: 'applyStructureEditToSession', note: `${edit.type} not yet implemented` });
+      const results = await Promise.all(
+        edit.orderedSessionExerciseIds.map((id, index) =>
+          supabase
+            .from('v2_session_exercises')
+            .update({ sort_order: index + 1 })
+            .eq('id', id)
+            .eq('session_id', sessionId)
+            .then(({ error }) => error),
+        ),
+      );
+
+      const firstError = results.find((e) => e != null);
+      if (firstError) {
+        if (__DEV__) {
+          devError('workout-query', firstError, { sessionId, action: 'reorderSlots' });
+        }
+        return false;
+      }
+      return true;
+    } else if (edit.type === 'updateNotes') {
+      if (!edit.targetSessionExerciseId) {
+        if (__DEV__) {
+          devError('workout-query', new Error('targetSessionExerciseId required for updateNotes'), { sessionId, edit });
+        }
+        return false;
+      }
+
+      // Session exercises have no notes column; by convention an exercise-level
+      // note for a live session is stored on its first set.
+      const { error } = await supabase
+        .from('v2_session_sets')
+        .update({ notes: edit.notes || null })
+        .eq('session_exercise_id', edit.targetSessionExerciseId)
+        .eq('set_number', 1);
+
+      if (error) {
+        if (__DEV__) {
+          devError('workout-query', error, { sessionId, edit, action: 'updateNotes' });
+        }
+        return false;
+      }
+      return true;
     }
 
     return false;
@@ -272,6 +319,64 @@ export async function applyStructureEditToSession(
     }
     return false;
   }
+}
+
+/**
+ * Set or clear the per-exercise rest override (seconds) for a live session exercise.
+ */
+export async function updateSessionExerciseRest(
+  sessionExerciseId: string,
+  restSec: number | null
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'updateSessionExerciseRest', sessionExerciseId, restSec });
+  }
+
+  const { error } = await supabase
+    .from('v2_session_exercises')
+    .update({ rest_sec: restSec })
+    .eq('id', sessionExerciseId);
+
+  if (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { sessionExerciseId, restSec });
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Assign (or clear, with group = null) a superset group for session exercises.
+ * Exercises sharing the same non-null group alternate during execution and
+ * share one rest timer after the last exercise of each round.
+ */
+export async function setSessionSupersetGroup(
+  sessionExerciseIds: string[],
+  group: number | null
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'setSessionSupersetGroup',
+      count: sessionExerciseIds.length,
+      group,
+    });
+  }
+
+  if (sessionExerciseIds.length === 0) return true;
+
+  const { error } = await supabase
+    .from('v2_session_exercises')
+    .update({ superset_group: group })
+    .in('id', sessionExerciseIds);
+
+  if (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { sessionExerciseIds, group });
+    }
+    return false;
+  }
+  return true;
 }
 
 export interface SmartRefreshPlan {
@@ -316,29 +421,46 @@ export async function getSmartRefreshPlan(
     }
   }
 
+  // Collect every distinct exercise/custom-exercise id we will need a name for, then fetch
+  // all merged exercises in one round-trip instead of N getMergedExercise calls.
+  const idsForNameLookup = new Set<string>();
+  for (const ex of sessionData.exercises) {
+    const key = ex.exercise_id || ex.custom_exercise_id;
+    if (!key) continue;
+    if (templateKeys.has(key)) continue;
+    if (protectedSessionExerciseIds.has(ex.id)) continue;
+    idsForNameLookup.add(key);
+  }
+  for (const slot of templateSlots) {
+    const key = slot.exercise_id || slot.custom_exercise_id;
+    if (!key || sessionKeys.has(key)) continue;
+    idsForNameLookup.add(key);
+  }
+
+  const mergedById = new Map<string, { name: string }>();
+  if (idsForNameLookup.size > 0) {
+    const merged = await listMergedExercises(userId, Array.from(idsForNameLookup));
+    for (const m of merged) {
+      mergedById.set(m.id, { name: m.name });
+    }
+  }
+
   const removals: SmartRefreshPlan['removals'] = [];
   for (const ex of sessionData.exercises) {
     const key = ex.exercise_id || ex.custom_exercise_id;
     if (!key) continue;
     if (templateKeys.has(key)) continue;
     if (protectedSessionExerciseIds.has(ex.id)) continue;
-    const meta = await getMergedExercise(
-      ex.exercise_id ? { exerciseId: ex.exercise_id } : { customExerciseId: ex.custom_exercise_id! },
-      userId
-    );
-    removals.push({ session_exercise_id: ex.id, name: meta?.name || 'Exercise' });
+    const name = mergedById.get(key)?.name || 'Exercise';
+    removals.push({ session_exercise_id: ex.id, name });
   }
 
   const additions: SmartRefreshPlan['additions'] = [];
   for (const slot of templateSlots) {
     const key = slot.exercise_id || slot.custom_exercise_id;
     if (!key || sessionKeys.has(key)) continue;
-    const meta = await getMergedExercise(
-      slot.exercise_id ? { exerciseId: slot.exercise_id } : { customExerciseId: slot.custom_exercise_id! },
-      userId
-    );
     additions.push({
-      name: meta?.name || 'Exercise',
+      name: mergedById.get(key)?.name || 'Exercise',
       exercise_id: slot.exercise_id || undefined,
       custom_exercise_id: slot.custom_exercise_id || undefined,
       sort_order: slot.sort_order,

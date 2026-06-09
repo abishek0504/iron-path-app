@@ -1,9 +1,13 @@
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 
 export default function SignupSuccess() {
   const router = useRouter();
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
     <View style={styles.container}>
@@ -23,46 +27,45 @@ export default function SignupSuccess() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    padding: spacing.lg,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  title: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-  },
-  button: {
-    marginTop: spacing.md,
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-});
-
-
-
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      padding: spacing.lg,
+    },
+    card: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      borderRadius: borderRadius.lg,
+      padding: spacing.lg,
+      gap: spacing.md,
+    },
+    title: {
+      fontSize: typography.sizes.xl,
+      fontWeight: typography.weights.semibold,
+      color: colors.textPrimary,
+    },
+    subtitle: {
+      fontSize: typography.sizes.sm,
+      color: colors.textSecondary,
+    },
+    button: {
+      marginTop: spacing.md,
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    buttonText: {
+      color: colors.background,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+  });
+}

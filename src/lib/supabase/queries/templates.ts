@@ -32,6 +32,8 @@ export interface TemplateSlot {
   experience: string | null;
   notes: string | null;
   sort_order: number;
+  superset_group?: number | null;
+  rest_sec?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -72,20 +74,32 @@ export async function getUserTemplates(userId: string): Promise<TemplateSummary[
       return [];
     }
 
-    // Get day counts for each template
-    const templatesWithCounts = await Promise.all(
-      (data || []).map(async (template) => {
-        const { count } = await supabase
-          .from('v2_template_days')
-          .select('*', { count: 'exact', head: true })
-          .eq('template_id', template.id);
+    const templates = data || [];
+    const templateIds = templates.map((t) => t.id);
 
-        return {
-          ...template,
-          day_count: count || 0,
-        };
-      })
-    );
+    // Single batched query for day counts (replaces a per-template count -> N+1 round-trips).
+    // We fetch only the template_id column and tally locally; this is cheap because
+    // each template typically has fewer than 7 day rows.
+    const dayCounts = new Map<string, number>();
+    if (templateIds.length > 0) {
+      const { data: dayRows, error: dayErr } = await supabase
+        .from('v2_template_days')
+        .select('template_id')
+        .in('template_id', templateIds);
+
+      if (dayErr && __DEV__) {
+        devError('template-query', dayErr, { userId, action: 'getUserTemplates_day_counts' });
+      }
+
+      for (const row of dayRows || []) {
+        dayCounts.set(row.template_id, (dayCounts.get(row.template_id) || 0) + 1);
+      }
+    }
+
+    const templatesWithCounts: TemplateSummary[] = templates.map((template) => ({
+      ...template,
+      day_count: dayCounts.get(template.id) || 0,
+    }));
 
     if (__DEV__) {
       devLog('template-query', {
@@ -455,6 +469,82 @@ export async function createTemplateSlot(
 
 
 /**
+ * Persist a new ordering for the slots of a template day.
+ *
+ * Accepts the slots in their desired final order and rewrites `sort_order` to match the
+ * array index. Uses a single round-trip via Promise.all to keep latency bounded; we accept
+ * an N-write fan-out here because per-day slot counts are small (typically <= 10).
+ *
+ * Returns false on the first failure; partial reorder is logged in DEV but not exposed,
+ * since the planner UI will refresh from the server and resolve any drift visually.
+ */
+export async function reorderTemplateSlots(orderedSlotIds: string[]): Promise<boolean> {
+  if (__DEV__) {
+    devLog('template-query', {
+      action: 'reorderTemplateSlots',
+      slotCount: orderedSlotIds.length,
+    });
+  }
+
+  if (orderedSlotIds.length === 0) return true;
+
+  const results = await Promise.all(
+    orderedSlotIds.map((slotId, index) =>
+      supabase
+        .from('v2_template_slots')
+        .update({ sort_order: index })
+        .eq('id', slotId)
+        .then(({ error }) => ({ slotId, index, error })),
+    ),
+  );
+
+  const failed = results.filter((r) => r.error);
+  if (failed.length > 0) {
+    if (__DEV__) {
+      devError(
+        'template-query',
+        failed[0].error,
+        { action: 'reorderTemplateSlots', failedCount: failed.length },
+      );
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Assign or clear the superset group on a set of template slots.
+ * Pass `group: null` to remove the slots from their superset.
+ */
+export async function setTemplateSlotSupersetGroup(
+  slotIds: string[],
+  group: number | null,
+): Promise<boolean> {
+  if (slotIds.length === 0) return true;
+
+  if (__DEV__) {
+    devLog('template-query', {
+      action: 'setTemplateSlotSupersetGroup',
+      slotCount: slotIds.length,
+      group,
+    });
+  }
+
+  const { error } = await supabase
+    .from('v2_template_slots')
+    .update({ superset_group: group })
+    .in('id', slotIds);
+
+  if (error) {
+    if (__DEV__) {
+      devError('template-query', error, { action: 'setTemplateSlotSupersetGroup' });
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
  * Update a template slot
  */
 export async function updateTemplateSlot(
@@ -593,6 +683,11 @@ export async function applySessionStructureToTemplate(
         dayId = newDay.id;
       }
 
+      // Guard: dayId must be set before slot creation (continue path above can leave it null)
+      if (!dayId) {
+        continue;
+      }
+
       // Create slots for exercises
       for (let i = 0; i < dayStructure.exercises.length; i++) {
         const exercise = dayStructure.exercises[i];
@@ -644,6 +739,8 @@ export async function applyStructureEditToTemplate(
     targetSlotId?: string;
     newExerciseId?: string;
     newCustomExerciseId?: string;
+    // Reorder slots: slot ids in desired final order
+    orderedSlotIds?: string[];
     // Update notes
     newNotes?: string;
   }
@@ -718,11 +815,15 @@ export async function applyStructureEditToTemplate(
       return await updateTemplateSlot(edit.targetSlotId, {
         notes: edit.newNotes || null,
       });
-    }
+    } else if (edit.type === 'reorderSlots') {
+      if (!edit.orderedSlotIds || edit.orderedSlotIds.length === 0) {
+        if (__DEV__) {
+          devError('template-query', new Error('orderedSlotIds required for reorderSlots'), { templateId, edit });
+        }
+        return false;
+      }
 
-    // TODO: Implement reorderSlots
-    if (__DEV__) {
-      devLog('template-query', { action: 'applyStructureEditToTemplate', note: `${edit.type} not yet implemented` });
+      return await reorderTemplateSlots(edit.orderedSlotIds);
     }
 
     return false;

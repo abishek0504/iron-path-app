@@ -7,14 +7,15 @@
  * sees muscles recovering over time without refetching from the DB.
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Pressable, Animated } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Info } from 'lucide-react-native';
-import { colors, spacing, typography } from '../../lib/utils/theme';
+import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
 import { devError, devLog } from '../../lib/utils/logger';
-import { computeFreshnessNow } from '../../lib/utils/muscleFreshness';
+import { buildFreshnessMapFromRaw } from '../../lib/utils/muscleFreshness';
 import {
   getLastCompletedSessionId,
   invokeUpdateMuscleFreshness,
@@ -36,19 +37,13 @@ interface WorkoutHeatmapProps {
   onBodySideChange?: (side: BodySide) => void;
 }
 
-function computeFreshnessFromRaw(rows: { muscle_key: string; last_trained_at: string | null }[]): Record<string, number> {
-  const map: Record<string, number> = {};
-  for (const row of rows) {
-    map[row.muscle_key] = computeFreshnessNow(row.muscle_key, row.last_trained_at);
-  }
-  return map;
-}
-
 export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
   userId,
   bodySide = 'front',
   onBodySideChange,
 }) => {
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [lastTrainedByMuscle, setLastTrainedByMuscle] = useState<{ muscle_key: string; last_trained_at: string | null }[]>([]);
   const [freshnessData, setFreshnessData] = useState<Record<string, number>>({});
@@ -68,7 +63,7 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
       }
 
       const rows = await getMuscleFreshnessRawCached(userId);
-      const computed = computeFreshnessFromRaw(rows);
+      const computed = buildFreshnessMapFromRaw(rows);
       setLastTrainedByMuscle(rows);
       setFreshnessData(computed);
 
@@ -114,7 +109,7 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
   useEffect(() => {
     if (lastTrainedByMuscle.length === 0) return;
     const interval = setInterval(() => {
-      setFreshnessData(computeFreshnessFromRaw(lastTrainedByMuscle));
+      setFreshnessData(buildFreshnessMapFromRaw(lastTrainedByMuscle));
     }, DECAY_TICK_MS);
     return () => clearInterval(interval);
   }, [lastTrainedByMuscle]);
@@ -197,19 +192,19 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
       >
         <View style={styles.legend}>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#22c55e' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.heatmapFullyRecovered }]} />
             <Text style={styles.legendText}>81-100%: Fully Recovered</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#eab308' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.heatmapLightFatigue }]} />
             <Text style={styles.legendText}>61-80%: Light Fatigue</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#f97316' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.heatmapModerateFatigue }]} />
             <Text style={styles.legendText}>31-60%: Moderate Fatigue</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#ef4444' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.heatmapFullyFatigued }]} />
             <Text style={styles.legendText}>0-30%: Fully Fatigued</Text>
           </View>
         </View>
@@ -218,9 +213,10 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: spacing.lg,
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
   },
@@ -300,5 +296,5 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
   },
-});
-
+  });
+}

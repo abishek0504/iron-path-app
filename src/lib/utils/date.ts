@@ -2,8 +2,25 @@
  * Date utility functions
  */
 
-const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** Full English weekday names (Sunday = 0 … Saturday = 6 in `Date.getDay()`). */
+export const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+
+/** Short labels for planner strip UI. */
+export const SHORT_WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+export const MS_PER_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** UTC calendar key `YYYY-MM-DD` for a timestamp. */
+export function getUtcDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/** Inclusive start, exclusive end in UTC for a calendar day key. */
+export function getUtcDayBoundsIso(dayKey: string): { startIso: string; endIsoExclusive: string } {
+  const startIso = `${dayKey}T00:00:00.000Z`;
+  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY_MS).toISOString();
+  return { startIso, endIsoExclusive };
+}
 
 /**
  * Get ISO date bounds for a weekday name in the current week (Sun–Sat).
@@ -17,7 +34,7 @@ export function getDateBoundsForDayName(dayName: string): { startIso: string; en
   targetDate.setDate(now.getDate() + (targetIndex - todayIndex));
   const dateKey = targetDate.toISOString().slice(0, 10);
   const startIso = `${dateKey}T00:00:00.000Z`;
-  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY).toISOString();
+  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY_MS).toISOString();
   return { startIso, endIsoExclusive };
 }
 

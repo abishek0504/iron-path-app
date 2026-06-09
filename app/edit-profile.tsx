@@ -30,10 +30,12 @@ import { updateUserProfile } from '../src/lib/supabase/queries/users';
 import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore, type UserProfile } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
-import { colors, spacing, borderRadius, typography } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme } from '../src/lib/utils/ThemeContext';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
+import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
 
@@ -53,6 +55,8 @@ export default function EditProfileScreen() {
   const cachedProfile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
   const showToast = useUIStore((state) => state.showToast);
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -237,6 +241,7 @@ export default function EditProfileScreen() {
       invalidateProfileCache(profile.id);
       setProfile({ ...profile, ...updates });
       if (__DEV__) devLog('edit-profile', { action: 'saveAndClose', updateKeys: Object.keys(updates) });
+      await rescheduleRemindersAfterProfileWorkoutDays(updates.workout_days);
       showToast('Profile saved', 'success');
       const action = pendingRemoveActionRef.current;
       pendingRemoveActionRef.current = null;
@@ -282,6 +287,7 @@ export default function EditProfileScreen() {
       if (__DEV__) {
         devLog('edit-profile', { action: 'save', updateKeys: Object.keys(updates) });
       }
+      await rescheduleRemindersAfterProfileWorkoutDays(updates.workout_days);
       showToast('Profile saved', 'success');
       setAllowCloseAfterSave(true);
     } catch (error) {
@@ -572,7 +578,7 @@ export default function EditProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -618,7 +624,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: colors.shadowColor,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -735,6 +741,14 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     gap: spacing.sm,
   },
+  weightPicker: {
+    width: '100%',
+    color: colors.textPrimary,
+  },
+  weightPickerItem: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+  },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -764,7 +778,7 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.bold,
   },
-});
+  }); }
 
 // Mounted globally in this screen for reuse
 export const EditProfileConfirmHost = ({ children }: { children: React.ReactNode }) => children;

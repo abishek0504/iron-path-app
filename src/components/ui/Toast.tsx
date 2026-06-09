@@ -3,10 +3,10 @@
  * Updated to work with Zustand store
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { CheckCircle, XCircle, Info } from 'lucide-react-native';
-import { colors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
 
 interface ToastProps {
   message: string;
@@ -15,12 +15,13 @@ interface ToastProps {
   duration?: number;
 }
 
-export const Toast: React.FC<ToastProps> = ({ 
-  message, 
+export const Toast: React.FC<ToastProps> = ({
+  message,
   type = 'success',
-  onHide, 
-  duration = 2000 
+  onHide,
+  duration = 2000
 }) => {
+  const colors = useTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(-100)).current;
 
@@ -62,6 +63,41 @@ export const Toast: React.FC<ToastProps> = ({
     return () => clearTimeout(timer);
   }, [duration, fadeAnim, slideAnim, onHide]);
 
+  const styles = useMemo(() => StyleSheet.create({
+    container: {
+      position: 'absolute',
+      top: 60,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      zIndex: 9999,
+      pointerEvents: 'none',
+    },
+    toast: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      gap: 12,
+      shadowColor: colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+      maxWidth: '90%',
+    },
+    message: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: '600',
+      flex: 1,
+    },
+  }), [colors]);
+
   const Icon = type === 'error' ? XCircle : type === 'info' ? Info : CheckCircle;
   const iconColor = type === 'error' ? colors.error : colors.primary;
 
@@ -82,39 +118,3 @@ export const Toast: React.FC<ToastProps> = ({
     </Animated.View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    top: 60,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 9999,
-    pointerEvents: 'none',
-  },
-  toast: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    gap: 12,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    maxWidth: '90%',
-  },
-  message: {
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '600',
-    flex: 1,
-  },
-});
-
