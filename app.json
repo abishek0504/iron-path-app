@@ -20,9 +20,9 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.ironpath.app",
+      "bundleIdentifier": "com.reginafang.ironpath",
       "buildNumber": "1",
-      "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID",
+      "appleTeamId": "JWUD8ZKQLN",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSUserNotificationsUsageDescription": "IronPath sends reminders to help you stay consistent with your workouts.",
@@ -89,7 +89,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#09090b"
       },
-      "package": "com.ironpath.app",
+      "package": "com.reginafang.ironpath",
       "versionCode": 1,
       "enableEdgeToEdge": true
     },

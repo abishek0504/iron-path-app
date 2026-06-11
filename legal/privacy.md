@@ -26,7 +26,7 @@ If you choose to connect Apple Health:
 
 ## AI workout generation
 
-When you use "Generate with AI", a summary of your training context (experience level, training goals, available days, recent workout structure, and muscle-group coverage) is sent to Google's Gemini API to generate a workout plan. Your email, name, and Apple Health data are **not** sent. Generations are rate-limited per day and logged in your account so you can review what was created.
+When you use "Generate with AI", a summary of your training context (experience level, preferred training split, available days, recent workout performance such as sets, reps, weight and effort ratings, and muscle-group coverage) is sent to OpenAI's API to generate a workout plan. Your email, name, and Apple Health data are **not** sent. Generations are rate-limited per day and logged in your account so you can review what was created.
 
 ## How we store data
 
@@ -47,7 +47,7 @@ You can delete your account in the App (Settings → Account → Delete account)
 | Service | Purpose | Data involved |
 | --- | --- | --- |
 | Supabase | Database, authentication, backend functions | Account, profile, workout data |
-| Google Gemini API | AI workout generation (on request) | Training context summary only |
+| OpenAI API | AI workout generation (on request) | Training context summary only |
 | Sentry | Crash and performance diagnostics | Device/app diagnostics |
 | Apple HealthKit | Optional health sync | Workouts, body weight, heart metrics |
 

@@ -98,6 +98,17 @@ async function updateSyncLedger(userId: string, type: 'workouts' | 'body_mass' |
 }
 
 /**
+ * Non-prompting connection check for UI state. HealthKit only exposes sharing
+ * (write) status — read grants are invisible by design — so write access to
+ * either synced type counts as connected.
+ */
+export function isAppleHealthConnected(): boolean {
+  const hk = getHealthKit();
+  if (!hk) return false;
+  return canShare(hk, WORKOUT_TYPE) || canShare(hk, BODY_MASS);
+}
+
+/**
  * Requests read/write access for the types IronPath syncs. Triggers the system
  * permission sheet on first call; afterwards reflects the stored decision.
  */

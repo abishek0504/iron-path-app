@@ -48,6 +48,8 @@ import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
+import { SplitPicker } from '../src/components/ui/SplitPicker';
+import { getSplitLabel } from '../src/lib/constants/trainingSplits';
 
 const EXPERIENCE_OPTIONS = ['beginner', 'intermediate', 'advanced'];
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
@@ -85,6 +87,7 @@ export default function Onboarding() {
   const [experience, setExperience] = useState<string>('');
   const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
   const [workoutDays, setWorkoutDays] = useState<string[]>([]);
+  const [preferredSplit, setPreferredSplit] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<string[]>([]);
 
   useEffect(() => {
@@ -119,6 +122,7 @@ export default function Onboarding() {
         setExperience(profile.experience_level || '');
         setDaysPerWeekSlider(profile.days_per_week ?? 0);
         setWorkoutDays(profile.workout_days || []);
+        setPreferredSplit(profile.preferred_training_style || null);
         setEquipment(profile.equipment_access || []);
         setProfile(profile);
       }
@@ -186,6 +190,9 @@ export default function Onboarding() {
       } else if (workoutDays.length !== daysPerWeekSlider) {
         errors.workoutDays = `Select exactly ${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}.`;
       }
+      if (!preferredSplit?.trim()) {
+        errors.preferredSplit = 'Pick a split or describe your own.';
+      }
     } else if (step === 4) {
       if (!equipment.length) errors.equipment = 'Select at least one option.';
     }
@@ -249,6 +256,7 @@ export default function Onboarding() {
         experience_level: experience,
         days_per_week: daysPerWeek,
         workout_days: workoutDays.length === daysPerWeekSlider ? workoutDays : undefined,
+        preferred_training_style: preferredSplit?.trim() || undefined,
         equipment_access: equipment,
         first_name: firstName.trim(),
         last_name: lastName.trim() || undefined,
@@ -557,6 +565,23 @@ export default function Onboarding() {
           </View>
         )}
       </View>
+
+      {daysPerWeekSlider > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.label}>Preferred split *</Text>
+          <Text style={styles.splitHint}>
+            Suggested for {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'} per week — or describe your own
+          </Text>
+          <SplitPicker
+            daysPerWeek={daysPerWeekSlider}
+            value={preferredSplit}
+            onChange={setPreferredSplit}
+          />
+          {fieldErrors.preferredSplit ? (
+            <Text style={styles.errorText}>{fieldErrors.preferredSplit}</Text>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 
@@ -637,6 +662,10 @@ export default function Onboarding() {
             ? `${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}: ${workoutDays.join(', ') || '—'}`
             : '—'}
         </Text>
+      </View>
+      <View style={styles.reviewRow}>
+        <Text style={styles.reviewLabel}>Preferred split</Text>
+        <Text style={styles.reviewValue}>{getSplitLabel(preferredSplit) ?? '—'}</Text>
       </View>
       <View style={styles.reviewRow}>
         <Text style={styles.reviewLabel}>Equipment</Text>
@@ -950,6 +979,10 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   preferredDaysSection: {
     marginTop: spacing.lg,
     gap: spacing.sm,
+  },
+  splitHint: {
+    color: colors.textMuted,
+    fontSize: typography.sizes.sm,
   },
   chipGroupPreferredDays: {
     flexDirection: 'column',

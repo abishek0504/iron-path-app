@@ -1,10 +1,11 @@
 /**
- * Edit-before-add: per-set weight/reps/duration, rest between sets, add/remove sets.
- * Checkbox "Add for today only". Default: add to routine. Back and Confirm.
+ * Exercise detail screen: hero image, muscle chips, description, per-set editor
+ * (weight/reps/duration/rest + warmup toggle), and explicit scope actions:
+ * "Add to routine" (template slot + session sync) vs "Add to this day only".
  * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–600.
  */
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,22 +14,28 @@ import {
   TextInput,
   ScrollView,
   ActivityIndicator,
-  Switch,
+  Image,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Dumbbell, Flame } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { useToast } from '../src/hooks/useToast';
+import { useDateContext } from '../src/hooks/useDateContext';
 import { selectExerciseTargets } from '../src/lib/engine/targetSelection';
 import {
   getOrCreateActiveSessionForToday,
   createSessionExercise,
 } from '../src/lib/supabase/queries/workouts_helpers';
-
+import {
+  getSessionsForToday,
+  syncTemplateSlotToSessionsForDay,
+  type SetType,
+} from '../src/lib/supabase/queries/workouts';
 import {
   applyStructureEditToTemplate,
   getTemplateSlotsForDay,
@@ -38,9 +45,11 @@ import {
   getUserExerciseDefaults,
   upsertUserExerciseDefaults,
 } from '../src/lib/supabase/queries/exercises';
+import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
+import { getExerciseImage } from '../src/lib/exerciseImages';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
-import { WEEK_DAYS } from '../src/lib/utils/date';
+import { getDateBoundsForDayName } from '../src/lib/utils/date';
 
 const DEFAULT_REST_SEC = 90;
 const REPS_MIN = 1;
@@ -49,6 +58,9 @@ const DURATION_MIN = 5;
 const DURATION_MAX = 3600;
 const REST_MIN = 0;
 const REST_MAX = 600;
+const HERO_ASPECT_RATIO = 3 / 2;
+/** Cap the hero so it never dominates small/tall screens. */
+const HERO_MAX_HEIGHT_FRACTION = 0.35;
 
 interface EditSet {
   id: string;
@@ -57,6 +69,7 @@ interface EditSet {
   reps: string;
   duration_sec: string;
   rest_sec: string;
+  set_type: SetType;
 }
 
 function validateSet(set: EditSet, isTimedMode: boolean): { weight?: string; reps?: string; duration_sec?: string; rest_sec?: string } {
@@ -101,6 +114,17 @@ function allSetsValid(sets: EditSet[], isTimedMode: boolean): boolean {
   return sets.every((s) => Object.keys(validateSet(s, isTimedMode)).length === 0);
 }
 
+function toExplicitSetRows(sets: EditSet[], isTimedMode: boolean) {
+  return sets.map((s) => ({
+    set_number: s.set_number,
+    weight: !isTimedMode && s.weight.trim() !== '' ? parseFloat(s.weight) : null,
+    reps: !isTimedMode && s.reps.trim() !== '' ? parseInt(s.reps, 10) : null,
+    duration_sec: isTimedMode && s.duration_sec.trim() !== '' ? parseInt(s.duration_sec, 10) : null,
+    rest_sec: s.rest_sec.trim() !== '' ? parseInt(s.rest_sec, 10) : null,
+    set_type: s.set_type,
+  }));
+}
+
 export default function AddExerciseEditScreen() {
   const router = useRouter();
   const toast = useToast();
@@ -135,6 +159,7 @@ export default function AddExerciseEditScreen() {
         ? params.sessionId[0]
         : undefined;
   const isEditSlot = !!editSlotId;
+  const dateContext = useDateContext(dayName);
 
   if (__DEV__ && (params.sessionId !== undefined || sessionId !== undefined)) {
     devLog('add-exercise-edit', {
@@ -152,14 +177,23 @@ export default function AddExerciseEditScreen() {
 
   const [userId, setUserId] = useState<string | null>(profileId ?? null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState<'routine' | 'dayOnly' | 'editSlot' | null>(null);
   const [sets, setSets] = useState<EditSet[]>([]);
-  const [todayOnly, setTodayOnly] = useState(false);
-  const todayOnlyRef = useRef(todayOnly);
-  todayOnlyRef.current = todayOnly;
+  const [exerciseInfo, setExerciseInfo] = useState<MergedExercise | null>(null);
+  // Sessions already materialized for the selected day; drives the "this day only" action.
+  const [daySessionCount, setDaySessionCount] = useState<number | null>(null);
 
   const exerciseIdVal = exerciseId || undefined;
   const customExerciseIdVal = customExerciseId || undefined;
+  const heroImage = exerciseName ? getExerciseImage(exerciseName) : null;
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // Scale hero with the screen: 3:2 of the content width, capped to a fraction
+  // of the window height so it stays compact on tall phones.
+  const heroHeight = Math.min(
+    (windowWidth - spacing.lg * 2) / HERO_ASPECT_RATIO,
+    windowHeight * HERO_MAX_HEIGHT_FRACTION
+  );
+  const saving = savingAction !== null;
 
   useEffect(() => {
     if (profileId) {
@@ -172,6 +206,47 @@ export default function AddExerciseEditScreen() {
     });
     return () => { cancelled = true; };
   }, [profileId]);
+
+  // Load exercise metadata (description, muscles, equipment) for the detail header.
+  useEffect(() => {
+    const id = exerciseIdVal || customExerciseIdVal;
+    if (!userId || !id) return;
+    let cancelled = false;
+    listMergedExercisesCached(userId, [id])
+      .then((list) => {
+        if (!cancelled) setExerciseInfo(list[0] ?? null);
+      })
+      .catch((e) => {
+        if (__DEV__) devError('add-exercise-edit', e, { action: 'loadExerciseInfo' });
+      });
+    return () => { cancelled = true; };
+  }, [userId, exerciseIdVal, customExerciseIdVal]);
+
+  // Check for materialized sessions on the selected day (any day, not just today).
+  useEffect(() => {
+    if (!userId || !dayName || isEditSlot) return;
+    let cancelled = false;
+    const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
+    getSessionsForToday(userId, startIso, endIsoExclusive)
+      .then((sessions) => {
+        if (cancelled) return;
+        setDaySessionCount(sessions.length);
+        if (__DEV__) {
+          devLog('add-exercise-edit', {
+            action: 'daySessions_check',
+            dayName,
+            startIso,
+            endIsoExclusive,
+            sessionCount: sessions.length,
+          });
+        }
+      })
+      .catch((e) => {
+        if (__DEV__) devError('add-exercise-edit', e, { action: 'daySessions_check' });
+        if (!cancelled) setDaySessionCount(0);
+      });
+    return () => { cancelled = true; };
+  }, [userId, dayName, isEditSlot]);
 
   const loadPrefill = useCallback(async () => {
     const missing: string[] = [];
@@ -254,6 +329,7 @@ export default function AddExerciseEditScreen() {
           reps: repsStr,
           duration_sec: durStr,
           rest_sec: i < count ? restStr : '',
+          set_type: 'normal',
         });
       }
       setSets(next);
@@ -275,6 +351,14 @@ export default function AddExerciseEditScreen() {
     );
   };
 
+  const toggleWarmup = (id: string) => {
+    setSets((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, set_type: s.set_type === 'warmup' ? 'normal' : 'warmup' } : s
+      )
+    );
+  };
+
   const addSet = () => {
     setSets((prev) => {
       const last = prev[prev.length - 1];
@@ -288,6 +372,7 @@ export default function AddExerciseEditScreen() {
           reps: last?.reps ?? '',
           duration_sec: last?.duration_sec ?? '',
           rest_sec: '',
+          set_type: 'normal',
         },
       ];
     });
@@ -327,40 +412,41 @@ export default function AddExerciseEditScreen() {
       toast.error('Fix errors before saving');
       return;
     }
-    if (exerciseIdVal && userId) {
-      const first = sets[0];
-      const success = await upsertUserExerciseDefaults(userId, exerciseIdVal, {
-        setCount: sets.length,
-        weight:
-          !isTimedMode && first.weight.trim() !== ''
-            ? parseFloat(first.weight)
-            : null,
-        reps:
-          !isTimedMode && first.reps.trim() !== ''
-            ? parseInt(first.reps, 10)
-            : null,
-        duration_sec:
-          isTimedMode && first.duration_sec.trim() !== ''
-            ? parseInt(first.duration_sec, 10)
-            : null,
-        rest_sec:
-          first.rest_sec.trim() !== ''
-            ? parseInt(first.rest_sec, 10)
-            : null,
-      });
-      if (!success) {
-        toast.error('Failed to save defaults');
-        return;
+    setSavingAction('editSlot');
+    try {
+      if (exerciseIdVal && userId) {
+        const first = sets[0];
+        const success = await upsertUserExerciseDefaults(userId, exerciseIdVal, {
+          setCount: sets.length,
+          weight:
+            !isTimedMode && first.weight.trim() !== ''
+              ? parseFloat(first.weight)
+              : null,
+          reps:
+            !isTimedMode && first.reps.trim() !== ''
+              ? parseInt(first.reps, 10)
+              : null,
+          duration_sec:
+            isTimedMode && first.duration_sec.trim() !== ''
+              ? parseInt(first.duration_sec, 10)
+              : null,
+          rest_sec:
+            first.rest_sec.trim() !== ''
+              ? parseInt(first.rest_sec, 10)
+              : null,
+        });
+        if (!success) {
+          toast.error('Failed to save defaults');
+          return;
+        }
       }
+      router.replace('/(tabs)/planner');
+    } finally {
+      setSavingAction(null);
     }
-    router.replace('/(tabs)/planner');
   };
 
-  const handleConfirm = async () => {
-    if (isEditSlot) {
-      await saveUserDefaultsAndBack();
-      return;
-    }
+  const validateAddContext = (): boolean => {
     const missingContext: string[] = [];
     if (!userId) missingContext.push('userId');
     if (!dayId) missingContext.push('dayId');
@@ -369,31 +455,115 @@ export default function AddExerciseEditScreen() {
     if (missingContext.length > 0) {
       if (__DEV__) devLog('add-exercise-edit', { action: 'confirm_fail', missing: missingContext });
       toast.error('Missing context');
-      return;
+      return false;
     }
     if (!exerciseIdVal && !customExerciseIdVal) {
       if (__DEV__) devLog('add-exercise-edit', { action: 'confirm_fail', missing: ['exerciseId and customExerciseId (need one)'] });
       toast.error('Missing exercise');
-      return;
+      return false;
     }
     if (!allSetsValid(sets, isTimedMode)) {
-      toast.error('Fix errors before confirming');
-      return;
+      toast.error('Fix errors before adding');
+      return false;
     }
-    setSaving(true);
-    try {
-      const addToRoutine = !todayOnlyRef.current;
-      // Only touch a live session when the edited day is actually today (or the
-      // caller passed an explicit session). Future-day edits are template-only;
-      // previously this created/used today's active session by mistake.
-      const isEditingToday = dayName === WEEK_DAYS[new Date().getDay()];
+    return true;
+  };
 
-      if (!isEditingToday && !sessionId && !addToRoutine) {
-        toast.error('"Today only" is only available for today\'s workout');
+  const insertExerciseWithSetsIntoSession = async (targetSessionId: string): Promise<boolean> => {
+    const { data: existing } = await supabase
+      .from('v2_session_exercises')
+      .select('sort_order')
+      .eq('session_id', targetSessionId)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sortOrder = (existing?.sort_order ?? 0) + 1;
+    const created = await createSessionExercise(targetSessionId, {
+      exerciseId: exerciseIdVal,
+      customExerciseId: customExerciseIdVal,
+      sortOrder,
+    });
+    if (!created) return false;
+    const rows = toExplicitSetRows(sets, isTimedMode).map((s) => ({
+      session_exercise_id: created.id,
+      ...s,
+      rpe: null,
+      rir: null,
+      notes: null,
+    }));
+    const { error } = await supabase.from('v2_session_sets').insert(rows);
+    if (error) {
+      if (__DEV__) devError('add-exercise-edit', error, { action: 'insertSets', sessionId: targetSessionId });
+      return false;
+    }
+    return true;
+  };
+
+  /** Add to routine: template slot + sync to the day's existing session(s). */
+  const handleAddToRoutine = async () => {
+    if (!validateAddContext()) return;
+    setSavingAction('routine');
+    try {
+      const slots = await getTemplateSlotsForDay(templateId, dayName);
+      const sortOrder = slots.length + 1;
+      const success = await applyStructureEditToTemplate(templateId, {
+        type: 'addSlot',
+        dayId,
+        exerciseId: exerciseIdVal,
+        customExerciseId: customExerciseIdVal,
+        sortOrder,
+      });
+      if (!success) {
+        toast.error('Failed to add to routine');
         return;
       }
+      invalidateTemplate(templateId);
 
-      let targetSession: { id: string } | null = null;
+      let syncedSessions = 0;
+      if (sessionId) {
+        const ok = await insertExerciseWithSetsIntoSession(sessionId);
+        if (!ok) {
+          toast.error('Added to routine, but failed to update workout');
+          return;
+        }
+        syncedSessions = 1;
+      } else {
+        syncedSessions = await syncTemplateSlotToSessionsForDay(userId!, dayName, {
+          exerciseId: exerciseIdVal,
+          customExerciseId: customExerciseIdVal,
+          experience,
+          explicitSets: toExplicitSetRows(sets, isTimedMode),
+        });
+      }
+
+      if (__DEV__) {
+        devLog('add-exercise-edit', {
+          action: 'add_complete',
+          scope: 'routine',
+          dayName,
+          targetSessionId: sessionId ?? null,
+          syncedSessions,
+          setCount: sets.length,
+          warmupCount: sets.filter((s) => s.set_type === 'warmup').length,
+        });
+      }
+      useUIStore.getState().setPlannerNeedsRefetch(true);
+      toast.success(syncedSessions > 0 ? 'Added to routine & workout' : 'Added to routine');
+      router.replace('/(tabs)/planner');
+    } catch (e) {
+      if (__DEV__) devError('add-exercise-edit', e, { action: 'handleAddToRoutine' });
+      toast.error('Failed to add exercise');
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
+  /** Add to this day only: insert into the targeted session, no template change. */
+  const handleAddDayOnly = async () => {
+    if (!validateAddContext()) return;
+    setSavingAction('dayOnly');
+    try {
+      let targetSessionId: string | null = null;
       if (sessionId) {
         const { data } = await supabase
           .from('v2_workout_sessions')
@@ -401,92 +571,53 @@ export default function AddExerciseEditScreen() {
           .eq('id', sessionId)
           .eq('user_id', userId)
           .maybeSingle();
-        targetSession = data ?? null;
-        if (!targetSession) {
+        targetSessionId = data?.id ?? null;
+        if (!targetSessionId) {
           toast.error('Workout not found');
           return;
         }
-      } else if (isEditingToday) {
-        targetSession = await getOrCreateActiveSessionForToday(userId!, dayName);
-        if (!targetSession) {
-          toast.error('Failed to get today\'s session');
+      } else if (dateContext.isToday) {
+        const session = await getOrCreateActiveSessionForToday(userId!, dayName);
+        if (!session) {
+          toast.error("Failed to get today's session");
           return;
         }
-      }
-
-      if (addToRoutine) {
-        const slots = await getTemplateSlotsForDay(templateId, dayName);
-        const sortOrder = slots.length + 1;
-        const success = await applyStructureEditToTemplate(templateId, {
-          type: 'addSlot',
-          dayId,
-          exerciseId: exerciseIdVal,
-          customExerciseId: customExerciseIdVal,
-          sortOrder,
-        });
-        if (success) {
-          invalidateTemplate(templateId);
-        } else {
-          toast.error('Failed to add to routine');
-          return;
-        }
-      }
-
-      if (targetSession) {
-        const { data: existing } = await supabase
-          .from('v2_session_exercises')
-          .select('sort_order')
-          .eq('session_id', targetSession.id)
-          .order('sort_order', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const sortOrder = (existing?.sort_order ?? 0) + 1;
-        const created = await createSessionExercise(targetSession.id, {
-          exerciseId: exerciseIdVal,
-          customExerciseId: customExerciseIdVal,
-          sortOrder,
-        });
-        if (!created) {
-          toast.error('Failed to add to workout');
-          return;
-        }
-        for (const s of sets) {
-          const weightVal = s.weight.trim() !== '' ? parseFloat(s.weight) : null;
-          const repsVal = s.reps.trim() !== '' ? parseInt(s.reps, 10) : null;
-          const durationVal = s.duration_sec.trim() !== '' ? parseInt(s.duration_sec, 10) : null;
-          const restVal = s.rest_sec.trim() !== '' ? parseInt(s.rest_sec, 10) : null;
-          const { error } = await supabase.from('v2_session_sets').insert({
-            session_exercise_id: created.id,
-            set_number: s.set_number,
-            weight: isTimedMode ? null : weightVal,
-            reps: isTimedMode ? null : repsVal,
-            duration_sec: isTimedMode ? durationVal : null,
-            rest_sec: restVal,
-            rpe: null,
-            rir: null,
-            notes: null,
-          });
-          if (error) {
-            if (__DEV__) devError('add-exercise-edit', error, { set_number: s.set_number });
-            toast.error('Failed to add sets');
-            return;
-          }
-        }
-        if (__DEV__) devLog('add-exercise-edit', { action: 'sessionSetsInserted', count: sets.length });
-        useUIStore.getState().setPlannerNeedsRefetch(true);
-        toast.success(addToRoutine ? 'Added to routine & workout' : 'Added to today\'s session');
+        targetSessionId = session.id;
       } else {
-        // Future-day edit: template updated, no live session touched
-        useUIStore.getState().setPlannerNeedsRefetch(true);
-        toast.success('Added to routine');
+        // Materialized day (non-today): target that day's most recent session.
+        const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
+        const sessions = await getSessionsForToday(userId!, startIso, endIsoExclusive);
+        targetSessionId = sessions[0]?.id ?? null;
+        if (!targetSessionId) {
+          toast.error('No workout exists for this day');
+          return;
+        }
       }
 
+      const ok = await insertExerciseWithSetsIntoSession(targetSessionId);
+      if (!ok) {
+        toast.error('Failed to add to workout');
+        return;
+      }
+
+      if (__DEV__) {
+        devLog('add-exercise-edit', {
+          action: 'add_complete',
+          scope: 'dayOnly',
+          dayName,
+          targetSessionId,
+          setCount: sets.length,
+          warmupCount: sets.filter((s) => s.set_type === 'warmup').length,
+        });
+      }
+      useUIStore.getState().setPlannerNeedsRefetch(true);
+      toast.success(dateContext.isToday ? "Added to today's workout" : `Added to ${dayName} only`);
       router.replace('/(tabs)/planner');
     } catch (e) {
-      if (__DEV__) devError('add-exercise-edit', e);
+      if (__DEV__) devError('add-exercise-edit', e, { action: 'handleAddDayOnly' });
       toast.error('Failed to add exercise');
     } finally {
-      setSaving(false);
+      setSavingAction(null);
     }
   };
 
@@ -514,16 +645,28 @@ export default function AddExerciseEditScreen() {
     );
   }
 
+  // Day-only is available for today (session gets created on demand) or any
+  // day that already has a materialized session; hidden otherwise (routine-only).
+  const canAddDayOnly =
+    !!sessionId || dateContext.isToday || (daySessionCount != null && daySessionCount > 0);
+  const setsValid = allSetsValid(sets, isTimedMode);
+  const primaryMuscles = exerciseInfo?.primary_muscles ?? [];
+  const secondaryMuscles = exerciseInfo?.secondary_muscles ?? [];
+  const equipment = exerciseInfo?.equipment_needed ?? [];
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.replace('/(tabs)/planner')}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace('/(tabs)/planner');
+          }}
           style={styles.backBtn}
         >
           <ArrowLeft size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{exerciseName || 'Add Exercise'}</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>{exerciseName || 'Add Exercise'}</Text>
       </View>
 
       {loading ? (
@@ -532,13 +675,64 @@ export default function AddExerciseEditScreen() {
         </View>
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {heroImage ? (
+            <Image source={heroImage} style={[styles.heroImage, { height: heroHeight }]} resizeMode="contain" />
+          ) : (
+            <View style={[styles.heroImage, { height: heroHeight }, styles.heroPlaceholder]}>
+              <Dumbbell size={48} color={colors.textMuted} />
+            </View>
+          )}
+
+          <Text style={styles.exerciseTitle}>{exerciseName}</Text>
+
+          {(primaryMuscles.length > 0 || secondaryMuscles.length > 0 || equipment.length > 0) && (
+            <View style={styles.chipsRow}>
+              {primaryMuscles.map((m) => (
+                <View key={`p-${m}`} style={[styles.chip, styles.chipPrimary]}>
+                  <Text style={styles.chipPrimaryText}>{m}</Text>
+                </View>
+              ))}
+              {secondaryMuscles.map((m) => (
+                <View key={`s-${m}`} style={styles.chip}>
+                  <Text style={styles.chipText}>{m}</Text>
+                </View>
+              ))}
+              {equipment.map((e) => (
+                <View key={`e-${e}`} style={styles.chip}>
+                  <Text style={styles.chipText}>{e}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {exerciseInfo?.description ? (
+            <View style={styles.descriptionCard}>
+              <Text style={styles.descriptionLabel}>How to do it</Text>
+              <Text style={styles.descriptionText}>{exerciseInfo.description}</Text>
+            </View>
+          ) : null}
+
+          <Text style={styles.sectionTitle}>Sets</Text>
           {sets.map((set, index) => {
             const err = validateSet(set, isTimedMode);
+            const isWarmup = set.set_type === 'warmup';
             return (
               <View key={set.id}>
-                <View style={styles.setCard}>
+                <View style={[styles.setCard, isWarmup && styles.setCardWarmup]}>
                   <View style={styles.setHeaderRow}>
-                    <Text style={styles.setNumber}>Set {set.set_number}</Text>
+                    <View style={styles.setHeaderLeft}>
+                      <Text style={styles.setNumber}>Set {set.set_number}</Text>
+                      <TouchableOpacity
+                        style={[styles.warmupChip, isWarmup && styles.warmupChipActive]}
+                        onPress={() => toggleWarmup(set.id)}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      >
+                        <Flame size={12} color={isWarmup ? colors.background : colors.textSecondary} />
+                        <Text style={[styles.warmupChipText, isWarmup && styles.warmupChipTextActive]}>
+                          Warmup
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                     {sets.length > 1 && (
                       <TouchableOpacity onPress={() => removeSet(set.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                         <Text style={styles.removeSetText}>Remove</Text>
@@ -611,51 +805,66 @@ export default function AddExerciseEditScreen() {
             <Text style={styles.addSetButtonText}>Add Set</Text>
           </TouchableOpacity>
 
-          {!isEditSlot && (
-            <View style={styles.todayOnlyCard}>
-              <View style={styles.checkboxRow}>
-                <Text style={styles.checkboxLabel}>Add for today only</Text>
-                <Switch
-                  value={todayOnly}
-                  onValueChange={setTodayOnly}
-                  trackColor={{ false: colors.borderLight, true: colors.primary }}
-                  thumbColor={colors.background}
-                />
-              </View>
-              <Text style={styles.hint}>
-                Off = add to routine for this day. On = add only to today&apos;s session.
-              </Text>
-            </View>
-          )}
-
-          {isEditSlot && (
-            <TouchableOpacity
-              style={[styles.removeFromRoutineBtn, removing && styles.confirmBtnDisabled]}
-              onPress={handleRemoveFromRoutine}
-              disabled={removing}
-            >
-              {removing ? (
-                <ActivityIndicator size="small" color={colors.error} />
-              ) : (
-                <Text style={styles.removeFromRoutineBtnText}>Remove from routine</Text>
+          {isEditSlot ? (
+            <>
+              <TouchableOpacity
+                style={[styles.removeFromRoutineBtn, removing && styles.btnDisabled]}
+                onPress={handleRemoveFromRoutine}
+                disabled={removing}
+              >
+                {removing ? (
+                  <ActivityIndicator size="small" color={colors.error} />
+                ) : (
+                  <Text style={styles.removeFromRoutineBtnText}>Remove from routine</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryBtn, (saving || !setsValid) && styles.btnDisabled]}
+                onPress={saveUserDefaultsAndBack}
+                disabled={saving || !setsValid}
+              >
+                {savingAction === 'editSlot' ? (
+                  <ActivityIndicator size="small" color={colors.background} />
+                ) : (
+                  <Text style={styles.primaryBtnText}>Done</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              {canAddDayOnly && (
+                <TouchableOpacity
+                  style={[styles.secondaryBtn, (saving || !setsValid) && styles.btnDisabled]}
+                  onPress={handleAddDayOnly}
+                  disabled={saving || !setsValid}
+                >
+                  {savingAction === 'dayOnly' ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={styles.secondaryBtnText}>
+                      {dateContext.isToday ? 'Add to today only' : `Add to this ${dayName} only`}
+                    </Text>
+                  )}
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryBtn, (saving || !setsValid) && styles.btnDisabled]}
+                onPress={handleAddToRoutine}
+                disabled={saving || !setsValid}
+              >
+                {savingAction === 'routine' ? (
+                  <ActivityIndicator size="small" color={colors.background} />
+                ) : (
+                  <Text style={styles.primaryBtnText}>Add to routine (repeats weekly)</Text>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.hint}>
+                {canAddDayOnly
+                  ? 'Routine adds repeat every week on this day. Day-only adds affect just this workout.'
+                  : `No workout exists for this ${dayName} yet — adding goes to your weekly routine.`}
+              </Text>
+            </>
           )}
-
-          <TouchableOpacity
-            style={[
-              styles.confirmBtn,
-              (saving || (!isEditSlot && !allSetsValid(sets, isTimedMode))) && styles.confirmBtnDisabled,
-            ]}
-            onPress={handleConfirm}
-            disabled={saving || (!isEditSlot && !allSetsValid(sets, isTimedMode))}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={colors.background} />
-            ) : (
-              <Text style={styles.confirmBtnText}>{isEditSlot ? 'Done' : 'Confirm add'}</Text>
-            )}
-          </TouchableOpacity>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -692,6 +901,78 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
   },
+  heroImage: {
+    width: '100%',
+    borderRadius: borderRadius.md,
+    backgroundColor: '#FFFFFF',
+    marginBottom: spacing.md,
+  },
+  heroPlaceholder: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exerciseTitle: {
+    fontSize: typography.sizes.xl,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  chip: {
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  chipText: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  chipPrimary: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  chipPrimaryText: {
+    fontSize: typography.sizes.xs,
+    color: colors.background,
+    fontWeight: '600',
+  },
+  descriptionCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  descriptionLabel: {
+    fontSize: typography.sizes.sm,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  descriptionText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textPrimary,
+    lineHeight: 20,
+  },
+  sectionTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
   section: {
     marginBottom: spacing.lg,
   },
@@ -703,16 +984,48 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     borderColor: colors.border,
     marginBottom: spacing.sm,
   },
+  setCardWarmup: {
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
+  },
   setHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
+  setHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   setNumber: {
     fontSize: typography.sizes.base,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  warmupChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    backgroundColor: colors.background,
+  },
+  warmupChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  warmupChipText: {
+    fontSize: typography.sizes.xs,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  warmupChipTextActive: {
+    color: colors.background,
   },
   removeSetText: {
     fontSize: typography.sizes.sm,
@@ -760,28 +1073,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
   },
-  todayOnlyCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  checkboxLabel: {
-    fontSize: typography.sizes.base,
-    color: colors.textPrimary,
-    fontWeight: '500',
-  },
   hint: {
     fontSize: typography.sizes.sm,
     color: colors.textMuted,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
+    textAlign: 'center',
   },
   removeFromRoutineBtn: {
     backgroundColor: colors.errorBg,
@@ -797,17 +1093,30 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontSize: typography.sizes.base,
     fontWeight: '600',
   },
-  confirmBtn: {
-    backgroundColor: colors.primary,
+  secondaryBtn: {
+    borderWidth: 1,
+    borderColor: colors.primary,
     paddingVertical: spacing.md,
     borderRadius: borderRadius.md,
     alignItems: 'center',
     marginTop: spacing.lg,
   },
-  confirmBtnDisabled: {
+  secondaryBtnText: {
+    color: colors.primary,
+    fontSize: typography.sizes.base,
+    fontWeight: '600',
+  },
+  primaryBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  btnDisabled: {
     opacity: 0.7,
   },
-  confirmBtnText: {
+  primaryBtnText: {
     color: colors.background,
     fontSize: typography.sizes.base,
     fontWeight: '600',

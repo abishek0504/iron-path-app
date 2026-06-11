@@ -22,7 +22,7 @@ type Props = {
 };
 
 type SessionWithExercises = WorkoutSession & {
-  exercises: Array<{ name: string; summary?: string }>;
+  exercises: Array<{ name: string; summary?: string; warmupCount?: number }>;
   exerciseCount: number;
 };
 
@@ -99,7 +99,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       const sessionExerciseIds = (exerciseRows || []).map((r) => r.id as string);
       const { data: setRows, error: setError } = await supabase
         .from('v2_session_sets')
-        .select('session_exercise_id, weight, reps, duration_sec, rpe, performed_at')
+        .select('session_exercise_id, weight, reps, duration_sec, rpe, set_type, performed_at')
         .in('session_exercise_id', sessionExerciseIds)
         .not('performed_at', 'is', null);
 
@@ -108,6 +108,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       }
 
       // Pick the "best" performed set per session_exercise.
+      // Warmup sets never compete for "best"; they're surfaced as a separate badge.
       // Ranking rules:
       //   - If any set has weight > 0, prefer max weight, tie-break on reps (heaviest lift).
       //   - Else if any set has duration_sec, prefer max duration (longest hold).
@@ -116,8 +117,13 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         string,
         { weight: number | null; reps: number | null; duration_sec: number | null; rpe: number | null }
       >();
+      const warmupCountBySessionExercise = new Map<string, number>();
       for (const row of setRows || []) {
         const seId = row.session_exercise_id as string;
+        if (row.set_type === 'warmup') {
+          warmupCountBySessionExercise.set(seId, (warmupCountBySessionExercise.get(seId) ?? 0) + 1);
+          continue;
+        }
         const weight = row.weight == null ? null : Number(row.weight);
         const reps = row.reps == null ? null : Number(row.reps);
         const duration_sec = row.duration_sec == null ? null : Number(row.duration_sec);
@@ -168,8 +174,9 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         const exercises = rows
           .map(({ sessionExerciseId, exerciseKey }) => {
             const name = exerciseIdToName.get(exerciseKey) || 'Exercise';
+            const warmupCount = warmupCountBySessionExercise.get(sessionExerciseId) ?? 0;
             const best = bestSetBySessionExercise.get(sessionExerciseId);
-            if (!best) return { name };
+            if (!best) return { name, warmupCount };
 
             // Timed summary takes precedence when no weight was lifted.
             let primary: string | null = null;
@@ -185,7 +192,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
             const rpeStr = best.rpe == null ? null : `RPE ${Math.round(best.rpe)}`;
 
             const parts = [primary, rpeStr].filter(Boolean) as string[];
-            return { name, summary: parts.length ? parts.join(' • ') : undefined };
+            return { name, summary: parts.length ? parts.join(' • ') : undefined, warmupCount };
           })
           .slice(0, 6);
         return {
@@ -341,7 +348,16 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
                   <View key={index} style={styles.exerciseItem}>
                     <View style={styles.exerciseDot} />
                     <View style={styles.exerciseTextCol}>
-                      <Text style={styles.exerciseName}>{ex.name}</Text>
+                      <View style={styles.exerciseNameRow}>
+                        <Text style={styles.exerciseName}>{ex.name}</Text>
+                        {(ex.warmupCount ?? 0) > 0 && (
+                          <View style={styles.warmupBadge}>
+                            <Text style={styles.warmupBadgeText}>
+                              {ex.warmupCount === 1 ? '1 warmup' : `${ex.warmupCount} warmups`}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                       {!!ex.summary && <Text style={styles.exerciseSummary}>{ex.summary}</Text>}
                     </View>
                   </View>
@@ -487,6 +503,22 @@ function createStyles(colors: ThemeColors) {
   exerciseName: {
     color: colors.textPrimary,
     fontSize: typography.sizes.sm,
+  },
+  exerciseNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  warmupBadge: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  warmupBadgeText: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.xs,
   },
   exerciseSummary: {
     color: colors.textSecondary,

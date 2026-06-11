@@ -16,6 +16,8 @@ export interface WatchWorkoutContext {
   setNumber?: number;
   totalSets?: number;
   targetText?: string;
+  /** Current set's type; the watch shows a "Warmup" label for warmup sets. */
+  setType?: 'normal' | 'warmup' | 'drop' | 'failure';
   phase?: 'execution' | 'rest' | 'logging' | 'complete';
   /** Epoch seconds when the rest timer ends (only during rest phase). */
   restEndsAt?: number;

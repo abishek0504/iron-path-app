@@ -178,11 +178,12 @@ Deno.serve(async (req) => {
 
     const sessionExerciseIds = sessionExercises.map(se => se.id);
 
-    // 2. Fetch sets for these exercises
+    // 2. Fetch sets for these exercises (warmups don't contribute meaningful stress)
     const { data: sets, error: setsError } = await serviceClient
       .from('v2_session_sets')
       .select('session_exercise_id, reps, weight, rpe, rir, duration_sec')
-      .in('session_exercise_id', sessionExerciseIds);
+      .in('session_exercise_id', sessionExerciseIds)
+      .neq('set_type', 'warmup');
 
     if (setsError) throw setsError;
 

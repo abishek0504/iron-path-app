@@ -44,7 +44,7 @@ import { devLog, devError } from '../../src/lib/utils/logger';
 import { hapticMedium, hapticWarning } from '../../src/lib/utils/haptics';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../src/lib/engine/targetSelection';
-import { WEEK_DAYS, getUtcDayKey, getUtcDayBoundsIso } from '../../src/lib/utils/date';
+import { WEEK_DAYS, getLocalDayKey, getLocalDayBoundsIso } from '../../src/lib/utils/date';
 
 const DAY_ORDER: Record<string, number> = {
   Sunday: 0,
@@ -259,7 +259,7 @@ export default function WorkoutTab() {
       }
 
       const { startIso: todayStartIso, endIsoExclusive: tomorrowStartIso } =
-        getUtcDayBoundsIso(getUtcDayKey(new Date()));
+        getLocalDayBoundsIso();
 
       // First parallel batch: templates and all sessions for today (multi-workout-per-day)
       const [templatesResult, sessionsForToday] = await Promise.all([
@@ -623,10 +623,10 @@ export default function WorkoutTab() {
           return;
         }
         const existingSession = await getActiveSession(userId);
-        const todayUtcKey = getUtcDayKey(new Date());
+        const todayLocalKey = getLocalDayKey(new Date());
         const existingIsToday =
           existingSession &&
-          getUtcDayKey(new Date(existingSession.started_at)) === todayUtcKey &&
+          getLocalDayKey(new Date(existingSession.started_at)) === todayLocalKey &&
           existingSession.day_name === selectedPlanDayName;
         if (existingIsToday && existingSession) {
           const { data: existingExercises } = await supabase
@@ -656,10 +656,10 @@ export default function WorkoutTab() {
       // Use selected session when viewing an active one (multi-workout-per-day); else single active session
       const existingSession =
         selectedSession?.status === 'active' ? selectedSession : await getActiveSession(userId);
-      const todayUtcKey = getUtcDayKey(new Date());
+      const todayLocalKey = getLocalDayKey(new Date());
       const existingIsToday =
         existingSession &&
-        getUtcDayKey(new Date(existingSession.started_at)) === todayUtcKey &&
+        getLocalDayKey(new Date(existingSession.started_at)) === todayLocalKey &&
         existingSession.day_name === selectedPlanDayName;
 
       // Collect Today Only from existing session (exercises not in template) so we preserve them when replacing

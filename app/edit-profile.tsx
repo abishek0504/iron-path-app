@@ -38,6 +38,7 @@ import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
+import { SplitPicker } from '../src/components/ui/SplitPicker';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
 const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'];
@@ -72,6 +73,7 @@ export default function EditProfileScreen() {
   const [experienceLevel, setExperienceLevel] = useState('');
   const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
   const [workoutDays, setWorkoutDays] = useState<string[]>([]);
+  const [preferredSplit, setPreferredSplit] = useState<string | null>(null);
   const [useImperial, setUseImperial] = useState(true);
   const [equipment, setEquipment] = useState<string[]>([]);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -126,6 +128,7 @@ export default function EditProfileScreen() {
         setExperienceLevel(p.experience_level ?? '');
         setDaysPerWeekSlider(p.days_per_week ?? 0);
         setWorkoutDays(p.workout_days ?? []);
+        setPreferredSplit(p.preferred_training_style ?? null);
         setUseImperial(p.use_imperial ?? true);
         setEquipment(p.equipment_access ?? []);
 
@@ -163,10 +166,11 @@ export default function EditProfileScreen() {
       (profile.experience_level ?? '') !== experienceLevel ||
       (profile.days_per_week ?? undefined) !== daysNum ||
       !workoutDaysMatch ||
+      (profile.preferred_training_style ?? null) !== (preferredSplit?.trim() || null) ||
       (profile.use_imperial ?? true) !== useImperial ||
       equipChanged
     );
-  }, [dateOfBirth, daysPerWeekSlider, equipment, experienceLevel, firstName, gender, lastName, profile, useImperial, workoutDays]);
+  }, [dateOfBirth, daysPerWeekSlider, equipment, experienceLevel, firstName, gender, lastName, preferredSplit, profile, useImperial, workoutDays]);
 
   usePreventRemove(hasChanges && !allowCloseAfterSave, ({ data }) => {
     pendingRemoveActionRef.current = data.action;
@@ -230,6 +234,7 @@ export default function EditProfileScreen() {
         experience_level: experienceLevel.trim() || undefined,
         days_per_week: daysNum,
         workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
+        preferred_training_style: preferredSplit?.trim() || undefined,
         use_imperial: useImperial,
         equipment_access: equipment,
       };
@@ -271,6 +276,7 @@ export default function EditProfileScreen() {
         experience_level: experienceLevel.trim() || undefined,
         days_per_week: daysNum,
         workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
+        preferred_training_style: preferredSplit?.trim() || undefined,
         use_imperial: useImperial,
         equipment_access: equipment,
       };
@@ -469,6 +475,19 @@ export default function EditProfileScreen() {
               </View>
             </View>
           )}
+        </View>
+
+        {/* Preferred split */}
+        <View style={styles.card}>
+          <Text style={styles.label}>Preferred Split</Text>
+          <Text style={styles.helperText}>
+            Suggestions match your days per week — the AI uses this to plan each day
+          </Text>
+          <SplitPicker
+            daysPerWeek={daysPerWeekSlider > 0 ? daysPerWeekSlider : 3}
+            value={preferredSplit}
+            onChange={setPreferredSplit}
+          />
         </View>
 
         {/* Units toggle */}

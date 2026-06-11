@@ -262,6 +262,7 @@ export default function ActiveWorkoutScreen() {
         setNumber: workoutPhase.setIndex + 1,
         totalSets: exercise.sets.length,
         targetText: formatSetTarget(set),
+        setType: set?.set_type ?? 'normal',
         phase: 'execution',
         nextUp: nextSet ? `Set ${workoutPhase.setIndex + 2}` : exercises[currentExerciseIndex + 1]?.name,
         supersetLabel,
@@ -588,6 +589,7 @@ export default function ActiveWorkoutScreen() {
     const currentSet = exercise.sets[currentSetIdx];
     let updatedExercises = exercises;
     if (currentSet) {
+      // Preserve set_type so a warmup completed by tap/watch isn't saved as 'normal'.
       if (exercise.mode === 'reps') {
         const hasValidDefaults = currentSet.weight !== null && currentSet.weight !== undefined &&
                                  currentSet.reps !== null && currentSet.reps !== undefined;
@@ -595,12 +597,14 @@ export default function ActiveWorkoutScreen() {
           weight: hasValidDefaults ? currentSet.weight! : 0,
           reps: hasValidDefaults ? currentSet.reps! : (currentSet.reps || 0),
           rpe: updatedRPEs[currentSetIdx],
+          set_type: currentSet.set_type ?? 'normal',
         });
       } else {
         // timed
         await markSetComplete(currentSet.id, {
           duration_sec: currentSet.duration_sec ?? 0,
           rpe: updatedRPEs[currentSetIdx],
+          set_type: currentSet.set_type ?? 'normal',
         });
       }
 

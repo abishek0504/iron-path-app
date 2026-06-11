@@ -28,7 +28,7 @@ You agree not to:
 
 ## 5. AI-generated content
 
-AI-generated workout plans are produced by a third-party model (Google Gemini) from your training context. They are suggestions, provided "as is", and may be imperfect. Review every plan before training with it. AI generation is rate-limited per day; limits may change.
+AI-generated workout plans are produced by a third-party model (OpenAI) from your training context. They are suggestions, provided "as is", and may be imperfect. Review every plan before training with it. AI generation is rate-limited per day; limits may change.
 
 ## 6. Apple Health
 

@@ -349,45 +349,42 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 ### Flow 4: AI Generation → Target Selection → Session Creation
 
 ```
-1. User taps "Generate with AI" in Planner
-   └→ app/(tabs)/planner.tsx
-   └→ generateWeekForTemplate(template, userId, profile)
-       
-       Phase 1: Front-load all data (NO SQL in loop)
-         └→ Fetch AI allow-list (v2_ai_recommended_exercises, limit 50)
-         └→ listMergedExercises(userId, exerciseIds)
-             └→ Get primary_muscles + implicit_hits for all candidates
-         └→ getMuscleStressStats(userId, last48h)
-             └→ Calculate current fatigue from performed truth
-         └→ getPrescriptionsForExercises(exerciseIds, experience, mode)
-             └→ Get target bands for all candidates
-       
-       Phase 2: Build exercise stress profiles
-         └→ For each candidate:
-             └→ TargetSets = round((sets_min + sets_max) / 2)
-             └→ Normalize muscle weights (primary=1.0, implicit=value, sum=1.0)
-             └→ basePriority from priority_order
-       
-       Phase 3: Greedy selection with in-flight fatigue simulation
-         └→ Initialize SimulatedFatigueState(currentStress)
-         └→ Loop: pick highest-scoring exercise not in red zone
-             └→ Calculate worstFraction across muscles
-             └→ Determine zone (green/yellow/red)
-             └→ Apply penalty: green=0, yellow=0.5*basePriority, red=∞
-             └→ Score = basePriority - penalty
-             └→ Select best, update simulated fatigue
-             └→ EstimatedStress_m = TargetSets * 0.7 * NormalizedWeight_m
-         └→ Return ordered exercise IDs
-   
-   └→ Distribute exercises across template days (2-3 per day)
-   └→ For each exercise:
+1. User taps "Generate with AI" in Planner (per day, picks sessionsPerDay 0-6)
+   └→ app/(tabs)/planner.tsx → runGenerateWithAI(sessionsPerDay)
+   └→ sessionsPerDay = 0 → rest day (clear slots + unstarted session exercises, no AI call)
+   └→ generateAiDay({ template, userId, profile, dayIndex, sessionsPerDay })
+       └→ src/lib/ai/generateWorkoutDay.ts
+       └→ supabase.functions.invoke('generate-workout', { templateId, dayName, sessionsPerDay })
+
+2. Edge Function: supabase/functions/generate-workout (OpenAI-powered)
+   └→ Auth via JWT; template ownership check; rolling 24h quota (10/day, v2_ai_generations)
+   └→ Context gathering (computed fresh per request, never persisted):
+       ├→ Allow-list: v2_ai_recommended_exercises + v2_exercises metadata (limit 80)
+       ├→ Profile: experience, equipment, days_per_week, preferred_training_style (split),
+       │   workout_days, use_imperial, current/goal weight
+       ├→ Muscle freshness: v2_muscle_freshness (last 48h, RPE/RIR-driven)
+       ├→ Per-exercise history: v2_session_sets via completed sessions (last 60 days,
+       │   warmups excluded, capped 300 rows) → per-exercise summary
+       │   { last_performed, last_set, top_set, avg_rpe, recent_set_count }
+       └→ Split compliance: "training day N of M this week" computed from workout_days
+   └→ OpenAI chat.completions (default gpt-5-mini, OPENAI_MODEL overridable)
+       └→ Strict structured outputs (response_format json_schema, strict: true)
+       └→ Output: sessions[][] of { exercise_id, sets, reps, duration_sec, weight, target_rpe }
+       └→ Prompt enforces: allow-list only, split compliance, freshness avoidance,
+           progressive overload from history (RPE-based up/hold/back-off)
+   └→ Server validation: allow-list check + dedupe + target bounds clamping
+       └→ Invalid exercise IDs dropped; invalid targets nulled (exercise kept)
+   └→ Audit row to v2_ai_generations (source 'openai' | 'fallback' | 'error')
+
+3. Planner consumes result
+   └→ For each AI exercise plan:
        └→ createTemplateSlot(dayId, { exerciseId, sortOrder })
-       └→ syncTemplateSlotToSessionsForDay(userId, dayName, { exerciseId, experience })
-           └→ Syncs new slot to existing sessions for that day (same as manual add)
-   └→ Fetch exercise names
-   └→ Calculate targets for all slots
+       └→ INSERT v2_session_exercises into existing/new session
+       └→ Targets: AI-prescribed (sets/reps/weight/duration) when present,
+           else selectExerciseTargets() prescription fallback
+   └→ prefillSessionSets(sessionId, sessionExercises, targetsMap)
    └→ invalidateTemplate + invalidateSessionsInRangeForUser + Reload template
-   └→ toast.success('Week generated')
+   └→ toast.success('{day} generated · N AI left today')
 ```
 
 ### Flow 5: Smart Refresh (Active Workout)

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, RotateCcw, Activity, Calendar, CalendarCheck, BarChart2, Flame, Trophy, Clock, Heart } from 'lucide-react-native';
+import { ChevronRight, RotateCcw, Activity, Calendar, CalendarCheck, BarChart2, Flame, Trophy, Clock, Heart, CheckCircle2 } from 'lucide-react-native';
 import { spacing, layout, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TabHeader } from '../../src/components/ui/TabHeader';
@@ -25,6 +25,7 @@ import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
 import { WeightTrackerCard } from '@/components/ui/WeightTrackerCard';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { isAppleHealthConnected } from '../../src/lib/health/healthIntegration';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
 const LBS_PER_KG = 2.20462;
@@ -55,6 +56,7 @@ export default function DashboardTab() {
   const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
   const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [healthConnected, setHealthConnected] = useState(false);
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
 
@@ -190,6 +192,9 @@ export default function DashboardTab() {
 
   useFocusEffect(
     useCallback(() => {
+      // Cheap synchronous permission check — refresh on every focus so the
+      // card flips to "Connected" right after returning from health-connect.
+      setHealthConnected(isAppleHealthConnected());
       const now = Date.now();
       if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
       lastFocusLoadRef.current = now;
@@ -406,13 +411,20 @@ export default function DashboardTab() {
           <Text style={styles.listSecondary}>
             Sync completed workouts and body weight with Apple Health
           </Text>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => router.push('/health-connect')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.actionButtonText}>Connect</Text>
-          </TouchableOpacity>
+          {healthConnected ? (
+            <View style={styles.connectedBadge}>
+              <CheckCircle2 size={18} color={colors.success} />
+              <Text style={styles.connectedBadgeText}>Connected</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => router.push('/health-connect')}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.actionButtonText}>Connect</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -557,6 +569,21 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   actionButtonText: {
     color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+  },
+  connectedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.successBg,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  connectedBadgeText: {
+    color: colors.successText,
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.semibold,
   },

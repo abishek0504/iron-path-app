@@ -22,8 +22,32 @@ export function getUtcDayBoundsIso(dayKey: string): { startIso: string; endIsoEx
   return { startIso, endIsoExclusive };
 }
 
+/** Local calendar key `YYYY-MM-DD` for a timestamp (device timezone). */
+export function getLocalDayKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 /**
- * Get ISO date bounds for a weekday name in the current week (Sun–Sat).
+ * Inclusive start, exclusive end of the LOCAL calendar day containing `date`,
+ * as ISO timestamps. Sessions are timestamped with real moments (`now`), so
+ * day-bucket queries must use local midnights — using the UTC date key shifts
+ * the window by the timezone offset and makes evening sessions "disappear".
+ * Uses setDate(+1) rather than +24h so DST transitions stay on local midnight.
+ */
+export function getLocalDayBoundsIso(date: Date = new Date()): { startIso: string; endIsoExclusive: string } {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { startIso: start.toISOString(), endIsoExclusive: end.toISOString() };
+}
+
+/**
+ * Get ISO date bounds for a weekday name in the current week (Sun–Sat),
+ * computed from LOCAL midnight of the target day.
  * Used to fetch sessions for a selected plan day.
  */
 export function getDateBoundsForDayName(dayName: string): { startIso: string; endIsoExclusive: string } {
@@ -32,10 +56,7 @@ export function getDateBoundsForDayName(dayName: string): { startIso: string; en
   const targetIndex = WEEK_DAYS.indexOf(dayName as (typeof WEEK_DAYS)[number]);
   const targetDate = new Date(now);
   targetDate.setDate(now.getDate() + (targetIndex - todayIndex));
-  const dateKey = targetDate.toISOString().slice(0, 10);
-  const startIso = `${dateKey}T00:00:00.000Z`;
-  const endIsoExclusive = new Date(new Date(startIso).getTime() + MS_PER_DAY_MS).toISOString();
-  return { startIso, endIsoExclusive };
+  return getLocalDayBoundsIso(targetDate);
 }
 
 /**

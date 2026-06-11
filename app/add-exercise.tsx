@@ -1,6 +1,7 @@
 /**
- * Add Exercise – full-page list of exercises with details and Add button.
- * Replaces the modal picker: navigate from Planner with dayId, templateId, dayName.
+ * Add Exercise – searchable list of exercises (name + primary muscles + chevron).
+ * Tapping a row opens the exercise detail screen.
+ * Navigate from Planner with dayId, templateId, dayName (and optional sessionId).
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -15,25 +16,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, ChevronDown, ChevronUp, Plus } from 'lucide-react-native';
+import { ArrowLeft, ChevronRight } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
-import { getExerciseHistory } from '../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../src/lib/utils/logger';
 
-function formatImplicitHits(hits: Record<string, number> | undefined): string {
-  if (!hits || Object.keys(hits).length === 0) return '—';
-  return Object.entries(hits)
-    .filter(([, v]) => v != null && v > 0)
-    .map(([k, v]) => `${k}: ${Math.round((v as number) * 100)}%`)
-    .join(', ');
-}
-
 function formatMuscles(muscles: string[] | undefined): string {
-  if (!muscles?.length) return '—';
+  if (!muscles?.length) return '';
   return muscles.join(', ');
 }
 
@@ -49,8 +41,6 @@ export default function AddExerciseScreen() {
   const [exercises, setExercises] = useState<MergedExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [lastPerformed, setLastPerformed] = useState<Record<string, string>>({});
 
   // Resolve userId from store or auth session so we don't wait on profile
   useEffect(() => {
@@ -90,43 +80,11 @@ export default function AddExerciseScreen() {
     loadExercises();
   }, [loadExercises]);
 
-  const loadLastPerformed = useCallback(
-    async (exerciseId: string) => {
-      if (!userId || lastPerformed[exerciseId] !== undefined) return;
-      try {
-        const history = await getExerciseHistory(exerciseId, userId, 1);
-        const s = history.sets[0];
-        if (!s) {
-          setLastPerformed((prev) => ({ ...prev, [exerciseId]: 'No history' }));
-          return;
-        }
-        if (s.weight != null && s.reps != null) {
-          setLastPerformed((prev) => ({ ...prev, [exerciseId]: `${s.weight} × ${s.reps} reps` }));
-        } else if (s.duration_sec != null) {
-          setLastPerformed((prev) => ({
-            ...prev,
-            [exerciseId]: `${Math.round((s.duration_sec ?? 0) / 60)} min`,
-          }));
-        } else {
-          setLastPerformed((prev) => ({ ...prev, [exerciseId]: 'Last performed' }));
-        }
-      } catch {
-        setLastPerformed((prev) => ({ ...prev, [exerciseId]: '—' }));
-      }
-    },
-    [userId, lastPerformed]
-  );
-
   const filtered = search.trim()
     ? exercises.filter((e) => e.name.toLowerCase().includes(search.trim().toLowerCase()))
     : exercises;
 
-  const toggleExpand = (id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id));
-    if (expandedId !== id) loadLastPerformed(id);
-  };
-
-  const handleAdd = (exercise: MergedExercise) => {
+  const openDetail = (exercise: MergedExercise) => {
     if (!dayId || !templateId || !dayName) return;
     const isCustom = exercise.source === 'custom';
     const resolvedSessionId =
@@ -208,49 +166,19 @@ export default function AddExerciseScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
-            const isExpanded = expandedId === item.id;
+            const muscles = formatMuscles(item.primary_muscles);
             return (
-              <View style={styles.row}>
-                <TouchableOpacity
-                  style={styles.rowMain}
-                  onPress={() => toggleExpand(item.id)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.rowTop}>
-                    <Text style={styles.name}>{item.name}</Text>
-                    {isExpanded ? (
-                      <ChevronUp size={20} color={colors.textSecondary} />
-                    ) : (
-                      <ChevronDown size={20} color={colors.textSecondary} />
-                    )}
-                  </View>
-                  {isExpanded && (
-                    <View style={styles.expanded}>
-                      {item.description ? (
-                        <>
-                          <Text style={styles.detailLabel}>How to do</Text>
-                          <Text style={styles.detailText}>{item.description}</Text>
-                        </>
-                      ) : null}
-                      <Text style={styles.detailLabel}>Primary muscles</Text>
-                      <Text style={styles.detailText}>{formatMuscles(item.primary_muscles)}</Text>
-                      <Text style={styles.detailLabel}>Implicit hits</Text>
-                      <Text style={styles.detailText}>{formatImplicitHits(item.implicit_hits)}</Text>
-                      <Text style={styles.detailLabel}>Last / PR</Text>
-                      <Text style={styles.detailText}>
-                        {lastPerformed[item.id] ?? 'Loading…'}
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.addBtn}
-                  onPress={() => handleAdd(item)}
-                >
-                  <Plus size={20} color={colors.background} />
-                  <Text style={styles.addBtnText}>Add</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.row}
+                onPress={() => openDetail(item)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.rowText}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  {muscles ? <Text style={styles.subtitle}>{muscles}</Text> : null}
+                </View>
+                <ChevronRight size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
             );
           }}
         />
@@ -300,55 +228,23 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+      paddingVertical: spacing.md,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    rowMain: {
+    rowText: {
       flex: 1,
-    },
-    rowTop: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
+      marginRight: spacing.sm,
     },
     name: {
       fontSize: typography.sizes.base,
       fontWeight: '600',
       color: colors.textPrimary,
-      flex: 1,
     },
-    expanded: {
-      marginTop: spacing.sm,
-      paddingTop: spacing.sm,
-      borderTopWidth: 1,
-      borderTopColor: colors.borderLight,
-    },
-    detailLabel: {
+    subtitle: {
       fontSize: typography.sizes.sm,
-      fontWeight: '600',
       color: colors.textSecondary,
-      marginTop: spacing.xs,
-    },
-    detailText: {
-      fontSize: typography.sizes.sm,
-      color: colors.textPrimary,
-      marginBottom: spacing.xs,
-    },
-    addBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.md,
-      marginLeft: spacing.sm,
-    },
-    addBtnText: {
-      color: colors.background,
-      fontSize: typography.sizes.sm,
-      fontWeight: '600',
+      marginTop: 2,
     },
     centered: {
       flex: 1,

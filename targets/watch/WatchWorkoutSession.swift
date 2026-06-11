@@ -11,6 +11,7 @@ struct WorkoutState: Equatable {
     var setNumber = 0
     var totalSets = 0
     var targetText = ""
+    var setType = "normal" // normal | warmup | drop | failure
     var phase = "execution" // execution | rest | logging | complete
     var restEndsAt: Date?
     var nextUp: String?
@@ -60,6 +61,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         next.setNumber = context["setNumber"] as? Int ?? 0
         next.totalSets = context["totalSets"] as? Int ?? 0
         next.targetText = context["targetText"] as? String ?? ""
+        next.setType = context["setType"] as? String ?? "normal"
         next.phase = context["phase"] as? String ?? "execution"
         next.nextUp = context["nextUp"] as? String
         next.supersetLabel = context["supersetLabel"] as? String

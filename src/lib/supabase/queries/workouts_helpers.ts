@@ -5,6 +5,7 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
+import { getLocalDayBoundsIso } from '../../utils/date';
 import {
   createWorkoutSession,
   type WorkoutSession,
@@ -28,15 +29,15 @@ export async function getOrCreateActiveSessionForToday(
   }
 
   try {
-    // Check if there is an in-progress session for today
-    const today = new Date().toISOString().split('T')[0];
+    // Check if there is an in-progress session for today (local calendar day)
+    const { startIso, endIsoExclusive } = getLocalDayBoundsIso();
     const { data: existingSession, error: queryError } = await supabase
       .from('v2_workout_sessions')
       .select('*')
       .eq('user_id', userId)
       .eq('status', 'active')
-      .gte('started_at', `${today}T00:00:00Z`)
-      .lt('started_at', `${today}T23:59:59Z`)
+      .gte('started_at', startIso)
+      .lt('started_at', endIsoExclusive)
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle();

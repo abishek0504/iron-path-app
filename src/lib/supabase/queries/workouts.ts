@@ -359,10 +359,22 @@ export async function getSessionsForToday(
   }
 }
 
+/** Explicit set rows for syncTemplateSlotToSessionsForDay (user-configured sets, incl. warmups). */
+export interface ExplicitSlotSet {
+  set_number: number;
+  weight?: number | null;
+  reps?: number | null;
+  duration_sec?: number | null;
+  rest_sec?: number | null;
+  set_type?: SetType;
+}
+
 /**
  * Sync a new template slot to existing sessions for a given day.
  * When adding to template (manual or AI), existing sessions for that day get the exercise too
  * so manual and generated flows stay unified.
+ * When `explicitSets` is provided (e.g. user configured sets in the exercise detail screen),
+ * those rows are inserted verbatim instead of engine-prefilled targets.
  */
 export async function syncTemplateSlotToSessionsForDay(
   userId: string,
@@ -371,27 +383,30 @@ export async function syncTemplateSlotToSessionsForDay(
     exerciseId?: string;
     customExerciseId?: string;
     experience?: string;
+    explicitSets?: ExplicitSlotSet[];
   }
-): Promise<void> {
+): Promise<number> {
   const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
   const sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
-  if (sessions.length === 0) return;
+  if (sessions.length === 0) return 0;
 
   const exerciseId = input.exerciseId;
   const customExerciseId = input.customExerciseId;
   const experience = input.experience || 'beginner';
-
-  const target = await selectExerciseTargets(
-    { exerciseId, customExerciseId },
-    userId,
-    { experience },
-    0
-  );
-  if (!target) return;
+  const explicitSets = input.explicitSets;
 
   const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
-  const key = exerciseId || customExerciseId;
-  if (key) targetsMap.set(key, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
+  if (!explicitSets || explicitSets.length === 0) {
+    const target = await selectExerciseTargets(
+      { exerciseId, customExerciseId },
+      userId,
+      { experience },
+      0
+    );
+    if (!target) return 0;
+    const key = exerciseId || customExerciseId;
+    if (key) targetsMap.set(key, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
+  }
 
   // Single batched query for current max(sort_order) per session, replacing a per-session
   // SELECT round-trip. Supabase JS does not support GROUP BY directly; we fetch the candidate
@@ -431,15 +446,43 @@ export async function syncTemplateSlotToSessionsForDay(
         action: 'syncTemplateSlot_insert',
       });
     }
-    return;
+    return 0;
   }
 
-  await Promise.all(
-    insertedRows.map((se) => prefillSessionSets(se.session_id, [se], targetsMap)),
-  );
-  if (__DEV__) {
-    devLog('workout-query', { action: 'syncTemplateSlotToSessionsForDay', dayName, sessionCount: sessions.length, exerciseId: exerciseId || customExerciseId });
+  if (explicitSets && explicitSets.length > 0) {
+    const setRows = insertedRows.flatMap((se) =>
+      explicitSets.map((s) => ({
+        session_exercise_id: se.id,
+        set_number: s.set_number,
+        weight: s.weight ?? null,
+        reps: s.reps ?? null,
+        duration_sec: s.duration_sec ?? null,
+        rest_sec: s.rest_sec ?? null,
+        set_type: s.set_type ?? 'normal',
+        rpe: null,
+        rir: null,
+        notes: null,
+      }))
+    );
+    const { error: setsErr } = await supabase.from('v2_session_sets').insert(setRows);
+    if (setsErr && __DEV__) {
+      devError('workout-query', setsErr, { dayName, action: 'syncTemplateSlot_explicitSets' });
+    }
+  } else {
+    await Promise.all(
+      insertedRows.map((se) => prefillSessionSets(se.session_id, [se], targetsMap)),
+    );
   }
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'syncTemplateSlotToSessionsForDay',
+      dayName,
+      sessionCount: sessions.length,
+      exerciseId: exerciseId || customExerciseId,
+      explicitSetCount: explicitSets?.length ?? 0,
+    });
+  }
+  return sessions.length;
 }
 
 /**
@@ -538,6 +581,7 @@ export async function saveSessionSet(
     rir?: number;
     duration_sec?: number;
     rest_sec?: number;
+    set_type?: SetType;
     notes?: string;
   }
 ): Promise<SessionSet | null> {
@@ -900,7 +944,8 @@ export async function getSessionStats(sessionId: string): Promise<SessionStats |
       .from('v2_session_sets')
       .select('weight, reps, rpe, duration_sec')
       .in('session_exercise_id', sessionExerciseIds)
-      .not('performed_at', 'is', null); // Only completed sets
+      .not('performed_at', 'is', null) // Only completed sets
+      .neq('set_type', 'warmup'); // Warmups excluded from session averages
 
     if (setsError) {
       if (__DEV__) {
@@ -1287,6 +1332,7 @@ export async function getUniqueSetRepCombinations(
       .eq('v2_session_exercises.v2_workout_sessions.status', 'completed')
       .or(`exercise_id.eq.${exerciseId},custom_exercise_id.eq.${exerciseId}`, { foreignTable: 'v2_session_exercises' })
       .not('performed_at', 'is', null)
+      .neq('set_type', 'warmup') // planner variations reflect working sets only
       .limit(MAX_UNIQUE_COMBO_SETS);
 
     if (error || !data || data.length === 0) {
@@ -1531,6 +1577,7 @@ export async function getExerciseHistory(
       .eq('v2_session_exercises.v2_workout_sessions.status', 'completed')
       .or(`exercise_id.eq.${exerciseId},custom_exercise_id.eq.${exerciseId}`, { foreignTable: 'v2_session_exercises' })
       .not('performed_at', 'is', null)
+      .neq('set_type', 'warmup') // warmups must not drive progressive overload / weight suggestions
       .order('performed_at', { ascending: false })
       .limit(limit);
 

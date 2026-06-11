@@ -65,6 +65,15 @@ struct ContentView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
+                if workout.state.setType == "warmup" {
+                    Text("Warmup")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.tint.opacity(0.2), in: Capsule())
+                        .foregroundStyle(.tint)
+                }
+
                 if !workout.state.targetText.isEmpty {
                     Text(workout.state.targetText)
                         .font(.title3.weight(.semibold))

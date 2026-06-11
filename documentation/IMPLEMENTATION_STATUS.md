@@ -11,7 +11,7 @@
 - ✅ Database schema, RLS (including system-template tighten), migrations for Health linkage + audit tables
 - ✅ Auth, soft-delete grace + restore prompt on login; **pg_cron purge job** hard-deletes accounts past `scheduled_purge_at`
 - ✅ Onboarding (~5-step), edit profile
-- ✅ Planner with drag reorder, templates, superset chips, AI day generation (**Gemini** via Edge Function + local fallback; key re-verified live 2026-06-09)
+- ✅ Planner with drag reorder, templates, superset chips, AI day generation (**OpenAI** via Edge Function, strict JSON-schema output with history-aware targets; migrated from Gemini 2026-06-10)
 - ✅ Workout tab + active workout: per-exercise rest timers, set types (warm-up/drop/failure), supersets with alternating execution + shared rest, previous-performance inline, replace/reorder/add(multi-select) mid-workout
 - ✅ Smart Adjust wired: `needsRebalance` runs on planner load, prompts before today's first session
 - ✅ Dashboard / progress surfaces
@@ -87,7 +87,7 @@
 | Zone detection | ✅ Complete | Green/yellow/red |
 | Prescription-based targets | ✅ Complete | Uses target bands |
 | Exercise distribution | ✅ Complete | 2-3 per day |
-| Gemini Edge generate-workout | ✅ Complete | Secrets + quota table; planner calls `generateAiDay` |
+| OpenAI Edge generate-workout | ✅ Complete | Secrets + quota table; planner calls `generateAiDay`; AI prescribes sets/reps/weight |
 | Generate button UI | ✅ Complete | Planner |
 | Loading state | ✅ Complete | Spinner while generating |
 | Error handling | ✅ Complete | Returns empty on error |
@@ -336,7 +336,7 @@
 4. ✅ End-to-end workout flow (manual TestFlight pass still pending)
 
 ### Phase 2: AI & Rebalance ✅ COMPLETE
-1. ✅ "Generate with AI" button in Planner (Gemini Edge Function + local fallback)
+1. ✅ "Generate with AI" button in Planner (OpenAI Edge Function, structured outputs)
 2. ✅ Loading overlay + quota display for AI generation
 3. ✅ Implement rebalance apply logic (Smart Adjust wired on planner load)
 4. ✅ Advanced fatigue model (Banister continuous decay)
