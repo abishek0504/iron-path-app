@@ -13,8 +13,6 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
-  Pressable,
-  TextInput,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -74,7 +72,8 @@ import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, applySessionStructureToTemplate, createTemplateSlot, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
 import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
-import { generateAiDay } from '../../src/lib/ai/generateWorkoutDay';
+import { generateAiDay, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
+import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
 
 const SHORT_DAY_NAMES = SHORT_WEEKDAY_LABELS;
 
@@ -127,9 +126,8 @@ export default function PlannerTab() {
     Map<string, { variations: Array<{ sets: number; reps?: number; duration_sec?: number }>; warmupCount: number }>
   >(new Map());
   const [showSessionEditSheet, setShowSessionEditSheet] = useState(false);
-  const [showSessionsPerDayPrompt, setShowSessionsPerDayPrompt] = useState(false);
+  const [showGenerateDayForm, setShowGenerateDayForm] = useState(false);
   const [isLoadingSessionsForDay, setIsLoadingSessionsForDay] = useState(false);
-  const [sessionsPerDayInput, setSessionsPerDayInput] = useState('1');
   const [editingSessionExercise, setEditingSessionExercise] = useState<{
     id: string;
     name: string;
@@ -1261,7 +1259,7 @@ export default function PlannerTab() {
   );
 
   const runGenerateWithAI = useCallback(
-    async (sessionsPerDay: number) => {
+    async (sessionsPerDay: number, constraints?: DayConstraints) => {
       if (!templateData || !activeTemplateId || !selectedDay) {
         toast.error('No template or day selected');
         return;
@@ -1283,6 +1281,7 @@ export default function PlannerTab() {
           dayName: selectedDay.day.day_name,
           dayIndex,
           sessionsPerDay,
+          constraints: constraints ?? null,
         });
       }
       setIsGenerating(true);
@@ -1340,6 +1339,7 @@ export default function PlannerTab() {
           profile,
           dayIndex,
           sessionsPerDay,
+          constraints,
         });
 
         if (aiResult.source === 'quota_exceeded') {
@@ -2060,8 +2060,7 @@ export default function PlannerTab() {
                   toast.error('No template loaded');
                   return;
                 }
-                setSessionsPerDayInput('1');
-                setShowSessionsPerDayPrompt(true);
+                setShowGenerateDayForm(true);
               }}
               disabled={isGenerating}
             >
@@ -2081,63 +2080,18 @@ export default function PlannerTab() {
         )}
       </NestableScrollContainer>
 
-      {/* Sessions per day prompt for Generate with AI (works on web where Alert doesn't) */}
-      <Modal
-        visible={showSessionsPerDayPrompt}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowSessionsPerDayPrompt(false)}
-      >
-        <Pressable
-          style={styles.sessionsPerDayOverlay}
-          onPress={() => setShowSessionsPerDayPrompt(false)}
-        >
-            <Pressable style={styles.sessionsPerDayCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sessionsPerDayTitle}>Sessions for {selectedDay?.day.day_name ?? 'this day'}</Text>
-            <Text style={styles.sessionsPerDaySubtitle}>
-              0 = rest day (no exercises). 1–6 = workout sessions. e.g. morning + evening = 2.
-            </Text>
-            {aiRemainingToday != null && (
-              <Text style={styles.sessionsPerDayQuota}>
-                {aiRemainingToday > 0
-                  ? `${aiRemainingToday} AI generation${aiRemainingToday === 1 ? '' : 's'} left today`
-                  : 'Daily AI limit reached — try again tomorrow'}
-              </Text>
-            )}
-            <TextInput
-              style={styles.sessionsPerDayInput}
-              value={sessionsPerDayInput}
-              onChangeText={(t) => setSessionsPerDayInput(t.replace(/[^0-9]/g, ''))}
-              keyboardType="number-pad"
-              placeholder="1"
-              placeholderTextColor={colors.textMuted}
-              maxLength={2}
-            />
-            <View style={styles.sessionsPerDayButtons}>
-              <TouchableOpacity
-                style={[styles.sessionsPerDayButton, styles.sessionsPerDayButtonSecondary]}
-                onPress={() => {
-                  setShowSessionsPerDayPrompt(false);
-                  setSessionsPerDayInput('1');
-                }}
-              >
-                <Text style={styles.sessionsPerDayButtonTextSecondary}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.sessionsPerDayButton}
-                onPress={() => {
-                  const n = Math.min(6, Math.max(0, parseInt(sessionsPerDayInput, 10) ?? 1));
-                  setShowSessionsPerDayPrompt(false);
-                  setSessionsPerDayInput('1');
-                  runGenerateWithAI(n);
-                }}
-              >
-                <Text style={styles.sessionsPerDayButtonText}>Generate</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Pre-generation constraints form for Generate with AI */}
+      <GenerateDayForm
+        visible={showGenerateDayForm}
+        dayName={selectedDay?.day.day_name ?? 'this day'}
+        splitValue={profile?.preferred_training_style ?? null}
+        aiRemainingToday={aiRemainingToday}
+        onCancel={() => setShowGenerateDayForm(false)}
+        onGenerate={(sessionsPerDay, constraints) => {
+          setShowGenerateDayForm(false);
+          runGenerateWithAI(sessionsPerDay, constraints);
+        }}
+      />
 
       {/* Full-screen overlay while the AI builds the day */}
       <Modal visible={isGenerating} transparent animationType="fade">
@@ -2777,55 +2731,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.semibold,
   },
-  sessionsPerDayOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  sessionsPerDayCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.xl,
-    minWidth: 280,
-    maxWidth: 360,
-  },
-  sessionsPerDayTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  sessionsPerDaySubtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-  },
-  sessionsPerDayInput: {
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.background,
-    color: colors.textPrimary,
-    fontSize: typography.sizes.lg,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.lg,
-    minWidth: 72,
-  },
   slotSupersetChip: {
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.semibold,
     color: colors.primary,
     marginTop: 2,
-  },
-  sessionsPerDayQuota: {
-    fontSize: typography.sizes.sm,
-    color: colors.primary,
-    marginBottom: spacing.sm,
   },
   generatingOverlay: {
     flex: 1,
@@ -2852,32 +2762,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   generatingSubtitle: {
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
-  },
-  sessionsPerDayButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'flex-end',
-    flexWrap: 'wrap',
-  },
-  sessionsPerDayButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.primary,
-  },
-  sessionsPerDayButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  sessionsPerDayButtonText: {
-    color: colors.onPrimaryContrast,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.semibold,
-  },
-  sessionsPerDayButtonTextSecondary: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
   },
   emptyContainer: {
     flex: 1,

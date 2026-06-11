@@ -22,6 +22,32 @@ import { devLog, devError } from '../utils/logger';
 import type { FullTemplate } from '../supabase/queries/templates';
 import type { UserProfile } from '../../stores/userStore';
 
+/**
+ * User-chosen constraints from the pre-generation form. All fields have
+ * "let the AI decide" defaults so the Edge Function treats the whole object
+ * as optional.
+ */
+export interface DayConstraints {
+  /** Split-day focus (e.g. "Push", "Upper"). null = let AI decide. */
+  dayFocus: string | null;
+  /** Exact exercises per session (2..8). null = AI decides (auto). */
+  exercisesPerSession: number | null;
+  intensity: 'light' | 'standard' | 'hard';
+  emphasizeMuscles: string[];
+  avoidMuscles: string[];
+  /** 0..5. Plumbing only until the exercise catalog gains a stretch flag. */
+  stretchCount: number;
+}
+
+export const DEFAULT_DAY_CONSTRAINTS: DayConstraints = {
+  dayFocus: null,
+  exercisesPerSession: null,
+  intensity: 'standard',
+  emphasizeMuscles: [],
+  avoidMuscles: [],
+  stretchCount: 0,
+};
+
 /** One exercise as prescribed by the AI. Targets are null when unavailable. */
 export interface AiSessionExercise {
   exercise_id: string;
@@ -98,8 +124,10 @@ export async function generateAiDay(args: {
   profile: UserProfile | null;
   dayIndex: number;
   sessionsPerDay: number;
+  constraints?: DayConstraints;
 }): Promise<GenerateAiDayResult> {
   const { template, dayIndex, sessionsPerDay } = args;
+  const constraints = args.constraints ?? DEFAULT_DAY_CONSTRAINTS;
 
   if (sessionsPerDay <= 0) {
     return { source: 'rest', sessions: [] };
@@ -115,6 +143,7 @@ export async function generateAiDay(args: {
       templateId,
       dayName,
       sessionsPerDay,
+      constraints,
     });
   }
 
@@ -126,6 +155,7 @@ export async function generateAiDay(args: {
           templateId,
           dayName,
           sessionsPerDay,
+          constraints,
         },
       },
     );

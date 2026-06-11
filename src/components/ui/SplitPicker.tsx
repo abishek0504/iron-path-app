@@ -2,20 +2,25 @@
  * SplitPicker — preferred-training-split selector shared by onboarding and
  * Edit Profile.
  *
- * Shows suggestion chips driven by the user's days-per-week, plus a "Custom"
- * chip that reveals a free-text input. `value` is either a known split id or
- * the custom text; both are stored verbatim in
- * `v2_profiles.preferred_training_style`.
+ * Shows suggestion chips driven by the user's days-per-week, plus a
+ * "Not sure — pick for me" chip. Only known split ids are stored in
+ * `v2_profiles.preferred_training_style` so the AI generation engine can map
+ * the split to predictable day-focus options. Legacy free-text values from
+ * the old "Custom" input are still accepted downstream (they fall back to
+ * generic focus options) but can no longer be created here.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import {
   getSuggestedSplits,
   isKnownSplitId,
+  TRAINING_SPLITS,
 } from '../../lib/constants/trainingSplits';
+
+const NOT_SURE_ID = TRAINING_SPLITS.not_sure.id;
 
 interface SplitPickerProps {
   daysPerWeek: number;
@@ -32,43 +37,31 @@ export function SplitPicker({ daysPerWeek, value, onChange }: SplitPickerProps) 
     [daysPerWeek],
   );
 
-  const valueIsKnown = isKnownSplitId(value);
-  const [customMode, setCustomMode] = useState(!!value && !valueIsKnown);
-
   // If the frequency changes and the selected suggestion no longer fits,
-  // clear it so the user re-picks. Custom text is kept — it's theirs.
+  // clear it so the user re-picks. "Not sure" survives frequency changes.
   useEffect(() => {
-    if (valueIsKnown && !suggestions.some((s) => s.id === value)) {
+    if (
+      isKnownSplitId(value) &&
+      value !== NOT_SURE_ID &&
+      !suggestions.some((s) => s.id === value)
+    ) {
       onChange(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestions]);
 
-  const selectSuggestion = (id: string) => {
-    setCustomMode(false);
-    onChange(id);
-  };
-
-  const toggleCustom = () => {
-    if (customMode) {
-      setCustomMode(false);
-      onChange(null);
-    } else {
-      setCustomMode(true);
-      onChange(valueIsKnown ? null : value);
-    }
-  };
+  const selectedSplit = isKnownSplitId(value) ? TRAINING_SPLITS[value!] : null;
 
   return (
     <View style={styles.container}>
       <View style={styles.chipGroup}>
         {suggestions.map((split) => {
-          const selected = !customMode && value === split.id;
+          const selected = value === split.id;
           return (
             <TouchableOpacity
               key={split.id}
               style={[styles.chip, selected && styles.chipSelected]}
-              onPress={() => selectSuggestion(split.id)}
+              onPress={() => onChange(split.id)}
             >
               <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
                 {split.label}
@@ -77,30 +70,19 @@ export function SplitPicker({ daysPerWeek, value, onChange }: SplitPickerProps) 
           );
         })}
         <TouchableOpacity
-          style={[styles.chip, customMode && styles.chipSelected]}
-          onPress={toggleCustom}
+          style={[styles.chip, value === NOT_SURE_ID && styles.chipSelected]}
+          onPress={() => onChange(NOT_SURE_ID)}
         >
-          <Text style={[styles.chipText, customMode && styles.chipTextSelected]}>
-            Custom
+          <Text
+            style={[styles.chipText, value === NOT_SURE_ID && styles.chipTextSelected]}
+          >
+            {TRAINING_SPLITS.not_sure.label}
           </Text>
         </TouchableOpacity>
       </View>
 
-      {!customMode && value && isKnownSplitId(value) ? (
-        <Text style={styles.descriptionText}>
-          {suggestions.find((s) => s.id === value)?.description ?? ''}
-        </Text>
-      ) : null}
-
-      {customMode ? (
-        <TextInput
-          value={value ?? ''}
-          onChangeText={(text) => onChange(text)}
-          placeholder="Describe your split (e.g. Chest+Tris / Back+Bis / Legs)"
-          placeholderTextColor={colors.textMuted}
-          style={styles.customInput}
-          autoCapitalize="sentences"
-        />
+      {selectedSplit ? (
+        <Text style={styles.descriptionText}>{selectedSplit.description}</Text>
       ) : null}
     </View>
   );
@@ -139,13 +121,6 @@ function createStyles(colors: ThemeColors) {
     descriptionText: {
       color: colors.textMuted,
       fontSize: typography.sizes.sm,
-    },
-    customInput: {
-      color: colors.textPrimary,
-      fontSize: typography.sizes.base,
-      paddingVertical: spacing.xs,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
     },
   });
 }

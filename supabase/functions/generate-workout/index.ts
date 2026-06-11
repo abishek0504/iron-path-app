@@ -23,6 +23,15 @@
  *     templateId: string  (uuid, must be owned by the caller)
  *     dayName: string     (display name, e.g. "Monday", informs the LLM intent)
  *     sessionsPerDay: int (1..6)
+ *     constraints?: {     (all optional — defaults mean "let the AI decide")
+ *       dayFocus: string | null            (e.g. "Push", "Upper")
+ *       exercisesPerSession: int | null    (2..8; null = auto)
+ *       intensity: 'light' | 'standard' | 'hard'
+ *       emphasizeMuscles: string[]
+ *       avoidMuscles: string[]
+ *       stretchCount: int                  (0..5; plumbing only until the
+ *                                           catalog gains a stretch flag)
+ *     }
  *   }
  *
  * Response (JSON):
@@ -60,6 +69,15 @@ const MAX_EXERCISES_PER_SESSION = 8;
 /** Minimum exercises per session — prevents the LLM from returning empty lists. */
 const MIN_EXERCISES_PER_SESSION = 2;
 
+/** Tolerance around a user-requested exercise count during validation. */
+const EXERCISE_COUNT_TOLERANCE = 1;
+
+/** Upper bound on user-requested stretches per session. */
+const MAX_STRETCH_COUNT = 5;
+
+/** Cap on user-supplied emphasize/avoid muscle entries (defense-in-depth). */
+const MAX_CONSTRAINT_MUSCLES = 12;
+
 /** Lookback window for recent muscle freshness — must match the engine's 48h window. */
 const FRESHNESS_LOOKBACK_HOURS = 48;
 
@@ -70,7 +88,7 @@ const HISTORY_LOOKBACK_DAYS = 60;
 const HISTORY_MAX_SETS = 300;
 
 /** Default OpenAI model. Overridable via `OPENAI_MODEL` env. */
-const DEFAULT_MODEL = 'gpt-5-mini';
+const DEFAULT_MODEL = 'gpt-5-nano';
 
 /** Hard timeout for the OpenAI call so a slow upstream can't hold the function open. */
 const OPENAI_TIMEOUT_MS = 30_000;
@@ -92,6 +110,17 @@ interface GenerateRequestBody {
   templateId?: unknown;
   dayName?: unknown;
   sessionsPerDay?: unknown;
+  constraints?: unknown;
+}
+
+/** User-chosen constraints from the pre-generation form (all optional). */
+interface DayConstraints {
+  dayFocus: string | null;
+  exercisesPerSession: number | null;
+  intensity: 'light' | 'standard' | 'hard';
+  emphasizeMuscles: string[];
+  avoidMuscles: string[];
+  stretchCount: number;
 }
 
 interface AllowListedExercise {
@@ -183,6 +212,71 @@ function sanitizeDayName(raw: unknown): string {
   return cleaned.slice(0, 64) || 'Workout';
 }
 
+/** Strip control chars and cap length on a free-text constraint value. */
+function sanitizeConstraintText(raw: unknown, maxLength: number): string | null {
+  if (typeof raw !== 'string') return null;
+  // deno-lint-ignore no-control-regex
+  const cleaned = raw.replace(/[\u0000-\u001F\u007F]/g, ' ').trim();
+  return cleaned.slice(0, maxLength) || null;
+}
+
+function sanitizeMuscleList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const result: string[] = [];
+  for (const item of raw) {
+    const cleaned = sanitizeConstraintText(item, 32);
+    if (cleaned) result.push(cleaned);
+    if (result.length >= MAX_CONSTRAINT_MUSCLES) break;
+  }
+  return result;
+}
+
+/**
+ * Parse + clamp the optional constraints object. Anything missing or invalid
+ * degrades to "let the AI decide" rather than failing the request, so old
+ * clients that don't send constraints keep working unchanged.
+ */
+function parseConstraints(raw: unknown): DayConstraints {
+  const defaults: DayConstraints = {
+    dayFocus: null,
+    exercisesPerSession: null,
+    intensity: 'standard',
+    emphasizeMuscles: [],
+    avoidMuscles: [],
+    stretchCount: 0,
+  };
+  if (!raw || typeof raw !== 'object') return defaults;
+  const obj = raw as Record<string, unknown>;
+
+  const exercisesPerSession =
+    typeof obj.exercisesPerSession === 'number' &&
+    Number.isInteger(obj.exercisesPerSession) &&
+    obj.exercisesPerSession >= MIN_EXERCISES_PER_SESSION &&
+    obj.exercisesPerSession <= MAX_EXERCISES_PER_SESSION
+      ? obj.exercisesPerSession
+      : null;
+
+  const intensity =
+    obj.intensity === 'light' || obj.intensity === 'hard' ? obj.intensity : 'standard';
+
+  const stretchCount =
+    typeof obj.stretchCount === 'number' &&
+    Number.isInteger(obj.stretchCount) &&
+    obj.stretchCount >= 0 &&
+    obj.stretchCount <= MAX_STRETCH_COUNT
+      ? obj.stretchCount
+      : 0;
+
+  return {
+    dayFocus: sanitizeConstraintText(obj.dayFocus, 48),
+    exercisesPerSession,
+    intensity,
+    emphasizeMuscles: sanitizeMuscleList(obj.emphasizeMuscles),
+    avoidMuscles: sanitizeMuscleList(obj.avoidMuscles),
+    stretchCount,
+  };
+}
+
 // ============================================================================
 // OpenAI call
 // ============================================================================
@@ -238,20 +332,62 @@ function buildResponseSchema(): Record<string, unknown> {
   };
 }
 
-function buildSystemPrompt(sessionsPerDay: number): string {
+function buildSystemPrompt(sessionsPerDay: number, constraints: DayConstraints): string {
+  const exerciseCountRule = constraints.exercisesPerSession !== null
+    ? `- Each session must contain exactly ${constraints.exercisesPerSession} exercises (the user explicitly requested this count).`
+    : `- Each session must contain ${MIN_EXERCISES_PER_SESSION}-${MAX_EXERCISES_PER_SESSION} exercises.`;
+
+  const hardRules = [
+    'HARD RULES (violations make the output unusable):',
+    `- Output exactly ${sessionsPerDay} session(s).`,
+    exerciseCountRule,
+    '- Use ONLY exercise IDs from the provided catalog. Copy the IDs verbatim. Never invent exercises.',
+    '- Do not repeat the same exercise within or across sessions for this day.',
+  ];
+
+  if (constraints.dayFocus) {
+    hardRules.push(
+      `- The user explicitly chose "${constraints.dayFocus}" as today's split-day focus. Every exercise must fit that focus — this overrides the inferred training day position in SPLIT CONTEXT.`,
+    );
+  } else {
+    hardRules.push(
+      '- Comply with the user\'s preferred training split: the SPLIT CONTEXT tells you which training day of the week this is. Choose muscles/movements that match that split day (e.g. training day 1 of Push/Pull/Legs = push exercises only).',
+    );
+  }
+
+  if (constraints.avoidMuscles.length > 0) {
+    hardRules.push(
+      `- NEVER select exercises whose primary muscles include any of: ${constraints.avoidMuscles.join(', ')} (the user marked these as sore/injured).`,
+    );
+  }
+
+  hardRules.push(
+    '- Respect muscle freshness: scores are 0-100 where lower = more fatigued. Avoid loading muscles with low freshness.',
+    '- Only choose exercises whose equipment the user has access to.',
+  );
+
+  const selectionGuidance: string[] = [];
+  if (constraints.emphasizeMuscles.length > 0) {
+    selectionGuidance.push(
+      `- Bias exercise selection toward these muscles (without violating the split focus): ${constraints.emphasizeMuscles.join(', ')}.`,
+    );
+  }
+
+  const intensityGuidance =
+    constraints.intensity === 'light'
+      ? '- The user requested a LIGHT day (recovery/deload): prescribe target RPE 5-6, moderate volume, and hold or reduce loads relative to history.'
+      : constraints.intensity === 'hard'
+        ? '- The user requested a HARD day: prescribe target RPE 8-9 on key lifts, with a heavy top set on the main compound movement where history supports it.'
+        : '- Standard intensity: prescribe target RPE 7-8 on working sets.';
+
   return [
     'You are an expert strength-and-conditioning coach generating one day of training.',
     '',
-    'HARD RULES (violations make the output unusable):',
-    `- Output exactly ${sessionsPerDay} session(s).`,
-    `- Each session must contain ${MIN_EXERCISES_PER_SESSION}-${MAX_EXERCISES_PER_SESSION} exercises.`,
-    '- Use ONLY exercise IDs from the provided catalog. Copy the IDs verbatim. Never invent exercises.',
-    '- Do not repeat the same exercise within or across sessions for this day.',
-    '- Comply with the user\'s preferred training split: the SPLIT CONTEXT tells you which training day of the week this is. Choose muscles/movements that match that split day (e.g. training day 1 of Push/Pull/Legs = push exercises only).',
-    '- Respect muscle freshness: scores are 0-100 where lower = more fatigued. Avoid loading muscles with low freshness.',
-    '- Only choose exercises whose equipment the user has access to.',
+    ...hardRules,
+    ...(selectionGuidance.length > 0 ? ['', 'SELECTION GUIDANCE:', ...selectionGuidance] : []),
     '',
     'PRESCRIPTION RULES (progressive overload):',
+    intensityGuidance,
     '- For each exercise, prescribe working sets, and reps (or duration_sec for timed exercises), plus weight and target RPE.',
     '- Use the EXERCISE HISTORY block: progress conservatively from the last performance.',
     '  * If the last average RPE was below 8, nudge weight or reps up slightly.',
@@ -270,11 +406,12 @@ function buildUserPrompt(params: {
   user: UserContext;
   dayName: string;
   sessionsPerDay: number;
+  constraints: DayConstraints;
   recentStress: Record<string, number>;
   history: Record<string, ExerciseHistorySummary>;
   trainingDayPosition: string | null;
 }): string {
-  const { catalog, user, dayName, sessionsPerDay, recentStress, history, trainingDayPosition } = params;
+  const { catalog, user, dayName, sessionsPerDay, constraints, recentStress, history, trainingDayPosition } = params;
 
   const catalogPayload = catalog.map((ex) => ({
     id: ex.id,
@@ -296,6 +433,15 @@ function buildUserPrompt(params: {
       current_weight: user.current_weight,
       goal_weight: user.goal_weight,
       uses_imperial_units: user.use_imperial,
+    }),
+    '',
+    'USER CONSTRAINTS (explicit choices for today — follow these over inferred context):',
+    JSON.stringify({
+      day_focus: constraints.dayFocus ?? 'let AI decide',
+      exercises_per_session: constraints.exercisesPerSession ?? 'auto',
+      intensity: constraints.intensity,
+      emphasize_muscles: constraints.emphasizeMuscles,
+      avoid_muscles: constraints.avoidMuscles,
     }),
     '',
     'SPLIT CONTEXT:',
@@ -329,16 +475,17 @@ async function callOpenAi(params: {
   user: UserContext;
   dayName: string;
   sessionsPerDay: number;
+  constraints: DayConstraints;
   recentStress: Record<string, number>;
   history: Record<string, ExerciseHistorySummary>;
   trainingDayPosition: string | null;
 }): Promise<OpenAiResult> {
-  const { apiKey, model, sessionsPerDay } = params;
+  const { apiKey, model, sessionsPerDay, constraints } = params;
 
   const requestBody: Record<string, unknown> = {
     model,
     messages: [
-      { role: 'system', content: buildSystemPrompt(sessionsPerDay) },
+      { role: 'system', content: buildSystemPrompt(sessionsPerDay, constraints) },
       { role: 'user', content: buildUserPrompt(params) },
     ],
     response_format: {
@@ -497,16 +644,25 @@ function sanitizeTargets(plan: AiExercisePlan, exercise: AllowListedExercise): A
 /**
  * Enforce the allow-list, dedupe within the day, and bounds-check targets.
  *
- * Returns `null` if the result can't be salvaged (wrong session count, or any
- * session ends up below the minimum exercise count). Callers treat null as
+ * Returns `null` if the result can't be salvaged (wrong session count, any
+ * session below the minimum exercise count, or a user-requested exercise
+ * count missed by more than the tolerance). Callers treat null as
  * "AI unavailable".
  */
 function validateAiSessions(
   raw: AiExercisePlan[][],
   catalogById: Map<string, AllowListedExercise>,
   sessionsPerDay: number,
+  requestedExercisesPerSession: number | null,
 ): AiExercisePlan[][] | null {
   if (raw.length !== sessionsPerDay) return null;
+
+  const maxPerSession = requestedExercisesPerSession !== null
+    ? Math.min(MAX_EXERCISES_PER_SESSION, requestedExercisesPerSession + EXERCISE_COUNT_TOLERANCE)
+    : MAX_EXERCISES_PER_SESSION;
+  const minPerSession = requestedExercisesPerSession !== null
+    ? Math.max(MIN_EXERCISES_PER_SESSION, requestedExercisesPerSession - EXERCISE_COUNT_TOLERANCE)
+    : MIN_EXERCISES_PER_SESSION;
 
   const seenAcrossDay = new Set<string>();
   const validated: AiExercisePlan[][] = [];
@@ -519,9 +675,9 @@ function validateAiSessions(
       if (seenAcrossDay.has(plan.exercise_id)) continue;
       seenAcrossDay.add(plan.exercise_id);
       sessionExercises.push(sanitizeTargets(plan, exercise));
-      if (sessionExercises.length >= MAX_EXERCISES_PER_SESSION) break;
+      if (sessionExercises.length >= maxPerSession) break;
     }
-    if (sessionExercises.length < MIN_EXERCISES_PER_SESSION) return null;
+    if (sessionExercises.length < minPerSession) return null;
     validated.push(sessionExercises);
   }
 
@@ -731,6 +887,18 @@ Deno.serve(async (req) => {
     const dayName = sanitizeDayName(body.dayName);
     auditDayName = dayName;
 
+    const constraints = parseConstraints(body.constraints);
+
+    // Stretch plumbing: the exercise catalog does not yet have a stretch flag
+    // (the master exercise list with a stretch column is in progress). Until
+    // allow-listed stretches exist, a requested stretchCount is accepted and
+    // logged but not sent to the LLM. When the column lands: select it in the
+    // allow-list query, filter `catalog` for stretch entries, and append a
+    // prompt rule asking for `constraints.stretchCount` stretches per session.
+    if (constraints.stretchCount > 0) {
+      console.log(`stretchCount=${constraints.stretchCount} requested but stretch catalog not yet available; ignoring`);
+    }
+
     // ------------------------------------------------------------------------
     // 3. Verify template ownership before anything expensive.
     // ------------------------------------------------------------------------
@@ -909,12 +1077,18 @@ Deno.serve(async (req) => {
           user: userContext,
           dayName,
           sessionsPerDay,
+          constraints,
           recentStress,
           history,
           trainingDayPosition,
         });
         auditModel = llm.model;
-        const validated = validateAiSessions(llm.sessions, catalogById, sessionsPerDay);
+        const validated = validateAiSessions(
+          llm.sessions,
+          catalogById,
+          sessionsPerDay,
+          constraints.exercisesPerSession,
+        );
         if (validated) {
           resultSessions = validated;
           source = 'openai';
