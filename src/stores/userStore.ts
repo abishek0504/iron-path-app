@@ -25,6 +25,9 @@ export interface UserProfile {
   // Soft-delete metadata (Phase 0 — App Store Guideline 5.1.1(v))
   deleted_at?: string | null;
   scheduled_purge_at?: string | null;
+  subscription_tier?: 'free' | 'pro';
+  subscription_expires_at?: string | null;
+  revenuecat_app_user_id?: string | null;
 }
 
 interface UserState {

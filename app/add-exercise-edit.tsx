@@ -25,6 +25,7 @@ import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { useToast } from '../src/hooks/useToast';
+import { tryRandomPaywallFromOutside } from '../src/lib/subscriptions/paywallBridge';
 import { useDateContext } from '../src/hooks/useDateContext';
 import { selectExerciseTargets } from '../src/lib/engine/targetSelection';
 import {
@@ -549,6 +550,7 @@ export default function AddExerciseEditScreen() {
       }
       useUIStore.getState().setPlannerNeedsRefetch(true);
       toast.success(syncedSessions > 0 ? 'Added to routine & workout' : 'Added to routine');
+      tryRandomPaywallFromOutside('add_exercise');
       router.replace('/(tabs)/planner');
     } catch (e) {
       if (__DEV__) devError('add-exercise-edit', e, { action: 'handleAddToRoutine' });
@@ -612,6 +614,7 @@ export default function AddExerciseEditScreen() {
       }
       useUIStore.getState().setPlannerNeedsRefetch(true);
       toast.success(dateContext.isToday ? "Added to today's workout" : `Added to ${dayName} only`);
+      tryRandomPaywallFromOutside('add_exercise');
       router.replace('/(tabs)/planner');
     } catch (e) {
       if (__DEV__) devError('add-exercise-edit', e, { action: 'handleAddDayOnly' });

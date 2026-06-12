@@ -43,6 +43,7 @@ import {
   type SetType,
 } from '../../../src/lib/supabase/queries/workouts';
 import { invalidateSessionsInRangeForUser } from '../../../src/lib/cache/sessionsCache';
+import { tryRandomPaywallFromOutside } from '../../../src/lib/subscriptions/paywallBridge';
 import { invalidateMuscleFreshnessCache } from '../../../src/lib/cache/muscleFreshnessCache';
 import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
@@ -769,6 +770,7 @@ export default function ActiveWorkoutScreen() {
       }
       hapticSuccess();
       toast.success('Workout completed!');
+      tryRandomPaywallFromOutside('finish_workout');
       goBack();
     } else {
       setIsCompleting(false);
@@ -839,6 +841,7 @@ export default function ActiveWorkoutScreen() {
 
       hapticSuccess();
       toast.success(inserted.length === 1 ? 'Exercise added' : `${inserted.length} exercises added`);
+      tryRandomPaywallFromOutside('add_exercise');
       await loadActiveSession();
     } catch (error) {
       if (__DEV__) devError('workout-active', error, { action: 'addExercisesToSession' });

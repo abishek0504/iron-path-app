@@ -63,16 +63,16 @@ export type GenerateAiDayResult =
       source: 'openai';
       sessions: AiSessionExercise[][];
       model: string;
-      remainingToday: number | null;
     }
   | {
       source: 'rest';
       sessions: AiSessionExercise[][];
     }
   | {
+      source: 'paywall_required';
+    }
+  | {
       source: 'quota_exceeded';
-      quota: number;
-      retryAfterHours: number;
     }
   | {
       source: 'auth_error';
@@ -88,33 +88,29 @@ interface EdgeResponse {
   sessions?: AiSessionExercise[][];
   source?: 'openai' | 'fallback';
   model?: string;
-  remainingToday?: number;
   fallbackReason?: string;
 }
 
 interface EdgeError {
   error?: string;
-  quota?: number;
-  retryAfterHours?: number;
+  code?: string;
 }
 
 /**
- * Detect a 429 response from the Edge Function. supabase-js v2 wraps non-2xx
- * responses in a `FunctionsHttpError`; the underlying Response is exposed via
- * `error.context`. We have to read the body to get the structured fields.
+ * Read structured error body from a non-2xx Edge Function response.
+ * supabase-js v2 wraps failures in `FunctionsHttpError` with `error.context`.
  */
-async function tryReadQuotaError(
+async function tryReadHttpError(
   error: unknown,
 ): Promise<{ status: number; body: EdgeError } | null> {
   if (!error || typeof error !== 'object') return null;
   const ctx = (error as { context?: Response }).context;
   if (!ctx || typeof ctx.status !== 'number') return null;
-  if (ctx.status !== 429) return { status: ctx.status, body: {} };
   try {
     const body = (await ctx.json()) as EdgeError;
-    return { status: 429, body };
+    return { status: ctx.status, body };
   } catch {
-    return { status: 429, body: {} };
+    return { status: ctx.status, body: {} };
   }
 }
 
@@ -161,22 +157,22 @@ export async function generateAiDay(args: {
     );
 
     if (error) {
-      const httpInfo = await tryReadQuotaError(error);
-      if (httpInfo?.status === 429) {
+      const httpInfo = await tryReadHttpError(error);
+
+      if (httpInfo?.status === 402) {
         if (__DEV__) {
-          devLog('ai-generate', {
-            action: 'quota_exceeded',
-            quota: httpInfo.body.quota ?? null,
-          });
+          devLog('ai-generate', { action: 'paywall_required' });
         }
-        return {
-          source: 'quota_exceeded',
-          quota: httpInfo.body.quota ?? 10,
-          retryAfterHours: httpInfo.body.retryAfterHours ?? 24,
-        };
+        return { source: 'paywall_required' };
       }
 
-      // Auth failures must be surfaced to the user (re-login).
+      if (httpInfo?.status === 429) {
+        if (__DEV__) {
+          devLog('ai-generate', { action: 'quota_exceeded' });
+        }
+        return { source: 'quota_exceeded' };
+      }
+
       if (httpInfo?.status === 401 || httpInfo?.status === 403) {
         if (__DEV__) {
           devLog('ai-generate', { action: 'auth_error', status: httpInfo.status });
@@ -184,7 +180,6 @@ export async function generateAiDay(args: {
         return { source: 'auth_error' };
       }
 
-      // Any other Edge error (incl. 5xx) — AI is unavailable.
       if (__DEV__) {
         devError('ai-generate', error, {
           step: 'invoke',
@@ -207,13 +202,9 @@ export async function generateAiDay(args: {
         source: 'openai',
         sessions: data.sessions,
         model: data.model ?? 'unknown',
-        remainingToday: data.remainingToday ?? null,
       };
     }
 
-    // Edge returned a "fallback" sentinel: the model was overloaded, timed
-    // out, or returned an invalid/unvalidatable response. Surface as
-    // unavailable.
     if (__DEV__) {
       devLog('ai-generate', {
         action: 'ai_unavailable',
@@ -225,7 +216,6 @@ export async function generateAiDay(args: {
       reason: data?.fallbackReason ?? 'edge_fallback',
     };
   } catch (err) {
-    // Network failure / Edge Function unreachable.
     if (__DEV__) {
       devError('ai-generate', err, { step: 'invoke_catch' });
     }

@@ -38,15 +38,15 @@
  *     sessions: AiExercisePlan[][]  // grouped by session (length === sessionsPerDay)
  *     model: string                 // model identifier used (or 'none' on fallback)
  *     source: 'openai' | 'fallback'
- *     remainingToday: int           // generations remaining in the user's daily quota
  *   }
  *
  * Status codes:
  *   200  success (source may be 'fallback' — sessions will be empty)
  *   400  bad request (missing/invalid params)
  *   401  invalid or missing JWT
+ *   402  paywall_required (free tier — no AI access)
  *   403  template not owned by the caller
- *   429  daily quota exceeded
+ *   429  weekly quota exceeded (pro subscribers)
  *   500  unexpected server error
  */
 
@@ -56,8 +56,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 // Constants
 // ============================================================================
 
-/** Per-user daily quota for AI generations. Recorded in v2_ai_generations. */
-const DAILY_QUOTA = 10;
+/** Pro subscribers: max AI generations per rolling 7 days. Recorded in v2_ai_generations. */
+const PRO_WEEKLY_QUOTA = 40;
+
+const PRO_ROLLING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Hard upper bound on sessionsPerDay (defense-in-depth). */
 const MAX_SESSIONS_PER_DAY = 6;
@@ -201,6 +203,14 @@ function jsonResponse(body: unknown, status: number): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function isProSubscriber(
+  profile: { subscription_tier: string; subscription_expires_at: string | null } | null,
+): boolean {
+  if (!profile || profile.subscription_tier !== 'pro') return false;
+  if (!profile.subscription_expires_at) return true;
+  return new Date(profile.subscription_expires_at).getTime() > Date.now();
 }
 
 function asPositiveInt(value: unknown, max: number): number | null {
@@ -1128,32 +1138,51 @@ Deno.serve(async (req) => {
     }
 
     // ------------------------------------------------------------------------
-    // 4. Rate-limit check.
+    // 4. Subscription gate + pro weekly rate limit.
     // ------------------------------------------------------------------------
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: usedToday, error: countErr } = await serviceClient
+    const { data: subProfile, error: subErr } = await serviceClient
+      .from('v2_profiles')
+      .select('subscription_tier, subscription_expires_at')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (subErr) {
+      return jsonResponse({ error: 'Failed to load subscription' }, 500);
+    }
+
+    const isPro = isProSubscriber(subProfile as {
+      subscription_tier: string;
+      subscription_expires_at: string | null;
+    } | null);
+
+    if (!isPro) {
+      return jsonResponse(
+        { error: 'paywall_required', code: 'paywall_required' },
+        402,
+      );
+    }
+
+    const windowStart = new Date(Date.now() - PRO_ROLLING_WINDOW_MS).toISOString();
+    const { count: usedThisWeek, error: countErr } = await serviceClient
       .from('v2_ai_generations')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
-      .gte('created_at', oneDayAgo);
+      .gte('created_at', windowStart);
 
     if (countErr) {
       return jsonResponse({ error: 'Failed to check quota' }, 500);
     }
 
-    const used = usedToday ?? 0;
-    if (used >= DAILY_QUOTA) {
+    const used = usedThisWeek ?? 0;
+    if (used >= PRO_WEEKLY_QUOTA) {
       return jsonResponse(
         {
-          error: 'Daily AI generation quota exceeded',
-          quota: DAILY_QUOTA,
-          remainingToday: 0,
-          retryAfterHours: 24,
+          error: 'Weekly AI generation quota exceeded',
+          code: 'weekly_quota_exceeded',
         },
         429,
       );
     }
-    const remainingTodayBefore = DAILY_QUOTA - used;
 
     // ------------------------------------------------------------------------
     // 5. Gather context (allow-list, profile, recent stress, set history).
@@ -1384,7 +1413,6 @@ Deno.serve(async (req) => {
         sessions: resultSessions ?? [],
         model,
         source,
-        remainingToday: Math.max(0, remainingTodayBefore - 1),
         ...(source === 'fallback' ? { fallbackReason: lastError } : {}),
       },
       200,

@@ -11,8 +11,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Linking,
+  Platform,
 } from 'react-native';
-import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sun, Moon, Monitor } from 'lucide-react-native';
+import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sun, Moon, Monitor, Sparkles, RefreshCw } from 'lucide-react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
@@ -23,6 +25,8 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { LegalLinks } from '../ui/LegalLinks';
 import { requestAccountDeletion } from '../../lib/supabase/queries/users';
 import { invalidateProfileCache } from '../../lib/cache/dashboardStatsCache';
+import { logOutRevenueCat } from '../../lib/subscriptions/revenueCat';
+import { usePaywall } from '../paywall/PaywallProvider';
 
 interface SettingsMenuProps {
   onClose?: () => void;
@@ -36,6 +40,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const showToast = useUIStore((state) => state.showToast);
   const profile = useUserStore((state) => state.profile);
   const clearProfile = useUserStore((state) => state.clearProfile);
+  const { isPro, showPaywall, restoreSubscription } = usePaywall();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -47,10 +52,23 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     router.push(path as any);
   };
 
+  const handleManageSubscription = async () => {
+    if (Platform.OS === 'ios') {
+      await Linking.openURL('https://apps.apple.com/account/subscriptions');
+      return;
+    }
+    showToast('Manage subscriptions in your device app store settings', 'info');
+  };
+
+  const handleRestoreSubscription = async () => {
+    await restoreSubscription();
+  };
+
   const handleLogout = async () => {
     if (onClose) {
       onClose();
     }
+    await logOutRevenueCat().catch(() => undefined);
     const { error } = await supabase.auth.signOut();
     if (error) {
       showToast('Unable to log out', 'error');
@@ -71,6 +89,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       }
 
       // Sign out locally regardless (Edge Function also revokes tokens)
+      await logOutRevenueCat().catch(() => undefined);
       await supabase.auth.signOut().catch(() => undefined);
       if (profile?.id) {
         invalidateProfileCache(profile.id);
@@ -124,6 +143,25 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       label: 'Apple Health',
       icon: Heart,
       onPress: () => handleNavigate('/health-connect'),
+    },
+    {
+      id: 'ironpath-pro',
+      label: isPro ? 'IronPath Pro' : 'Upgrade to Pro',
+      sublabel: isPro ? 'Active' : undefined,
+      icon: Sparkles,
+      onPress: () => {
+        if (isPro) {
+          void handleManageSubscription();
+        } else {
+          showPaywall('app_open');
+        }
+      },
+    },
+    {
+      id: 'restore-subscription',
+      label: 'Restore subscription',
+      icon: RefreshCw,
+      onPress: () => void handleRestoreSubscription(),
     },
     {
       id: 'help',

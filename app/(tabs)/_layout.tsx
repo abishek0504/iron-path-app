@@ -9,6 +9,11 @@ import { spacing, typography, type ThemeColors } from "../../src/lib/utils/theme
 import { useTheme } from "../../src/lib/utils/ThemeContext";
 import { supabase } from "../../src/lib/supabase/client";
 import { hapticSelection } from "../../src/lib/utils/haptics";
+import { usePaywall } from "../../src/components/paywall/PaywallProvider";
+import { APP_OPEN_PAYWALL_DELAY_MS } from "../../src/lib/subscriptions/constants";
+import {
+  takePendingOnboardingPaywall,
+} from "../../src/lib/subscriptions/paywallBridge";
 
 const CustomTabBar = (props: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
@@ -182,6 +187,26 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
   return { ready, authenticated };
 }
 
+function AppOpenPaywallEffect() {
+  const { tryAppOpenPaywall, tryRandomPaywall, isLoading } = usePaywall();
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (takePendingOnboardingPaywall()) {
+      tryRandomPaywall('onboarding_complete');
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      tryAppOpenPaywall();
+    }, APP_OPEN_PAYWALL_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [isLoading, tryAppOpenPaywall, tryRandomPaywall]);
+
+  return null;
+}
+
 export default function TabLayout() {
   const { ready, authenticated } = useSessionGuard();
   const colors = useTheme();
@@ -196,6 +221,8 @@ export default function TabLayout() {
   }
 
   return (
+    <>
+    <AppOpenPaywallEffect />
     <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
@@ -248,6 +275,7 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    </>
   );
 }
 

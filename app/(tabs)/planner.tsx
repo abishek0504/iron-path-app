@@ -75,6 +75,7 @@ import { applyStructureEditToTemplate, applySessionStructureToTemplate, createTe
 import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
 import { generateAiDay, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
 import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
+import { usePaywall } from '../../src/components/paywall/PaywallProvider';
 
 const SHORT_DAY_NAMES = SHORT_WEEKDAY_LABELS;
 
@@ -90,6 +91,7 @@ export default function PlannerTab() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { requestGenerateAi, showPaywall } = usePaywall();
   const profile = useUserStore((state) => state.profile);
   const plannerNeedsRefetch = useUIStore((s) => s.plannerNeedsRefetch);
   const setPlannerNeedsRefetch = useUIStore((s) => s.setPlannerNeedsRefetch);
@@ -110,8 +112,6 @@ export default function PlannerTab() {
   const [isLoadingTargets, setIsLoadingTargets] = useState(false);
   const [showSmartAdjustPrompt, setShowSmartAdjustPrompt] = useState(false);
   const [rebalanceResult, setRebalanceResult] = useState<RebalanceResult | null>(null);
-  /** Remaining AI generations today, surfaced from the last edge response. */
-  const [aiRemainingToday, setAiRemainingToday] = useState<number | null>(null);
   const [todaySessionExercises, setTodaySessionExercises] = useState<Array<{
     id: string;
     exercise_id?: string;
@@ -1343,11 +1343,13 @@ export default function PlannerTab() {
           constraints,
         });
 
+        if (aiResult.source === 'paywall_required') {
+          showPaywall('generate_ai');
+          return;
+        }
+
         if (aiResult.source === 'quota_exceeded') {
-          setAiRemainingToday(0);
-          toast.error(
-            `Daily AI limit reached (${aiResult.quota}/day). Try again in ${aiResult.retryAfterHours}h.`,
-          );
+          toast.error("You've reached this week's AI limit. Try again later.");
           return;
         }
 
@@ -1359,7 +1361,7 @@ export default function PlannerTab() {
         if (aiResult.source === 'ai_unavailable') {
           const reason = aiResult.reason ?? '';
           if (reason.includes('quota') || reason.includes('HTTP 429')) {
-            toast.error('AI service quota exceeded. Please try again later.');
+            toast.error("You've reached this week's AI limit. Try again later.");
           } else if (
             reason.startsWith('session_count_mismatch') ||
             reason.startsWith('too_few_exercises') ||
@@ -1376,8 +1378,6 @@ export default function PlannerTab() {
           toast.success(`${selectedDay.day.day_name} set as rest day`);
           return;
         }
-
-        setAiRemainingToday(aiResult.remainingToday);
 
         const sessionGroups = aiResult.sessions;
         if (sessionGroups.length === 0 || sessionGroups.every((g) => g.length === 0)) {
@@ -1548,9 +1548,7 @@ export default function PlannerTab() {
             source: aiResult.source,
           });
         }
-        const remaining = aiResult.remainingToday;
-        const quotaSuffix = remaining != null ? ` · ${remaining} AI left today` : '';
-        toast.success(`${day.day.day_name} generated${quotaSuffix}`);
+        toast.success(`${day.day.day_name} generated`);
       } catch (error) {
         if (__DEV__) {
           devError('planner-ai', error, {
@@ -1571,6 +1569,7 @@ export default function PlannerTab() {
       getCurrentUserId,
       loadTemplate,
       toast,
+      showPaywall,
     ]
   );
 
@@ -2095,7 +2094,7 @@ export default function PlannerTab() {
                   toast.error('No template loaded');
                   return;
                 }
-                setShowGenerateDayForm(true);
+                requestGenerateAi(() => setShowGenerateDayForm(true));
               }}
               disabled={isGenerating}
             >
@@ -2120,7 +2119,6 @@ export default function PlannerTab() {
         visible={showGenerateDayForm}
         dayName={selectedDay?.day.day_name ?? 'this day'}
         splitValue={profile?.preferred_training_style ?? null}
-        aiRemainingToday={aiRemainingToday}
         onCancel={() => setShowGenerateDayForm(false)}
         onGenerate={(sessionsPerDay, constraints) => {
           setShowGenerateDayForm(false);

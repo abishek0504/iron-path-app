@@ -54,7 +54,6 @@ interface GenerateDayFormProps {
   dayName: string;
   /** Stored `preferred_training_style` (split id or legacy free text). */
   splitValue: string | null | undefined;
-  aiRemainingToday: number | null;
   onCancel: () => void;
   onGenerate: (sessionsPerDay: number, constraints: DayConstraints) => void;
 }
@@ -63,7 +62,6 @@ export function GenerateDayForm({
   visible,
   dayName,
   splitValue,
-  aiRemainingToday,
   onCancel,
   onGenerate,
 }: GenerateDayFormProps) {
@@ -133,13 +131,6 @@ export function GenerateDayForm({
             keyboardShouldPersistTaps="handled"
           >
             <Text style={styles.title}>Generate {dayName}</Text>
-            {aiRemainingToday != null && (
-              <Text style={styles.quota}>
-                {aiRemainingToday > 0
-                  ? `${aiRemainingToday} AI generation${aiRemainingToday === 1 ? '' : 's'} left today`
-                  : 'Daily AI limit reached — try again tomorrow'}
-              </Text>
-            )}
 
             <Text style={styles.sectionLabel}>Sessions</Text>
             <Text style={styles.sectionHint}>
@@ -313,11 +304,6 @@ function createStyles(colors: ThemeColors) {
       fontWeight: typography.weights.semibold,
       color: colors.textPrimary,
       marginBottom: spacing.xs,
-    },
-    quota: {
-      fontSize: typography.sizes.sm,
-      color: colors.primary,
-      marginBottom: spacing.sm,
     },
     sectionLabel: {
       fontSize: typography.sizes.sm,

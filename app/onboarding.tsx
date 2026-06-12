@@ -44,6 +44,7 @@ import { invalidateTemplates, invalidateTemplate } from '../src/lib/cache/templa
 import { devLog, devError } from '../src/lib/utils/logger';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { useToast } from '../src/hooks/useToast';
+import { setPendingOnboardingPaywall } from '../src/lib/subscriptions/paywallBridge';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
@@ -322,6 +323,7 @@ export default function Onboarding() {
       }
 
       toast.success('Profile saved!');
+      setPendingOnboardingPaywall();
       router.replace('/(tabs)');
     } catch (error) {
       if (__DEV__) {
