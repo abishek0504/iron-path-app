@@ -6,6 +6,7 @@
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
 import { getDateBoundsForDayName } from '../../utils/date';
+import { formatDurationCompact } from '../../utils/formatDuration';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
 
@@ -1028,10 +1029,7 @@ export interface TopPR {
 
 /** Format duration in seconds for PR display: "45s" or "1:30". */
 export function formatPrDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  return formatDurationCompact(seconds);
 }
 
 /** Format a single PR for UI: weight×reps, "N reps", or timed duration. */

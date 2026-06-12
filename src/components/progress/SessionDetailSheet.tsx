@@ -13,6 +13,7 @@ import { getSessionsInRangeCached, invalidateSessionsInRangeForUser } from '../.
 import { deleteSessionWithExercises, type WorkoutSession } from '../../lib/supabase/queries/workouts';
 import { listMergedExercisesCached } from '../../lib/cache/exerciseCache';
 import { devLog, devError } from '../../lib/utils/logger';
+import { formatDurationDisplay } from '../../lib/utils/formatDuration';
 import { useUserStore } from '../../stores/userStore';
 
 type Props = {
@@ -181,7 +182,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
             // Timed summary takes precedence when no weight was lifted.
             let primary: string | null = null;
             if (best.duration_sec != null && best.duration_sec > 0 && (best.weight == null || best.weight === 0)) {
-              primary = formatDuration(best.duration_sec);
+              primary = `${formatDurationDisplay(best.duration_sec)} hold`;
             } else if (best.weight != null) {
               const weightStr = best.weight === 0 ? 'Bodyweight' : `${Math.round(best.weight)} ${unitsLabel}`;
               const repsStr = best.reps == null ? null : `${Math.round(best.reps)} reps`;
@@ -285,13 +286,6 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       hour: 'numeric',
       minute: '2-digit',
     });
-  };
-
-  const formatDuration = (seconds: number): string => {
-    if (seconds < 60) return `${seconds} sec hold`;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return secs === 0 ? `${mins}:00 hold` : `${mins}:${secs.toString().padStart(2, '0')} hold`;
   };
 
   if (loading) {

@@ -41,6 +41,7 @@ import {
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
 import { hapticSelection, hapticSuccess } from '../../src/lib/utils/haptics';
+import { formatTimedSetsTarget } from '../../src/lib/utils/formatDuration';
 import { GripVertical } from 'lucide-react-native';
 import {
   getUserTemplatesCached,
@@ -1696,7 +1697,7 @@ export default function PlannerTab() {
                           const targetText = target
                             ? target.mode === 'reps'
                               ? `${target.sets} sets × ${target.reps} reps`
-                              : `${target.sets} sets × ${Math.floor((target.duration_sec || 0) / 60)} min`
+                              : formatTimedSetsTarget(target.sets, target.duration_sec)
                             : null;
                           const supersetLabel = (() => {
                             if (slot.superset_group == null) return null;
@@ -1933,7 +1934,7 @@ export default function PlannerTab() {
                                   return `${v.sets} sets × ${v.reps} reps`;
                                 }
                                 if (v.duration_sec != null) {
-                                  return `${v.sets} sets × ${Math.floor(v.duration_sec / 60)} min`;
+                                  return formatTimedSetsTarget(v.sets, v.duration_sec);
                                 }
                                 return '';
                               }).filter(Boolean);
@@ -1950,7 +1951,7 @@ export default function PlannerTab() {
                             } else if (target) {
                               const targetText = target.mode === 'reps'
                                 ? `${target.sets} sets × ${target.reps} reps`
-                                : `${target.sets} sets × ${Math.floor((target.duration_sec || 0) / 60)} min`;
+                                : formatTimedSetsTarget(target.sets, target.duration_sec);
                               targetContent = <Text style={styles.slotTargets}>{targetText}</Text>;
                             } else {
                               targetContent = <Text style={styles.slotTargets}>Loading targets...</Text>;

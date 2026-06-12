@@ -106,6 +106,7 @@
           "iosDisplayInForeground": true
         }
       ],
+      "./plugins/withLocalNotificationsOnly.js",
       [
         "@kingstinct/react-native-healthkit",
         {

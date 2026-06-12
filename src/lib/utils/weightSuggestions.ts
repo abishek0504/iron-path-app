@@ -11,6 +11,7 @@ import { getExerciseHistory } from '../supabase/queries/workouts';
 import { getUserProfileCached } from '../cache/dashboardStatsCache';
 import { supabase } from '../supabase/client';
 import { devLog } from './logger';
+import { formatDurationDisplay } from './formatDuration';
 
 const DEFAULT_BW_LBS = 150;
 const DEFAULT_BW_KG = 70;
@@ -180,9 +181,7 @@ export function formatWeightSuggestion(
   }
 
   if (suggestion.duration_sec != null) {
-    const mins = Math.floor(suggestion.duration_sec / 60);
-    const secs = suggestion.duration_sec % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return formatDurationDisplay(suggestion.duration_sec);
   }
 
   return 'Enter weight';
