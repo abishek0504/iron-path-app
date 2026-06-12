@@ -2,6 +2,8 @@
 
 **Purpose**: Get the project running from scratch.
 
+**Last Updated**: 2026-06-11
+
 ## Prerequisites
 
 - **Node.js**: v22.21.1 or later
@@ -9,7 +11,7 @@
 - **Expo CLI**: Installed globally via `npx expo`
 - **Supabase Account**: For database and auth
 - **Platform-specific tools**:
-  - **iOS**: Xcode 13+ (Mac only)
+  - **iOS**: Xcode 16+ (Mac only)
   - **Android**: Android Studio + SDK
   - **Web**: Modern browser (Chrome, Firefox, Safari)
 
@@ -27,11 +29,13 @@ npm install
 ```
 
 **Key Dependencies:**
-- `expo`: ~53.0.0 - React Native framework
-- `expo-router`: ~4.0.0 - File-based routing
-- `@supabase/supabase-js`: ^2.48.1 - Supabase client
+- `expo`: ~54.0.25 - React Native framework (SDK 54, React Native 0.81.5)
+- `expo-router`: ~6.0.15 - File-based routing
+- `expo-dev-client`: ~6.0.21 - Custom dev client (native modules)
+- `@supabase/supabase-js`: ^2.84.0 - Supabase client
 - `zustand`: ^5.0.2 - State management
-- `react-native-reanimated`: ^3.16.5 - Animations
+- `react-native-reanimated`: 4.1.5 - Animations
+- `@kingstinct/react-native-healthkit`: ^13.1.4 - Apple Health (iOS dev builds only)
 
 ### 3. Configure Environment Variables
 
@@ -39,7 +43,12 @@ Create `.env` file in root:
 ```bash
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+
+# Optional: auth email redirect (falls back to the app's deep link if unset)
 EXPO_PUBLIC_SUPABASE_REDIRECT_URL=http://localhost:8081/auth/callback
+
+# Optional: Sentry crash reporting (production builds; set via EAS env)
+EXPO_PUBLIC_SENTRY_DSN=your-sentry-dsn
 ```
 
 **Get Supabase credentials:**
@@ -75,44 +84,56 @@ npx supabase db push
 
 **Option C: Manual (Dashboard)**
 1. Go to Supabase Dashboard → SQL Editor
-2. Copy/paste migration files in order:
-   - `supabase/migrations/20240101000000_create_v2_tables.sql`
-   - `supabase/migrations/20240101000001_create_v2_rls_policies.sql`
-   - `supabase/migrations/20250101000000_patch_c1_template_slots_custom_exercise_id.sql`
-   - `supabase/migrations/20250101000001_patch_c2_session_exercises_custom_exercise_id.sql`
-   - `supabase/migrations/20250101000002_patch_d_custom_exercise_targets.sql`
-   - `supabase/migrations/20250101000003_patch_h_remove_goal.sql`
-   - `supabase/migrations/20250101000004_seed_v2_muscles.sql`
-   - `supabase/migrations/20250101000005_split_full_name.sql`
-3. Run each migration
+2. Copy/paste **all** migration files from `supabase/migrations/` in filename (chronological) order, starting with:
+   - `20240101000000_create_v2_tables.sql`
+   - `20240101000001_create_v2_rls_policies.sql`
+   - ...through the latest `20260611*` exercise-import migrations
+3. Run each migration (there are 40+; the timestamp prefix defines the order)
 
 ### 5. Seed Required Data
 
-**Critical: v2_muscles** (28 canonical muscles)
+**Critical: v2_muscles** (29 canonical muscles)
 ```sql
--- Already included in migration 20250101000004_seed_v2_muscles.sql
+-- 28 seeded in migration 20250101000004_seed_v2_muscles.sql,
+-- plus 'adductors' added in 20260611120002_add_adductors_muscle_key.sql.
 -- Verify by checking:
 SELECT COUNT(*) FROM v2_muscles;
--- Should return 28
+-- Should return 29
 ```
 
-**Optional: Sample exercises and prescriptions**
-```sql
--- Add sample exercises to v2_exercises
--- Add prescriptions to v2_exercise_prescriptions
--- Add AI recommendations to v2_ai_recommended_exercises
--- (Create your own or wait for seed data scripts)
-```
+**Exercises, prescriptions, and AI recommendations** are all seeded by migrations (no manual step needed):
+- `20260122000002_seed_exercise_prescriptions.sql`, `20260128000000_seed_exercise_metadata.sql`, `20260128000001_seed_ai_recommended_exercises.sql`
+- `20260611120000_import_master_exercises_from_csv.sql` (full master exercise + stretch catalog from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`)
+- `20260611120003_seed_prescriptions_for_new_exercises.sql`, `20260611120004_refresh_ai_recommended_exercises.sql`
 
 **Without prescriptions**: App will run but planner will show "Missing targets" warnings.
 
-### 6. Generate TypeScript Types (Optional but Recommended)
+### 6. Deploy Edge Functions
+
+The app calls Supabase Edge Functions in `supabase/functions/`:
+- `generate-workout` — AI workout generation (requires `OPENAI_API_KEY` secret; optional `OPENAI_MODEL`)
+- `update-muscle-freshness` — recomputes muscle freshness/stress caches
+- `delete-account` — account soft-delete flow
+- `generate-exercise-image` — exercise illustration generation (requires `OPENAI_API_KEY`; optional `OPENAI_IMAGE_MODEL`)
 
 ```bash
-npx supabase gen types typescript --project-id your-project-id > src/types/supabase.ts
+# Set secrets once
+npx supabase secrets set OPENAI_API_KEY=sk-...
+
+# Deploy all functions
+npx supabase functions deploy generate-workout
+npx supabase functions deploy update-muscle-freshness
+npx supabase functions deploy delete-account
+npx supabase functions deploy generate-exercise-image
 ```
 
-**Current Status**: Project uses hand-typed interfaces. Generated types help prevent drift.
+### 7. Generate TypeScript Types
+
+```bash
+npx supabase gen types typescript --project-id your-project-id > src/types/supabase.gen.ts
+```
+
+**Current Status**: Generated types live in `src/types/supabase.gen.ts` and are re-exported (with app-friendly aliases) via `src/types/supabase.ts`. Regenerate after every schema change.
 
 ## Running the App
 
@@ -120,10 +141,9 @@ npx supabase gen types typescript --project-id your-project-id > src/types/supab
 
 **Start Development Server:**
 ```bash
-npm start
+npm start            # standard Expo server (web / Expo Go)
+npm run start:dev    # dev-client server (for custom dev builds)
 ```
-
-This opens Expo DevTools in browser. Choose platform:
 
 **Web:**
 ```bash
@@ -135,43 +155,45 @@ Opens http://localhost:8081 in browser.
 
 **iOS Simulator (Mac only):**
 ```bash
-npm run ios
-# Or from Expo DevTools: Press 'i'
+npm run ios            # expo run:ios (compiles the native dev build)
+npm run ios:simulator  # boots the 'iPhone 17 Pro Max' simulator
 ```
 
 **Android Emulator:**
 ```bash
-npm run android
-# Or from Expo DevTools: Press 'a'
+npm run android        # expo run:android
 ```
 
-**Physical Device:**
-1. Install Expo Go app from App Store/Play Store
-2. Scan QR code from terminal/browser
-3. App loads on device
+**Physical Device (dev build, not Expo Go):**
+The app uses native modules (HealthKit, Reanimated 4/worklets, body highlighter), so it requires a custom dev client rather than Expo Go:
+```bash
+npx expo run:ios --device                            # development build on device
+npx expo run:ios --device --configuration Release    # release build on device
+```
+Run `npm run prebuild:ios` first if native config changed (see `DEVELOPMENT_BUILD.md`).
 
 **Note:** The Dashboard muscle heatmap (Muscle status) shows the full body view on a development build or simulator. In Expo Go, a list fallback (muscle groups + freshness %) is shown so the data is visible; the body silhouette uses native modules and is only rendered in dev builds.
 
 ### Production Builds
 
+EAS Build profiles are defined in `eas.json` (`development`, `preview`, `production`, `development-simulator`).
+
 **Build for iOS:**
 ```bash
-npx expo build:ios
-# Or use EAS Build:
-npx eas build --platform ios
+npm run eas:dev:ios                              # development profile
+npx eas-cli@latest build --profile production --platform ios
 ```
 
 **Build for Android:**
 ```bash
-npx expo build:android
-# Or use EAS Build:
-npx eas build --platform android
+npm run eas:dev:android                          # development profile
+npx eas-cli@latest build --profile production --platform android
 ```
 
 **Build for Web:**
 ```bash
-npx expo export:web
-# Output in web-build/
+npx expo export --platform web
+# Output in dist/
 ```
 
 ## Project Structure Tour
@@ -209,7 +231,12 @@ iron-path-app/
 │
 ├── supabase/
 │   ├── migrations/       # Database migrations
+│   ├── functions/        # Edge Functions (generate-workout, update-muscle-freshness,
+│   │                     #   delete-account, generate-exercise-image)
+│   ├── seed/             # Seed source data (master exercise/stretch CSV)
 │   └── exports/          # Database exports (schema, data)
+│
+├── scripts/              # Dev/ops scripts (dev-log-server, exercise import + image generation)
 │
 ├── documentation/        # Project documentation
 │   ├── 00_INDEX.md      # Documentation index
@@ -218,12 +245,12 @@ iron-path-app/
 │   ├── ALGORITHMS.md
 │   ├── DATA_FLOWS.md
 │   ├── SETUP_GUIDE.md (this file)
-│   ├── IMPLEMENTATION_STATUS.md
-│   └── archive/         # Old documentation
+│   └── IMPLEMENTATION_STATUS.md
 │
 ├── .env                  # Environment variables (DO NOT COMMIT)
 ├── .gitignore           # Git ignore rules
 ├── app.json             # Expo config
+├── eas.json             # EAS Build profiles
 ├── package.json         # Dependencies
 └── tsconfig.json        # TypeScript config
 ```
@@ -258,19 +285,31 @@ rm -rf node_modules/.cache
 ### Update TypeScript Types
 ```bash
 # After schema changes
-npx supabase gen types typescript --project-id your-project-id > src/types/supabase.ts
+npx supabase gen types typescript --project-id your-project-id > src/types/supabase.gen.ts
 ```
 
-### Check Linting (When Configured)
+### Check Linting / Types
 ```bash
-# Not configured yet - TODO
-npm run lint
+npm run lint          # TypeScript check (tsc --noEmit)
+npm run lint:eslint   # ESLint (expo lint)
 ```
 
-### Run Type Check
+### Run Tests
 ```bash
-# Verify TypeScript types
-npx tsc --noEmit
+npm test              # vitest run
+```
+
+### Exercise Catalog & Image Tooling (scripts/)
+```bash
+# Regenerate the exercise import migration + manifests from the master CSV
+node scripts/generate-exercise-import-sql.mjs
+
+# Batch-generate exercise images via the generate-exercise-image Edge Function
+# (needs EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY in .env)
+node scripts/run-exercise-image-batch.mjs --resume
+
+# Direct OpenAI image generation (needs local OPENAI_API_KEY)
+node scripts/generate-exercise-images.mjs
 ```
 
 ## Development Workflow
@@ -338,7 +377,7 @@ npx expo start --clear
 **Fix**:
 1. Update CocoaPods: `cd ios && pod install && cd ..`
 2. Clean build: Xcode → Product → Clean Build Folder
-3. Check Xcode version (need 13+)
+3. Check Xcode version (need 16+)
 
 ### Android Build Fails
 **Symptom**: Build errors on Android  
@@ -356,7 +395,7 @@ npx expo start --clear
 4. Check file is in watched directories (not in `node_modules/`)
 
 ### Can't Connect to Dev Server on Physical Device
-**Symptom**: "Unable to connect" on Expo Go  
+**Symptom**: "Unable to connect" in the dev client  
 **Fix**:
 1. Ensure device and computer on same network
 2. Check firewall isn't blocking port 8081
@@ -387,15 +426,14 @@ npx expo start --clear
 After setup:
 1. ✅ App runs successfully
 2. ✅ Can create account and login
-3. ✅ Database migrations applied
-4. ✅ 28 muscles seeded
+3. ✅ Database migrations applied (exercises + prescriptions seeded by migrations)
+4. ✅ 29 muscles seeded
+5. ✅ Edge functions deployed (with `OPENAI_API_KEY` secret)
 
 **Recommended:**
-1. Add sample exercises to `v2_exercises`
-2. Add prescriptions to `v2_exercise_prescriptions`
-3. Test onboarding flow
-4. Test planner (will show "Missing targets" until prescriptions added)
-5. Review `documentation/IMPLEMENTATION_STATUS.md` to see what's complete
+1. Test onboarding flow
+2. Test planner and AI week generation
+3. Review `documentation/IMPLEMENTATION_STATUS.md` to see what's complete
 
 ## Additional Resources
 

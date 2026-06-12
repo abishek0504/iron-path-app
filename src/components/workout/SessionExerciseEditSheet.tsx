@@ -64,6 +64,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   const [saving, setSaving] = useState(false);
   const [originalSetIds, setOriginalSetIds] = useState<string[]>([]);
   const [restSec, setRestSec] = useState<string>('');
+  const [isStretch, setIsStretch] = useState(false);
   const insets = useSafeAreaInsets();
 
   const weightUnit = useImperial ? 'lbs' : 'kg';
@@ -89,7 +90,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
           .order('set_number', { ascending: true }),
         supabase
           .from('v2_session_exercises')
-          .select('rest_sec')
+          .select('rest_sec, exercise_id, v2_exercises(is_stretch)')
           .eq('id', sessionExerciseId)
           .maybeSingle(),
       ]);
@@ -100,6 +101,11 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
         }
         return;
       }
+
+      const stretchFlag =
+        (exerciseRow as { v2_exercises?: { is_stretch?: boolean } | null } | null)?.v2_exercises
+          ?.is_stretch === true;
+      setIsStretch(stretchFlag);
 
       const loaded = (data || []) as SessionSet[];
       setSets(loaded);
@@ -153,7 +159,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
               weight: set.weight || null,
               reps: set.reps || null,
               duration_sec: set.duration_sec || null,
-              rpe: set.rpe || null,
+              rpe: isStretch ? null : (set.rpe || null),
               set_type: set.set_type || 'normal',
             });
 
@@ -172,7 +178,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
               weight: set.weight || null,
               reps: set.reps || null,
               duration_sec: set.duration_sec || null,
-              rpe: set.rpe || null,
+              rpe: isStretch ? null : (set.rpe || null),
               set_type: set.set_type || 'normal',
             })
             .eq('id', set.id);
@@ -385,6 +391,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                     </View>
                   )}
 
+                  {!isStretch && (
                   <View style={styles.inputGroupSmall}>
                     <Text style={styles.inputLabel}>RPE</Text>
                     <TextInput
@@ -403,6 +410,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                       maxLength={2}
                     />
                   </View>
+                  )}
                 </View>
               </View>
             ))}

@@ -1,7 +1,7 @@
 # IronPath V2 Documentation
 
 **Generated**: 2026-01-19  
-**Last Updated**: 2026-01-21 (Active Workout Flow & Set Completion Tracking)  
+**Last Updated**: 2026-06-11 (Exercise Library Expansion, Stretches & Image Pipeline)  
 **Philosophy**: Document what matters - architecture decisions, data flows, and setup procedures. Let well-written code document itself.
 
 ## Core Documentation
@@ -81,6 +81,12 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 Old documentation archived in [`archive/`](archive/) with timestamps.
 
 ## Recent Updates
+
+### 2026-06-11: Documentation Refresh — Exercise Library, Stretches, Images, Workout Flow
+- **Exercise library expansion**: 388 master entries (340 strength + 48 stretches) imported from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`; new `is_stretch` flag, `adductors` muscle key (29 canonical muscles), rule-based prescriptions for all new exercises, AI allow-list refreshed (340 exercises).
+- **Exercise image pipeline**: `generate-exercise-image` Edge Function (OpenAI Images) + batch scripts in `scripts/`; 45 of 388 images generated into `assets/exercises/` (mapped in `src/lib/exerciseImages.ts`).
+- **Workout flow enhancements** (June 2026): set types/supersets/per-exercise rest, PR trigger + freshness function exclude warm-ups, soft-deleted account purge cron, security advisor remediation, AI backend migrated Gemini → OpenAI with `source` audit tracking.
+- **IMPLEMENTATION_STATUS.md** updated to reflect all of the above (feature matrix, changelog, remaining manual steps).
 
 ### 2026-01-28: Prescription Rationale and Guidelines
 - **PRESCRIPTION_RATIONALE.md**: New doc with research, science, and biomechanics behind every prescription value. Defines suggested_weight_multiplier_bw as **working weight** (fraction of BW for prescribed rep range, not 1RM); validates rep/set bands and progression formulas against meta-analyses and strength standards; provides guidelines for adding future exercises (how to derive multiplier, rep/set bands, checklist). ALGORITHMS.md: added "Suggested weight and progression rationale" with formulas and link to PRESCRIPTION_RATIONALE. 00_INDEX: added PRESCRIPTION_RATIONALE to core docs and "For Understanding Algorithms".

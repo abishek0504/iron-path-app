@@ -80,6 +80,7 @@ interface Exercise {
   exercise_id?: string;
   custom_exercise_id?: string;
   mode: 'reps' | 'timed';
+  is_stretch?: boolean;
   notes?: string;
   superset_group?: number | null;
   rest_sec?: number | null;
@@ -103,7 +104,7 @@ interface SetLog {
   weight: string; // empty string for timed exercises
   reps: string; // empty string for timed exercises
   duration_sec: string; // empty string for reps exercises
-  rpe: number;
+  rpe?: number;
   setType: SetType;
 }
 
@@ -357,6 +358,7 @@ export default function ActiveWorkoutScreen() {
             exercise_id: ex.exercise_id,
             custom_exercise_id: ex.custom_exercise_id,
             mode: meta.is_timed ? 'timed' : 'reps',
+            is_stretch: meta.is_stretch === true,
             notes: ex.notes,
             superset_group: ex.superset_group ?? null,
             rest_sec: ex.rest_sec ?? null,
@@ -475,7 +477,7 @@ export default function ActiveWorkoutScreen() {
       duration_sec: set.duration_sec !== undefined && set.duration_sec !== null
         ? set.duration_sec.toString()
         : (suggestion.duration_sec !== undefined ? suggestion.duration_sec.toString() : ''),
-      rpe: currentSetRPEs[idx] || set.rpe || 7,
+      ...(exercise.is_stretch ? {} : { rpe: currentSetRPEs[idx] || set.rpe || 7 }),
       setType: set.set_type ?? 'normal',
     }));
     setSetLogs(logs);
@@ -577,11 +579,14 @@ export default function ActiveWorkoutScreen() {
     hapticHeavy();
 
     const currentSetIdx = workoutPhase.setIndex;
+    const isStretch = exercise.is_stretch === true;
 
-    // Update RPE for this set
+    // Update RPE for this set (strength only)
     const updatedRPEs = [...currentSetRPEs];
-    updatedRPEs[currentSetIdx] = currentSetRPEs[currentSetIdx] || 7;
-    setCurrentSetRPEs(updatedRPEs);
+    if (!isStretch) {
+      updatedRPEs[currentSetIdx] = currentSetRPEs[currentSetIdx] || 7;
+      setCurrentSetRPEs(updatedRPEs);
+    }
 
     // Persist set immediately so progress survives an unexpected exit, then
     // user can fine-tune in the batch logging phase. Always mark complete with
@@ -596,14 +601,14 @@ export default function ActiveWorkoutScreen() {
         await markSetComplete(currentSet.id, {
           weight: hasValidDefaults ? currentSet.weight! : 0,
           reps: hasValidDefaults ? currentSet.reps! : (currentSet.reps || 0),
-          rpe: updatedRPEs[currentSetIdx],
+          ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
           set_type: currentSet.set_type ?? 'normal',
         });
       } else {
         // timed
         await markSetComplete(currentSet.id, {
           duration_sec: currentSet.duration_sec ?? 0,
-          rpe: updatedRPEs[currentSetIdx],
+          ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
           set_type: currentSet.set_type ?? 'normal',
         });
       }
@@ -614,7 +619,11 @@ export default function ActiveWorkoutScreen() {
               ...ex,
               sets: ex.sets.map((s, sIdx) =>
                 sIdx === currentSetIdx
-                  ? { ...s, completed: true, rpe: updatedRPEs[currentSetIdx] }
+                  ? {
+                      ...s,
+                      completed: true,
+                      ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
+                    }
                   : s
               ),
             }
@@ -675,16 +684,17 @@ export default function ActiveWorkoutScreen() {
 
     for (const log of setLogs) {
       const set = exercise.sets[log.setNumber - 1];
+      const includeRpe = exercise.is_stretch !== true && log.rpe != null;
       const payload = exercise.mode === 'reps'
         ? {
             weight: parseFloat(log.weight),
             reps: parseInt(log.reps),
-            rpe: log.rpe,
+            ...(includeRpe ? { rpe: log.rpe } : {}),
             set_type: log.setType,
           }
         : {
             duration_sec: parseInt(log.duration_sec),
-            rpe: log.rpe,
+            ...(includeRpe ? { rpe: log.rpe } : {}),
             set_type: log.setType,
           };
 
@@ -707,7 +717,7 @@ export default function ActiveWorkoutScreen() {
                   ...s,
                   weight: parseFloat(log.weight),
                   reps: parseInt(log.reps),
-                  rpe: log.rpe,
+                  ...(ex.is_stretch ? {} : { rpe: log.rpe }),
                   set_type: log.setType,
                   completed: true,
                 };
@@ -715,7 +725,7 @@ export default function ActiveWorkoutScreen() {
               return {
                 ...s,
                 duration_sec: parseInt(log.duration_sec),
-                rpe: log.rpe,
+                ...(ex.is_stretch ? {} : { rpe: log.rpe }),
                 set_type: log.setType,
                 completed: true,
               };
@@ -1297,7 +1307,8 @@ export default function ActiveWorkoutScreen() {
               </View>
             )}
 
-            {/* RPE Slider */}
+            {/* RPE Slider — strength only; stretches are not RPE-scored */}
+            {!currentExercise.is_stretch && (
             <View style={styles.rpeSection}>
               <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
               <RPESlider
@@ -1309,6 +1320,7 @@ export default function ActiveWorkoutScreen() {
                 }}
               />
             </View>
+            )}
 
             {/* Complete Set Button */}
             <TouchableOpacity style={styles.completeSetButton} onPress={handleCompleteSet}>
@@ -1467,31 +1479,35 @@ export default function ActiveWorkoutScreen() {
                     </View>
                   )}
 
-                  <View style={styles.logInputGroupSmall}>
-                    <Text style={styles.logInputLabel}>RPE</Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        const updated = [...setLogs];
-                        updated[idx].rpe = updated[idx].rpe < 10 ? updated[idx].rpe + 1 : 5;
-                        setSetLogs(updated);
-                      }}
-                    >
-                      <Text style={styles.rpeDisplayValue}>{log.rpe}</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {!currentExercise.is_stretch && (
+                    <View style={styles.logInputGroupSmall}>
+                      <Text style={styles.logInputLabel}>RPE</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const updated = [...setLogs];
+                          const current = updated[idx].rpe ?? 7;
+                          updated[idx].rpe = current < 10 ? current + 1 : 5;
+                          setSetLogs(updated);
+                        }}
+                      >
+                        <Text style={styles.rpeDisplayValue}>{log.rpe ?? 7}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
 
-                {/* RPE Slider for this set */}
-                <View style={styles.rpeSliderContainer}>
-                  <RPESlider
-                    value={log.rpe}
-                    onChange={(value) => {
-                      const updated = [...setLogs];
-                      updated[idx].rpe = value;
-                      setSetLogs(updated);
-                    }}
-                  />
-                </View>
+                {!currentExercise.is_stretch && (
+                  <View style={styles.rpeSliderContainer}>
+                    <RPESlider
+                      value={log.rpe ?? 7}
+                      onChange={(value) => {
+                        const updated = [...setLogs];
+                        updated[idx].rpe = value;
+                        setSetLogs(updated);
+                      }}
+                    />
+                  </View>
+                )}
               </View>
             ))}
 

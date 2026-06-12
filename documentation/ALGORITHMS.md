@@ -2,6 +2,8 @@
 
 **Purpose**: Document mathematical formulas and algorithms with worked examples.
 
+**Last Updated**: 2026-06-11
+
 ## Target Selection Algorithm
 
 **Location**: `src/lib/engine/targetSelection.ts`
@@ -39,6 +41,7 @@ if (!prescription):
 history = getExerciseHistory(exerciseKey, userId, limit=5)
 hasHistory = history.sets.length > 0
 ```
+History only includes completed working sets: warm-up sets (`set_type = 'warmup'`) are excluded so they never drive progressive overload or weight suggestions.
 
 **4. Select Sets Within Band**
 ```
@@ -54,7 +57,7 @@ sets = clamp(sets, sets_min, sets_max)
 
 **Reps Mode:**
 ```
-if (hasHistory AND lastReps >= reps_max * 0.9 AND avgRPE <= 7):
+if (hasHistory AND lastReps >= reps_max * 0.9 AND (no avgRPE OR avgRPE <= 7)):
   // Hit top of band with acceptable effort → increase weight
   weight = lastWeight + max(lastWeight * 0.025, 2.5)
   reps = reps_min  // Reset to bottom of band
@@ -66,6 +69,9 @@ else:
   // No history: use default selection (mid-range)
   reps = historyCount < 3 ? floor((reps_min + reps_max) / 2) : ceil((reps_min + reps_max) / 2)
   reps = clamp(reps, reps_min, reps_max)
+  // Suggested weight from prescription multiplier (no NULLs)
+  weight = round(bw * suggested_weight_multiplier_bw * 2) / 2  // nearest 0.5
+  // bw = profile current_weight, or fallback 150 lb / 70 kg
 ```
 
 **Timed Mode:**
@@ -98,15 +104,18 @@ return {
 Input:
   - Exercise: Bench Press (reps mode)
   - Experience: intermediate
-  - Prescription: sets_min=3, sets_max=4, reps_min=8, reps_max=12
+  - Prescription: sets_min=3, sets_max=4, reps_min=8, reps_max=12,
+    suggested_weight_multiplier_bw=1.25
   - historyCount: 0 (no sessions yet)
   - hasHistory: false
+  - Profile has no current_weight → fallback bw = 150 lb
 
 Calculation:
   sets = floor((3 + 4) / 2) = floor(3.5) = 3
   reps = floor((8 + 12) / 2) = floor(10) = 10
+  weight = round(150 * 1.25 * 2) / 2 = 187.5
 
-Output: { exercise_id, sets: 3, reps: 10, mode: 'reps' }
+Output: { exercise_id, sets: 3, reps: 10, weight: 187.5, mode: 'reps' }
 ```
 
 **Example 2: Bench Press (After Progress)**
@@ -170,12 +179,13 @@ weight = round(bw × suggested_weight_multiplier_bw × 2) / 2
 ```
 - `bw` = user's current_weight from profile, or fallback 150 lb / 70 kg.
 - Multiplier = **working weight** as fraction of BW for the prescribed rep range (not 1RM). Bodyweight-only exercises use 0.
+- `targetSelection.ts` rounds to nearest 0.5; `weightSuggestions.ts` rounds to nearest 0.5 (imperial) or 0.25 (kg).
 
 **Weight progression (with history, when user hits top of rep band at acceptable RPE):**
 ```
 weight = lastWeight + max(lastWeight × 0.025, 2.5)
 ```
-- Minimum increase 2.5 lb; otherwise 2.5% of last weight. Rounded to nearest 0.5. Aligns with evidence-based 2–10% load progression (ACSM, NASM).
+- Minimum increase 2.5 lb; otherwise 2.5% of last weight (not rounded in `targetSelection.ts` — see Example 2's 138.375). Aligns with evidence-based 2–10% load progression (ACSM, NASM).
 
 **Duration progression (timed):** `duration_sec = min(lastDuration + 5, duration_sec_max)`.
 
@@ -185,6 +195,8 @@ weight = lastWeight + max(lastWeight × 0.025, 2.5)
 
 ### Purpose
 Calculate muscle stress from performed sets using effort signal and muscle weighting.
+
+Warm-up sets (`set_type = 'warmup'`) are excluded from the query — only working sets contribute stress.
 
 ### Constants
 - `DEFAULT_STIMULUS = 0.6`: Fallback when RPE/RIR missing
@@ -221,14 +233,15 @@ stimulus = DEFAULT_STIMULUS = 0.6
 
 ### Muscle Weighting
 
-**Build raw weights:**
+**Build raw weights (additive):**
 ```
 for each muscle m in primary_muscles:
-  w_m = 1.0
+  w_m += 1.0
 
 for each muscle m in implicit_hits:
-  w_m = implicit_hits[m]  // 0-1 value from exercise metadata
+  w_m += implicit_hits[m]  // 0-1 value from exercise metadata
 ```
+If a muscle appears in both `primary_muscles` and `implicit_hits`, its weights sum.
 
 **Normalize to sum = 1:**
 ```
@@ -298,7 +311,7 @@ stress_lats = 3 * 0.6 * 0.057 = 0.103
 
 **Location**: `supabase/functions/update-muscle-freshness/index.ts`
 
-The previous 48-hour hard lookback was a static proxy that failed to account for the magnitude of systemic fatigue or non-linear recovery curves. To align with biomechanical reality, we are migrating to a modified Banister Impulse-Response model.
+The previous 48-hour hard lookback was a static proxy that failed to account for the magnitude of systemic fatigue or non-linear recovery curves. To align with biomechanical reality, freshness uses a modified Banister Impulse-Response model.
 
 **Mathematical Formulation:**
 ```
@@ -314,14 +327,16 @@ Where:
 * **Slow Recovery** (λ=0.020, Half-life ~35h): Lower Back (Erectors), Hamstrings
 * **Medium Recovery** (λ=0.041, Half-life ~17h): Chest, Quads, Lats, Glutes, Upper Back, Traps, Core
 * **Fast Recovery** (λ=0.099, Half-life ~7h): Deltoids, Biceps, Triceps, Calves, Forearms
-* **Stabilizers** (λ=0.060, Half-life ~12h): Rotator Cuff, Serratus, Deep Core, Glute Med/Min
+* **Stabilizers** (λ=0.060, Half-life ~12h): Rotator Cuff, Serratus, Deep Core, Glute Med/Min, Piriformis, Tibialis Anterior, Hip Flexors, Adductors
+* Unknown muscle keys fall back to `DEFAULT_LAMBDA = 0.041`
 
 **Implementation:**
 - Triggered automatically when a workout session is marked as 'completed'
-- Edge Function calculates stress per muscle using existing stress calculation logic
-- For muscles hit in session: `freshness = 0` (fully fatigued)
-- For all other muscles: Apply decay formula based on hours elapsed since last trained
-- Updates `v2_muscle_freshness` table with new freshness values (0-100)
+- Edge Function calculates stress per muscle using existing stress calculation logic (warm-up sets excluded)
+- For muscles hit in session: `freshness = 0` (fully fatigued), `last_trained_at = now`
+- For all other muscles with a `last_trained_at`: decay the **stored** fatigue (`Fatigue₀ = 100 - stored freshness`) over hours elapsed since `last_trained_at`; result rounded to 0.1
+- Muscles never trained: `freshness = 100`
+- Updates `v2_muscle_freshness` table with new freshness values (0-100) in one batch upsert
 
 **Example Calculation:**
 ```
@@ -345,7 +360,7 @@ The heatmap shows current recovery (0–100) per muscle. So that recovery update
 
 - Load rows from `v2_muscle_freshness` (muscle_key, last_trained_at).
 - For each row: `freshness_now = computeFreshnessNow(muscle_key, last_trained_at)`.
-- Formula: at `last_trained_at`, fatigue = 100 (freshness 0). Fatigue(t) = 100 × e^(-λ × t), Freshness(t) = 100 - Fatigue(t). λ from `MUSCLE_DECAY_LAMBDA` (matches Edge Function).
+- Formula: at `last_trained_at`, fatigue = 100 (freshness 0). Fatigue(t) = 100 × e^(-λ × t), Freshness(t) = 100 - Fatigue(t). λ from `MUSCLE_DECAY_LAMBDA` (matches the Edge Function, except `adductors` is not yet listed client-side and falls back to the default λ=0.041).
 
 So the heatmap reflects current recovery even when the user has not completed a workout since the last one; no scheduled job is required.
 
@@ -389,10 +404,11 @@ RED_THRESHOLD = 0.85  // >85% stress (hard stop)
 
 ### Algorithm Overview
 
-**1. Load Allow-List** (v2_ai_recommended_exercises, limit 50)
+**1. Load Allow-List** (v2_ai_recommended_exercises, active, limit 50)
 ```
 candidates = fetch exercises with priority_order (lower = higher priority)
 ```
+The allow-list now covers every non-stretch master exercise with an active prescription (refreshed by migration `20260611120004`; `priority_order` derived from density_score tiers: ≥9 → 10, ≥8 → 20, ≥6 → 30, ≥4 → 40, else 50). The client engine takes the top 50 by priority.
 
 **2. Front-Load All Supporting Data**
 ```
@@ -415,7 +431,7 @@ for each candidate:
   W = Σ w_m
   NormalizedWeight_m = w_m / W
   
-  basePriority = derived from priority_order
+  basePriority = maxPriorityOrder + 1 - priority_order  // lower priority_order = higher basePriority
   
   profile = {
     exerciseId,
@@ -424,6 +440,8 @@ for each candidate:
     basePriority
   }
 ```
+
+If any allow-listed exercise is missing a prescription for the user's experience/mode, generation **fails fast** (throws) to surface the data-integrity issue instead of silently excluding it.
 
 **4. Initialize Simulated Fatigue State**
 ```
@@ -475,6 +493,8 @@ while (candidates remaining):
 
 return selected
 ```
+
+**Multi-session days** (`sessionsPerDay > 1`): the same greedy loop runs once per session with the simulated fatigue carried across sessions, so session 2 naturally avoids the muscles hit in session 1. Each session is capped at `2 + ((dayIndex * sessionsPerDay + sessionIndex) % 2)` exercises (i.e. 2–3).
 
 ### Worked Example
 
@@ -544,6 +564,36 @@ Update simulated state:
 ```
 
 **Result**: Algorithm naturally pivots away from fatigued chest muscles toward fresh back muscles.
+
+## Server-Side AI Generation (OpenAI Edge Function)
+
+**Location**: `supabase/functions/generate-workout/index.ts`
+
+### Purpose
+Generate one template day (exercise selection **with** prescribed targets: sets/reps/weight/RPE) using an LLM, constrained to the allow-list and validated server-side.
+
+### Constants
+```
+DAILY_QUOTA = 10                 // generations per user per rolling 24h (recorded in v2_ai_generations)
+MAX_SESSIONS_PER_DAY = 6
+MIN/MAX_EXERCISES_PER_SESSION = 2 / 8
+EXERCISE_COUNT_TOLERANCE = 1     // around user-requested count
+MAX_STRETCH_COUNT = 5
+FRESHNESS_LOOKBACK_HOURS = 48
+HISTORY_LOOKBACK_DAYS = 60       // warmups excluded; cap HISTORY_MAX_SETS = 300
+DEFAULT_MODEL = 'gpt-5-nano'     // overridable via OPENAI_MODEL
+TARGET_BOUNDS: sets 1-10, reps 1-50, weight 0-2000, duration_sec 5-3600, target_rpe 5-10
+```
+
+### Algorithm
+1. Auth (user JWT), verify template ownership, enforce daily quota.
+2. Build per-request context: allow-list catalog (`v2_ai_recommended_exercises`, active, limit 400, stretches excluded), profile, muscle freshness (last 48h), per-exercise history summary (last set, top set, avg RPE) from completed sessions, split-day position.
+3. **Stretch handling**: when the user requests `stretchCount` (1-5), a separate stretch catalog (`v2_exercises` where `is_stretch = true`) is sent; the LLM appends exactly that many stretches per session, in addition to strength exercises.
+4. Call OpenAI with strict JSON-schema structured output.
+5. Validate: every returned ID must be in the catalog (allow-list is the security boundary); dedupe within the day; per-session strength count must be within tolerance of the requested count (else the whole result is rejected → fallback); out-of-bounds or mode-mismatched targets are nulled (client falls back to prescription-based targets) rather than failing generation.
+6. Audit every call to `v2_ai_generations` (fallbacks still consume quota).
+
+On any failure the response has `source: 'fallback'` with empty sessions; the client (`src/lib/ai/generateWorkoutDay.ts`) surfaces this as `ai_unavailable` ("try again later") — it intentionally does **not** silently substitute the local deterministic engine, because the user explicitly asked for an AI generation.
 
 ## Rebalance Detection
 
@@ -620,12 +670,12 @@ From 6 sessions:
   chest, triceps, anterior_deltoids, lats, biceps, upper_back, traps, abs
 ```
 
-**Step 2: All Canonical Muscles** (28 total)
+**Step 2: All Canonical Muscles** (29 total)
 ```
 Upper Push (7): chest, upper_chest, lower_chest, anterior_deltoids, lateral_deltoids, posterior_deltoids, triceps
 Upper Pull (6): lats, upper_back, lower_back, traps, biceps, forearms
 Core (2): abs, obliques
-Lower Front (2): quads, hip_flexors
+Lower Front (3): quads, hip_flexors, adductors
 Lower Back (4): hamstrings, glutes, calves, soleus
 Stabilizers (7): rotator_cuff, serratus_anterior, transverse_abdominis, glute_medius, glute_minimus, piriformis, tibialis_anterior
 ```
@@ -635,20 +685,20 @@ Stabilizers (7): rotator_cuff, serratus_anterior, transverse_abdominis, glute_me
 Missed muscles:
   upper_chest, lower_chest, lateral_deltoids, posterior_deltoids,
   lower_back, forearms, obliques,
-  quads, hip_flexors,
+  quads, hip_flexors, adductors,
   hamstrings, glutes, calves, soleus,
   rotator_cuff, serratus_anterior, transverse_abdominis,
   glute_medius, glute_minimus, piriformis, tibialis_anterior
 
-Total: 20 muscles missed
+Total: 21 muscles missed
 ```
 
 **Step 4: Result**
 ```
 {
   needsRebalance: true,
-  reasons: ["20 muscles not hit in last 6 sessions: upper_chest, lower_chest, lateral_deltoids, posterior_deltoids, lower_back..."],
-  missedMuscles: [all 20 muscles]
+  reasons: ["21 muscles not hit in last 6 sessions: upper_chest, lower_chest, lateral_deltoids, posterior_deltoids, lower_back..."],
+  missedMuscles: [all 21 muscles]
 }
 ```
 
@@ -672,10 +722,9 @@ While the fatigue model handles recovery, "Rebalance" handles neglect.
 **Selection Criteria:**
 1. Query `v2_exercises` where `primary_muscles` overlaps with `missedMuscles`
 2. Filter by:
-   - Exercise is in `v2_ai_recommended_exercises` (allow-list)
-   - Exercise has prescription for user's experience level
-   - Prefer compound movements (density_score > 7)
-3. Select top 2-3 exercises that cover the most missed muscles
+   - Exercise is in `v2_ai_recommended_exercises` (allow-list, active)
+   - Prefer compound movements (density_score >= 7)
+3. Score each exercise: `score = missedMusclesCovered × density_score`; greedily pick exercises that cover new muscles, stopping at 3 exercises or once ~70% of the missed muscles are covered
 4. Return exercise IDs
 
 **Application:**
@@ -687,9 +736,51 @@ While the fatigue model handles recovery, "Rebalance" handles neglect.
 - Show toast: "Added X catch-up exercises"
 - Navigate to active workout
 
+## Workout Flow (Set Types, Supersets, Rest)
+
+**Location**: `src/lib/engine/workoutFlow.ts` (pure logic, unit tested in `workoutFlow.vitest.ts`)
+
+### Set Types
+`v2_session_sets.set_type` is one of `normal | warmup | drop | failure`. Warm-up sets are excluded from: muscle stress (fatigue model + freshness Edge Function), exercise history / progressive overload, weight suggestions, session averages, year-to-date stats, and PR detection.
+
+### Rest Resolution
+```
+rest_sec = exercise.rest_sec ?? set.rest_sec ?? DEFAULT_REST_SEC (90)
+```
+Per-exercise override wins, then the per-set value, then the app default.
+
+### Superset Transitions
+- Exercises sharing a `superset_group` form a group; solo exercises are a group of one.
+- After completing a set, move to the next group member's first incomplete set with **no rest**; wrapping back to the start of the group (or the next set of a solo exercise) triggers the rest timer.
+- When every set in the group is complete, enter the logging phase.
+
+## PR Detection
+
+**Location**: DB trigger `trigger_upsert_exercise_pr` (see migration `20260609000001_pr_trigger_exclude_warmups.sql`)
+
+Runs on insert/update of `v2_session_sets` with a non-null `performed_at`. **Warm-up sets (`set_type = 'warmup'`) return early and never register as PRs.**
+
+PR type per set:
+```
+if duration_sec set            → 'timed'    (PR = longest duration)
+else if weight null/0 and reps → 'reps_only' (PR = most reps)
+else if weight > 0             → 'weight'   (PR = heaviest weight; ties broken by more reps)
+```
+One row per (user, exercise or custom exercise, pr_type) in `v2_user_exercise_prs`; the upsert only overwrites when the new set beats the stored PR.
+
+## Session Staleness (Smart Refresh)
+
+**Location**: `src/lib/engine/sessionStaleness.ts`
+
+Detects whether an active session diverges from current truth; drives the Refresh button state (Gray / Orange / Red).
+
+- **Structural**: template slot ids/order no longer match the session's exercises → Orange.
+- **Target**: a workout was completed *after* this session started, so progressive-overload targets were computed from stale history → Orange.
+- **Biomechanical**: any primary muscle of a session exercise has freshness < 30% (recovery zone) → Red.
+
 ## Time Estimation Formula
 
-**Location**: Documented in architecture, not yet implemented as function
+**Location**: Documented in architecture, not yet implemented as a session-time function. The inputs (`setup_buffer_sec`, `avg_time_per_set_sec`, `is_unilateral`) exist on every master exercise (seeded by the CSV import migration `20260611120000`).
 
 ### Formula
 
@@ -754,10 +845,11 @@ time = 20 + (3 * 90 * 2) = 20 + 540 = 560 seconds = 9.3 minutes
 ### AI Generation Edge Cases
 
 1. **No allow-list exercises**: Return empty array
-2. **No prescriptions for exercises**: Exclude those exercises
+2. **No prescription for an allow-listed exercise**: Fail fast (throw) — surfaces data-integrity issues instead of silently excluding
 3. **All exercises in red zone**: Stop selection (prevent overtraining)
 4. **Empty current stress**: Start with zero stress for all muscles
 5. **Missing merged exercise**: Skip that exercise
+6. **Stretches (`is_stretch = true`)**: Excluded from the AI strength allow-list; only appended via the server-side `stretchCount` constraint
 
 ### Rebalance Detection Edge Cases
 

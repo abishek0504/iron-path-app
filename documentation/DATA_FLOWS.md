@@ -2,6 +2,8 @@
 
 **Purpose**: Document how components, queries, and stores connect. Show critical user flows end-to-end.
 
+**Last Updated**: 2026-06-11
+
 ## Query → Store → Component Patterns
 
 ###
@@ -116,7 +118,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 
 ## Cache and invalidation
 
-**Caches** live in `src/lib/cache/`. All use short TTL (90s) and in-memory Maps. Mutations must invalidate so the next read is fresh.
+**Caches** live in `src/lib/cache/`. All use in-memory Maps with short TTL (90s, except muscleFreshnessCache at 5 min). Mutations must invalidate so the next read is fresh.
 
 | Cache | Keys | Invalidate when |
 |-------|------|------------------|
@@ -124,6 +126,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 | **sessionsCache** | `sessionsInRange:${userId}:${startIso}:${endIso}` | Session completed or deleted: `invalidateSessionsInRangeForUser(userId)`. Called from active workout (completeWorkoutSession), planner (delete container), SessionDetailSheet (delete session). |
 | **exerciseCache** | `mergedExercises:${userId}:...` | Custom exercise create/update/delete: `invalidateMergedExercisesForUser(userId)`. Called inside customExerciseMutations. |
 | **dashboardStatsCache** | `profile:${userId}`, `weightHistory:${userId}:${limit}`, `yearStats:${userId}`, etc. | Profile: `invalidateProfileCache(userId)` after updateUserProfile (edit-profile, onboarding). Weight: `invalidateWeightCache(userId)` after insertWeightLog (WeightTrackerCard, onboarding); invalidates all `weightHistory:${userId}:*` keys. |
+| **muscleFreshnessCache** | `userId` (raw `muscle_key` + `last_trained_at` rows, 5 min TTL) | Workout completed: `invalidateMuscleFreshnessCache(userId)` from active workout finish; WorkoutHeatmap also invalidates after triggering an update-muscle-freshness backfill. |
 
 **Persistent source of truth:** Supabase (v2_* tables). Auth session is persisted by the Supabase client (AsyncStorage on native, localStorage on web) so users stay logged in. **App data (templates, sessions, exercises, profile) is not persisted to disk**—it lives in in-memory caches (90s TTL) and Zustand; screens fetch from Supabase on load.
 
@@ -181,11 +184,12 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 
 ```
 1. User taps "Start" on Workout tab
-   └→ app/(tabs)/index.tsx
-   └→ needsRebalance(userId, templateId, dayName)
-       └→ If gaps detected: show SmartAdjustPrompt
-           ├→ "Continue anyway": proceed to step 2
-           └→ "Smart adjust": applyRebalanceToSession() adds catch-up exercises
+   └→ app/(tabs)/index.tsx creates or reuses today's session and navigates
+   (Rebalance check lives in the Planner, not on Start: when the Planner loads
+    a template and there are no sessions yet today, needsRebalance(userId,
+    templateId, todayName) runs once; if muscle-coverage gaps are detected,
+    SmartAdjustPrompt offers to add catch-up exercises via
+    getRebalanceExercises() in src/lib/engine/rebalance.ts)
 
 2. Create workout session
    └→ createWorkoutSession(userId, templateId, dayName)
@@ -213,6 +217,8 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ Display current exercise name
    └→ Display exercise notes (if available from template slot)
    └→ Display current exercise with all sets
+   └→ Set type badge per set (normal/warmup/drop/failure, cycled by tapping;
+       saved as v2_session_sets.set_type — warm-ups excluded from PR/volume calcs)
    └→ For each set:
        └→ User views default weight/reps from prefill
        └→ User adjusts RPE slider (1-10) - saved in real-time
@@ -221,13 +227,16 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
                └→ UPDATE v2_session_sets SET
                    weight = ?, reps = ?, rpe = ?, performed_at = NOW()
                └→ CRITICAL: performed_at timestamp marks set as truly complete
-           └→ If last set: advance to LOGGING phase
-           └→ Else: advance to REST phase
+           └→ Transition via findNextStep (src/lib/engine/workoutFlow.ts):
+               ├→ Superset partner has sets left mid-round: EXECUTION on partner, no rest
+               ├→ Round wrapped / solo exercise with sets left: REST phase
+               └→ Group/exercise fully complete: LOGGING phase
    
    REST PHASE (between sets):
-   └→ Automatic rest timer (90-180s based on RPE)
+   └→ Automatic rest timer; duration via resolveRestSec:
+       per-exercise rest_sec → per-set rest_sec → 90s default
    └→ User can skip or wait
-   └→ Returns to EXECUTION phase for next set
+   └→ Returns to EXECUTION phase for next set (possibly next superset member)
    
    LOGGING PHASE (after all sets for exercise):
    └→ Display batch logging screen
@@ -246,8 +255,11 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ completeWorkoutSession(sessionId)
        └→ UPDATE v2_workout_sessions SET
            status='completed', completed_at=NOW()
-       └→ Edge Function triggered (database trigger)
+       └→ update-muscle-freshness Edge Function runs (DB trigger + direct
+           client invoke as fallback)
            └→ Updates v2_muscle_freshness with continuous decay
+       └→ writeCompletedWorkoutToHealth(sessionId) mirrors session to Apple Health
+       └→ invalidateMuscleFreshnessCache(userId) + invalidateSessionsInRangeForUser(userId)
 
 4. Resume mid-workout (CRITICAL for Continue button)
    └→ User exits during workout (presses back)
@@ -349,17 +361,22 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 ### Flow 4: AI Generation → Target Selection → Session Creation
 
 ```
-1. User taps "Generate with AI" in Planner (per day, picks sessionsPerDay 0-6)
-   └→ app/(tabs)/planner.tsx → runGenerateWithAI(sessionsPerDay)
+1. User taps "Generate with AI" in Planner (per day, picks sessionsPerDay 0-6
+   plus optional DayConstraints: dayFocus, exercisesPerSession (2-8 or auto),
+   intensity (light/standard/hard), emphasizeMuscles, avoidMuscles, stretchCount 0-5)
+   └→ app/(tabs)/planner.tsx → runGenerateWithAI(sessionsPerDay, constraints)
    └→ sessionsPerDay = 0 → rest day (clear slots + unstarted session exercises, no AI call)
-   └→ generateAiDay({ template, userId, profile, dayIndex, sessionsPerDay })
+   └→ generateAiDay({ template, userId, profile, dayIndex, sessionsPerDay, constraints })
        └→ src/lib/ai/generateWorkoutDay.ts
-       └→ supabase.functions.invoke('generate-workout', { templateId, dayName, sessionsPerDay })
+       └→ supabase.functions.invoke('generate-workout', { templateId, dayName, sessionsPerDay, ... })
 
 2. Edge Function: supabase/functions/generate-workout (OpenAI-powered)
    └→ Auth via JWT; template ownership check; rolling 24h quota (10/day, v2_ai_generations)
    └→ Context gathering (computed fresh per request, never persisted):
-       ├→ Allow-list: v2_ai_recommended_exercises + v2_exercises metadata (limit 80)
+       ├→ Allow-list: v2_ai_recommended_exercises + v2_exercises metadata (limit 80,
+       │   stretches excluded from the strength catalog via is_stretch)
+       ├→ Stretch catalog: v2_exercises WHERE is_stretch = true, included only
+       │   when stretchCount > 0
        ├→ Profile: experience, equipment, days_per_week, preferred_training_style (split),
        │   workout_days, use_imperial, current/goal weight
        ├→ Muscle freshness: v2_muscle_freshness (last 48h, RPE/RIR-driven)
@@ -367,13 +384,16 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
        │   warmups excluded, capped 300 rows) → per-exercise summary
        │   { last_performed, last_set, top_set, avg_rpe, recent_set_count }
        └→ Split compliance: "training day N of M this week" computed from workout_days
-   └→ OpenAI chat.completions (default gpt-5-mini, OPENAI_MODEL overridable)
+   └→ OpenAI chat.completions (default gpt-5-nano, OPENAI_MODEL overridable)
        └→ Strict structured outputs (response_format json_schema, strict: true)
        └→ Output: sessions[][] of { exercise_id, sets, reps, duration_sec, weight, target_rpe }
        └→ Prompt enforces: allow-list only, split compliance, freshness avoidance,
+           user constraints (focus/intensity/emphasize/avoid/stretches),
            progressive overload from history (RPE-based up/hold/back-off)
    └→ Server validation: allow-list check + dedupe + target bounds clamping
        └→ Invalid exercise IDs dropped; invalid targets nulled (exercise kept)
+       └→ Per-session strength count bounded (2-8, ± tolerance around requested
+           exercisesPerSession); stretches capped at stretchCount per session
    └→ Audit row to v2_ai_generations (source 'openai' | 'fallback' | 'error')
 
 3. Planner consumes result
@@ -431,17 +451,47 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
        │   └→ SELECT sessions WHERE status='completed' ORDER BY completed_at DESC
        │   └→ Display as list with dates
        └→ getTopPRs(userId, limit=3)
-           └→ Parallel queries for weight-based and duration-based PRs
-           └→ Merge and sort by recency
+           └→ Reads v2_user_exercise_prs cache table (kept fresh by upsert
+               trigger on set completion; warm-up sets excluded)
+           └→ Merge weight-based and timed PRs, sort by recency
            └→ Display top 3
 
-2. User taps muscle status icon (heatmap)
+2. Weight tracking (WeightTrackerCard on Dashboard)
+   └→ getWeightHistory via dashboardStatsCache
+   └→ User logs weight → insertWeightLog → INSERT v2_weight_logs
+       └→ writeBodyMassToHealth mirrors to Apple Health (kg)
+       └→ invalidateWeightCache(userId)
+
+3. User taps muscle status icon (heatmap)
    └→ Open muscleStatus bottom sheet
    └→ WorkoutHeatmap loads freshness and renders
-       └→ SELECT v2_muscle_freshness (muscle_key, last_trained_at) for user_id
+       └→ getMuscleFreshnessRawCached(userId) (5-min cache over
+           v2_muscle_freshness muscle_key + last_trained_at)
        └→ For each row: computeFreshnessNow(muscle_key, last_trained_at) using Banister decay (src/lib/utils/muscleFreshness.ts) so recovery shows on rest days
-       └→ If table empty but user has completed session: invoke update-muscle-freshness Edge Function once (backfill), then reload
-       └→ BodyHeatmap colors muscles by freshness (0 = fatigued, 100 = recovered)
+       └→ If table empty but user has completed session: invoke update-muscle-freshness Edge Function once (backfill), invalidate cache, then reload
+       └→ BodyHeatmap colors muscles by freshness (0 = fatigued, 100 = recovered);
+           muscle keys map to heatmap slugs via src/lib/constants/muscleHeatmapSlugs.ts
+           (includes adductors; hip_flexors shares the adductors slug)
+```
+
+### Flow 7: Account Deletion → Grace Period → Restore or Purge
+
+```
+1. User requests deletion (SettingsMenu bottom sheet)
+   └→ requestAccountDeletion() (src/lib/supabase/queries/users.ts)
+       └→ invokes delete-account Edge Function (user JWT)
+           └→ Sets v2_profiles.deleted_at = now(),
+               scheduled_purge_at = now() + 30 days
+           └→ Revokes refresh tokens (signs out all devices)
+   └→ Client calls supabase.auth.signOut()
+
+2. During grace period: user signs in
+   └→ app/login.tsx detects profile.deleted_at + scheduled_purge_at
+   └→ Offers Restore → restoreAccount(userId) clears both columns (owner RLS)
+
+3. After grace period: nightly pg_cron job
+   └→ purge_soft_deleted_accounts() deletes auth.users rows where
+       scheduled_purge_at <= now() (batched); all v2_* data cascades
 ```
 
 ## Bottom Sheet State Machine

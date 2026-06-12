@@ -1,10 +1,10 @@
 # Implementation Status
 
-**Last Updated**: 2026-06-09  
+**Last Updated**: 2026-06-11  
 
 ## Summary
 
-**Overall progress**: Feature-complete for App Store submission. Remaining items are **external/manual**: Apple Developer enrollment (placeholders in `eas.json`/`app.json`), publishing legal pages (`legal/*.md` → ironpath.app), a Sentry DSN, the Supabase "leaked password protection" dashboard toggle, and the final TestFlight pass.
+**Overall progress**: Feature-complete for App Store submission. Remaining items are **external/manual**: completing Apple submission IDs (`app.json` `ios.appleTeamId` is now set; `eas.json` submit `ascAppId`/`appleTeamId` are still placeholders), publishing legal pages (`legal/*.md` → ironpath.app; both URLs still 404 as of 2026-06-11), a Sentry DSN, the Supabase "leaked password protection" dashboard toggle (still disabled per security advisors 2026-06-11), and the final TestFlight pass.
 
 **Core systems**:
 
@@ -24,6 +24,10 @@
 - ✅ watchOS companion mirror: `targets/watch/` SwiftUI app via `@bacons/apple-targets`, iPhone WCSession bridge (`modules/watch-connectivity/`), set-completion round trip with offline queue
 - ✅ Privacy manifest wired via `expo.ios.privacyManifests` in app.json
 - ✅ Supabase security advisors remediated (search_path pins, trigger fn EXECUTE revokes, avatars bucket policies, anon table grants revoked)
+- ✅ Exercise library expanded to **388 master entries** (340 strength + 48 stretches) via CSV import (`supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`, migration 20260611120000); `is_stretch` column added; `adductors` muscle key added (29 canonical muscles); rule-based prescriptions seeded for all new exercises (1,164 active); AI allow-list refreshed to 340 non-stretch exercises
+- ✅ AI generation supports a `stretchCount` constraint server-side: `generate-workout` carries a separate stretch catalog and appends stretch/mobility work per session (client plumbing in `generateWorkoutDay.ts`, default 0 — no planner UI yet)
+- ✅ `update-muscle-freshness` excludes warm-up sets from stress (`.neq('set_type','warmup')`, deployed v13); warm-up `set_type` now preserved on tap/watch set completion, so the PR-trigger warmup race is fixed
+- 🟡 Exercise image pipeline: `generate-exercise-image` Edge Function (OpenAI Images, `gpt-image-1`) + batch scripts (`scripts/run-exercise-image-batch.mjs`, manifest of 388 prompts in `scripts/output/exercise-image-manifest.json`); 45 images generated so far in `assets/exercises/`, mapped via `src/lib/exerciseImages.ts`
 
 ## Feature Matrix
 
@@ -81,7 +85,7 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Allow-list filtering | ✅ Complete | v2_ai_recommended_exercises |
+| Allow-list filtering | ✅ Complete | v2_ai_recommended_exercises (340 non-stretch exercises, refreshed 2026-06-11) |
 | Fatigue simulation | ✅ Complete | In-flight stress tracking |
 | Greedy scoring | ✅ Complete | Priority - penalty |
 | Zone detection | ✅ Complete | Green/yellow/red |
@@ -91,6 +95,7 @@
 | Generate button UI | ✅ Complete | Planner |
 | Loading state | ✅ Complete | Spinner while generating |
 | Error handling | ✅ Complete | Returns empty on error |
+| Stretch append (`stretchCount`) | ⚠️ Partial | Edge Function validates 0–5 stretches/session from stretch catalog; client always sends 0 (no planner UI yet) |
 
 ### Workout Execution
 
@@ -155,7 +160,7 @@
 | Top PRs | ✅ Complete | Weight + duration PRs |
 | PR recency sorting | ✅ Complete | Most recent first |
 | Muscle status button | ✅ Complete | Opens heatmap |
-| Heatmap display | ✅ Complete | `react-native-body-highlighter` 28-muscle visualization (Skia removed) |
+| Heatmap display | ✅ Complete | `react-native-body-highlighter` visualization, 29 muscle keys mapped (Skia removed) |
 | Muscle freshness | ✅ Complete | Edge Function on session complete; heatmap computes freshness on read (decay from last_trained_at) so recovery shows on rest days |
 | Stress calculation | ✅ Complete | Weighted biomechanical model |
 | Empty states | ✅ Complete | No data messages |
@@ -166,6 +171,9 @@
 |---------|--------|-------|
 | Exercise picker | ✅ Complete | Global bottom sheet |
 | Search exercises | ✅ Complete | Filters by name |
+| Master exercise library | ✅ Complete | 388 entries (340 strength + 48 stretches) imported from CSV 2026-06-11 |
+| Stretch entries (`is_stretch`) | ✅ Complete | Flagged separately; timed prescriptions seeded; excluded from AI strength selection |
+| Exercise images | ⚠️ Partial | 45 / 388 generated (`assets/exercises/`, `src/lib/exerciseImages.ts`); batch pipeline ready to resume |
 | Multi-select mode | ✅ Complete | Checkmark selection + "Add N exercises" footer |
 | Exercise metadata display | ✅ Complete | Name, muscles |
 | Custom exercise creation | ✅ Complete | Full form with targets |
@@ -231,7 +239,7 @@
 |---------|--------|-------|
 | All v2_* tables | ✅ Complete | Base + patches applied |
 | RLS policies | ✅ Complete | Owner-based security |
-| Muscle seeding | ✅ Complete | 28 canonical muscles |
+| Muscle seeding | ✅ Complete | 29 canonical muscles (adductors added 2026-06-11) |
 | Query error handling | ✅ Complete | Try/catch + null returns |
 | Dev logging | ✅ Complete | `__DEV__` wrapped |
 | Type generation | ✅ Complete | Generated `src/types/supabase.gen.ts` (`npx supabase gen types`) re-exported via `supabase.ts` |
@@ -244,7 +252,7 @@
 | Target selection | ✅ Complete | With progressive overload |
 | Fatigue model (stress) | ✅ Complete | Stimulus × normalized weights |
 | Fatigue model (Banister) | ✅ Complete | Continuous decay with λ constants |
-| Weighted implicit hits | ✅ Complete | 40+ exercises seeded |
+| Weighted implicit hits | ✅ Complete | All 388 exercises carry weighted `implicit_hits` (CSV import 2026-06-11) |
 | AI week generation | ✅ Complete | Greedy selector |
 | Rebalance detection | ✅ Complete | Muscle gap analysis |
 | Rebalance apply | ✅ Complete | Adds catch-up exercises |
@@ -254,10 +262,10 @@
 
 ### Blocking submission (external, not code)
 
-1. **Apple Developer enrollment** — replace `REPLACE_WITH_APPLE_TEAM_ID` in `app.json` (`ios.appleTeamId`) and `eas.json` (`submit.production.ios.appleTeamId`/`ascAppId`) once enrolled and the ASC app record exists.
-2. **Legal pages** — publish `legal/privacy.md` and `legal/terms.md` at `ironpath.app/privacy` and `/terms` (URLs already referenced by `src/lib/utils/legal.ts`).
+1. **Apple submission IDs** — `app.json` `ios.appleTeamId` is set (enrollment done); `eas.json` `submit.production.ios.appleTeamId`/`ascAppId` are still placeholders pending the ASC app record.
+2. **Legal pages** — publish `legal/privacy.md` and `legal/terms.md` at `ironpath.app/privacy` and `/terms` (URLs already referenced by `src/lib/utils/legal.ts`; both still return "Page not found" as of 2026-06-11).
 3. **Sentry** — create the project, set `EXPO_PUBLIC_SENTRY_DSN` in `eas.json` production env, replace `REPLACE_WITH_SENTRY_ORG` in `app.json`, and add `SENTRY_AUTH_TOKEN` as an EAS secret for dSYM upload.
-4. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix.
+4. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix. Still disabled per security advisors check on 2026-06-11.
 
 ### Non-blocking
 
@@ -266,6 +274,30 @@
    - **Future**: Add daily stress cache rebuild job if needed
 
 ## Completed Features (Recent)
+
+### Exercise Library Expansion & Image Pipeline (2026-06-11)
+- ✅ Imported 388 master entries (45 updates + 343 inserts; 340 strength + 48 stretches) from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv` (migration 20260611120000, generated by `scripts/generate-exercise-import-sql.mjs`)
+- ✅ Added `is_stretch` flag to `v2_exercises` (20260611120001)
+- ✅ Added `adductors` canonical muscle key + heatmap slug mapping (20260611120002; `muscleHeatmapSlugs.ts`)
+- ✅ Seeded rule-based prescriptions for all new exercises — stretches get timed holds, strength gets experience-banded reps (20260611120003; 1,164 active prescriptions live)
+- ✅ Refreshed AI allow-list to all 340 non-stretch exercises with density-based priority (20260611120004)
+- ✅ Stretch-aware AI generation: `generate-workout` accepts `stretchCount` (0–5) and appends stretches from a dedicated stretch catalog (deployed v14); client plumbing defaults to 0
+- ✅ Exercise image pipeline: `generate-exercise-image` Edge Function (OpenAI `gpt-image-1`) + `scripts/run-exercise-image-batch.mjs` / `generate-exercise-images*.mjs`; 388-prompt manifest, 45 images generated into `assets/exercises/` and wired through `src/lib/exerciseImages.ts`
+- ✅ `update-muscle-freshness` excludes warm-up sets from stress (deployed v13)
+- ✅ Warm-up `set_type` preserved when completing sets via tap/watch — fixes the warmup PR race
+- ✅ `getExerciseHistory` excludes warm-ups from progressive-overload/weight-suggestion history
+- ✅ Set-type (warm-up) editing added to `app/add-exercise-edit.tsx`
+
+### AI Backend Migration to OpenAI (2026-06-10)
+- ✅ `generate-workout` rewritten for OpenAI structured outputs (strict JSON schema, history-aware targets); Gemini removed
+- ✅ `v2_ai_generations.source` constraint extended with `'openai'` (migration 20260610000000); legacy `gemini` rows preserved
+- ✅ Live verification: at least one `source='openai'` generation row in production
+
+### Workout Flow, PRs & Ops Hardening (2026-06-09)
+- ✅ Set types (normal/warmup/drop/failure), supersets, per-exercise rest (`20260609000000`)
+- ✅ PR trigger excludes warm-ups (`20260609000001`)
+- ✅ pg_cron purge job for soft-deleted accounts (`20260609000002`)
+- ✅ Security advisor remediation: search_path pins, EXECUTE revokes, avatars policies, anon grants (`20260609000003`)
 
 ### Phase 1-3: Biomechanics & Active Workout (2026-01-21)
 - ✅ Upgraded fatigue model to Banister continuous decay
@@ -327,7 +359,7 @@
 
 ### Phase 1: Complete Core Workout Flow ✅ COMPLETE
 1. ✅ Build active workout UI
-   - ✅ Interactive set editing (swipe-to-complete)
+   - ✅ Interactive set editing (exercise-by-exercise phases with Complete Set + batch logging)
    - ✅ RPE input (slider with color zones)
    - ✅ Rest timer (auto-start, per-exercise `rest_sec`)
    - ✅ Exercise notes display
@@ -367,7 +399,7 @@
 
 ### Core Flows to Test Before Release
 - [ ] Signup → Onboarding → Create Template → View Planner
-- [ ] Add Exercise → Select Scope → See in Planner
+- [ ] Add Exercise (Today vs Future date context) → See in Planner
 - [ ] Remove Exercise → Confirm → Removed
 - [ ] Start Workout → Create Session → See Active Workout
 - [ ] Complete Workout → See in Progress Calendar
@@ -392,7 +424,7 @@ If deploying to users with existing data:
 
 1. **Backup Database** before migrations
 2. **Apply Patches in Order** (C1, C2, D, H, split_full_name)
-3. **Verify Seed Data** (28 muscles must exist)
+3. **Verify Seed Data** (29 muscles must exist, including `adductors`)
 4. **Test RLS Policies** (ensure no unauthorized access)
 5. **Monitor Logs** for errors post-deployment
 6. **Provide Support** for users with issues

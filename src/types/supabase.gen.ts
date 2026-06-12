@@ -211,6 +211,7 @@ export type Database = {
           equipment_needed: string[] | null
           id: string
           implicit_hits: Json
+          is_stretch: boolean
           is_timed: boolean
           is_unilateral: boolean
           movement_pattern: string | null
@@ -229,6 +230,7 @@ export type Database = {
           equipment_needed?: string[] | null
           id?: string
           implicit_hits: Json
+          is_stretch?: boolean
           is_timed?: boolean
           is_unilateral: boolean
           movement_pattern?: string | null
@@ -657,6 +659,7 @@ export type Database = {
           equipment_needed: string[] | null
           id: string
           implicit_hits: Json
+          is_stretch: boolean
           is_timed: boolean
           is_unilateral: boolean
           movement_pattern: string | null
@@ -676,6 +679,7 @@ export type Database = {
           equipment_needed?: string[] | null
           id?: string
           implicit_hits: Json
+          is_stretch?: boolean
           is_timed?: boolean
           is_unilateral: boolean
           movement_pattern?: string | null

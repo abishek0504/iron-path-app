@@ -2,6 +2,8 @@
 
 **Purpose**: Document core architectural decisions and WHY they were made.
 
+**Last Updated**: 2026-06-11
+
 ## Core Principles
 
 ### 1. Strict Data Layering (WHY: Prevent data corruption and ensure single source of truth)
@@ -136,18 +138,23 @@ This keeps **plan editing** (structure) and **performed truth** cleanly separate
 ### 6. RLS & Immutability (WHY: Security and data integrity)
 
 **Immutable Tables** (auth SELECT only):
-- `v2_muscles` - Canonical muscle keys
-- `v2_exercises` - Master exercise list
+- `v2_muscles` - Canonical muscle keys (includes `adductors`)
+- `v2_exercises` - Master exercise list (~390 entries after the 2026-06 CSV import; `is_stretch` flags mobility/stretch entries)
 - `v2_exercise_prescriptions` - Curated targets
 - `v2_ai_recommended_exercises` - AI allow-list
 
 **User-Owned Tables** (user CRUD via RLS):
-- `v2_profiles` - User settings
+- `v2_profiles` - User settings (+ `deleted_at` / `scheduled_purge_at` soft-delete markers)
 - `v2_user_exercise_overrides` - Exercise customizations
 - `v2_user_custom_exercises` - User-created exercises
 - `v2_workout_templates` + children - Planning
 - `v2_workout_sessions` + children - Performed truth
 - `v2_muscle_freshness`, `v2_daily_muscle_stress` - Caches
+- `v2_weight_logs` - Body-weight log entries
+- `v2_user_exercise_prs` - PR cache (maintained by upsert trigger; warm-ups excluded)
+- `v2_health_sync` - Apple Health import/export ledger
+- `v2_support` - Help & Support submissions
+- `v2_ai_generations` - AI generation audit (owner SELECT only; rows written by the generate-workout Edge Function via service role)
 
 **RLS Enforcement:**
 ```sql
@@ -165,11 +172,9 @@ USING (
 )
 ```
 
-**Security Risk Identified:**
-- System templates (`user_id IS NULL`) allow writes from any auth user
-- Current RLS: `USING (user_id = auth.uid() OR user_id IS NULL)`
-- Risk: Clients could modify system templates
-- **TODO**: Tighten policy or remove system template concept
+**System Template Hardening (resolved 2026-05):**
+- Previous `FOR ALL` policies let any auth user write rows with `user_id IS NULL` (system templates)
+- Migration `20260508000000_tighten_system_template_rls.sql` split policies: SELECT allows owner OR system, INSERT/UPDATE/DELETE are owner-only (same pattern on `v2_template_days`/`v2_template_slots` via EXISTS on the parent template)
 
 ### 3.1 Frictionless Logging Pattern (Active Workout)
 
@@ -219,6 +224,14 @@ To visualize the 28-muscle freshness state without dropping frames during naviga
 - Skia rendering: ~2-3ms render time per frame
 - Allows smooth animations and transitions
 
+### 4.2 Exercise Image Pipeline (build-time, not runtime)
+
+Anatomical illustrations for master exercises are generated offline and bundled with the app — no runtime image fetching or storage bucket:
+
+1. **Generation**: `scripts/run-exercise-image-batch.mjs` (or `scripts/generate-exercise-images.mjs` with a local key) batch-generates JPGs per CSV entry; the former calls the `generate-exercise-image` Edge Function (OpenAI Images, `gpt-image-1`, key held in Supabase secrets), writing to `assets/exercises/<slug>.jpg` and tracking progress in `scripts/output/exercise-image-manifest.json`
+2. **Mapping**: `scripts/generate-exercise-images-ts.mjs` regenerates `src/lib/exerciseImages.ts` — a static name → `require()` map (React Native needs static requires)
+3. **Display**: `getExerciseImage(exerciseName)` returns the bundled asset (e.g. hero image in `add-exercise-edit`); custom exercises return null
+
 ## State Management (Zustand)
 
 **WHY Zustand:** Lightweight, no boilerplate, works with React Native.
@@ -250,9 +263,14 @@ const useUIStore = create<UIState>((set) => ({
 
 ## Active Workout State Machine
 
-### WorkoutPhase Enum
+### WorkoutPhase Type
 ```typescript
-type WorkoutPhase = 'execution' | 'rest' | 'logging' | 'complete';
+// app/(stack)/workout/active.tsx — discriminated union, not a plain enum
+type WorkoutPhase =
+  | { type: 'execution'; setIndex: number }
+  | { type: 'rest'; nextExerciseIndex: number; nextSetIndex: number }
+  | { type: 'logging' }
+  | { type: 'complete' };
 ```
 
 ### Phase Transitions
@@ -291,9 +309,11 @@ type WorkoutPhase = 'execution' | 'rest' | 'logging' | 'complete';
 - User taps "Finish Workout"
 - `completeWorkoutSession(sessionId)` called
   - UPDATE v2_workout_sessions SET status='completed', completed_at=NOW()
-  - Database trigger fires Edge Function for muscle freshness update
+  - update-muscle-freshness Edge Function runs (database trigger, plus a direct client invoke as fallback)
   - `writeCompletedWorkoutToHealth(sessionId)` mirrors the session to Apple Health as an HKWorkout (traditional strength training) when access is granted
+  - `invalidateMuscleFreshnessCache(userId)` so the heatmap refetches
 - Navigate back to Workout tab
+- (An explicit mid-workout bail-out instead calls `abandonWorkoutSession`, which sets status='abandoned' and skips the freshness update)
 
 ### Apple Health integration (architecture)
 
@@ -365,11 +385,16 @@ const hasActiveWorkout =
 
 **Stack Routes** (slide animations):
 - `/` - Bootstrap/auth check
-- `/login`, `/signup` - Auth
+- `/get-started` - Landing page
+- `/login`, `/signup`, `/signup-success` - Auth
 - `/onboarding` - Multi-step setup
 - `/(tabs)/*` - Main app tabs
 - `/workout/active` - Active workout (modal presentation)
 - `/edit-profile` - Profile editing (modal presentation)
+- `/add-exercise`, `/add-exercise-edit` - Exercise search and slot editing
+- `/prs` - Personal records
+- `/health-connect` - Apple Health connection
+- `/help-support`, `/workout-reminders` - Settings sub-screens
 
 **Tab Routes** (bottom tab bar):
 - `/(tabs)/index` - Workout (today's plan)
@@ -377,11 +402,13 @@ const hasActiveWorkout =
 - `/(tabs)/progress` - Progress (calendar views)
 - `/(tabs)/dashboard` - Dashboard (metrics, PRs)
 
-**Bottom Sheets** (global overlays):
+**Bottom Sheets** (global overlays, `BottomSheetId` in `src/stores/uiStore.ts`):
 - `exercisePicker` - Exercise selection
 - `settingsMenu` - Settings options
 - `planDayPicker` - Choose plan day
+- `workoutPicker` - Choose among today's workouts
 - `muscleStatus` - Heatmap display
+- `sessionDetail` - Session details from Progress calendar
 
 ### Navigation Guards
 
@@ -480,22 +507,38 @@ app/                    # Expo Router (file-based routing)
 src/
   components/          # React components
     ui/               # Global reusable UI
+    ai/               # AI generation UI
     exercise/         # Exercise-specific
     settings/         # Settings-specific
     workout/          # Workout-specific
     progress/         # Progress-specific
+    visualizations/   # BodyHeatmap (Skia)
   hooks/              # React hooks (useToast, useModal, etc.)
   lib/
-    engine/           # Business logic (algorithms)
+    ai/               # generateWorkoutDay (Edge Function client)
+    cache/            # In-memory TTL caches (template, sessions, exercises, dashboard, freshness)
+    engine/           # Business logic (targets, rebalance, staleness, workout flow)
+    health/           # Apple Health integration
     supabase/
       client.ts       # Supabase client config
       queries/        # Query functions (organized by domain)
     utils/            # Pure utilities
+    exerciseImages.ts # Generated name → bundled asset map (do not edit by hand)
   stores/             # Zustand stores
   types/              # TypeScript types
 
+assets/exercises/      # Bundled exercise illustrations (JPG, generated)
+
+scripts/               # Dev tooling (exercise image batch generation, SQL import generation)
+
 supabase/
   migrations/         # SQL migrations (apply in order)
+  functions/          # Edge Functions: generate-workout, update-muscle-freshness,
+                      #   delete-account, generate-exercise-image
+  seed/               # Master exercise CSV source
+
+modules/watch-connectivity/  # Local Expo Module wrapping WCSession (iPhone side)
+targets/watch/               # SwiftUI watchOS companion (@bacons/apple-targets)
 ```
 
 ## Naming Conventions
@@ -544,6 +587,16 @@ supabase/
 **Why**: Template slots and session exercises can reference EITHER master OR custom exercise (not both, not neither)  
 **Implementation**: CHECK constraint `(exercise_id IS NOT NULL AND custom_exercise_id IS NULL) OR (exercise_id IS NULL AND custom_exercise_id IS NOT NULL)`  
 
+### Decision: Set types, supersets, and rest overrides as columns (not new tables)
+**When**: Migration 20260609000000  
+**Why**: Workout-flow parity (warm-up/drop/failure sets, alternating supersets, per-exercise rest) without new join tables  
+**Impact**: `v2_session_sets.set_type` (warm-ups excluded from PR/volume calcs), `superset_group` + `rest_sec` on `v2_session_exercises` and `v2_template_slots`; pure transition logic lives in `src/lib/engine/workoutFlow.ts`  
+
+### Decision: Stretches live in `v2_exercises` with an `is_stretch` flag
+**When**: Migrations 20260611120000-20260611120004 (CSV master import + flag)  
+**Why**: Reuse prescriptions, sessions, and image pipeline for mobility work instead of a parallel table  
+**Impact**: ~390 master exercises after import; AI generation excludes stretches from the strength catalog and only includes them when the user requests a per-session `stretchCount`  
+
 ### Decision: Use Expo Router instead of React Navigation
 **Why**: File-based routing, simpler, better DX, built-in for Expo  
 **Trade-off**: Less flexible than React Navigation but much easier to maintain  
@@ -563,6 +616,11 @@ supabase/
 - Session stored in AsyncStorage (native) or localStorage (web)
 - Auto-refresh tokens
 - RLS enforces user boundaries
+
+### Account Lifecycle (soft-delete + purge)
+- **Delete** (App Store Guideline 5.1.1(v)): `requestAccountDeletion()` invokes the `delete-account` Edge Function, which sets `v2_profiles.deleted_at` and `scheduled_purge_at = now() + 30 days`, then revokes refresh tokens
+- **Restore**: during the grace period, login detects the soft-delete markers and offers Restore (`restoreAccount` clears both columns via owner RLS)
+- **Purge**: nightly pg_cron job `purge_soft_deleted_accounts()` hard-deletes expired `auth.users` rows (batched); all `v2_*` data cascades via `ON DELETE CASCADE`
 
 ### API Keys
 - Only anon key in client

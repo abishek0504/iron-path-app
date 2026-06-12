@@ -1,0 +1,271 @@
+{
+  "mappedCount": 53,
+  "mapped": [
+    {
+      "exercise": "Cable Hip Abduction",
+      "from": "tensor_fasciae_latae",
+      "to": "glute_medius"
+    },
+    {
+      "exercise": "Cable Hip Abduction",
+      "from": "tensor_fasciae_latae",
+      "to": "glute_medius"
+    },
+    {
+      "exercise": "Child's Pose",
+      "from": "shoulders",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Child's Pose",
+      "from": "shoulders",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Downward Dog",
+      "from": "shoulders",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Downward Dog",
+      "from": "shoulders",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Farmer's Walk",
+      "from": "core",
+      "to": "abs"
+    },
+    {
+      "exercise": "Front Squat",
+      "from": "core",
+      "to": "abs"
+    },
+    {
+      "exercise": "Hip Abduction Machine",
+      "from": "tensor_fasciae_latae",
+      "to": "glute_medius"
+    },
+    {
+      "exercise": "Hip Abduction Machine",
+      "from": "tensor_fasciae_latae",
+      "to": "glute_medius"
+    },
+    {
+      "exercise": "Levator Scapulae Stretch",
+      "from": "neck",
+      "to": "traps"
+    },
+    {
+      "exercise": "Levator Scapulae Stretch",
+      "from": "neck",
+      "to": "traps"
+    },
+    {
+      "exercise": "Overhead Press",
+      "from": "core",
+      "to": "abs"
+    },
+    {
+      "exercise": "Overhead Triceps Stretch",
+      "from": "shoulders",
+      "to": "lateral_deltoids"
+    },
+    {
+      "exercise": "Overhead Triceps Stretch",
+      "from": "shoulders",
+      "to": "lateral_deltoids"
+    },
+    {
+      "exercise": "Scapular Pull Up",
+      "from": "lower_traps",
+      "to": "traps"
+    },
+    {
+      "exercise": "Squat (Barbell)",
+      "from": "core",
+      "to": "abs"
+    },
+    {
+      "exercise": "Squat Pry",
+      "from": "ankles",
+      "to": "tibialis_anterior"
+    },
+    {
+      "exercise": "Squat Pry",
+      "from": "ankles",
+      "to": "tibialis_anterior"
+    },
+    {
+      "exercise": "Upper Trap Stretch",
+      "from": "neck",
+      "to": "traps"
+    },
+    {
+      "exercise": "Upper Trap Stretch",
+      "from": "neck",
+      "to": "traps"
+    },
+    {
+      "exercise": "Tuck Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Tuck Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Advanced Tuck Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Advanced Tuck Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Straddle Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Straddle Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Full Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Full Front Lever Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Front Lever Raise",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Front Lever Raise",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Front Lever Row",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Front Lever Row",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Ice Cream Maker",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Ice Cream Maker",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "German Hang Pull-Out",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "German Hang Pull-Out",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Archer Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Archer Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Typewriter Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Typewriter Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "One-Arm Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "One-Arm Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "One-Arm Chin-Up Eccentric",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "One-Arm Chin-Up Eccentric",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Explosive Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Explosive Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Chest-to-Bar Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Chest-to-Bar Pull-Up",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Arm-Over-Arm Sled Pull",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Arm-Over-Arm Sled Pull",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Hercules Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    },
+    {
+      "exercise": "Hercules Hold",
+      "from": "rear_deltoids",
+      "to": "posterior_deltoids"
+    }
+  ],
+  "unresolved": []
+}

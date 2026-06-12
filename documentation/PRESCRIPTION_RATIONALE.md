@@ -2,6 +2,8 @@
 
 **Purpose**: Document the research, science, and biomechanics behind every prescription value (rep/set bands, suggested weight multipliers, progression logic) and provide guidelines for adding future exercises.
 
+**Last Updated**: 2026-06-11
+
 ---
 
 ## 1. Definition of Values
@@ -21,15 +23,35 @@
 - **Reps (reps mode)**: `reps_min`–`reps_max` define the target rep range per set.
 - **Duration (timed mode)**: `duration_sec_min`–`duration_sec_max` define hold/walk duration per set.
 
-Evidence: Meta-analyses (e.g. BJSM 2023, umbrella reviews) show hypertrophy occurs across **~5–30 reps** when taken close to failure; **3–5 sets** per muscle per session are effective; **8–12 reps** remain a common moderate range. Our bands align with this:
+Evidence: Meta-analyses (e.g. BJSM 2023, umbrella reviews) show hypertrophy occurs across **~5–30 reps** when taken close to failure; **3–5 sets** per muscle per session are effective; **8–12 reps** remain a common moderate range. Rep-based bands are **tiered by `density_score`** (rule-based seed in migration `20260611120003_seed_prescriptions_for_new_exercises.sql`); curated prescriptions for the original main lifts keep the same compound bands:
 
-| Experience   | Sets   | Reps (reps mode) | Rationale |
-|-------------|--------|-------------------|-----------|
-| Beginner    | 3      | 8–12              | Lower volume, moderate reps; build technique and work capacity. |
-| Intermediate| 3–4    | 6–10              | More volume and slightly heavier; strength–hypertrophy overlap. |
-| Advanced    | 4–5    | 5–8               | Higher volume, heavier loads; more strength-oriented. |
+**Compound (density_score ≥ 8):**
 
-Timed exercises: beginner 20–30 s, intermediate 30–45 s, advanced 45–60 s (isometric/hold progressions).
+| Experience   | Sets   | Reps  | Rationale |
+|-------------|--------|--------|-----------|
+| Beginner    | 3      | 8–12   | Lower volume, moderate reps; build technique and work capacity. |
+| Intermediate| 3–4    | 6–10   | More volume and slightly heavier; strength–hypertrophy overlap. |
+| Advanced    | 4–5    | 5–8    | Higher volume, heavier loads; more strength-oriented. |
+
+**Moderate / accessory (density_score 6–7):**
+
+| Experience   | Sets   | Reps  |
+|-------------|--------|--------|
+| Beginner    | 3      | 8–12   |
+| Intermediate| 3–4    | 8–12   |
+| Advanced    | 3–4    | 6–10   |
+
+**Isolation / small muscle (density_score ≤ 5):**
+
+| Experience   | Sets   | Reps  |
+|-------------|--------|--------|
+| Beginner    | 3      | 10–15  |
+| Intermediate| 3–4    | 10–15  |
+| Advanced    | 3–4    | 8–12   |
+
+Timed strength exercises (non-stretch, e.g. planks, dead hangs): beginner 3×20–30 s, intermediate 3–4×30–45 s, advanced 4–5×45–60 s (isometric/hold progressions).
+
+Stretches (`is_stretch = true`, always timed): beginner 1–2×30–45 s, intermediate 1–2×45–60 s, advanced 2–3×45–90 s — low volume holds, longer with experience.
 
 ---
 
@@ -92,19 +114,28 @@ References: Strength standards (e.g. ExRx, strength calculators) report 1RM/BW b
 - **Plank, Side Plank, L-Sit, Superman Hold**: Timed; multiplier = 0.
 - **Farmer's Walk**: Timed; multiplier = 0. Load is often 0.5–1× BW per hand; currently user-defined; optional future: separate “carry load” suggestion.
 
+### 3.6 Stretches and the Expanded Master Catalog
+
+The master catalog (`supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`, imported by migration `20260611120000`) now contains **388 exercises**: 340 strength (282 rep-based, 58 timed) and **48 stretches** (`is_stretch = true`, all timed).
+
+- **Stretches**: Multiplier = 0; timed holds with the low-volume bands in §1.2. Excluded from the AI strength allow-list — only appended to generated days when the user explicitly requests stretches (`stretchCount` constraint).
+- **Rule-seeded prescriptions**: Exercises imported without curated prescriptions get bands from the density-tier rules in §1.2 (migration `20260611120003`). Their `suggested_weight_multiplier_bw` stays at the column default **0** until curated, so the no-history suggestion is 0 (user enters the load) and history takes over from the first session.
+
 ---
 
 ## 4. Progression Logic (Formulas)
 
 ### 4.1 Weight Progression (Reps Mode)
 
-- **When to increase weight**: User hits **top of rep band** (e.g. 12 reps when band is 8–12) at **acceptable effort** (e.g. RPE ≤ 7). Then suggest slightly higher weight and reset toward bottom of band.
+- **When to increase weight**: User hits **top of rep band** (≥ 90% of `reps_max`, e.g. 11+ reps when band is 8–12) at **acceptable effort** (avg RPE ≤ 7, or no RPE recorded). Then suggest slightly higher weight and reset toward bottom of band.
 - **Formula (targetSelection.ts)**:  
   `weight = lastWeight + max(lastWeight × 0.025, 2.5)`  
-  So: at least **2.5 lbs** increase, or **2.5%** of last weight, whichever is larger. Rounded to nearest 0.5.
-- **Formula (weightSuggestions.ts, no history)**: Uses prescription: `weight = round(bw × multiplier × 2) / 2`. With history and target reps hit: `weight = lastWeight + (lastWeight >= 100 ? 5 : 2.5)` (fixed increment), rounded to 0.5.
+  So: at least **2.5 lbs** increase, or **2.5%** of last weight, whichever is larger (not rounded).
+- **Formula (weightSuggestions.ts, no history)**: Uses prescription: `weight = bw × multiplier`, rounded to nearest **0.5 lb** (imperial) or **0.25 kg** (metric). With history and target reps hit, a fixed unit-aware increment:  
+  imperial: `+5` if last weight ≥ 100 lb, else `+2.5`; metric: `+2.5` if ≥ 45 kg, else `+1.25` — same rounding.
+- **History excludes warm-ups**: Only working sets (`set_type != 'warmup'`) drive progression and weight suggestions; warm-up sets also never register PRs (DB trigger early-returns on `set_type = 'warmup'`).
 
-**Research**: 2–10% load increase when exceeding target reps is common (ACSM, NASM); 2.5% minimum and 2.5–5 lb increments are within evidence-based ranges and are practical for small plates.
+**Research**: 2–10% load increase when exceeding target reps is common (ACSM, NASM); 2.5% minimum and 1.25–5 lb/kg increments are within evidence-based ranges and are practical for small plates.
 
 ### 4.2 Rep Progression (Reps Mode)
 
@@ -133,10 +164,10 @@ References: Strength standards (e.g. ExRx, strength calculators) report 1RM/BW b
 
 ### 5.2 Rep and Set Bands
 
-- **Default (hypertrophy)**: Use the same bands as existing rep-based prescriptions:  
-  Beginner 3×8–12, Intermediate 3–4×6–10, Advanced 4–5×5–8.
-- **Exception – calisthenics / core (e.g. hanging leg raise, calf raise)**: Can use slightly different rep bands (e.g. 3×6–10 beginner, 3–4×8–12 intermediate, 4–5×10–15 advanced) if the movement is better suited to slightly higher reps.
-- **Timed**: Use existing timed bands (20–30 s / 30–45 s / 45–60 s) unless the movement has a strong reason to differ.
+- **Default (hypertrophy)**: Use the density-tier bands in §1.2 — compound (density ≥ 8): 3×8–12 / 3–4×6–10 / 4–5×5–8; moderate (6–7): 3×8–12 / 3–4×8–12 / 3–4×6–10; isolation (≤ 5): 3×10–15 / 3–4×10–15 / 3–4×8–12. The rule-based seed migration applies these automatically to exercises without curated prescriptions.
+- **Exception – calisthenics / core (e.g. hanging leg raise, calf raise)**: Can use slightly different rep bands if the movement is better suited to slightly higher reps; curate explicitly.
+- **Timed strength**: Use existing timed bands (3×20–30 s / 3–4×30–45 s / 4–5×45–60 s) unless the movement has a strong reason to differ.
+- **Stretches**: Use the stretch bands (1–2×30–45 s / 1–2×45–60 s / 2–3×45–90 s) and set `is_stretch = true`.
 
 ### 5.3 Experience Levels
 
@@ -148,9 +179,9 @@ Levels map to **prescription row** (experience + mode); multipliers and bands ar
 
 ### 5.4 Checklist for New Exercises
 
-- [ ] Choose **mode**: `reps` or `timed`.
-- [ ] Set **sets_min**, **sets_max** (and **reps_min**/ **reps_max** or **duration_sec_min**/ **duration_sec_max**).
-- [ ] Set **suggested_weight_multiplier_bw** using §5.1 (0 for bodyweight/timed where no load is suggested).
+- [ ] Choose **mode**: `reps` or `timed`; set **is_stretch** for mobility/stretch entries (stretches are timed and excluded from AI strength selection).
+- [ ] Set **sets_min**, **sets_max** (and **reps_min**/ **reps_max** or **duration_sec_min**/ **duration_sec_max**) — or rely on the density-tier rule seed for defaults.
+- [ ] Set **suggested_weight_multiplier_bw** using §5.1 (0 for bodyweight/timed where no load is suggested; defaults to 0 if not curated).
 - [ ] Add a row per **experience** (beginner, intermediate, advanced) if the exercise is used for hypertrophy.
 - [ ] Document **rationale** (e.g. “Same as Bent Over Row; horizontal pull”) in migration or seed comment/source_notes if the table supports it.
 
@@ -158,7 +189,7 @@ Levels map to **prescription row** (experience + mode); multipliers and bands ar
 
 ## 6. Summary
 
-- **Multipliers** = working weight as fraction of BW for the prescribed rep range (not 1RM).
-- **Rep/set bands** align with hypertrophy research (3–5 sets, 5–30 reps effective; we use 5–12 and 5–8 for advanced).
-- **Progression**: Weight = last + max(2.5% last, 2.5 lb); reps +1 toward top of band; timed +5 s, all clamped to prescription bands.
+- **Multipliers** = working weight as fraction of BW for the prescribed rep range (not 1RM). Rule-seeded prescriptions default to 0 until curated.
+- **Rep/set bands** align with hypertrophy research (3–5 sets, 5–30 reps effective) and are tiered by density_score (compound 5–12 reps, isolation up to 15); stretches use low-volume timed holds.
+- **Progression**: Weight = last + max(2.5% last, 2.5 lb); reps +1 toward top of band; timed +5 s, all clamped to prescription bands. Warm-up sets never drive progression or PRs.
 - **Every value** is chosen so that suggested loads and progressions are realistic per exercise, muscle group, and experience level; new exercises should follow the same rationale and the guidelines in §5.

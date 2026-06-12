@@ -48,7 +48,22 @@ export async function calculateWeightSuggestion(
     });
   }
 
-  // Get recent history (last 5 sessions)
+  if (exerciseId) {
+    const { data: stretchRow } = await supabase
+      .from('v2_exercises')
+      .select('is_stretch')
+      .eq('id', exerciseId)
+      .maybeSingle();
+    if (stretchRow?.is_stretch) {
+      return {
+        duration_sec: targetDuration,
+        source: 'prescription',
+        confidence: 'medium',
+      };
+    }
+  }
+
+  // Get recent history (last 5 sessions) — strength exercises only
   const referenceId = exerciseId || customExerciseId!;
   const history = await getExerciseHistory(referenceId, userId, 5);
 

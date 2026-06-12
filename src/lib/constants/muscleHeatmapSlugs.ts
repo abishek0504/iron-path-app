@@ -27,6 +27,7 @@ export const MUSCLE_KEY_TO_SLUG: Record<string, string> = {
 
   quads: 'quadriceps',
   hip_flexors: 'adductors',
+  adductors: 'adductors',
 
   hamstrings: 'hamstring',
   glutes: 'gluteal',
@@ -71,6 +72,7 @@ export const MUSCLE_KEY_TO_DISPLAY_NAME: Record<string, string> = {
   serratus_anterior: 'Serratus Anterior',
   quads: 'Quadriceps',
   hip_flexors: 'Hip Flexors',
+  adductors: 'Adductors',
   hamstrings: 'Hamstrings',
   glutes: 'Glutes',
   calves: 'Calves',

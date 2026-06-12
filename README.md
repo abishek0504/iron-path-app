@@ -14,7 +14,7 @@ Unlike apps that use arbitrary defaults (e.g., "3 sets of 10 reps"), IronPath em
 
 ### Natural Movement Philosophy
 
-**We treat the body as a compound whole, not machine parts.** Our muscle model focuses on **28 functionally distinct muscle groups** organized by movement patterns (push, pull, core, lower body) rather than isolating individual muscle heads. This approach recognizes that:
+**We treat the body as a compound whole, not machine parts.** Our muscle model focuses on **29 functionally distinct muscle groups** organized by movement patterns (push, pull, core, lower body) rather than isolating individual muscle heads. This approach recognizes that:
 
 - Compound movements engage multiple muscles in coordinated patterns
 - Stabilizers and secondary muscles play critical roles in movement quality
@@ -56,7 +56,7 @@ This curated approach ensures users never see meaningless defaults—every numbe
 ## 🚀 Key Features
 
 - **Prescription-Based Programming**: All workout targets derive from curated exercise prescriptions, eliminating generic defaults
-- **Muscle Stress Heatmap**: Real-time visualization of muscle fatigue and recovery status across 28 functionally organized muscle groups
+- **Muscle Stress Heatmap**: Real-time visualization of muscle fatigue and recovery status across 29 functionally organized muscle groups
 - **Progressive Overload Engine**: Mathematical algorithms that adjust weight, reps, and duration based on RPE/RIR signals and historical performance
 - **Fatigue-Aware Week Generation**: AI-powered exercise selection that simulates muscle stress in real-time to prevent overtraining
 - **Custom Exercise Support**: Users can create and track custom exercises with full biomechanical modeling support
@@ -100,6 +100,7 @@ All executed volume is natively indexed into your tracking timeline. The Engine 
 ### Backend & Database
 - **Supabase** - PostgreSQL database with Row Level Security (RLS)
 - **Supabase Auth** - Email/password authentication with secure session management
+- **Supabase Edge Functions** - `generate-workout` (OpenAI-powered week generation), `update-muscle-freshness`, `delete-account`, `generate-exercise-image`
 - **RLS Policies** - Client-side security with anon key, no service role exposure
 - **Type-Safe Queries** - Generated TypeScript types from database schema
 
@@ -131,7 +132,10 @@ All executed volume is natively indexed into your tracking timeline. The Engine 
 │   ├── stores/           # Zustand state management
 │   └── types/            # TypeScript type definitions
 ├── supabase/
-│   └── migrations/       # Database migrations (versioned)
+│   ├── migrations/       # Database migrations (versioned)
+│   ├── functions/        # Edge Functions (generate-workout, update-muscle-freshness, ...)
+│   └── seed/             # Master exercise/stretch seed CSV
+├── scripts/               # Dev/ops tooling (exercise import, image generation)
 └── documentation/         # Comprehensive architecture docs
 ```
 
@@ -178,10 +182,11 @@ All tables follow strict naming conventions (lowercase snake_case) and include p
 ## 🚦 Getting Started
 
 ### Prerequisites
-- Node.js 18+
-- npm or yarn
-- Expo CLI
+- Node.js 20+
+- npm
+- Expo CLI (via `npx expo`)
 - Supabase account and project
+- Xcode 16+ (iOS) / Android Studio (Android)
 
 ### Installation
 
@@ -208,23 +213,38 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 # Use Supabase CLI or dashboard
 ```
 
-5. Generate TypeScript types:
+5. Deploy edge functions (with `OPENAI_API_KEY` set as a Supabase secret):
 ```bash
-npx supabase gen types typescript --project-id your_project_id > src/types/supabase.ts
+npx supabase functions deploy generate-workout
+npx supabase functions deploy update-muscle-freshness
+npx supabase functions deploy delete-account
+npx supabase functions deploy generate-exercise-image
 ```
 
-6. Start the development server:
+6. Generate TypeScript types:
 ```bash
-npm start
+npx supabase gen types typescript --project-id your_project_id > src/types/supabase.gen.ts
 ```
+
+7. Start the development server:
+```bash
+npm start            # web / Expo Go
+npm run start:dev    # dev-client server
+npx expo run:ios     # build & run the native iOS dev build
+```
+
+See [documentation/SETUP_GUIDE.md](./documentation/SETUP_GUIDE.md) for the full walkthrough.
 
 ## 📚 Documentation
 
-Comprehensive documentation is available in the `documentation/` directory:
+Comprehensive documentation is available in the `documentation/` directory (see [00_INDEX.md](./documentation/00_INDEX.md)):
 
-- **[V2_ARCHITECTURE.md](./documentation/V2_ARCHITECTURE.md)**: Complete system contract, schema, formulas, and architectural decisions
-- **[IMPLEMENTATION_SUMMARY.md](./documentation/IMPLEMENTATION_SUMMARY.md)**: Detailed implementation tracking and component documentation
-- **[README_V2.md](./documentation/README_V2.md)**: V2-specific setup and development guide
+- **[SYSTEM_ARCHITECTURE.md](./documentation/SYSTEM_ARCHITECTURE.md)**: Complete system contract and architectural decisions
+- **[DATABASE_SCHEMA.md](./documentation/DATABASE_SCHEMA.md)**: Tables, RLS policies, and type generation
+- **[ALGORITHMS.md](./documentation/ALGORITHMS.md)**: Fatigue modeling, progression, and generation formulas
+- **[DATA_FLOWS.md](./documentation/DATA_FLOWS.md)**: End-to-end data flow patterns
+- **[SETUP_GUIDE.md](./documentation/SETUP_GUIDE.md)**: From-scratch setup walkthrough
+- **[IMPLEMENTATION_STATUS.md](./documentation/IMPLEMENTATION_STATUS.md)**: Implementation tracking
 
 ## 🎯 Key Technical Achievements
 
@@ -233,7 +253,7 @@ Comprehensive documentation is available in the `documentation/` directory:
 - **In-Flight Fatigue Simulation**: Real-time muscle stress accumulation during workout generation prevents overtraining
 - **Progressive Overload Algorithms**: Data-driven weight and rep progression based on effort signals and historical performance
 - **Curated Prescription System**: Evidence-based target bands replace generic defaults across all exercises
-- **Biomechanical Modeling**: 28-muscle functional group system with primary/implicit hit weighting for compound movement analysis
+- **Biomechanical Modeling**: 29-muscle functional group system with primary/implicit hit weighting for compound movement analysis
 
 ### Engineering Excellence
 - **Type-Safe Database Queries**: Full TypeScript coverage with generated types from Supabase schema

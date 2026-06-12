@@ -61,6 +61,7 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
   piriformis: 0.060,
   tibialis_anterior: 0.060,
   hip_flexors: 0.060,
+  adductors: 0.060,
 };
 
 const DEFAULT_LAMBDA = 0.041;
@@ -200,7 +201,7 @@ Deno.serve(async (req) => {
       masterIds.size > 0
         ? serviceClient
             .from('v2_exercises')
-            .select('id, primary_muscles, implicit_hits')
+            .select('id, primary_muscles, implicit_hits, is_stretch')
             .in('id', Array.from(masterIds))
         : Promise.resolve({ data: [], error: null }),
       customIds.size > 0
@@ -214,15 +215,25 @@ Deno.serve(async (req) => {
     if (masterMeta.error) throw masterMeta.error;
     if (customMeta.error) throw customMeta.error;
 
-    const exerciseMetaMap = new Map<string, { primary_muscles?: unknown; implicit_hits?: unknown }>();
+    const exerciseMetaMap = new Map<string, { primary_muscles?: unknown; implicit_hits?: unknown; is_stretch?: boolean }>();
     for (const ex of [...(masterMeta.data || []), ...(customMeta.data || [])]) {
       exerciseMetaMap.set(ex.id, ex);
     }
 
-    // 4. Calculate stress per muscle
+    const stretchSessionExerciseIds = new Set<string>();
+    for (const se of sessionExercises) {
+      if (!se.exercise_id) continue;
+      const meta = exerciseMetaMap.get(se.exercise_id);
+      if (meta?.is_stretch) {
+        stretchSessionExerciseIds.add(se.id);
+      }
+    }
+
+    // 4. Calculate stress per muscle (stretches excluded — cooldown only, not training stress)
     const muscleStress: Record<string, number> = {};
 
     for (const set of sets || []) {
+      if (stretchSessionExerciseIds.has(set.session_exercise_id)) continue;
       const se = sessionExercises.find(s => s.id === set.session_exercise_id);
       if (!se) continue;
 

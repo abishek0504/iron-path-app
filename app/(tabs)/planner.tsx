@@ -1356,7 +1356,18 @@ export default function PlannerTab() {
         }
 
         if (aiResult.source === 'ai_unavailable') {
-          toast.error('AI generation is currently overloaded. Please try again later.');
+          const reason = aiResult.reason ?? '';
+          if (reason.includes('quota') || reason.includes('HTTP 429')) {
+            toast.error('AI service quota exceeded. Please try again later.');
+          } else if (
+            reason.startsWith('session_count_mismatch') ||
+            reason.startsWith('too_few_exercises') ||
+            reason === 'allow_list_validation_failed'
+          ) {
+            toast.error('AI returned an invalid workout plan. Please try again.');
+          } else {
+            toast.error('AI generation is currently unavailable. Please try again later.');
+          }
           return;
         }
 
@@ -1416,7 +1427,7 @@ export default function PlannerTab() {
 
             if (newSlot) {
               slotsCreated++;
-              
+
               const mergedExercise = await getMergedExercise({ exerciseId }, userId);
               if (mergedExercise) {
                 setExerciseNames((prev) => {
@@ -1425,7 +1436,7 @@ export default function PlannerTab() {
                   return next;
                 });
               }
-              
+
               setTemplateData((prev) => {
                 if (!prev) return prev;
                 return {
@@ -1451,36 +1462,59 @@ export default function PlannerTab() {
                 if (!seErr && se) {
                   sessionExercises.push(se);
 
-                  // Prefer AI-prescribed targets (history-aware progressive
-                  // overload); the edge function nulls out-of-bounds targets,
-                  // in which case we fall back to prescription-based ones.
-                  const hasAiTargets =
-                    aiPlan.sets != null && (aiPlan.reps != null || aiPlan.duration_sec != null);
-                  if (hasAiTargets) {
-                    targetsMap.set(exerciseId, {
-                      sets: aiPlan.sets!,
-                      reps: aiPlan.reps ?? undefined,
-                      duration_sec: aiPlan.duration_sec ?? undefined,
-                      weight: aiPlan.weight ?? undefined,
-                    });
-                  } else {
-                    const target = await selectExerciseTargets(
-                      { exerciseId },
-                      userId,
-                      { experience: exp },
-                      0
-                    );
-                    if (target) {
+                  const isStretch = mergedExercise?.is_stretch === true;
+                  if (isStretch) {
+                    if (aiPlan.sets != null && aiPlan.duration_sec != null) {
                       targetsMap.set(exerciseId, {
-                        sets: target.sets,
-                        reps: target.reps,
-                        duration_sec: target.duration_sec,
-                        weight: target.weight
+                        sets: aiPlan.sets,
+                        duration_sec: aiPlan.duration_sec,
                       });
+                    } else {
+                      const target = await selectExerciseTargets(
+                        { exerciseId },
+                        userId,
+                        { experience: exp },
+                        0,
+                        mergedExercise ?? undefined,
+                      );
+                      if (target) {
+                        targetsMap.set(exerciseId, {
+                          sets: target.sets,
+                          duration_sec: target.duration_sec,
+                        });
+                      }
+                    }
+                  } else {
+                    const hasAiTargets =
+                      aiPlan.sets != null &&
+                      (aiPlan.reps != null || aiPlan.duration_sec != null);
+                    if (hasAiTargets) {
+                      targetsMap.set(exerciseId, {
+                        sets: aiPlan.sets!,
+                        reps: aiPlan.reps ?? undefined,
+                        duration_sec: aiPlan.duration_sec ?? undefined,
+                        weight: aiPlan.weight ?? undefined,
+                      });
+                    } else {
+                      const target = await selectExerciseTargets(
+                        { exerciseId },
+                        userId,
+                        { experience: exp },
+                        0,
+                        mergedExercise ?? undefined,
+                      );
+                      if (target) {
+                        targetsMap.set(exerciseId, {
+                          sets: target.sets,
+                          reps: target.reps,
+                          duration_sec: target.duration_sec,
+                          weight: target.weight,
+                        });
+                      }
                     }
                   }
                 } else if (__DEV__) {
-                   devError('planner-ai', seErr || new Error('Failed to create session exercise'), { sessionId: targetSessionId, exerciseId });
+                  devError('planner-ai', seErr || new Error('Failed to create session exercise'), { sessionId: targetSessionId, exerciseId });
                 }
               }
 

@@ -235,7 +235,9 @@ export function GenerateDayForm({
             </View>
 
             <Text style={styles.sectionLabel}>Stretches</Text>
-            <Text style={styles.sectionHint}>Stretch support is rolling out — may be skipped for now.</Text>
+            <Text style={styles.sectionHint}>
+              Appended after strength work — matched to muscles trained that session.
+            </Text>
             <View style={styles.chipGroup}>
               {STRETCH_COUNT_OPTIONS.map((count) => (
                 <Chip

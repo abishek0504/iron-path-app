@@ -18,6 +18,8 @@ export interface MergedExercise {
   setup_buffer_sec: number;
   avg_time_per_set_sec: number;
   is_timed: boolean;
+  /** True for mobility/stretch entries from the master catalog. */
+  is_stretch?: boolean;
   equipment_needed?: string[];
   movement_pattern?: string;
   tempo_category?: string;
@@ -154,6 +156,7 @@ export async function getMergedExercise(
       setup_buffer_sec: override?.setup_buffer_sec_override ?? masterExercise.setup_buffer_sec,
       avg_time_per_set_sec: override?.avg_time_per_set_sec_override ?? masterExercise.avg_time_per_set_sec,
       is_timed: override?.is_timed_override ?? masterExercise.is_timed,
+      is_stretch: masterExercise.is_stretch ?? false,
       equipment_needed: masterExercise.equipment_needed,
       movement_pattern: masterExercise.movement_pattern,
       tempo_category: masterExercise.tempo_category,
@@ -294,6 +297,7 @@ export async function listMergedExercises(
         setup_buffer_sec: override?.setup_buffer_sec_override ?? master.setup_buffer_sec,
         avg_time_per_set_sec: override?.avg_time_per_set_sec_override ?? master.avg_time_per_set_sec,
         is_timed: override?.is_timed_override ?? master.is_timed,
+        is_stretch: master.is_stretch ?? false,
         equipment_needed: master.equipment_needed,
         movement_pattern: master.movement_pattern,
         tempo_category: master.tempo_category,

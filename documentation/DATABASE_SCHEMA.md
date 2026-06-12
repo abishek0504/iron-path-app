@@ -2,6 +2,8 @@
 
 **Purpose**: Document database structure, migrations, and RLS policies.
 
+**Last Updated**: 2026-06-11
+
 ## Migration Order
 
 Apply migrations in this exact order:
@@ -11,19 +13,46 @@ Apply migrations in this exact order:
 3. **20250101000000_patch_c1_template_slots_custom_exercise_id.sql** - Adds custom_exercise_id to template slots
 4. **20250101000001_patch_c2_session_exercises_custom_exercise_id.sql** - Verifies/adds custom_exercise_id to session exercises
 5. **20250101000002_patch_d_custom_exercise_targets.sql** - Adds target band fields to custom exercises
-6. **20250101000003_patch_h_remove_goal.sql** - Removes goal from profiles/prescriptions/slots
+6. **20250101000003_patch_h_remove_goal.sql** - Removes goal from profiles/prescriptions/slots (note: the live schema retains `goal` columns; see v2_exercise_prescriptions below)
 7. **20250101000004_seed_v2_muscles.sql** - Seeds 28 canonical muscles
 8. **20250101000005_split_full_name.sql** - Splits full_name into first_name/last_name
-9. **20260122000001_refine_implicit_hits.sql** - Updates implicit_hits to weighted coefficients (40+ exercises)
-10. **20260122000002_seed_exercise_prescriptions.sql** - Seeds exercise prescriptions for all exercises
-11. **20260122000004_add_suggested_weights.sql** - Adds suggested_weight_lbs/kg to prescriptions (45 exercises)
-12. **20260128000000_seed_exercise_metadata.sql** - Seeds description, secondary_muscles, equipment_needed, movement_pattern, tempo_category
-13. **20260128000001_seed_ai_recommended_exercises.sql** - Seeds AI allow-list with priority_order and notes (all exercises with prescriptions)
-14. **20260128000002_seed_prescription_source_notes.sql** - Seeds source_notes explaining prescription rationale
-15. **20260128000003_add_bw_multiplier_prescriptions.sql** - Adds suggested_weight_multiplier_bw (bodyweight-based default; no NULLs)
-16. **20260130000001_add_fk_covering_indexes.sql** - Adds covering indexes for FK columns that lacked them (v2_user_exercise_prs, v2_workout_templates, v2_template_slots, v2_workout_sessions, v2_session_exercises); improves JOIN and CASCADE performance
-17. **20260130000002_add_remaining_fk_indexes_and_prs_pk.sql** - Adds covering indexes for remaining FKs (muscle_key on v2_daily_muscle_stress/v2_muscle_freshness, custom_exercise_id on v2_template_slots, exercise_id on v2_user_exercise_overrides/v2_user_exercise_prs, custom_exercise_id on v2_user_exercise_prs); adds id PRIMARY KEY to v2_user_exercise_prs
-18. **20260130000003_rls_auth_uid_initplan.sql** - RLS: replace `auth.uid()` with `(select auth.uid())` in all owner policies so PostgreSQL evaluates once (InitPlan) instead of per row; fixes "Auth RLS Initialization Plan" performance warning
+9. **20260122000000_trigger_muscle_freshness_update.sql** - Trigger on session completion that calls the `update-muscle-freshness` Edge Function via pg_net
+10. **20260122000001_refine_implicit_hits.sql** - Updates implicit_hits to weighted coefficients (40+ exercises)
+11. **20260122000002_seed_exercise_prescriptions.sql** - Seeds exercise prescriptions for all exercises
+12. **20260122000003_fix_performed_at_default.sql** - Drops DEFAULT now() from v2_session_sets.performed_at (sets were being marked complete on creation)
+13. **20260122000004_add_suggested_weights.sql** - Adds suggested_weight_lbs/kg to prescriptions (45 exercises)
+14. **20260122000005_create_template_slot_sets.sql** - Adds v2_template_slot_sets for per-slot default sets (later removed)
+15. **20260122000006_remove_template_slot_sets.sql** - Drops v2_template_slot_sets; prefill always uses prescriptions + history
+16. **20260128000000_seed_exercise_metadata.sql** - Seeds description, secondary_muscles, equipment_needed, movement_pattern, tempo_category
+17. **20260128000001_seed_ai_recommended_exercises.sql** - Seeds AI allow-list with priority_order and notes (all exercises with prescriptions)
+18. **20260128000002_seed_prescription_source_notes.sql** - Seeds source_notes explaining prescription rationale
+19. **20260128000003_add_bw_multiplier_prescriptions.sql** - Adds suggested_weight_multiplier_bw (bodyweight-based default; no NULLs)
+20. **20260128000004_add_user_default_targets.sql** - Adds default_set_count/weight/reps/duration_sec/rest_sec to v2_user_exercise_overrides
+21. **20260129000000_create_v2_user_exercise_prs.sql** - Creates v2_user_exercise_prs PR cache + trigger on completed sets
+22. **20260129000001_backfill_v2_user_exercise_prs.sql** - Backfills PRs from existing completed sets
+23. **20260129000002_pr_types_reps_and_timed.sql** - Adds pr_type ('weight' | 'reps_only' | 'timed') and duration_sec to PRs; unique per (user, exercise, pr_type)
+24. **20260129000003_backfill_pr_reps_only_and_timed.sql** - Backfills reps_only and timed PRs
+25. **20260129000010_create_v2_support.sql** - Creates v2_support (Help & Support contact form submissions)
+26. **20260130000000_create_v2_weight_logs.sql** - Creates v2_weight_logs (weight history); backfills one row per profile with current_weight
+27. **20260130000001_add_fk_covering_indexes.sql** - Adds covering indexes for FK columns that lacked them (v2_user_exercise_prs, v2_workout_templates, v2_template_slots, v2_workout_sessions, v2_session_exercises); improves JOIN and CASCADE performance
+28. **20260130000002_add_remaining_fk_indexes_and_prs_pk.sql** - Adds covering indexes for remaining FKs (muscle_key on v2_daily_muscle_stress/v2_muscle_freshness, custom_exercise_id on v2_template_slots, exercise_id on v2_user_exercise_overrides/v2_user_exercise_prs, custom_exercise_id on v2_user_exercise_prs); adds id PRIMARY KEY to v2_user_exercise_prs
+29. **20260130000003_rls_auth_uid_initplan.sql** - RLS: replace `auth.uid()` with `(select auth.uid())` in all owner policies so PostgreSQL evaluates once (InitPlan) instead of per row; fixes "Auth RLS Initialization Plan" performance warning
+30. **20260312000000_add_vsit_timed_prescription.sql** - Adds missing timed prescription for V-Sit and ensures it is in the AI allow-list
+31. **20260312000001_ensure_ai_exercises_have_mode_prescriptions.sql** - Removes AI allow-list entries lacking a mode-matching prescription (reps exercises need 'reps', timed need 'timed')
+32. **20260508000000_tighten_system_template_rls.sql** - Splits template RLS into SELECT (owner OR system) and INSERT/UPDATE/DELETE (owner only); closes the system-template write hole
+33. **20260508000001_account_soft_delete.sql** - Adds deleted_at/scheduled_purge_at to v2_profiles for account soft delete with 30-day grace period
+34. **20260508000002_create_v2_ai_generations.sql** - Creates v2_ai_generations (AI generation audit log + rate-limit ledger)
+35. **20260510000000_health_hk_links_session_validation.sql** - Adds hk_workout_uuid (sessions) and hk_sample_uuid (weight logs) with unique partial indexes; creates v2_health_sync; tightens RPE (0-10) and RIR (0-15) checks
+36. **20260609000000_workout_flow_set_types_supersets_rest.sql** - Adds set_type to v2_session_sets; superset_group + rest_sec to v2_session_exercises and v2_template_slots
+37. **20260609000001_pr_trigger_exclude_warmups.sql** - PR trigger ignores warm-up sets (set_type = 'warmup'); pins function search_path
+38. **20260609000002_purge_soft_deleted_accounts_cron.sql** - pg_cron job (daily 03:00 UTC) hard-deletes auth.users past scheduled_purge_at; v2_* data cascades
+39. **20260609000003_security_advisor_remediation.sql** - Pins function search_paths, revokes EXECUTE on trigger functions, drops broad avatars-bucket policies, revokes all anon grants on v2_* tables
+40. **20260610000000_ai_generations_openai_source.sql** - Allows 'openai' as a v2_ai_generations.source value (backend moved from Gemini to OpenAI)
+41. **20260611120000_import_master_exercises_from_csv.sql** - Master exercise import from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`: 388 exercises (45 updates, 343 inserts), including 48 stretches
+42. **20260611120001_add_is_stretch_to_v2_exercises.sql** - Adds is_stretch boolean to v2_exercises (mobility/stretch entries vs strength)
+43. **20260611120002_add_adductors_muscle_key.sql** - Adds 'adductors' as a 29th canonical muscle key (lower_body_front)
+44. **20260611120003_seed_prescriptions_for_new_exercises.sql** - Rule-based prescriptions for new exercises (stretch timed holds, timed strength, rep bands tiered by density_score)
+45. **20260611120004_refresh_ai_recommended_exercises.sql** - Refreshes AI allow-list: all non-stretch exercises with mode-matching prescriptions; priority by density_score; stretches deactivated
 
 ## Table Relationships
 
@@ -39,7 +68,7 @@ v2_exercises (master list)
 v2_user_custom_exercises (user-created)
   └→ v2_template_slots, v2_session_exercises (usage)
 
-v2_profiles (user settings)
+v2_profiles (user settings, soft-delete markers)
 
 v2_workout_templates (planning)
   └→ v2_template_days
@@ -48,8 +77,14 @@ v2_workout_templates (planning)
 v2_workout_sessions (performed truth)
   └→ v2_session_exercises
       └→ v2_session_sets
+          └→ v2_user_exercise_prs (PR cache, trigger-maintained)
 
 v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
+
+v2_weight_logs (weight history)
+v2_health_sync (HealthKit sync ledger)
+v2_ai_generations (AI generation audit log / rate limits)
+v2_support (Help & Support submissions)
 ```
 
 ## Core Tables
@@ -59,11 +94,11 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 #### v2_muscles
 **Purpose**: Single source of truth for muscle keys. All muscle references validate against this.
 
-**28 Muscles Organized by Functional Groups:**
+**29 Muscles Organized by Functional Groups:**
 - **Upper Body Push** (7): chest, upper_chest, lower_chest, anterior_deltoids, lateral_deltoids, posterior_deltoids, triceps
 - **Upper Body Pull** (6): lats, upper_back, lower_back, traps, biceps, forearms
 - **Core** (2): abs, obliques
-- **Lower Body Front** (2): quads, hip_flexors
+- **Lower Body Front** (3): quads, hip_flexors, adductors (added 2026-06-11 for inner-thigh work)
 - **Lower Body Back** (4): hamstrings, glutes, calves, soleus
 - **Stabilizers** (7): rotator_cuff, serratus_anterior, transverse_abdominis, glute_medius, glute_minimus, piriformis, tibialis_anterior
 
@@ -73,6 +108,8 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 
 #### v2_exercises
 **Purpose**: Master exercise list, immutable from client.
+
+**Size**: 388 exercises (340 strength + 48 stretches) since the 2026-06-11 master import from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv` (45 updates to existing rows, 343 inserts).
 
 **Key Fields:**
 - `density_score` (0-10): Exercise quality rating
@@ -93,6 +130,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `is_unilateral`: Doubles time estimate if true
 - `avg_time_per_set_sec`: Includes rest between sets
 - `is_timed`: Boolean flag for timed vs reps mode
+- `is_stretch`: True for mobility/stretch entries; excluded from AI strength selection (added 2026-06-11, NOT NULL DEFAULT false)
 
 **Constraints:**
 - `density_score` CHECK (>= 0 AND <= 10)
@@ -110,13 +148,18 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **Purpose**: Curated programming targets per exercise by context.
 
 **Key Fields:**
-- `exercise_id`, `experience`, `mode` - UNIQUE key (goal removed in Patch H)
+- `exercise_id`, `goal`, `experience`, `mode` - lookup key. Patch H (20250101000003) was written to drop `goal`, but the live schema retains it (generated types show `goal` NOT NULL); newer migrations (20260312000000, 20260611120003) write `goal = 'hypertrophy'` and conflict on `(exercise_id, goal, experience, mode)`.
 - `sets_min/max` (1-10)
 - `reps_min/max` (1-50, only if mode='reps')
 - `duration_sec_min/max` (5-3600, only if mode='timed')
-- `suggested_weight_multiplier_bw`: **Bodyweight multiplier for suggested weight (no NULLs).** suggested_weight = current_weight × this. Single default per exercise/experience (no ranges). Represents **working weight** for the prescribed rep range (not 1RM). Research, rationale, and guidelines for all multipliers and for adding new exercises: see [PRESCRIPTION_RATIONALE.md](PRESCRIPTION_RATIONALE.md). Seeded in 20260128000003.
+- `suggested_weight_multiplier_bw`: **Bodyweight multiplier for suggested weight (NOT NULL DEFAULT 0).** suggested_weight = current_weight × this. Single default per exercise/experience (no ranges). Represents **working weight** for the prescribed rep range (not 1RM). Research, rationale, and guidelines for all multipliers and for adding new exercises: see [PRESCRIPTION_RATIONALE.md](PRESCRIPTION_RATIONALE.md). Seeded in 20260128000003; prescriptions created by 20260611120003 keep the default 0 (bodyweight).
 - `suggested_weight_lbs/kg`: Legacy fixed weights (nullable); runtime prefers multiplier × profile.current_weight with fallback 150 lb / 70 kg.
 - `source_notes`: Research-backed notes explaining prescription rationale (seeded 2026-01-28)
+
+**Seeding for the 2026-06-11 master import (20260611120003)**, rule-based and idempotent:
+- Stretches (is_stretch, timed): 1-2 sets × 30-45s (beginner) up to 2-3 × 45-90s (advanced)
+- Timed strength (planks, dead hangs): 3 × 20-30s (beginner) up to 4-5 × 45-60s (advanced)
+- Rep-based strength, tiered by density_score: ≥8 → 3×8-12 / 3-4×6-10 / 4-5×5-8; 6-7 → 3×8-12 / 3-4×8-12 / 3-4×6-10; ≤5 → 3×10-15 / 3-4×10-15 / 3-4×8-12 (beginner / intermediate / advanced)
 
 **Constraints:**
 - Mode-specific target bands (reps XOR duration)
@@ -132,7 +175,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **How prescriptions are selected**
 - Lookup key: `(exercise_id, experience, mode)` with `is_active = true`. One row per exercise per experience level per mode (reps vs timed).
 - Code: `getExercisePrescription(exerciseId, experience, mode)` in `src/lib/supabase/queries/prescriptions.ts`. Used by `selectExerciseTargets()` in `src/lib/engine/targetSelection.ts` and by week generation in `src/lib/engine/weekGeneration.ts`.
-- Custom exercises do not use this table; they use their own target bands from `v2_user_custom_exercises` (sets_min/max, reps_min/max, duration_sec_min/max).
+- Custom exercises do not use this table; `selectExerciseTargets()` reads target bands off the custom exercise when present, otherwise falls back to defaults (see v2_user_custom_exercises note on target bands).
 
 **Why rows look similar (bands vs weights)**
 - Rep/set **bands** (e.g. beginner 3 sets, 8–12 reps) are shared by design across many rep-based exercises for hypertrophy. So Chin Up and Squat can have the same sets_min/max and reps_min/max for a given experience/mode. That is intentional: the band is “do 8–12 reps in 3 sets,” not “do the same weight.”
@@ -147,9 +190,8 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 3. **Algorithm uses tracked values**: On the next session, `getExerciseHistory()` returns last weight, last reps, last duration, and average RPE. `selectExerciseTargets()` uses that for progressive overload: e.g. if last reps ≥ 90% of reps_max and RPE ≤ 7, suggest weight increase and reset reps to reps_min; otherwise suggest lastReps+1 at same weight. So future targets are driven by **performed truth**, not by the static prescription; the prescription only defines the valid band and the initial/default suggestion.
 
 **Patch H Impact:**
-- Removed `goal` column
-- Consolidated duplicates (preferred hypertrophy if existed)
-- New unique key: `(exercise_id, experience, mode)`
+- Migration intended to remove `goal` and key on `(exercise_id, experience, mode)`; consolidated duplicates (preferred hypertrophy if existed)
+- Live schema retains `goal` (all rows use 'hypertrophy'); effective uniqueness is `(exercise_id, goal, experience, mode)`
 
 #### v2_ai_recommended_exercises
 **Purpose**: AI allow-list. Only exercises in this table can be selected by AI generation.
@@ -162,7 +204,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `notes`: Exercise description and programming rationale (seeded 2026-01-28)
 - `is_active`: Soft delete flag
 
-**Seeding**: All exercises with active prescriptions are automatically added to AI allow-list (migration 20260128000001)
+**Seeding**: Originally all exercises with active prescriptions (20260128000001). Refreshed 2026-06-11 (20260611120004): all **non-stretch** exercises with a mode-matching active prescription (reps exercises need a 'reps' prescription, timed need 'timed'); priority_order assigned by density_score (≥9 → 10, ≥8 → 20, ≥6 → 30, ≥4 → 40, else 50); stretch entries deactivated. 20260312000001 also removes entries lacking a mode-matching prescription.
 
 **RLS**: Auth SELECT only
 
@@ -186,18 +228,11 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 #### v2_user_custom_exercises
 **Purpose**: User-created exercises not in master list.
 
-**Key Fields:** Same as v2_exercises PLUS target band fields (added in Patch D):
-- `mode` (reps | timed)
-- `sets_min/max`, `reps_min/max`, `duration_sec_min/max`
+**Key Fields:** Same as v2_exercises (including `is_stretch`).
 
-**Constraints:** Same as v2_exercise_prescriptions (mode-gated target bands)
+**Note on target bands**: Patch D (20250101000002) added `mode`, `sets_min/max`, `reps_min/max`, `duration_sec_min/max` with prescription-style CHECK constraints, but the live schema (per generated types in `src/types/supabase.gen.ts`) does not currently include these columns. `selectExerciseTargets()` still reads bands from custom exercises when present and falls back to defaults otherwise.
 
 **RLS**: Owner CRUD (`user_id = auth.uid()`)
-
-**Patch D Impact:**
-- Added target band fields
-- Backfilled existing rows with mode='reps', 3-4 sets, 8-12 reps
-- Added CHECK constraints matching prescription constraints
 
 #### v2_profiles
 **Purpose**: User settings and preferences.
@@ -205,16 +240,18 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 **Key Fields:**
 - `id` (PRIMARY KEY, FK to auth.users)
 - `first_name`, `last_name` (split from full_name in Patch)
-- `date_of_birth`, `age` (deprecated - calculate from DOB)
-- `experience_level`, `days_per_week`, `equipment_access[]`
+- `date_of_birth`
+- `experience_level`, `days_per_week`, `equipment_access[]`, `workout_days[]`
 - `use_imperial`: Boolean for unit system
+- `current_weight`, `goal_weight`, `height`, `gender`, `goal`, `preferred_training_style`, `avatar_url` (all nullable)
+- `deleted_at`, `scheduled_purge_at`: Account soft delete (20260508000001). delete-account sets both (purge = now + 30d); Restore during the grace window sets both back to NULL. A pg_cron job (`purge-soft-deleted-accounts`, daily 03:00 UTC, 20260609000002) hard-deletes `auth.users` rows past `scheduled_purge_at`; every v2_* table cascades. Partial index `idx_v2_profiles_scheduled_purge_at` supports the purge query.
 
 **Required for Onboarding:**
 - `first_name`, `date_of_birth`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]`
 
 **RLS**: Owner CRUD (`id = auth.uid()`)
 
-**Patch H Impact**: Removed `goal` column
+**Patch H Impact**: Intended to remove `goal`; live schema retains it as a nullable column
 
 **Patch (20250101000005) Impact**:
 - Removed `full_name`
@@ -231,9 +268,9 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `name`: Default 'Weekly Plan'
 - `is_active`: Soft delete
 
-**RLS**: `user_id = auth.uid() OR user_id IS NULL`
+**RLS**: SELECT `user_id = (select auth.uid()) OR user_id IS NULL`; INSERT/UPDATE/DELETE owner only (`user_id = (select auth.uid())`)
 
-**Security Risk**: Current RLS allows clients to write to system templates (user_id IS NULL). Consider tightening.
+**Security Fix (2026-05-08)**: Migration 20260508000000 split the old FOR ALL policy so system templates (user_id IS NULL) are readable but no longer writable by clients.
 
 #### v2_template_days
 **Purpose**: Days within a template.
@@ -246,7 +283,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 
 **Pattern**: Planner ensures all 7 weekdays exist (Sunday=0 to Saturday=6)
 
-**RLS**: Owner via template (`template.user_id = auth.uid() OR template.user_id IS NULL`)
+**RLS**: Via template — SELECT allows owner OR system template; writes require template ownership (20260508000000)
 
 #### v2_template_slots
 **Purpose**: Exercise slots within a day. Stores intent only, targets come from prescriptions.
@@ -257,12 +294,14 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `experience`: Optional override for prescription lookup
 - `notes`: User notes
 - `sort_order`: Display order within day
+- `superset_group` (nullable integer, 20260609000000): Slots in the same day sharing this integer form a superset when copied to sessions
+- `rest_sec` (nullable, 0-3600, 20260609000000): Per-slot rest override, copied to session exercises when materialized
 
 **Patch C1 Impact**: Added `custom_exercise_id` + XOR constraint
 
-**Patch H Impact**: Removed `goal` field
+**Patch H Impact**: Intended to remove `goal`; live schema retains it as a nullable column
 
-**RLS**: Owner via template (transitive through days)
+**RLS**: Via template (transitive through days) — SELECT allows system templates; writes require ownership (20260508000000)
 
 
 ### Performed Truth
@@ -275,6 +314,7 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `day_name`: Planned day label (metadata only - use timestamps for grouping)
 - `status`: 'active' | 'completed' | 'abandoned'
 - `started_at`, `completed_at`
+- `hk_workout_uuid` (nullable, 20260510000000): Apple Health HKWorkout UUID after successful export; unique partial index prevents duplicate exports
 
 **RLS**: Owner CRUD (`user_id = auth.uid()`)
 
@@ -290,6 +330,8 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `session_id` (FK to v2_workout_sessions)
 - `exercise_id` XOR `custom_exercise_id` (CHECK constraint)
 - `sort_order`: Order within session
+- `superset_group` (nullable integer, 20260609000000): Exercises sharing this integer alternate as a superset with a shared rest timer
+- `rest_sec` (nullable, 0-3600, 20260609000000): Per-exercise rest override; null falls back to set-level rest_sec, then app default
 
 **Patch C2 Impact**: Verified/reinforced XOR constraint
 
@@ -306,14 +348,17 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `set_number`: 1, 2, 3, ...
 - `reps` (1-50) XOR `duration_sec` (5-3600) - CHECK constraints enforce
 - `weight` (>= 0)
-- `rpe` (1-10) XOR `rir` - CHECK constraints enforce
+- `rpe` (0-10, widened from 1-10 in 20260510000000) XOR `rir` (0-15) - CHECK constraints enforce
 - `rest_sec` (0-600)
-- `performed_at`: Timestamp when set was completed (NULL = not performed)
+- `set_type` (20260609000000): 'normal' | 'warmup' | 'drop' | 'failure' (NOT NULL DEFAULT 'normal'). Warm-up sets are excluded from PR and volume calculations.
+- `notes`: Optional per-set notes
+- `performed_at`: Timestamp when set was completed (NULL = not performed; DEFAULT dropped in 20260122000003)
 
 **Constraints:**
 - Reps/duration exclusivity: `NOT (reps IS NOT NULL AND duration_sec IS NOT NULL)`
 - At least one required: `reps IS NOT NULL OR duration_sec IS NOT NULL`
 - RPE/RIR exclusivity: `NOT (rpe IS NOT NULL AND rir IS NOT NULL)`
+- `set_type IN ('normal', 'warmup', 'drop', 'failure')`
 
 **RLS**: Owner via session (transitive through session_exercises)
 
@@ -329,6 +374,66 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - **Continue Button**: Appears when `SUM(performed_at IS NOT NULL) > 0 AND SUM(performed_at IS NULL) > 0`
 
 **Bug Fix (2026-01-21)**: `markSetComplete` originally only updated weight/reps/rpe but never set `performed_at`. This caused the "Continue" button to never appear after exiting mid-workout. Fixed by always setting `performed_at: new Date().toISOString()` in the UPDATE.
+
+#### v2_user_exercise_prs
+**Purpose**: PR cache, one row per (user, exercise, pr_type). Maintained by trigger `trigger_session_set_pr_upsert` on v2_session_sets (created 20260129000000).
+
+**Key Fields:**
+- `id` (PRIMARY KEY, added in 20260130000002)
+- `exercise_id` XOR `custom_exercise_id` (CHECK constraint)
+- `pr_type` (20260129000002): 'weight' (weight NOT NULL) | 'reps_only' (bodyweight reps) | 'timed' (duration_sec NOT NULL)
+- `weight`, `reps`, `duration_sec`: PR values per type
+- `set_id`, `session_exercise_id`, `session_id`, `performed_at`: Provenance of the PR set
+
+**Trigger Logic**: On set completion (`performed_at` set), upserts the matching PR row if the new set beats the current PR (weight has priority over reps). Warm-up sets (`set_type = 'warmup'`) never register as PRs (20260609000001). Backfilled from history in 20260129000001/20260129000003.
+
+**RLS**: Owner CRUD (`user_id = auth.uid()`)
+
+**Indexes:**
+- Unique partial: `(user_id, exercise_id, pr_type)` and `(user_id, custom_exercise_id, pr_type)`
+- `idx_v2_user_exercise_prs_user_order` for leaderboard-style ordering, plus FK covering indexes (20260130000001/2)
+
+### User Data & Logs
+
+#### v2_weight_logs
+**Purpose**: Weight log history (20260130000000). `v2_profiles.current_weight` remains the latest value for app-wide use.
+
+**Key Fields:**
+- `weight` (> 0), `recorded_at`
+- `hk_sample_uuid` (nullable, 20260510000000): Apple Health HKQuantitySample UUID for bodyMass write deduplication (unique partial index)
+
+**RLS**: Owner CRUD (`user_id = auth.uid()`)
+
+**Indexes:** `idx_v2_weight_logs_user_recorded` on (user_id, recorded_at DESC)
+
+#### v2_health_sync
+**Purpose**: HealthKit sync ledger (20260510000000) — last successful pull/push per logical type.
+
+**Key Fields:**
+- `user_id` (PRIMARY KEY, FK to auth.users)
+- `last_synced_at`, `types` (JSONB, per-category timestamps)
+
+**RLS**: Owner CRUD (`user_id = (select auth.uid())`)
+
+#### v2_ai_generations
+**Purpose**: Audit log + rate-limit ledger for AI workout generation (20260508000002). Every `generate-workout` Edge Function call records a row to enforce a per-user daily quota and observe model usage, latency, and fallback rates.
+
+**Key Fields:**
+- `source` (CHECK, updated 20260610000000): 'openai' (OpenAI response used) | 'gemini' (legacy Gemini response) | 'fallback' (deterministic engine used) | 'error' (no result)
+- `template_id` (nullable, ON DELETE SET NULL), `day_name`, `sessions_per_day`, `exercise_count`, `model`, `latency_ms`, `error_code`
+
+**RLS**: Owner SELECT only; no INSERT/UPDATE/DELETE policies, so only the service role (used inside the Edge Function) can write.
+
+**Indexes:** `idx_v2_ai_generations_user_created` on (user_id, created_at DESC) for the rate-limit query
+
+#### v2_support
+**Purpose**: Help & Support contact-form submissions (20260129000010).
+
+**Key Fields:** `name`, `email`, `message`
+
+**RLS**: Owner INSERT and SELECT only (`user_id = auth.uid()`)
+
+**Indexes:** `idx_v2_support_user_id`, `idx_v2_support_created_at`
 
 ### Derived Caches (Optional, Rebuildable)
 
@@ -373,34 +478,45 @@ v2_muscle_freshness, v2_daily_muscle_stress (derived caches)
 - `v2_workout_sessions`: `USING (user_id = auth.uid())`
 - `v2_muscle_freshness`: `USING (user_id = auth.uid())`
 - `v2_daily_muscle_stress`: `USING (user_id = auth.uid())`
+- `v2_user_exercise_prs`: `USING (user_id = auth.uid())`
+- `v2_weight_logs`: `USING (user_id = auth.uid())`
+- `v2_health_sync`: `USING (user_id = auth.uid())`
+
+### Restricted-Write Tables
+- `v2_ai_generations`: Owner SELECT only; writes via service role (Edge Function) only
+- `v2_support`: Owner INSERT and SELECT only (no UPDATE/DELETE)
 
 ### User-Owned Tables (Transitive Ownership)
 
+Since 20260508000000, template-family policies are split per operation: SELECT allows owner OR system (user_id IS NULL); INSERT/UPDATE/DELETE require ownership.
+
 **v2_workout_templates**:
 ```sql
-USING (user_id = auth.uid() OR user_id IS NULL)
--- ⚠️ Risk: Allows writes to system templates
+-- SELECT
+USING (user_id = (select auth.uid()) OR user_id IS NULL)
+-- INSERT/UPDATE/DELETE
+USING (user_id = (select auth.uid()))
 ```
 
-**v2_template_days** (via template):
+**v2_template_days** (via template; SELECT shown, writes require template ownership):
 ```sql
 USING (
   EXISTS (
     SELECT 1 FROM v2_workout_templates
     WHERE id = template_days.template_id
-    AND (user_id = auth.uid() OR user_id IS NULL)
+    AND (user_id = (select auth.uid()) OR user_id IS NULL)
   )
 )
 ```
 
-**v2_template_slots** (via template through days):
+**v2_template_slots** (via template through days; SELECT shown, writes require template ownership):
 ```sql
 USING (
   EXISTS (
     SELECT 1 FROM v2_template_days
     JOIN v2_workout_templates ON templates.id = days.template_id
     WHERE days.id = slots.day_id
-    AND (templates.user_id = auth.uid() OR templates.user_id IS NULL)
+    AND (templates.user_id = (select auth.uid()) OR templates.user_id IS NULL)
   )
 )
 ```
@@ -428,10 +544,13 @@ USING (
 )
 ```
 
+### Anon Role Lockdown (2026-06-09)
+Migration 20260609000003 revokes all `anon` grants on every v2_* table (and sets default privileges so future tables are not anon-granted). All app queries run as `authenticated` behind RLS. It also revokes EXECUTE on trigger functions (`handle_new_user`, `trigger_upsert_exercise_pr`) from public/anon/authenticated and pins `search_path` on SECURITY DEFINER functions.
+
 ## Seeding Required Data
 
 ### Critical: v2_muscles
-Run migration `20250101000004_seed_v2_muscles.sql` to insert 28 canonical muscles.
+Run migration `20250101000004_seed_v2_muscles.sql` to insert 28 canonical muscles, then `20260611120002_add_adductors_muscle_key.sql` for the 29th (adductors).
 
 **Idempotent**: Uses `ON CONFLICT (key) DO NOTHING` so safe to re-run.
 
@@ -463,7 +582,7 @@ Migration `20260128000000_seed_exercise_metadata.sql` fills missing fields in `v
 - ACSM tempo guidelines for repetition duration
 - Exercise form best practices from strength training literature
 
-**Coverage**: All exercises referenced in prescriptions migration (40+ exercises) have complete metadata seeded.
+**Coverage**: All exercises referenced in prescriptions migration (40+ exercises) had complete metadata seeded; superseded for most rows by the 2026-06-11 master import below.
 
 ### AI Recommended Exercises Seeding (2026-01-28)
 Migration `20260128000001_seed_ai_recommended_exercises.sql` seeds `v2_ai_recommended_exercises`:
@@ -484,16 +603,23 @@ Migration `20260128000002_seed_prescription_source_notes.sql` fills `source_note
   - Beginner hypertrophy: "8-12 reps optimize muscle growth for novices"
   - Advanced hypertrophy: "5-8 reps emphasize strength-endurance"
   - Isometric targets: Explains time-under-tension principles
-- **Coverage**: All prescriptions have source notes explaining programming decisions
+- **Coverage**: All prescriptions as of 2026-01-28 have source notes; rule-based prescriptions added 2026-06-11 do not set source_notes
+
+### Master Exercise Import (2026-06-11)
+Migration `20260611120000_import_master_exercises_from_csv.sql` (auto-generated from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`) brings `v2_exercises` to **388 exercises** (45 updates to existing rows, 343 inserts; 340 strength + 48 stretches). Follow-up migrations in the same batch:
+- `20260611120001`: Adds `is_stretch` to v2_exercises
+- `20260611120002`: Adds `adductors` muscle key (29 canonical muscles)
+- `20260611120003`: Rule-based prescriptions for all new exercises (stretch timed holds, timed strength, rep bands tiered by density_score)
+- `20260611120004`: Refreshes the AI allow-list (non-stretch exercises with mode-matching prescriptions, priority by density_score; stretches deactivated)
 
 ## Type Generation
 
 After schema changes:
 ```bash
-npx supabase gen types typescript --project-id <your-project-id> > src/types/supabase.ts
+npx supabase gen types typescript --project-id <your-project-id> > src/types/supabase.gen.ts
 ```
 
-**Current Status**: `src/types/supabase.ts` is placeholder. Query modules use hand-typed interfaces. Consider generating types to prevent drift.
+**Current Status**: `src/types/supabase.gen.ts` is generated from the live database and reflects the current schema. Regenerate after every applied migration to prevent drift.
 
 ## Schema Evolution Patterns
 
@@ -644,5 +770,5 @@ When adding new tables or RLS policies, follow these so the Supabase linter and 
 
 ### Type Drift
 **Symptom**: TypeScript types don't match database schema  
-**Check**: When was `src/types/supabase.ts` last generated?  
+**Check**: When was `src/types/supabase.gen.ts` last generated?  
 **Fix**: Regenerate types after schema changes

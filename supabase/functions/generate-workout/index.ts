@@ -29,8 +29,7 @@
  *       intensity: 'light' | 'standard' | 'hard'
  *       emphasizeMuscles: string[]
  *       avoidMuscles: string[]
- *       stretchCount: int                  (0..5; plumbing only until the
- *                                           catalog gains a stretch flag)
+ *       stretchCount: int                  (0..5; append stretches from stretch catalog)
  *     }
  *   }
  *
@@ -66,11 +65,28 @@ const MAX_SESSIONS_PER_DAY = 6;
 /** Hard upper bound on exercises returned per session — keeps prompts small and bounds DB inserts. */
 const MAX_EXERCISES_PER_SESSION = 8;
 
+/** Cap on allow-list exercises embedded in the LLM prompt — matches the local engine (`weekGeneration.ts` limit 50). Sending the full 340-exercise catalog causes the model to return invalid IDs or too few exercises, failing server validation. */
+const CATALOG_PROMPT_LIMIT = 50;
+
 /** Minimum exercises per session — prevents the LLM from returning empty lists. */
 const MIN_EXERCISES_PER_SESSION = 2;
 
-/** Tolerance around a user-requested exercise count during validation. */
+/** Tolerance around a user-requested exercise count during validation (auto mode only). */
 const EXERCISE_COUNT_TOLERANCE = 1;
+
+/**
+ * Static stretch holds by experience — two rounds per stretch, hold duration
+ * within prescription bands (beginner 30–45s, intermediate 45–60s, advanced 45–90s).
+ * Two shorter holds beat one long hold for post-workout cooldown.
+ */
+const STRETCH_TARGETS_BY_EXPERIENCE: Record<
+  string,
+  { sets: number; duration_sec: number }
+> = {
+  beginner: { sets: 2, duration_sec: 40 },
+  intermediate: { sets: 2, duration_sec: 50 },
+  advanced: { sets: 2, duration_sec: 60 },
+};
 
 /** Upper bound on user-requested stretches per session. */
 const MAX_STRETCH_COUNT = 5;
@@ -129,6 +145,7 @@ interface AllowListedExercise {
   primary_muscles: string[];
   equipment_needed: string[] | null;
   is_timed: boolean;
+  is_stretch: boolean;
   movement_pattern: string | null;
   priority_order: number;
 }
@@ -332,7 +349,11 @@ function buildResponseSchema(): Record<string, unknown> {
   };
 }
 
-function buildSystemPrompt(sessionsPerDay: number, constraints: DayConstraints): string {
+function buildSystemPrompt(
+  sessionsPerDay: number,
+  constraints: DayConstraints,
+  stretchCount: number,
+): string {
   const exerciseCountRule = constraints.exercisesPerSession !== null
     ? `- Each session must contain exactly ${constraints.exercisesPerSession} exercises (the user explicitly requested this count).`
     : `- Each session must contain ${MIN_EXERCISES_PER_SESSION}-${MAX_EXERCISES_PER_SESSION} exercises.`;
@@ -366,6 +387,12 @@ function buildSystemPrompt(sessionsPerDay: number, constraints: DayConstraints):
     '- Only choose exercises whose equipment the user has access to.',
   );
 
+  if (stretchCount > 0) {
+    hardRules.push(
+      `- Append exactly ${stretchCount} stretch/mobility exercise(s) per session from the STRETCH CATALOG (IDs prefixed in catalog). Stretches are in addition to strength exercises — do not count them toward the strength exercise count.`,
+    );
+  }
+
   const selectionGuidance: string[] = [];
   if (constraints.emphasizeMuscles.length > 0) {
     selectionGuidance.push(
@@ -397,12 +424,14 @@ function buildSystemPrompt(sessionsPerDay: number, constraints: DayConstraints):
     '- If there is no history for an exercise, prescribe a conservative starting target appropriate for the user\'s experience level; leave weight null if you cannot estimate it safely.',
     '- Timed exercises (is_timed=true) get duration_sec and null reps; rep exercises get reps and null duration_sec.',
     '- Bodyweight exercises get null weight.',
+    '- STRETCHES (from STRETCH CATALOG): prescribe exactly 2 working sets, duration_sec 40–60 s per hold (beginner ~40, intermediate ~50, advanced ~60), null weight, null target_rpe. Stretches are not scored with RPE and do not use progressive overload.',
     `- sets must be ${TARGET_BOUNDS.sets.min}-${TARGET_BOUNDS.sets.max}, reps ${TARGET_BOUNDS.reps.min}-${TARGET_BOUNDS.reps.max}, duration_sec ${TARGET_BOUNDS.durationSec.min}-${TARGET_BOUNDS.durationSec.max}, target_rpe ${TARGET_BOUNDS.rpe.min}-${TARGET_BOUNDS.rpe.max}.`,
   ].join('\n');
 }
 
 function buildUserPrompt(params: {
   catalog: AllowListedExercise[];
+  stretchCatalog: AllowListedExercise[];
   user: UserContext;
   dayName: string;
   sessionsPerDay: number;
@@ -411,7 +440,17 @@ function buildUserPrompt(params: {
   history: Record<string, ExerciseHistorySummary>;
   trainingDayPosition: string | null;
 }): string {
-  const { catalog, user, dayName, sessionsPerDay, constraints, recentStress, history, trainingDayPosition } = params;
+  const {
+    catalog,
+    stretchCatalog,
+    user,
+    dayName,
+    sessionsPerDay,
+    constraints,
+    recentStress,
+    history,
+    trainingDayPosition,
+  } = params;
 
   const catalogPayload = catalog.map((ex) => ({
     id: ex.id,
@@ -422,7 +461,14 @@ function buildUserPrompt(params: {
     is_timed: ex.is_timed,
   }));
 
-  return [
+  const stretchPayload = stretchCatalog.map((ex) => ({
+    id: ex.id,
+    name: ex.name,
+    muscles: ex.primary_muscles,
+    is_timed: ex.is_timed,
+  }));
+
+  const blocks = [
     `Generate ${sessionsPerDay} session(s) for the day named "${dayName}".`,
     '',
     'USER CONTEXT:',
@@ -442,6 +488,7 @@ function buildUserPrompt(params: {
       intensity: constraints.intensity,
       emphasize_muscles: constraints.emphasizeMuscles,
       avoid_muscles: constraints.avoidMuscles,
+      stretch_count: constraints.stretchCount,
     }),
     '',
     'SPLIT CONTEXT:',
@@ -460,7 +507,17 @@ function buildUserPrompt(params: {
     '',
     'EXERCISE CATALOG (allow-list — choose only from these IDs):',
     JSON.stringify(catalogPayload),
-  ].join('\n');
+  ];
+
+  if (stretchPayload.length > 0) {
+    blocks.push(
+      '',
+      'STRETCH CATALOG (use only for stretch/mobility additions when stretch_count > 0):',
+      JSON.stringify(stretchPayload),
+    );
+  }
+
+  return blocks.join('\n');
 }
 
 interface OpenAiResult {
@@ -472,6 +529,7 @@ async function callOpenAi(params: {
   apiKey: string;
   model: string;
   catalog: AllowListedExercise[];
+  stretchCatalog: AllowListedExercise[];
   user: UserContext;
   dayName: string;
   sessionsPerDay: number;
@@ -480,12 +538,15 @@ async function callOpenAi(params: {
   history: Record<string, ExerciseHistorySummary>;
   trainingDayPosition: string | null;
 }): Promise<OpenAiResult> {
-  const { apiKey, model, sessionsPerDay, constraints } = params;
+  const { apiKey, model, sessionsPerDay, constraints, stretchCatalog } = params;
+  const stretchCount = constraints.stretchCount > 0 && stretchCatalog.length > 0
+    ? constraints.stretchCount
+    : 0;
 
   const requestBody: Record<string, unknown> = {
     model,
     messages: [
-      { role: 'system', content: buildSystemPrompt(sessionsPerDay, constraints) },
+      { role: 'system', content: buildSystemPrompt(sessionsPerDay, constraints, stretchCount) },
       { role: 'user', content: buildUserPrompt(params) },
     ],
     response_format: {
@@ -641,47 +702,208 @@ function sanitizeTargets(plan: AiExercisePlan, exercise: AllowListedExercise): A
   };
 }
 
+function stretchTargetsForExperience(experience: string): {
+  sets: number;
+  duration_sec: number;
+} {
+  return STRETCH_TARGETS_BY_EXPERIENCE[experience] ?? STRETCH_TARGETS_BY_EXPERIENCE.beginner;
+}
+
+/** Overwrite LLM stretch targets with evidence-based static-hold defaults (no RPE). */
+function applyStretchPrescription(plan: AiExercisePlan, experience: string): AiExercisePlan {
+  const t = stretchTargetsForExperience(experience);
+  return {
+    exercise_id: plan.exercise_id,
+    sets: t.sets,
+    reps: null,
+    duration_sec: t.duration_sec,
+    weight: null,
+    target_rpe: null,
+  };
+}
+
+function emptyStrengthPlan(exerciseId: string): AiExercisePlan {
+  return {
+    exercise_id: exerciseId,
+    sets: null,
+    reps: null,
+    duration_sec: null,
+    weight: null,
+    target_rpe: null,
+  };
+}
+
+function sessionMuscleSet(strengthExercises: AllowListedExercise[]): Set<string> {
+  const muscles = new Set<string>();
+  for (const ex of strengthExercises) {
+    for (const m of ex.primary_muscles) muscles.add(m);
+  }
+  return muscles;
+}
+
+function scoreStretchOverlap(stretch: AllowListedExercise, sessionMuscles: Set<string>): number {
+  let score = 0;
+  for (const m of stretch.primary_muscles) {
+    if (sessionMuscles.has(m)) score += 1;
+  }
+  return score;
+}
+
+function pickStretchesForSession(
+  stretchCatalog: AllowListedExercise[],
+  count: number,
+  sessionMuscles: Set<string>,
+  seenAcrossDay: Set<string>,
+): AllowListedExercise[] {
+  if (count <= 0) return [];
+  return stretchCatalog
+    .filter((ex) => !seenAcrossDay.has(ex.id))
+    .sort((a, b) => scoreStretchOverlap(b, sessionMuscles) - scoreStretchOverlap(a, sessionMuscles))
+    .slice(0, count);
+}
+
+function pickStrengthForSession(
+  catalog: AllowListedExercise[],
+  count: number,
+  seenAcrossDay: Set<string>,
+): AllowListedExercise[] {
+  if (count <= 0) return [];
+  return catalog
+    .filter((ex) => !ex.is_stretch && !seenAcrossDay.has(ex.id))
+    .sort((a, b) => a.priority_order - b.priority_order)
+    .slice(0, count);
+}
+
 /**
- * Enforce the allow-list, dedupe within the day, and bounds-check targets.
- *
- * Returns `null` if the result can't be salvaged (wrong session count, any
- * session below the minimum exercise count, or a user-requested exercise
- * count missed by more than the tolerance). Callers treat null as
- * "AI unavailable".
+ * Enforce the allow-list, dedupe, pad to user-requested counts, and apply
+ * stretch prescriptions. When the user picks an exact exercise or stretch
+ * count, we pad deterministically if the LLM returns too few.
  */
-function validateAiSessions(
+function finalizeAiSessions(
   raw: AiExercisePlan[][],
+  catalog: AllowListedExercise[],
+  stretchCatalog: AllowListedExercise[],
   catalogById: Map<string, AllowListedExercise>,
   sessionsPerDay: number,
   requestedExercisesPerSession: number | null,
-): AiExercisePlan[][] | null {
-  if (raw.length !== sessionsPerDay) return null;
+  stretchCount: number,
+  experience: string,
+): { sessions: AiExercisePlan[][]; reason: null } | { sessions: null; reason: string } {
+  if (raw.length !== sessionsPerDay) {
+    return {
+      sessions: null,
+      reason: `session_count_mismatch: got ${raw.length}, expected ${sessionsPerDay}`,
+    };
+  }
 
-  const maxPerSession = requestedExercisesPerSession !== null
-    ? Math.min(MAX_EXERCISES_PER_SESSION, requestedExercisesPerSession + EXERCISE_COUNT_TOLERANCE)
+  const maxStrengthPerSession = requestedExercisesPerSession !== null
+    ? requestedExercisesPerSession
     : MAX_EXERCISES_PER_SESSION;
-  const minPerSession = requestedExercisesPerSession !== null
-    ? Math.max(MIN_EXERCISES_PER_SESSION, requestedExercisesPerSession - EXERCISE_COUNT_TOLERANCE)
+  const minStrengthPerSession = requestedExercisesPerSession !== null
+    ? requestedExercisesPerSession
     : MIN_EXERCISES_PER_SESSION;
 
   const seenAcrossDay = new Set<string>();
-  const validated: AiExercisePlan[][] = [];
+  const finalized: AiExercisePlan[][] = [];
 
   for (const group of raw) {
     const sessionExercises: AiExercisePlan[] = [];
+    const sessionStrengthMeta: AllowListedExercise[] = [];
+    let strengthCount = 0;
+    let stretchInSession = 0;
+
     for (const plan of group) {
       const exercise = catalogById.get(plan.exercise_id);
       if (!exercise) continue;
       if (seenAcrossDay.has(plan.exercise_id)) continue;
-      seenAcrossDay.add(plan.exercise_id);
-      sessionExercises.push(sanitizeTargets(plan, exercise));
-      if (sessionExercises.length >= maxPerSession) break;
+
+      if (exercise.is_stretch) {
+        if (stretchCount === 0 || stretchInSession >= stretchCount) continue;
+        stretchInSession += 1;
+        seenAcrossDay.add(plan.exercise_id);
+        sessionExercises.push(applyStretchPrescription(plan, experience));
+      } else {
+        if (strengthCount >= maxStrengthPerSession) continue;
+        strengthCount += 1;
+        seenAcrossDay.add(plan.exercise_id);
+        sessionStrengthMeta.push(exercise);
+        sessionExercises.push(sanitizeTargets(plan, exercise));
+      }
     }
-    if (sessionExercises.length < minPerSession) return null;
-    validated.push(sessionExercises);
+
+    const sessionMuscles = sessionMuscleSet(sessionStrengthMeta);
+
+    if (requestedExercisesPerSession !== null && strengthCount < requestedExercisesPerSession) {
+      const need = requestedExercisesPerSession - strengthCount;
+      const fillers = pickStrengthForSession(catalog, need, seenAcrossDay);
+      if (fillers.length < need) {
+        return {
+          sessions: null,
+          reason: `too_few_exercises: could only pad ${fillers.length}/${need} strength exercises`,
+        };
+      }
+      for (const ex of fillers) {
+        seenAcrossDay.add(ex.id);
+        sessionStrengthMeta.push(ex);
+        sessionExercises.push(emptyStrengthPlan(ex.id));
+        strengthCount += 1;
+        for (const m of ex.primary_muscles) sessionMuscles.add(m);
+      }
+    }
+
+    if (stretchCount > 0 && stretchInSession < stretchCount) {
+      const need = stretchCount - stretchInSession;
+      const fillers = pickStretchesForSession(
+        stretchCatalog,
+        need,
+        sessionMuscles,
+        seenAcrossDay,
+      );
+      if (fillers.length < need) {
+        return {
+          sessions: null,
+          reason: `too_few_stretches: could only pad ${fillers.length}/${need} stretches`,
+        };
+      }
+      for (const ex of fillers) {
+        seenAcrossDay.add(ex.id);
+        sessionExercises.push(applyStretchPrescription(emptyStrengthPlan(ex.id), experience));
+        stretchInSession += 1;
+      }
+    }
+
+    if (strengthCount < minStrengthPerSession) {
+      return {
+        sessions: null,
+        reason: `too_few_exercises: session had ${strengthCount} strength exercises, need ${minStrengthPerSession}`,
+      };
+    }
+
+    if (requestedExercisesPerSession !== null && strengthCount !== requestedExercisesPerSession) {
+      return {
+        sessions: null,
+        reason: `strength_count_mismatch: got ${strengthCount}, expected ${requestedExercisesPerSession}`,
+      };
+    }
+
+    if (stretchCount > 0 && stretchInSession !== stretchCount) {
+      return {
+        sessions: null,
+        reason: `stretch_count_mismatch: got ${stretchInSession}, expected ${stretchCount}`,
+      };
+    }
+
+    if (requestedExercisesPerSession === null && strengthCount > MAX_EXERCISES_PER_SESSION) {
+      return {
+        sessions: null,
+        reason: `too_many_exercises: session had ${strengthCount} strength exercises, max ${MAX_EXERCISES_PER_SESSION}`,
+      };
+    }
+
+    finalized.push(sessionExercises);
   }
 
-  return validated;
+  return { sessions: finalized, reason: null };
 }
 
 // ============================================================================
@@ -889,16 +1111,6 @@ Deno.serve(async (req) => {
 
     const constraints = parseConstraints(body.constraints);
 
-    // Stretch plumbing: the exercise catalog does not yet have a stretch flag
-    // (the master exercise list with a stretch column is in progress). Until
-    // allow-listed stretches exist, a requested stretchCount is accepted and
-    // logged but not sent to the LLM. When the column lands: select it in the
-    // allow-list query, filter `catalog` for stretch entries, and append a
-    // prompt rule asking for `constraints.stretchCount` stretches per session.
-    if (constraints.stretchCount > 0) {
-      console.log(`stretchCount=${constraints.stretchCount} requested but stretch catalog not yet available; ignoring`);
-    }
-
     // ------------------------------------------------------------------------
     // 3. Verify template ownership before anything expensive.
     // ------------------------------------------------------------------------
@@ -950,13 +1162,20 @@ Deno.serve(async (req) => {
       Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    const [allowListRes, profileRes, freshnessRes, historyRes] = await Promise.all([
+    const [allowListRes, stretchCatalogRes, profileRes, freshnessRes, historyRes] = await Promise.all([
       serviceClient
         .from('v2_ai_recommended_exercises')
-        .select('exercise_id, priority_order, v2_exercises(id, name, primary_muscles, equipment_needed, is_timed, movement_pattern)')
+        .select('exercise_id, priority_order, v2_exercises(id, name, primary_muscles, equipment_needed, is_timed, is_stretch, movement_pattern)')
         .eq('is_active', true)
         .order('priority_order', { ascending: true })
-        .limit(80),
+        .limit(CATALOG_PROMPT_LIMIT),
+      constraints.stretchCount > 0
+        ? serviceClient
+          .from('v2_exercises')
+          .select('id, name, primary_muscles, equipment_needed, is_timed, is_stretch, movement_pattern')
+          .eq('is_stretch', true)
+          .order('name', { ascending: true })
+        : Promise.resolve({ data: [], error: null }),
       serviceClient
         .from('v2_profiles')
         .select('experience_level, equipment_access, days_per_week, preferred_training_style, workout_days, use_imperial, current_weight, goal_weight')
@@ -984,6 +1203,9 @@ Deno.serve(async (req) => {
     if (allowListRes.error || !allowListRes.data) {
       return jsonResponse({ error: 'Failed to load allow-list' }, 500);
     }
+    if (stretchCatalogRes.error) {
+      return jsonResponse({ error: 'Failed to load stretch catalog' }, 500);
+    }
 
     const catalog: AllowListedExercise[] = [];
     for (const row of allowListRes.data as Array<{
@@ -995,19 +1217,43 @@ Deno.serve(async (req) => {
         primary_muscles: string[];
         equipment_needed: string[] | null;
         is_timed: boolean;
+        is_stretch: boolean;
         movement_pattern: string | null;
       } | null;
     }>) {
       const ex = row.v2_exercises;
-      if (!ex) continue;
+      if (!ex || ex.is_stretch) continue;
       catalog.push({
         id: ex.id,
         name: ex.name,
         primary_muscles: Array.isArray(ex.primary_muscles) ? ex.primary_muscles : [],
         equipment_needed: ex.equipment_needed,
         is_timed: !!ex.is_timed,
+        is_stretch: false,
         movement_pattern: ex.movement_pattern,
         priority_order: row.priority_order ?? 999,
+      });
+    }
+
+    const stretchCatalog: AllowListedExercise[] = [];
+    for (const ex of (stretchCatalogRes.data ?? []) as Array<{
+      id: string;
+      name: string;
+      primary_muscles: string[];
+      equipment_needed: string[] | null;
+      is_timed: boolean;
+      is_stretch: boolean;
+      movement_pattern: string | null;
+    }>) {
+      stretchCatalog.push({
+        id: ex.id,
+        name: ex.name,
+        primary_muscles: Array.isArray(ex.primary_muscles) ? ex.primary_muscles : [],
+        equipment_needed: ex.equipment_needed,
+        is_timed: !!ex.is_timed,
+        is_stretch: true,
+        movement_pattern: ex.movement_pattern,
+        priority_order: 999,
       });
     }
 
@@ -1016,8 +1262,9 @@ Deno.serve(async (req) => {
     }
 
     const catalogById = new Map<string, AllowListedExercise>(
-      catalog.map((ex) => [ex.id, ex]),
+      [...catalog, ...stretchCatalog].map((ex) => [ex.id, ex]),
     );
+    const stretchIds = new Set(stretchCatalog.map((ex) => ex.id));
     const allowedIds = new Set<string>(catalogById.keys());
 
     const profileRow = (profileRes.data ?? null) as {
@@ -1057,6 +1304,9 @@ Deno.serve(async (req) => {
       (historyRes.data ?? []) as unknown as HistorySetRow[],
       allowedIds,
     );
+    for (const stretchId of stretchIds) {
+      delete history[stretchId];
+    }
 
     const trainingDayPosition = computeTrainingDayPosition(dayName, userContext.workout_days);
 
@@ -1074,6 +1324,7 @@ Deno.serve(async (req) => {
           apiKey: openAiApiKey,
           model: openAiModel,
           catalog,
+          stretchCatalog,
           user: userContext,
           dayName,
           sessionsPerDay,
@@ -1083,18 +1334,23 @@ Deno.serve(async (req) => {
           trainingDayPosition,
         });
         auditModel = llm.model;
-        const validated = validateAiSessions(
+        const validated = finalizeAiSessions(
           llm.sessions,
+          catalog,
+          stretchCatalog,
           catalogById,
           sessionsPerDay,
           constraints.exercisesPerSession,
+          constraints.stretchCount > 0 && stretchCatalog.length > 0 ? constraints.stretchCount : 0,
+          userContext.experience_level,
         );
-        if (validated) {
-          resultSessions = validated;
+        if (validated.sessions) {
+          resultSessions = validated.sessions;
           source = 'openai';
           model = llm.model;
         } else {
-          lastError = 'allow_list_validation_failed';
+          lastError = validated.reason ?? 'allow_list_validation_failed';
+          console.error('AI session validation failed:', lastError);
         }
       } catch (err) {
         lastError = err instanceof Error ? err.message.slice(0, 200) : 'openai_failed';

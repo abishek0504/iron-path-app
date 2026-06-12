@@ -144,7 +144,42 @@ export async function selectExerciseTargets(
     return null;
   }
 
-  // Get exercise history for progressive overload
+  // Static stretches: fixed hold prescription — no history, no progressive overload, no RPE.
+  if (exercise.is_stretch && mode === 'timed') {
+    let stretchSets = prescription.sets_min;
+    let stretchDuration: number | undefined;
+    if (prescription.duration_sec_min && prescription.duration_sec_max) {
+      const preferredSets = Math.min(2, prescription.sets_max);
+      stretchSets = Math.max(prescription.sets_min, preferredSets);
+      stretchDuration = Math.round(
+        prescription.duration_sec_min +
+          (prescription.duration_sec_max - prescription.duration_sec_min) * 0.65,
+      );
+      stretchDuration = Math.max(
+        prescription.duration_sec_min,
+        Math.min(prescription.duration_sec_max, stretchDuration),
+      );
+    }
+
+    const target: ExerciseTarget = {
+      exercise_id: exercise.id,
+      sets: stretchSets,
+      mode,
+      duration_sec: stretchDuration,
+    };
+
+    if (__DEV__) {
+      devLog('target-selection', {
+        action: 'selectExerciseTargets_result',
+        target,
+        stretch: true,
+      });
+    }
+
+    return target;
+  }
+
+  // Get exercise history for progressive overload (strength only)
   const history = await getExerciseHistory(exerciseKey, userId, 5);
   const hasHistory = history && history.sets.length > 0;
 

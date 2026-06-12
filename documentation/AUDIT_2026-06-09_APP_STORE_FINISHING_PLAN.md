@@ -2,6 +2,8 @@
 
 Double-check audit of all work marked completed in the "App Store Finishing Plan". Six parallel code audits (one per phase) plus independent verification against the live Supabase project, hosted URLs, and local test/typecheck/lint suites.
 
+> **Status update 2026-06-11**: items resolved since this audit are annotated inline with "Done/Fixed/Superseded 2026-06-11"; re-verified open items are marked "still open". Unannotated items were not re-checked.
+
 ---
 
 ## 1. Verdict at a glance
@@ -36,12 +38,12 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 ## 2. Findings that contradict "completed" status
 
-1. **Gemini was not re-verified live.** The `ai-verify-polish` todo is marked completed, but `v2_ai_generations` contains exactly one `source='gemini'` row dated 2026-05-10 — nothing since. The plan required a fresh dev-build generation to confirm the key hasn't expired.
-2. **Legal URLs are live-404.** `https://ironpath.app/privacy` and `https://ironpath.app/terms` both return "Page not found". Content in `legal/privacy.md` / `legal/terms.md` is complete (Supabase, Gemini, HealthKit, Sentry, account deletion), and `LegalLinks` renders on signup, settings, and help — so the app currently links users to 404s. Hard App Store blocker.
-3. **Leaked-password protection is still disabled** (confirmed via live security advisors). The remediation migration's own comment defers it to the dashboard; it was never toggled. One-click fix: [Supabase password security](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
-4. **Set types missing from `app/add-exercise-edit.tsx`** — zero `set_type` UI or inserts; every set added via that screen defaults to `normal`. The plan named this file explicitly.
-5. **`app/add-exercise.tsx` has no multi-select** — only the active-workout add flow got `multiSelect`; the full-page screen still adds one exercise at a time.
-6. **`update-muscle-freshness` edge function does not exclude warmups** — client-side stress queries filter `.neq('set_type','warmup')`, but the deployed freshness function counts all sets (index.ts lines 182–265), so warm-ups still inflate muscle stress.
+1. **Gemini was not re-verified live.** The `ai-verify-polish` todo is marked completed, but `v2_ai_generations` contains exactly one `source='gemini'` row dated 2026-05-10 — nothing since. The plan required a fresh dev-build generation to confirm the key hasn't expired. — **Superseded 2026-06-10**: backend migrated Gemini → OpenAI (`generate-workout` rewritten, deployed v14; migration `20260610000000_ai_generations_openai_source`); ≥1 `source='openai'` row in live `v2_ai_generations` confirms a real generation.
+2. **Legal URLs are live-404.** `https://ironpath.app/privacy` and `https://ironpath.app/terms` both return "Page not found". Content in `legal/privacy.md` / `legal/terms.md` is complete (Supabase, Gemini, HealthKit, Sentry, account deletion), and `LegalLinks` renders on signup, settings, and help — so the app currently links users to 404s. Hard App Store blocker. — **Still open 2026-06-11** (both URLs re-verified 404).
+3. **Leaked-password protection is still disabled** (confirmed via live security advisors). The remediation migration's own comment defers it to the dashboard; it was never toggled. One-click fix: [Supabase password security](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection). — **Still open 2026-06-11** (re-verified via security advisors).
+4. **Set types missing from `app/add-exercise-edit.tsx`** — zero `set_type` UI or inserts; every set added via that screen defaults to `normal`. The plan named this file explicitly. — **Done 2026-06-11**: `set_type` is now part of the screen's set model with a warm-up toggle and persisted inserts.
+5. **`app/add-exercise.tsx` has no multi-select** — only the active-workout add flow got `multiSelect`; the full-page screen still adds one exercise at a time. — **Still open 2026-06-11**.
+6. **`update-muscle-freshness` edge function does not exclude warmups** — client-side stress queries filter `.neq('set_type','warmup')`, but the deployed freshness function counts all sets (index.ts lines 182–265), so warm-ups still inflate muscle stress. — **Done 2026-06-11**: function now filters `.neq('set_type','warmup')` (index.ts:187) and is deployed (v13).
 
 ---
 
@@ -49,17 +51,17 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 | # | Bug | Severity | Location |
 |---|---|---|---|
-| 1 | **Warmup PR race**: "Complete Set" calls `markSetComplete` without `set_type` → PR trigger fires as `normal` and may upsert a PR; re-tagging as warmup in logging never revokes it | High | `app/(stack)/workout/active.tsx:594-604` + PR trigger |
-| 2 | Watch `completeSet` listener ignores `sessionId`/`setNumber` — a stale `transferUserInfo` replay could complete the wrong set | Medium | `app/(stack)/workout/active.tsx:220-223` |
-| 3 | `as? Int` casts on WCSession plist values (`NSNumber`) can fail → watch shows "Set 0 of 0" | Medium | `targets/watch/WatchWorkoutSession.swift:60-61` |
+| 1 | **Warmup PR race**: "Complete Set" calls `markSetComplete` without `set_type` → PR trigger fires as `normal` and may upsert a PR; re-tagging as warmup in logging never revokes it — **Fixed 2026-06-11**: `active.tsx` now preserves `set_type` when completing via tap/watch | High | `app/(stack)/workout/active.tsx:594-604` + PR trigger |
+| 2 | Watch `completeSet` listener ignores `sessionId`/`setNumber` — a stale `transferUserInfo` replay could complete the wrong set (still present 2026-06-11) | Medium | `app/(stack)/workout/active.tsx:220-223` |
+| 3 | `as? Int` casts on WCSession plist values (`NSNumber`) can fail → watch shows "Set 0 of 0" (still present 2026-06-11) | Medium | `targets/watch/WatchWorkoutSession.swift:60-61` |
 | 4 | 403 (template not owned) surfaces as "Session expired — please log in again" | Low | `src/lib/ai/generateWorkoutDay.ts:166-173` + `planner.tsx:1245` |
 | 5 | AI-returned empty/`rest` result doesn't clear slots (only the user-entered `0` path does) | Low | `planner.tsx:1258-1266` |
-| 6 | Route mismatch: "Continue anyway" → `/workout/active`, "Smart adjust" → `/(stack)/workout/active` | Low | `planner.tsx:2349` vs `:2482` |
-| 7 | Multi-add batch insert hardcodes `custom_exercise_id: null` — custom exercises can't be batch-added | Low | `active.tsx:801-805` |
+| 6 | Route mismatch: "Continue anyway" → `/workout/active`, "Smart adjust" → `/(stack)/workout/active` (still present 2026-06-11) | Low | `planner.tsx:2349` vs `:2482` |
+| 7 | Multi-add batch insert hardcodes `custom_exercise_id: null` — custom exercises can't be batch-added (still present 2026-06-11) | Low | `active.tsx:801-805` |
 | 8 | Quota copy at 0 remaining says "local engine will be used" but the call hard-stops with an error toast | Low | `planner.tsx:2128` vs `:1236-1241` |
-| 9 | `getExerciseHistory` includes warmups — affects "Last / PR" on add-exercise screen | Low | `workouts.ts:1509-1535` |
+| 9 | `getExerciseHistory` includes warmups — affects "Last / PR" on add-exercise screen — **Fixed 2026-06-11**: query now filters `.neq('set_type','warmup')` | Low | `workouts.ts:1509-1535` |
 | 10 | Auth detection depends on `error.context.status`; if supabase-js doesn't expose `context`, auth errors silently fall back to local generation | Low | `generateWorkoutDay.ts:94-107` |
-| 11 | Duplicate `setRebalanceResult(null)` calls | Trivial | `planner.tsx:2493`, `:2495` |
+| 11 | Duplicate `setRebalanceResult(null)` calls (still present 2026-06-11) | Trivial | `planner.tsx:2493`, `:2495` |
 
 ---
 
@@ -72,7 +74,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 | 1 | Schema + PR trigger migrations | VERIFIED |
 | 2 | Per-exercise rest timer | VERIFIED |
 | 3 | Previous performance inline | VERIFIED |
-| 4 | Set types + warmup exclusions | PARTIAL |
+| 4 | Set types + warmup exclusions | PARTIAL → **Done 2026-06-11** (add-exercise-edit `set_type` UI; freshness fn warmup filter deployed v13; PR race fixed) |
 | 5 | Supersets | VERIFIED |
 | 6 | Replace + reorder | PARTIAL |
 | 7 | Multi-select exercise add | PARTIAL |
@@ -83,7 +85,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 - **Schema (VERIFIED)** — `20260609000000_workout_flow_set_types_supersets_rest.sql`: `v2_session_sets.set_type` text NOT NULL DEFAULT 'normal' CHECK (normal|warmup|drop|failure); `superset_group` + `rest_sec` (CHECK 0–3600) on `v2_session_exercises` and `v2_template_slots`. `20260609000001_pr_trigger_exclude_warmups.sql`: early return on `NEW.set_type = 'warmup'`, full trigger rewrite with pinned `search_path`. Types regenerated in `src/types/supabase.gen.ts` (note: `set_type` typed as `string`, not the app's `SetType` union).
 - **Rest timer (VERIFIED)** — no hardcoded `durationSec={90}`. `resolveRestSec()` in `src/lib/engine/workoutFlow.ts:23-28` resolves exercise → set → 90s default; used in `active.tsx` (RestTimer at 1322/1332, watch context at 271/281). Edit control in `SessionExerciseEditSheet.tsx:286-299` persists to `v2_session_exercises.rest_sec`. Auto-starts on set completion via `findNextStep` → rest phase. Unit-tested.
 - **Previous performance (VERIFIED)** — `getPreviousExercisePerformance()` (`workouts.ts:1410-1478`, warmups excluded). Rendered in execution phase ("Last time: …", `active.tsx:1244-1260`) and logging phase ("Previous: …" per row, `:1384-1397`). Note: inline context, not a full Hevy-style set table.
-- **Set types (PARTIAL)** — active.tsx: read-only badge in execution (1226-1232), tappable cycling chips in logging (1359-1381), persisted in `handleSaveAndContinue`. `SessionExerciseEditSheet.tsx`: per-set chips + persist (307-329). **`add-exercise-edit.tsx`: NOT DONE** (zero matches). Client warmup exclusions verified in `workouts.ts` (YTD volume :682, prev performance :1443, muscle stress :1692). **Edge function `update-muscle-freshness`: NOT DONE** (no warmup filter). Set type is only editable in the logging phase, after first completion → PR race (bug #1).
+- **Set types (PARTIAL)** — active.tsx: read-only badge in execution (1226-1232), tappable cycling chips in logging (1359-1381), persisted in `handleSaveAndContinue`. `SessionExerciseEditSheet.tsx`: per-set chips + persist (307-329). **`add-exercise-edit.tsx`: NOT DONE** (zero matches) — *Done 2026-06-11: `set_type` model + warm-up toggle + persisted inserts added*. Client warmup exclusions verified in `workouts.ts` (YTD volume :682, prev performance :1443, muscle stress :1692). **Edge function `update-muscle-freshness`: NOT DONE** (no warmup filter) — *Done 2026-06-11: warmup filter added and deployed (v13)*. Set type is only editable in the logging phase, after first completion → PR race (bug #1) — *Fixed 2026-06-11 (set_type preserved on completion)*.
 - **Supersets (VERIFIED)** — `findNextStep()` alternates within `superset_group`, rest only on round wrap. Active: badge UI (1197-1207), toggle via overflow menu (966-1009, 1594-1609), `setSessionSupersetGroup` (`workouts_helpers.ts:370`). Planner: `handleToggleSlotSuperset` (914-958), "Superset A/B" chips (1683-1715), link/unlink button (1723-1727). Session materialization copies `superset_group` + `rest_sec` from slots (`(tabs)/index.tsx:736-737`). Unit-tested (5 superset cases).
 - **Replace + reorder (PARTIAL)** — replace-in-place verified with completed-sets guard (`active.tsx:947-949`); `swapExercise` deletes old sets and re-prefils. `reorderSlots`/`updateNotes` are real implementations in both `workouts_helpers.ts` (263-312) and `templates.ts` (807-826) — no longer stubs. Gap: active-workout reorder is an **arrow-button modal** (1012-1048, 1650-1669), not drag (planner has drag). Minor: session reorder uses 1-based `sort_order`, template/creation use 0-based.
 - **Multi-select (PARTIAL)** — `ExercisePicker` multiSelect + confirm footer verified; active-workout add flow uses it with batch insert + `prefillSessionSets` (770-828). **`add-exercise.tsx`: NOT DONE** — single-exercise flow, no picker/multiSelect/batch.
@@ -163,10 +165,10 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 | # | Item | Status | Remaining blocker |
 |---|---|---|---|
-| 1 | Legal pages | PARTIAL | Host `legal/*.md` at ironpath.app (**confirmed 404 live**) |
+| 1 | Legal pages | PARTIAL | Host `legal/*.md` at ironpath.app (**confirmed 404 live**; still 404 re-verified 2026-06-11) |
 | 2 | Account purge job | VERIFIED (applied + cron active, confirmed live) | Consider avatar storage cleanup |
-| 3 | Security remediation | VERIFIED (applied, confirmed live) | Enable leaked-password protection (dashboard) |
-| 4 | EAS production env | PARTIAL | Real Sentry DSN; consider EAS secrets; Apple IDs |
+| 3 | Security remediation | VERIFIED (applied, confirmed live) | Enable leaked-password protection (dashboard — still disabled 2026-06-11) |
+| 4 | EAS production env | PARTIAL | Real Sentry DSN; consider EAS secrets; Apple IDs (`app.json` `appleTeamId` now set 2026-06-11; `eas.json` submit `ascAppId`/`appleTeamId` still placeholders) |
 | 5 | Sentry | PARTIAL | DSN, org, `SENTRY_AUTH_TOKEN`; optional `enabled: !__DEV__` |
 | 6 | Privacy manifest | PARTIAL | Sync root file with `app.json`; ASC questionnaire alignment |
 | 7 | CI | PARTIAL | Add `npm run lint:eslint` if desired |
@@ -224,12 +226,12 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 ## 11. Recommended priority order before TestFlight
 
-1. **Publish `legal/*.md` to ironpath.app** — app already links to 404s (App Store blocker)
-2. **Run one real Gemini generation from a dev build** — truly close `ai-verify-polish`
-3. **Fix the warmup PR race** — pass `set_type` at completion, or revoke/recompute PR on retag
-4. **Enable leaked-password protection** — Supabase dashboard, 1 minute
-5. **Add warmup exclusion to `update-muscle-freshness`** and redeploy
-6. **Harden watch events** — validate `sessionId`/`setNumber`; use `NSNumber`-safe parsing
-7. **Sync `PrivacyInfo.xcprivacy` with `app.json`** (CrashData entry); sweep stale docs (`SYSTEM_ARCHITECTURE.md`, `DEVELOPMENT_BUILD.md`); drop the 3 dead `planner.tsx` imports
-8. **Fill Sentry DSN/org + Apple IDs** once enrollment completes (the one plan todo legitimately still pending)
-9. Optional hardening: set-type UI in `add-exercise-edit.tsx`, multi-select in `add-exercise.tsx`, custom exercises in batch add, tests for `needsRebalance` + warmup PR exclusion, ESLint in CI, avatar cleanup on purge
+1. **Publish `legal/*.md` to ironpath.app** — app already links to 404s (App Store blocker) — *still open 2026-06-11 (re-verified 404)*
+2. **Run one real Gemini generation from a dev build** — truly close `ai-verify-polish` — *Superseded 2026-06-10: backend migrated to OpenAI (migration 20260610000000, `generate-workout` v14); live `source='openai'` generation row confirmed*
+3. **Fix the warmup PR race** — pass `set_type` at completion, or revoke/recompute PR on retag — *Done 2026-06-11 (`active.tsx` preserves `set_type` on tap/watch completion)*
+4. **Enable leaked-password protection** — Supabase dashboard, 1 minute — *still open 2026-06-11 (re-verified via security advisors)*
+5. **Add warmup exclusion to `update-muscle-freshness`** and redeploy — *Done 2026-06-11 (`.neq('set_type','warmup')`, deployed v13)*
+6. **Harden watch events** — validate `sessionId`/`setNumber`; use `NSNumber`-safe parsing — *still open 2026-06-11*
+7. **Sync `PrivacyInfo.xcprivacy` with `app.json`** (CrashData entry); sweep stale docs (`SYSTEM_ARCHITECTURE.md`, `DEVELOPMENT_BUILD.md`); drop the 3 dead `planner.tsx` imports — *partial 2026-06-11: PrivacyInfo CrashData still missing; dead imports still present; status docs (IMPLEMENTATION_STATUS/00_INDEX) refreshed*
+8. **Fill Sentry DSN/org + Apple IDs** once enrollment completes (the one plan todo legitimately still pending) — *partial 2026-06-11: `app.json` `appleTeamId` set; Sentry DSN/org and `eas.json` submit IDs still placeholders*
+9. Optional hardening: set-type UI in `add-exercise-edit.tsx` (*Done 2026-06-11*), multi-select in `add-exercise.tsx`, custom exercises in batch add, tests for `needsRebalance` + warmup PR exclusion, ESLint in CI, avatar cleanup on purge — *rest still open*

@@ -1462,6 +1462,17 @@ export async function getPreviousExercisePerformance(
   }
 
   try {
+    if (exerciseId) {
+      const { data: stretchRow } = await supabase
+        .from('v2_exercises')
+        .select('is_stretch')
+        .eq('id', exerciseId)
+        .maybeSingle();
+      if (stretchRow?.is_stretch) {
+        return null;
+      }
+    }
+
     // Pull the most recent completed sets for this exercise (any session), newest
     // first, then keep only the sets belonging to the newest session exercise.
     const { data, error } = await supabase
@@ -1552,6 +1563,15 @@ export async function getExerciseHistory(
   }
 
   try {
+    const { data: stretchRow } = await supabase
+      .from('v2_exercises')
+      .select('is_stretch')
+      .eq('id', exerciseId)
+      .maybeSingle();
+    if (stretchRow?.is_stretch) {
+      return empty;
+    }
+
     const { data, error } = await supabase
       .from('v2_session_sets')
       .select(
@@ -1786,13 +1806,14 @@ export async function getMuscleStressStats(
       id: string;
       primary_muscles: string[] | null;
       implicit_hits: Record<string, number> | null;
+      is_stretch?: boolean;
     };
 
     const [masterMetaResult, customMetaResult] = await Promise.all([
       masterIds.size
         ? supabase
             .from('v2_exercises')
-            .select('id, primary_muscles, implicit_hits')
+            .select('id, primary_muscles, implicit_hits, is_stretch')
             .in('id', Array.from(masterIds))
         : Promise.resolve({ data: [] as any[], error: null }),
       customIds.size
@@ -1846,6 +1867,10 @@ export async function getMuscleStressStats(
         (customExerciseId && customMap.get(customExerciseId));
 
       if (!meta) {
+        continue;
+      }
+
+      if (meta.is_stretch) {
         continue;
       }
 
