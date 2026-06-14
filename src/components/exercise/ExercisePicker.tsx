@@ -13,12 +13,12 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native';
 import { Check, Search, X } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/uiStore';
 import { spacing, borderRadius, type ThemeColors } from '../../lib/utils/theme';
+import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { Exercise } from '../../types/exercisePicker';
@@ -234,7 +234,7 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
       {/* List */}
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <LogoEdgeLoader size="xlarge" />
         </View>
       ) : (
         <FlatList

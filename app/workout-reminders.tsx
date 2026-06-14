@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { ChevronLeft } from 'lucide-react-native';
 import { borderRadius, spacing, typography, type ThemeColors, isLightTheme } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { useUIStore } from '../src/stores/uiStore';
 import {
   cancelWorkoutReminders,
@@ -114,9 +115,7 @@ export default function WorkoutRemindersScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <LoadingScreen style={styles.centered} />
       </SafeAreaView>
     );
   }
@@ -212,7 +211,7 @@ export default function WorkoutRemindersScreen() {
           activeOpacity={0.85}
         >
           {saving ? (
-            <ActivityIndicator size="small" color={colors.background} />
+            <LogoEdgeLoader size="small" variant="inverted" />
           ) : (
             <Text style={styles.saveButtonText}>Save</Text>
           )}

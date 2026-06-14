@@ -4,7 +4,8 @@
  */
 
 import { useEffect, useState, useMemo } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
 import { spacing, type ThemeColors } from '../src/lib/utils/theme';
@@ -95,8 +96,7 @@ export default function Index() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={colors.primary} />
-      <Text style={styles.text}>Loading...</Text>
+      <LoadingScreen message="Loading..." style={styles.loader} />
       {errorText ? <Text style={styles.error}>{errorText}</Text> : null}
     </View>
   );
@@ -106,14 +106,10 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
       flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
       backgroundColor: colors.background,
-      gap: spacing.md,
     },
-    text: {
-      color: colors.textSecondary,
-      fontSize: 16,
+    loader: {
+      flex: 1,
     },
     error: {
       color: colors.error,

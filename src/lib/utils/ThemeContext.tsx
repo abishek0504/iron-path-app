@@ -1,9 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
-import { darkColors, lightColors, type ThemeColors } from './theme';
+import {
+  darkColors,
+  lightColors,
+  pinkColors,
+  type ThemeColors,
+  type ThemeOptionId,
+} from './theme';
 
-export type ThemeMode = 'dark' | 'light' | 'system';
+export type ThemeMode = ThemeOptionId;
 
 const STORAGE_KEY = '@iron_path_theme_mode';
 
@@ -25,7 +31,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((stored) => {
-      if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      if (
+        stored === 'light' ||
+        stored === 'dark' ||
+        stored === 'system' ||
+        stored === 'pink'
+      ) {
         setThemeModeState(stored);
       }
     });
@@ -39,6 +50,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const colors = useMemo(() => {
     if (themeMode === 'light') return lightColors;
     if (themeMode === 'dark') return darkColors;
+    if (themeMode === 'pink') return pinkColors;
     return scheme === 'light' ? lightColors : darkColors;
   }, [themeMode, scheme]);
 

@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -26,11 +24,10 @@ import { SOFT_DISMISS_DELAY_MS } from '../../lib/subscriptions/constants';
 import type { PaywallTrigger } from '../../lib/subscriptions/paywallTriggers';
 import { headlineForTrigger } from '../../lib/subscriptions/paywallTriggers';
 import { hapticSelection } from '../../lib/utils/haptics';
-import { borderRadius, spacing, typography } from '../../lib/utils/theme';
-
-const PAYWALL_BG = '#09090b';
-const CTA_LIME = '#a3e635';
-const CLOSE_ICON_OPACITY = 0.1;
+import { borderRadius, spacing, typography, type ThemeColors } from '../../lib/utils/theme';
+import { useTheme } from '../../lib/utils/ThemeContext';
+import { IronPathLogo } from '../ui/IronPathLogo';
+import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 
 const BULLETS = [
   'AI plans your week',
@@ -75,6 +72,8 @@ export function PaywallModal({
   onRestore,
 }: PaywallModalProps) {
   const insets = useSafeAreaInsets();
+  const colors = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [selectedPlan, setSelectedPlan] = useState<PlanId>('annual');
   const [canDismiss, setCanDismiss] = useState(false);
   const ctaScale = useSharedValue(1);
@@ -137,7 +136,7 @@ export function PaywallModal({
               accessibilityRole="button"
               accessibilityLabel="Close"
             >
-              <X size={22} color={`rgba(250,250,250,${CLOSE_ICON_OPACITY})`} />
+              <X size={22} color={colors.textMuted} />
             </TouchableOpacity>
           </Animated.View>
         ) : (
@@ -145,12 +144,13 @@ export function PaywallModal({
         )}
 
         <View style={styles.content}>
-          <Image source={require('../../../assets/icon.png')} style={styles.logo} />
+          <IronPathLogo size={72} style={styles.logo} />
           <Text style={styles.headline}>{headline}</Text>
           <Text style={styles.subhead}>Cancel anytime</Text>
 
           <View style={styles.plans}>
             <PlanRow
+              styles={styles}
               label="Annual"
               price={annualPackage?.product.priceString ?? '$59.99/yr'}
               sublabel="7-day free trial"
@@ -160,6 +160,7 @@ export function PaywallModal({
               onPress={() => setSelectedPlan('annual')}
             />
             <PlanRow
+              styles={styles}
               label="Monthly"
               price={monthlyPackage?.product.priceString ?? '$9.99/mo'}
               sublabel="7-day free trial"
@@ -187,7 +188,7 @@ export function PaywallModal({
               accessibilityRole="button"
             >
               {isPurchasing ? (
-                <ActivityIndicator color={PAYWALL_BG} />
+                <LogoEdgeLoader size="small" variant="inverted" />
               ) : (
                 <Text style={styles.ctaText}>Start 7-day free trial</Text>
               )}
@@ -211,6 +212,7 @@ export function PaywallModal({
 }
 
 function PlanRow({
+  styles,
   label,
   price,
   sublabel,
@@ -219,6 +221,7 @@ function PlanRow({
   badge,
   onPress,
 }: {
+  styles: ReturnType<typeof createStyles>;
   label: string;
   price: string;
   sublabel: string;
@@ -259,10 +262,11 @@ function PlanRow({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: PAYWALL_BG,
+    backgroundColor: colors.background,
     paddingHorizontal: spacing.lg,
   },
   closeWrap: {
@@ -283,21 +287,18 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   logo: {
-    width: 72,
-    height: 72,
-    borderRadius: borderRadius.lg,
     alignSelf: 'center',
     marginBottom: spacing.sm,
   },
   headline: {
-    color: '#fafafa',
+    color: colors.textPrimary,
     fontSize: typography.sizes['2xl'],
     fontWeight: typography.weights.bold,
     textAlign: 'center',
     lineHeight: 32,
   },
   subhead: {
-    color: 'rgba(250,250,250,0.65)',
+    color: colors.textSecondary,
     fontSize: typography.sizes.md,
     textAlign: 'center',
     lineHeight: 22,
@@ -310,14 +311,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(250,250,250,0.15)',
+    borderColor: colors.cardBorder,
     borderRadius: borderRadius.lg,
     padding: spacing.md,
-    backgroundColor: 'rgba(250,250,250,0.04)',
+    backgroundColor: colors.card,
   },
   planRowSelected: {
-    borderColor: '#fafafa',
-    backgroundColor: 'rgba(250,250,250,0.08)',
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySubtleBg,
   },
   planRowMuted: {
     opacity: 0.55,
@@ -332,30 +333,30 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   planLabel: {
-    color: '#fafafa',
+    color: colors.textPrimary,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.semibold,
   },
   planLabelMuted: {
-    color: 'rgba(250,250,250,0.55)',
+    color: colors.textMuted,
   },
   planPrice: {
-    color: '#fafafa',
+    color: colors.textPrimary,
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.medium,
   },
   planTrial: {
-    color: 'rgba(250,250,250,0.5)',
+    color: colors.textMuted,
     fontSize: typography.sizes.sm,
   },
   badge: {
-    backgroundColor: 'rgba(34,197,94,0.2)',
+    backgroundColor: colors.successBg,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: borderRadius.sm,
   },
   badgeText: {
-    color: '#86efac',
+    color: colors.successText,
     fontSize: typography.sizes.xs,
     fontWeight: typography.weights.semibold,
   },
@@ -364,18 +365,18 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: 'rgba(250,250,250,0.35)',
+    borderColor: colors.borderLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   radioSelected: {
-    borderColor: '#fafafa',
+    borderColor: colors.primary,
   },
   radioDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#fafafa',
+    backgroundColor: colors.primary,
   },
   bullets: {
     marginTop: spacing.sm,
@@ -383,7 +384,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   bullet: {
-    color: 'rgba(250,250,250,0.75)',
+    color: colors.textSecondary,
     fontSize: typography.sizes.md,
     lineHeight: 22,
   },
@@ -392,7 +393,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   cta: {
-    backgroundColor: CTA_LIME,
+    backgroundColor: colors.primary,
     borderRadius: borderRadius.lg,
     paddingVertical: spacing.md,
     alignItems: 'center',
@@ -403,12 +404,12 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   ctaText: {
-    color: PAYWALL_BG,
+    color: colors.onPrimaryContrast,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
   },
   disclosure: {
-    color: 'rgba(250,250,250,0.45)',
+    color: colors.textMuted,
     fontSize: typography.sizes.xs,
     textAlign: 'center',
     lineHeight: 16,
@@ -418,8 +419,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   restoreText: {
-    color: 'rgba(250,250,250,0.55)',
+    color: colors.textSecondary,
     fontSize: typography.sizes.sm,
     textDecorationLine: 'underline',
   },
-});
+  });
+}

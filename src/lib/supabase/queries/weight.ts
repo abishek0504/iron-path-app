@@ -77,6 +77,84 @@ export async function insertWeightLog(
   }
 }
 
+/** Max rows returned for the full weight history screen. */
+export const WEIGHT_HISTORY_MAX = 500;
+
+/**
+ * Get full weight history for a user, ordered by recorded_at desc
+ */
+export async function getWeightHistoryAll(userId: string): Promise<WeightLog[]> {
+  return getWeightHistory(userId, WEIGHT_HISTORY_MAX);
+}
+
+/**
+ * Delete a weight log and sync profile.current_weight to the latest remaining entry.
+ */
+export async function deleteWeightLog(
+  userId: string,
+  logId: string,
+): Promise<{ success: boolean; currentWeight: number | null }> {
+  if (__DEV__) {
+    devLog('weight-query', { action: 'deleteWeightLog', userId, logId });
+  }
+
+  try {
+    const { error: deleteError } = await supabase
+      .from('v2_weight_logs')
+      .delete()
+      .eq('id', logId)
+      .eq('user_id', userId);
+
+    if (deleteError) {
+      if (__DEV__) devError('weight-query', deleteError);
+      return { success: false, currentWeight: null };
+    }
+
+    const { data: latestRow, error: latestError } = await supabase
+      .from('v2_weight_logs')
+      .select('weight')
+      .eq('user_id', userId)
+      .order('recorded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestError) {
+      if (__DEV__) devError('weight-query', latestError);
+      return { success: false, currentWeight: null };
+    }
+
+    const currentWeight =
+      latestRow?.weight != null ? Number(latestRow.weight) : null;
+
+    const { error: updateError } = await supabase
+      .from('v2_profiles')
+      .update({
+        current_weight: currentWeight,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (updateError) {
+      if (__DEV__) devError('weight-query', updateError);
+      return { success: false, currentWeight: null };
+    }
+
+    if (__DEV__) {
+      devLog('weight-query', {
+        action: 'deleteWeightLog:done',
+        userId,
+        logId,
+        currentWeight,
+      });
+    }
+
+    return { success: true, currentWeight };
+  } catch (error) {
+    if (__DEV__) devError('weight-query', error);
+    return { success: false, currentWeight: null };
+  }
+}
+
 /**
  * Get weight history for a user, ordered by recorded_at desc
  */

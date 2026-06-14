@@ -76,6 +76,13 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="generate-ai"
+          options={{
+            gestureEnabled: false,
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="(stack)/workout/active"
           options={{ 
             presentation: 'modal', 
@@ -97,6 +104,14 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="workout-reminders"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="appearance"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="weight-history"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
       </Stack>

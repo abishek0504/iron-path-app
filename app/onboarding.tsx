@@ -13,7 +13,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
   ScrollView,
   TextInput,
   Switch,
@@ -44,6 +43,8 @@ import { invalidateTemplates, invalidateTemplate } from '../src/lib/cache/templa
 import { devLog, devError } from '../src/lib/utils/logger';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { useToast } from '../src/hooks/useToast';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { setPendingOnboardingPaywall } from '../src/lib/subscriptions/paywallBridge';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -677,12 +678,7 @@ export default function Onboarding() {
   );
 
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
+    return <LoadingScreen message="Loading..." />;
   }
 
   const isLastStep = currentStep === TOTAL_STEPS;
@@ -728,7 +724,7 @@ export default function Onboarding() {
                 disabled={submitting}
               >
                 {submitting ? (
-                  <ActivityIndicator color={colors.textPrimary} />
+                  <LogoEdgeLoader size="small" variant="inverted" />
                 ) : (
                   <Text style={styles.nextButtonText}>
                     {isLastStep ? 'Complete setup' : 'Next'}

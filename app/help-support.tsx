@@ -11,7 +11,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -24,6 +23,8 @@ import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { supabase } from '../src/lib/supabase/client';
 import { LegalLinks } from '../src/components/ui/LegalLinks';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 
 export default function HelpSupportScreen() {
   const router = useRouter();
@@ -95,7 +96,7 @@ export default function HelpSupportScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top']}>
-        <ActivityIndicator color={colors.primary} size="large" />
+        <LoadingScreen />
       </SafeAreaView>
     );
   }
@@ -166,7 +167,7 @@ export default function HelpSupportScreen() {
             activeOpacity={0.85}
           >
             {sending ? (
-              <ActivityIndicator color={colors.background} />
+              <LogoEdgeLoader size="small" variant="inverted" />
             ) : (
               <Text style={styles.sendButtonText}>Send</Text>
             )}

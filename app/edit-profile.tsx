@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   LayoutAnimation,
   Platform,
@@ -34,6 +33,8 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
@@ -309,7 +310,7 @@ export default function EditProfileScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer} edges={['top']}>
-        <ActivityIndicator color={colors.primary} size="large" />
+        <LoadingScreen />
       </SafeAreaView>
     );
   }
@@ -548,7 +549,7 @@ export default function EditProfileScreen() {
         activeOpacity={0.85}
       >
         {saving ? (
-          <ActivityIndicator color={colors.background} />
+          <LogoEdgeLoader size="small" variant="inverted" />
         ) : (
           <Text style={styles.saveButtonText}>Save</Text>
         )}

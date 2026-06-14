@@ -8,10 +8,11 @@
  */
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Animated } from 'react-native';
+import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { useFocusEffect } from 'expo-router';
 import { Info } from 'lucide-react-native';
-import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
 import { devError, devLog } from '../../lib/utils/logger';
@@ -133,7 +134,7 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
     return (
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <LogoEdgeLoader size="large" />
           <Text style={styles.loadingText}>Loading muscle data...</Text>
         </View>
       </View>
@@ -216,10 +217,10 @@ export const WorkoutHeatmap: React.FC<WorkoutHeatmapProps> = ({
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
-      paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
+      paddingHorizontal: 0,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+    },
   title: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
@@ -249,15 +250,14 @@ function createStyles(colors: ThemeColors) {
   },
   heatmapContainer: {
     alignItems: 'center',
-    marginVertical: spacing.lg,
+    marginVertical: spacing.sm,
   },
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     minHeight: 44,
-    marginTop: spacing.sm,
-    marginRight: -spacing.sm,
+    marginTop: spacing.xs,
   },
   footerSpacer: {
     flex: 1,

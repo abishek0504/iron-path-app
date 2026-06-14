@@ -4,7 +4,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity, RefreshControl } from 'react-native';
+import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, {
@@ -55,6 +56,10 @@ const DAY_ORDER: Record<string, number> = {
   Friday: 5,
   Saturday: 6,
 };
+
+/** Workout tab loading header (day title + greeting) — balances loader on tab screens. */
+const WORKOUT_LOADING_HEADER_HEIGHT =
+  spacing.md + spacing.sm + typography.sizes['2xl'] + spacing.xs + typography.sizes.xs + 8;
 
 function getTodayDayName(): string {
   const dayIndex = new Date().getDay();
@@ -148,7 +153,7 @@ const CircularButton = ({
         )}
         {disabled && !isCompleted && (
           <Svg width={164} height={164} style={styles.gradientBorderSvg} pointerEvents="none">
-            <Circle cx="82" cy="82" r="80" fill="none" stroke={colors.borderLight} strokeWidth="2" />
+            <Circle cx="82" cy="82" r="80" fill="none" stroke={colors.workoutDisabledRing} strokeWidth="2" />
           </Svg>
         )}
         <Pressable
@@ -934,10 +939,12 @@ export default function WorkoutTab() {
             <Text style={styles.greetingText}>{getGreeting()}</Text>
           </View>
         </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading workout...</Text>
-        </View>
+        <LoadingScreen
+          message="Loading workout..."
+          style={styles.loadingContainer}
+          centerInViewport
+          chrome={{ top: WORKOUT_LOADING_HEADER_HEIGHT }}
+        />
       </SafeAreaView>
     );
   }
@@ -997,7 +1004,7 @@ export default function WorkoutTab() {
             ) : isRestDay ? (
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
                 <View style={styles.restDayIconContainer}>
-                  <Timer size={40} color={colors.accentCyanBright} />
+                  <Timer size={40} color={colors.workoutRestTitle} />
                 </View>
                 <Text style={styles.restDayTitle}>Rest Day</Text>
                 <Text style={styles.restDayText}>Take it easy!</Text>
@@ -1188,8 +1195,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     left: -100,
     width: 500,
     height: 500,
-    backgroundColor: colors.primaryDark,
-    opacity: 0.1,
+    backgroundColor: colors.workoutGlowPrimary,
     borderRadius: 250,
   },
   glowBottom: {
@@ -1198,8 +1204,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     right: -100,
     width: 400,
     height: 400,
-    backgroundColor: colors.accentCyan,
-    opacity: 0.1,
+    backgroundColor: colors.workoutGlowAccent,
     borderRadius: 200,
   },
   scrollView: {
@@ -1240,6 +1245,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     alignItems: 'center',
+    shadowColor: colors.workoutCardShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 3,
   },
   iconContainer: {
     marginBottom: spacing.md,
@@ -1260,13 +1270,13 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: colors.accentCyanMuted,
+    backgroundColor: colors.workoutRestIconBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,
   },
   restDayTitle: {
-    color: colors.accentCyanBright,
+    color: colors.workoutRestTitle,
     fontSize: typography.sizes.xl,
     fontWeight: '700',
     marginBottom: spacing.md,
@@ -1287,6 +1297,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.cardBorder,
+    shadowColor: colors.workoutCardShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 3,
   },
   workoutCardContent: {
     backgroundColor: colors.card,
@@ -1305,12 +1320,12 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     flex: 1,
   },
   badgePrimary: {
-    backgroundColor: 'rgba(163, 230, 53, 0.2)',
+    backgroundColor: colors.workoutBadgePrimaryBg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
     borderWidth: 1,
-    borderColor: 'rgba(163, 230, 53, 0.2)',
+    borderColor: colors.workoutBadgePrimaryBorder,
   },
   badgePrimaryText: {
     color: colors.primary,
@@ -1320,12 +1335,12 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     textTransform: 'uppercase',
   },
   badgeSecondary: {
-    backgroundColor: 'rgba(39, 39, 42, 0.4)',
+    backgroundColor: colors.workoutBadgeSecondaryBg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
     borderWidth: 1,
-    borderColor: 'rgba(63, 63, 70, 0.3)',
+    borderColor: colors.workoutBadgeSecondaryBorder,
   },
   badgeSecondaryText: {
     color: colors.textSecondary,
@@ -1338,11 +1353,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(39, 39, 42, 0.6)',
+    backgroundColor: colors.workoutControlSurface,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: colors.cardBorder,
   },
   workoutTitle: {
     fontSize: typography.sizes.xl,
@@ -1369,7 +1384,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(163, 230, 53, 0.2)',
+    backgroundColor: colors.workoutIconTintBg,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
@@ -1393,7 +1408,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     flex: 1,
   },
   todayOnlyTag: {
-    backgroundColor: 'rgba(163, 230, 53, 0.2)',
+    backgroundColor: colors.workoutIconTintBg,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: borderRadius.sm,
@@ -1430,8 +1445,8 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.full,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.card,
+    borderColor: colors.workoutBadgePrimaryBorder,
+    backgroundColor: colors.workoutBadgePrimaryBg,
   },
   planDayChangeText: {
     color: colors.primary,
@@ -1497,11 +1512,10 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   circularButtonDisabled: {
     backgroundColor: 'transparent',
     borderWidth: 2,
-    borderColor: colors.borderLight,
+    borderColor: colors.workoutDisabledRing,
     shadowColor: 'transparent',
     shadowOpacity: 0,
     elevation: 0,
-    opacity: 0.5,
   },
   circularButtonInner: {
     width: 140,
@@ -1515,8 +1529,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     backgroundColor: colors.card,
   },
   circularButtonInnerDisabled: {
-    backgroundColor: colors.cardHover,
-    opacity: 0.6,
+    backgroundColor: colors.workoutDisabledFill,
   },
   circularButtonTextContainer: {
     width: '100%',
@@ -1537,12 +1550,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontWeight: '700',
   },
   circularButtonTextDisabled: {
-    color: colors.textMuted,
-    opacity: 0.7,
+    color: colors.workoutDisabledText,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: colors.modalBackdropTint,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
@@ -1579,8 +1591,8 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     padding: spacing.md,
     borderRadius: borderRadius.md,
     borderWidth: 1,
-    borderColor: colors.borderLight,
-    backgroundColor: 'rgba(39, 39, 42, 0.5)',
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.workoutControlSurface,
     alignItems: 'center',
     justifyContent: 'center',
   },

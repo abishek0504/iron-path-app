@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  ActivityIndicator,
   Image,
   useWindowDimensions,
 } from 'react-native';
@@ -26,6 +25,8 @@ import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { useToast } from '../src/hooks/useToast';
 import { tryRandomPaywallFromOutside } from '../src/lib/subscriptions/paywallBridge';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { useDateContext } from '../src/hooks/useDateContext';
 import { selectExerciseTargets } from '../src/lib/engine/targetSelection';
 import {
@@ -673,9 +674,7 @@ export default function AddExerciseEditScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <LoadingScreen style={styles.centered} />
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           {heroImage ? (
@@ -816,7 +815,7 @@ export default function AddExerciseEditScreen() {
                 disabled={removing}
               >
                 {removing ? (
-                  <ActivityIndicator size="small" color={colors.error} />
+                  <LogoEdgeLoader size="small" />
                 ) : (
                   <Text style={styles.removeFromRoutineBtnText}>Remove from routine</Text>
                 )}
@@ -827,7 +826,7 @@ export default function AddExerciseEditScreen() {
                 disabled={saving || !setsValid}
               >
                 {savingAction === 'editSlot' ? (
-                  <ActivityIndicator size="small" color={colors.background} />
+                  <LogoEdgeLoader size="small" variant="inverted" />
                 ) : (
                   <Text style={styles.primaryBtnText}>Done</Text>
                 )}
@@ -842,7 +841,7 @@ export default function AddExerciseEditScreen() {
                   disabled={saving || !setsValid}
                 >
                   {savingAction === 'dayOnly' ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
+                    <LogoEdgeLoader size="small" />
                   ) : (
                     <Text style={styles.secondaryBtnText}>
                       {dateContext.isToday ? 'Add to today only' : `Add to this ${dayName} only`}
@@ -856,7 +855,7 @@ export default function AddExerciseEditScreen() {
                 disabled={saving || !setsValid}
               >
                 {savingAction === 'routine' ? (
-                  <ActivityIndicator size="small" color={colors.background} />
+                  <LogoEdgeLoader size="small" variant="inverted" />
                 ) : (
                   <Text style={styles.primaryBtnText}>Add to routine (repeats weekly)</Text>
                 )}
@@ -907,7 +906,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   heroImage: {
     width: '100%',
     borderRadius: borderRadius.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.cardBackground,
     marginBottom: spacing.md,
   },
   heroPlaceholder: {

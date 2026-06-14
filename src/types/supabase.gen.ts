@@ -885,6 +885,91 @@ export type Database = {
         }
         Relationships: []
       }
+      v2_workout_preset_slots: {
+        Row: {
+          created_at: string
+          custom_exercise_id: string | null
+          exercise_id: string | null
+          id: string
+          notes: string | null
+          preset_id: string
+          rest_sec: number | null
+          sort_order: number
+          superset_group: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          custom_exercise_id?: string | null
+          exercise_id?: string | null
+          id?: string
+          notes?: string | null
+          preset_id: string
+          rest_sec?: number | null
+          sort_order: number
+          superset_group?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          custom_exercise_id?: string | null
+          exercise_id?: string | null
+          id?: string
+          notes?: string | null
+          preset_id?: string
+          rest_sec?: number | null
+          sort_order?: number
+          superset_group?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "v2_workout_preset_slots_custom_exercise_id_fkey"
+            columns: ["custom_exercise_id"]
+            isOneToOne: false
+            referencedRelation: "v2_user_custom_exercises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "v2_workout_preset_slots_exercise_id_fkey"
+            columns: ["exercise_id"]
+            isOneToOne: false
+            referencedRelation: "v2_exercises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "v2_workout_preset_slots_preset_id_fkey"
+            columns: ["preset_id"]
+            isOneToOne: false
+            referencedRelation: "v2_workout_presets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v2_workout_presets: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       v2_workout_sessions: {
         Row: {
           completed_at: string | null

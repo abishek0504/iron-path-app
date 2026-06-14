@@ -3,28 +3,21 @@
  * Displays current weight, loss metrics, and a line chart of weight over time
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
+  Pressable,
   LayoutAnimation,
   Platform,
   UIManager,
   ScrollView,
 } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withDelay,
-  Easing,
-} from 'react-native-reanimated';
 import { Picker } from '@react-native-picker/picker';
-import Svg, { Path, G } from 'react-native-svg';
 import { Scale } from 'lucide-react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -36,12 +29,14 @@ import {
   invalidateProfileCache,
 } from '../../lib/cache/dashboardStatsCache';
 import { insertWeightLog } from '../../lib/supabase/queries/weight';
+import { aggregateWeightLogsByDay, computeWeightMetrics } from '../../lib/utils/weightChart';
 import { BottomSheet } from './BottomSheet';
+import { LogoEdgeLoader } from './LogoEdgeLoader';
+import { WeightTrendChart } from './WeightTrendChart';
+import { devLog } from '../../lib/utils/logger';
 import type { WeightLog } from '../../lib/supabase/queries/weight';
 
 const CHART_HEIGHT = 160;
-const CHART_VIEWBOX = { width: 300, height: 100 };
-const CHART_PAD = { left: 44, right: 12, top: 12, bottom: 8 };
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -50,10 +45,12 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 interface WeightTrackerCardProps {
   userId: string;
   onRefresh?: () => void;
+  /** Increment to re-fetch weight history (e.g. after Health sync). */
+  refreshSignal?: number;
 }
 
-
-export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps) {
+export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTrackerCardProps) {
+  const router = useRouter();
   const colors = useTheme();
   const profile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
@@ -70,15 +67,23 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
   const currentWeight = profile?.current_weight ?? null;
   const unitsLabel = useImperial ? 'lbs' : 'kg';
 
-  const chartSlideY = useSharedValue(CHART_HEIGHT);
-  const chartOpacity = useSharedValue(0);
-  const hasAnimatedRef = useRef(false);
-
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
       const logs = await getWeightHistoryCached(userId);
       setHistory(logs);
+
+      if (__DEV__ && logs.length > 0) {
+        const sorted = [...logs].sort(
+          (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
+        );
+        devLog('weight-chart', {
+          action: 'loadHistory',
+          pointCount: logs.length,
+          dateStart: sorted[0].recorded_at,
+          dateEnd: sorted[sorted.length - 1].recorded_at,
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -88,6 +93,18 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
     loadHistory();
   }, [loadHistory]);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadHistory();
+    }, [loadHistory]),
+  );
+
+  useEffect(() => {
+    if (refreshSignal !== undefined && refreshSignal > 0) {
+      loadHistory();
+    }
+  }, [refreshSignal, loadHistory]);
+
   useEffect(() => {
     if (currentWeight != null) {
       setSelectedWeight(Math.round(currentWeight));
@@ -96,80 +113,11 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
     }
   }, [currentWeight, useImperial]);
 
-  const sortedByDate = useMemo(() => {
-    return [...history].sort(
-      (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
-    );
-  }, [history]);
-
-  const metrics = useMemo(() => {
-    const current = currentWeight ?? (sortedByDate.length ? sortedByDate[sortedByDate.length - 1].weight : null);
-    const first = sortedByDate.length ? sortedByDate[0].weight : null;
-
-    if (current == null || first == null) {
-      return null;
-    }
-
-    const lost = first - current;
-    const pct = first > 0 ? (lost / first) * 100 : 0;
-    return { current, first, lost, pct };
-  }, [currentWeight, sortedByDate]);
-
-  const chartData = useMemo(() => {
-    if (sortedByDate.length < 2) return null;
-
-    const weights = sortedByDate.map((l) => l.weight);
-    const minW = Math.min(...weights);
-    const maxW = Math.max(...weights);
-    const range = maxW - minW || 1;
-    const padding = range * 0.1;
-    const chartMin = minW - padding;
-    const chartMax = maxW + padding;
-    const chartRange = chartMax - chartMin;
-
-    const w = CHART_VIEWBOX.width - CHART_PAD.left - CHART_PAD.right;
-    const h = CHART_VIEWBOX.height - CHART_PAD.top - CHART_PAD.bottom;
-
-    const points = sortedByDate.map((log, i) => {
-      const x = CHART_PAD.left + (i / Math.max(1, sortedByDate.length - 1)) * w;
-      const y = CHART_PAD.top + h - ((log.weight - chartMin) / chartRange) * h;
-      return `${x},${y}`;
-    });
-
-    const pathD = `M ${points.join(' L ')}`;
-    const firstDate = sortedByDate[0].recorded_at;
-    const lastDate = sortedByDate[sortedByDate.length - 1].recorded_at;
-
-    const formatDate = (iso: string) => {
-      const d = new Date(iso);
-      const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-      if (d.getFullYear() !== new Date().getFullYear()) opts.year = '2-digit';
-      return d.toLocaleDateString('en-US', opts);
-    };
-
-    return {
-      pathD,
-      yMin: chartMin,
-      yMax: chartMax,
-      xLabelStart: formatDate(firstDate),
-      xLabelEnd: formatDate(lastDate),
-    };
-  }, [sortedByDate]);
-
-  useEffect(() => {
-    if (history.length >= 2 && !hasAnimatedRef.current) {
-      hasAnimatedRef.current = true;
-      chartSlideY.value = CHART_HEIGHT;
-      chartOpacity.value = 0;
-      chartSlideY.value = withDelay(150, withTiming(0, { duration: 450, easing: Easing.out(Easing.cubic) }));
-      chartOpacity.value = withDelay(150, withTiming(1, { duration: 350 }));
-    }
-  }, [history.length]);
-
-  const chartAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: chartSlideY.value }],
-    opacity: chartOpacity.value,
-  }));
+  const chartLogs = useMemo(() => aggregateWeightLogsByDay(history), [history]);
+  const metrics = useMemo(
+    () => computeWeightMetrics(currentWeight, chartLogs),
+    [currentWeight, chartLogs],
+  );
 
   const handleUpdateWeight = async () => {
     setShowWeightPicker(false);
@@ -236,7 +184,7 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
       opacity: 0.7,
     },
     updateButtonText: {
-      color: colors.background,
+      color: colors.onPrimaryContrast,
       fontSize: typography.sizes.sm,
       fontWeight: typography.weights.semibold,
     },
@@ -251,7 +199,7 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
     },
     metricValue: {
       color: colors.textPrimary,
-      fontSize: 30,
+      fontSize: typography.sizes['2xl'],
       fontWeight: typography.weights.bold,
       flexShrink: 1,
     },
@@ -259,48 +207,27 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
       flexShrink: 1,
       minWidth: 0,
       maxWidth: '48%',
+      gap: spacing.xs,
+    },
+    metricDelta: {
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
     },
     metricPositive: {
-      color: colors.success,
+      color: colors.successText,
     },
     metricNegative: {
-      color: colors.warning,
+      color: colors.warningText,
     },
     percentText: {
-      fontSize: typography.sizes.base,
+      fontSize: typography.sizes.sm,
       fontWeight: typography.weights.medium,
-      color: colors.textSecondary,
+      color: colors.textMuted,
     },
     chartContainer: {
       height: CHART_HEIGHT,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    chartWrapper: {
-      overflow: 'hidden',
-      gap: spacing.xs,
-    },
-    chartWithAxes: {
-      flexDirection: 'row',
-      alignItems: 'stretch',
-    },
-    yAxisLabels: {
-      width: 48,
-      height: CHART_HEIGHT - 32,
-      justifyContent: 'space-between',
-    },
-    xAxisLabels: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      paddingHorizontal: CHART_PAD.left + 4,
-    },
-    axisLabel: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.xs,
-    },
-    chartSvg: {
-      flex: 1,
-      overflow: 'visible',
     },
     emptyState: {
       paddingVertical: spacing.xl,
@@ -337,7 +264,7 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
       alignItems: 'center',
     },
     confirmButtonText: {
-      color: colors.background,
+      color: colors.onPrimaryContrast,
       fontSize: typography.sizes.base,
       fontWeight: typography.weights.semibold,
     },
@@ -346,17 +273,22 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <View style={styles.titleRow}>
+        <Pressable
+          style={styles.titleRow}
+          onPress={() => router.push('/weight-history')}
+          accessibilityRole="button"
+          accessibilityLabel="Open weight history"
+        >
           <Scale size={20} color={colors.primary} />
           <Text style={styles.cardTitle}>Weight Tracker</Text>
-        </View>
+        </Pressable>
         <TouchableOpacity
           style={[styles.updateButton, saving && styles.updateButtonDisabled]}
           onPress={() => setShowWeightPicker(true)}
           disabled={saving}
         >
           {saving ? (
-            <ActivityIndicator size="small" color={colors.background} />
+            <LogoEdgeLoader size="small" variant="inverted" />
           ) : (
             <Text style={styles.updateButtonText}>Update weight</Text>
           )}
@@ -365,7 +297,7 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
 
       {loading ? (
         <View style={styles.chartContainer}>
-          <ActivityIndicator size="small" color={colors.primary} />
+          <LogoEdgeLoader size="small" />
         </View>
       ) : currentWeight == null && history.length === 0 ? (
         <View style={styles.emptyState}>
@@ -381,61 +313,36 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
                 {(currentWeight ?? 0).toFixed(1)} {unitsLabel}
               </Text>
             </View>
-            {metrics && history.length > 1 && (
+            {metrics && chartLogs.length > 1 && (
               <View style={styles.metricBlock}>
                 <Text style={styles.metricLabel}>
                   {metrics.lost >= 0 ? 'Lost' : 'Gained'}
                 </Text>
                 <Text
                   style={[
-                    styles.metricValue,
+                    styles.metricDelta,
                     metrics.lost >= 0 ? styles.metricPositive : styles.metricNegative,
                   ]}
                 >
                   {Math.abs(metrics.lost).toFixed(1)} {unitsLabel}
-                  {metrics.pct !== 0 && (
-                    <Text style={styles.percentText}>
-                      {' '}
-                      ({metrics.pct >= 0 ? '' : '+'}
-                      {(-metrics.pct).toFixed(1)}%)
-                    </Text>
-                  )}
                 </Text>
+                {metrics.pct !== 0 ? (
+                  <Text style={styles.percentText}>
+                    {metrics.pct >= 0 ? '' : '+'}
+                    {(-metrics.pct).toFixed(1)}% since first log
+                  </Text>
+                ) : null}
               </View>
             )}
           </View>
 
-          {history.length >= 2 && chartData && (
-            <Animated.View style={[styles.chartWrapper, chartAnimatedStyle]}>
-              <View style={styles.chartWithAxes}>
-                <View style={styles.yAxisLabels}>
-                  <Text style={styles.axisLabel}>{chartData.yMax.toFixed(0)} {unitsLabel}</Text>
-                  <Text style={styles.axisLabel}>{chartData.yMin.toFixed(0)} {unitsLabel}</Text>
-                </View>
-                <Svg
-                  width="100%"
-                  height={CHART_HEIGHT - 24}
-                  viewBox={`0 0 ${CHART_VIEWBOX.width} ${CHART_VIEWBOX.height}`}
-                  preserveAspectRatio="xMidYMid meet"
-                  style={styles.chartSvg}
-                >
-                  <G>
-                    <Path
-                      d={chartData.pathD}
-                      fill="none"
-                      stroke={colors.primary}
-                      strokeWidth={1.5}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </G>
-                </Svg>
-              </View>
-              <View style={styles.xAxisLabels}>
-                <Text style={styles.axisLabel}>{chartData.xLabelStart}</Text>
-                <Text style={styles.axisLabel}>{chartData.xLabelEnd}</Text>
-              </View>
-            </Animated.View>
+          {chartLogs.length >= 1 && (
+            <WeightTrendChart
+              logs={history}
+              useImperial={useImperial}
+              height={CHART_HEIGHT}
+              animated
+            />
           )}
         </>
       )}
@@ -480,4 +387,3 @@ export function WeightTrackerCard({ userId, onRefresh }: WeightTrackerCardProps)
     </View>
   );
 }
-

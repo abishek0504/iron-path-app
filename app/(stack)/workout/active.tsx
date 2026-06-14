@@ -14,7 +14,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
   TextInput,
   ScrollView,
   Keyboard,
@@ -44,6 +43,8 @@ import {
 } from '../../../src/lib/supabase/queries/workouts';
 import { invalidateSessionsInRangeForUser } from '../../../src/lib/cache/sessionsCache';
 import { tryRandomPaywallFromOutside } from '../../../src/lib/subscriptions/paywallBridge';
+import { LogoEdgeLoader } from '../../../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../../../src/components/ui/LoadingScreen';
 import { invalidateMuscleFreshnessCache } from '../../../src/lib/cache/muscleFreshnessCache';
 import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
@@ -1101,10 +1102,7 @@ export default function ActiveWorkoutScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading workout...</Text>
-        </View>
+        <LoadingScreen message="Loading workout..." style={styles.loadingContainer} />
       </SafeAreaView>
     );
   }
@@ -1536,7 +1534,7 @@ export default function ActiveWorkoutScreen() {
 
             {isCompleting ? (
               <View style={styles.finishButton}>
-                <ActivityIndicator size="small" color={colors.background} />
+                <LogoEdgeLoader size="small" variant="inverted" />
                 <Text style={styles.finishText}>Saving…</Text>
               </View>
             ) : (
@@ -1787,7 +1785,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   overflowOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.modalBackdropTint,
     justifyContent: 'flex-start',
     alignItems: 'flex-end',
     paddingTop: spacing.xl + 56,
@@ -2062,7 +2060,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   reorderOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: colors.modalBackdropTint,
     justifyContent: 'center',
     padding: spacing.lg,
   },

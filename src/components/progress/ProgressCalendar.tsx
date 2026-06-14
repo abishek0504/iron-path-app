@@ -315,11 +315,11 @@ function createStyles(colors: ThemeColors) {
   },
   dateCellToday: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+    backgroundColor: colors.primarySubtleBg,
   },
   dateCellSelected: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(163, 230, 53, 0.2)',
+    backgroundColor: colors.primarySelectedBg,
   },
   dateCellWithSession: {
     borderColor: colors.primaryDark,
@@ -370,11 +370,11 @@ function createStyles(colors: ThemeColors) {
   },
   weekListItemToday: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(163, 230, 53, 0.1)',
+    backgroundColor: colors.primarySubtleBg,
   },
   weekListItemSelected: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(163, 230, 53, 0.2)',
+    backgroundColor: colors.primarySelectedBg,
   },
   weekListItemContent: {
     flexDirection: 'row',
@@ -404,7 +404,7 @@ function createStyles(colors: ThemeColors) {
     borderRadius: borderRadius.full,
   },
   weekListItemBadgeText: {
-    color: '#000',
+    color: colors.onPrimaryContrast,
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.semibold,
   },

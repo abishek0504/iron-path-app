@@ -12,7 +12,6 @@ import {
   TouchableOpacity,
   FlatList,
   TextInput,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -23,6 +22,7 @@ import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../src/lib/utils/logger';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 
 function formatMuscles(muscles: string[] | undefined): string {
   if (!muscles?.length) return '';
@@ -157,9 +157,7 @@ export default function AddExerciseScreen() {
           <Text style={styles.emptyText}>Loading profile…</Text>
         </View>
       ) : loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <LoadingScreen style={styles.centered} />
       ) : (
         <FlatList
           data={filtered}

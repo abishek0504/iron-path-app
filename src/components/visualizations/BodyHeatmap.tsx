@@ -35,6 +35,24 @@ import {
   SLUG_TO_LABEL,
 } from '../../lib/constants/muscleHeatmapSlugs';
 
+/** Intensity 1 = neutral/untracked; 2–5 = fatigue bands (see freshnessToIntensity). */
+const HEATMAP_NEUTRAL_INTENSITY = 1;
+
+/** Library-only slugs with no v2_muscles mapping — still themed instead of hardcoded gray. */
+const HEATMAP_DECORATIVE_SLUGS = [
+  'head',
+  'neck',
+  'hands',
+  'feet',
+  'hair',
+  'knees',
+  'ankles',
+] as const;
+
+const ALL_HEATMAP_SLUGS = [
+  ...new Set([...Object.keys(SLUG_TO_MUSCLE_KEYS), ...HEATMAP_DECORATIVE_SLUGS]),
+];
+
 type BodySide = 'front' | 'back';
 
 interface BodyHeatmapProps {
@@ -47,10 +65,10 @@ interface BodyHeatmapProps {
 
 function freshnessToIntensity(freshness: number | null | undefined): number | null {
   if (freshness === null || freshness === undefined) return null;
-  if (freshness >= 81) return 1; // fully recovered
-  if (freshness >= 61) return 2; // light fatigue
-  if (freshness >= 31) return 3; // moderate fatigue
-  return 4; // fully fatigued
+  if (freshness >= 81) return 2;
+  if (freshness >= 61) return 3;
+  if (freshness >= 31) return 4;
+  return 5;
 }
 
 export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
@@ -63,12 +81,21 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const heatIntensityColors = useMemo(
-    () => [colors.success, colors.warningText, colors.heatAccent, colors.error] as string[],
+    () =>
+      [
+        colors.heatmapBodyDefault,
+        colors.heatmapFullyRecovered,
+        colors.heatmapLightFatigue,
+        colors.heatmapModerateFatigue,
+        colors.heatmapFullyFatigued,
+      ] as string[],
     [colors],
   );
 
   const intensityToColor = useCallback(
-    (intensity: number) => heatIntensityColors[Math.min(intensity - 1, 3)] ?? heatIntensityColors[0],
+    (intensity: number) =>
+      heatIntensityColors[Math.min(Math.max(intensity - 1, 0), heatIntensityColors.length - 1)] ??
+      heatIntensityColors[0],
     [heatIntensityColors],
   );
 
@@ -82,7 +109,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   const gender: 'male' | 'female' =
     (profile?.gender?.toLowerCase() === 'female' ? 'female' : 'male');
 
-  const bodyData: Array<{ slug: string; intensity: number; avgFreshness: number }> = useMemo(() => {
+  const trackedBodyData: Array<{ slug: string; intensity: number; avgFreshness: number }> = useMemo(() => {
     const slugToFreshnessSum = new Map<string, { sum: number; count: number }>();
 
     for (const [muscleKey, freshness] of Object.entries(freshnessData)) {
@@ -120,6 +147,16 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
 
     return parts;
   }, [freshnessData]);
+
+  /** Full slug set for SVG — untracked regions use neutral theme fill instead of library gray. */
+  const bodyRenderData = useMemo(() => {
+    const trackedSlugs = new Set(trackedBodyData.map((part) => part.slug));
+    const neutralParts = ALL_HEATMAP_SLUGS.filter((slug) => !trackedSlugs.has(slug)).map((slug) => ({
+      slug,
+      intensity: HEATMAP_NEUTRAL_INTENSITY,
+    }));
+    return [...trackedBodyData, ...neutralParts];
+  }, [trackedBodyData]);
 
   const detailMuscles = useMemo(() => {
     if (!selectedSlug) return [];
@@ -162,11 +199,11 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
               Full heatmap on mobile (dev build). Web and Expo Go are for preview.
             </Text>
             <Text style={styles.expoGoListTitle}>Muscle freshness</Text>
-            {bodyData.length === 0 ? (
+            {trackedBodyData.length === 0 ? (
               <Text style={styles.expoGoListEmpty}>No muscle data in this view.</Text>
             ) : (
               <View style={styles.expoGoListGrid}>
-                {bodyData.map(({ slug, intensity, avgFreshness }) => (
+                {trackedBodyData.map(({ slug, intensity, avgFreshness }) => (
                   <View key={slug} style={styles.expoGoListCell}>
                     <View
                       style={[
@@ -187,12 +224,12 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
           </ScrollView>
         ) : (
           <Body
-            data={bodyData.map(({ slug, intensity }) => ({ slug, intensity })) as any}
+            data={bodyRenderData.map(({ slug, intensity }) => ({ slug, intensity })) as any}
             side={side}
             gender={gender}
             scale={1.2}
             colors={heatIntensityColors}
-            border={colors.borderLight}
+            border={colors.heatmapBodyBorder}
             onBodyPartPress={(bodyPart) => setSelectedSlug(bodyPart.slug ?? null)}
           />
         )}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
@@ -97,7 +98,7 @@ export default function ForgotPasswordScreen() {
           activeOpacity={0.85}
         >
           {sending ? (
-            <ActivityIndicator color={colors.background} />
+            <LogoEdgeLoader size="small" variant="inverted" />
           ) : (
             <Text style={styles.buttonText}>Send reset link</Text>
           )}

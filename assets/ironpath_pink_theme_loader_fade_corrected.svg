@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="IronPath pink theme loader fade">
+  <defs>
+    <radialGradient id="cardbg" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f4f4f5"/>
+    </radialGradient>
+    <style>
+      #ironpath-whole-fade {
+        animation: ironpathWholeFade 1.8s ease-in-out infinite;
+      }
+      @keyframes ironpathWholeFade {
+        0%, 100% { opacity: 0.35; filter: brightness(0.92); }
+        50% { opacity: 1; filter: brightness(1.16); }
+      }
+    </style>
+  </defs>
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <rect x="46" y="46" width="932" height="932" rx="210" fill="url(#cardbg)"/>
+  <g id="ironpath-whole-fade" fill-rule="nonzero">
+    <path id="shape-01-top-i" d="M 370.73 280.91 L 482.60 280.91 L 426.26 478.52 L 315.20 479.34 Z" fill="#ff2ea6"/>
+    <path id="shape-02-left-inner" d="M 254.78 419.73 L 282.54 419.73 L 237.63 564.26 L 209.86 564.26 Z" fill="#ff2ea6"/>
+    <path id="shape-03-left-mid" d="M 213.13 430.34 L 240.89 429.52 L 205.78 543.03 L 178.83 543.03 Z" fill="#ff2ea6"/>
+    <path id="shape-04-left-outer" d="M 169.03 460.56 L 193.53 460.56 L 176.38 516.90 L 151.07 516.90 Z" fill="#ff2ea6"/>
+    <path id="shape-05-bottom-i" d="M 306.22 508.73 L 418.09 508.73 L 352.77 739.01 L 241.71 739.01 Z" fill="#ff2ea6"/>
+    <path id="shape-06-bottom-p" d="M 507.10 739.01 L 399.31 739.01 L 465.45 506.28 L 766.78 506.28 L 749.63 562.63 L 730.85 574.88 L 713.70 583.04 L 687.57 591.21 L 665.52 594.48 L 549.56 594.48 Z" fill="#a3e635"/>
+    <path id="shape-07-right-inner" d="M 759.43 558.55 L 798.62 431.97 L 824.75 431.16 L 785.56 557.73 Z" fill="#ff2ea6"/>
+    <path id="shape-08-right-mid" d="M 799.44 544.66 L 828.02 453.21 L 852.52 453.21 L 823.94 544.66 Z" fill="#ff2ea6"/>
+    <path id="shape-09-right-outer" d="M 841.08 520.98 L 853.33 481.79 L 872.93 481.79 L 861.50 520.17 Z" fill="#ff2ea6"/>
+    <path id="shape-10-top-p" d="M 526.70 280.91 L 716.15 280.91 L 739.01 284.17 L 759.43 290.70 L 789.64 308.67 L 805.97 325.00 L 815.77 339.70 L 825.57 362.56 L 829.65 383.80 L 829.65 405.03 L 827.20 422.99 L 792.91 424.63 L 775.76 479.34 L 693.28 479.34 L 702.26 466.27 L 709.61 449.94 L 712.88 435.24 L 712.88 422.18 L 706.35 401.76 L 691.65 387.06 L 672.87 380.53 L 498.12 380.53 Z" fill="#a3e635"/>
+  </g>
+</svg>

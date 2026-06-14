@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
+import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, RotateCcw, Activity, Calendar, CalendarCheck, BarChart2, Flame, Trophy, Clock, Heart, CheckCircle2 } from 'lucide-react-native';
 import { spacing, layout, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
-import { TabHeader } from '../../src/components/ui/TabHeader';
+import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
 import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
@@ -19,13 +21,15 @@ import {
   getCachedTopPRsCached,
   getRecentSessionsCached,
   getUserProfileCached,
+  invalidateWeightCache,
+  invalidateProfileCache,
 } from '../../src/lib/cache/dashboardStatsCache';
 import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
 import { WorkoutHeatmap } from '../../src/components/workout/WorkoutHeatmap';
 import { WeightTrackerCard } from '@/components/ui/WeightTrackerCard';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
-import { isAppleHealthConnected } from '../../src/lib/health/healthIntegration';
+import { isAppleHealthConnected, syncBodyMassWithHealth } from '../../src/lib/health/healthIntegration';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
 const LBS_PER_KG = 2.20462;
@@ -57,10 +61,40 @@ export default function DashboardTab() {
   const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [healthConnected, setHealthConnected] = useState(false);
+  const [weightRefreshKey, setWeightRefreshKey] = useState(0);
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
+  const hasLoadedOnceRef = useRef(false);
 
   const FOCUS_RELOAD_THROTTLE_MS = 4000;
+
+  const runBackgroundWeightSync = useCallback(
+    async (userId: string) => {
+      if (!isAppleHealthConnected()) return;
+      try {
+        const { imported, exported } = await syncBodyMassWithHealth(userId);
+        if (imported > 0 || exported > 0) {
+          invalidateWeightCache(userId);
+          invalidateProfileCache(userId);
+          setWeightRefreshKey((k) => k + 1);
+          const updatedProfile = await getUserProfileCached(userId);
+          if (updatedProfile) setProfile(updatedProfile);
+        }
+        if (__DEV__) {
+          devLog('profile-dashboard', {
+            action: 'healthWeightSync:done',
+            imported,
+            exported,
+          });
+        }
+      } catch (error) {
+        if (__DEV__) {
+          devError('profile-dashboard', error, { action: 'healthWeightSync' });
+        }
+      }
+    },
+    [setProfile],
+  );
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
@@ -93,14 +127,14 @@ export default function DashboardTab() {
   const load = useCallback(async () => {
     if (loadInFlightRef.current) return;
     loadInFlightRef.current = true;
-    setLoading(true);
+    const isInitialLoad = !hasLoadedOnceRef.current;
+    if (isInitialLoad) setLoading(true);
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const userId = session?.user?.id;
       if (!userId) {
-        loadInFlightRef.current = false;
         showToast('Please log in', 'error');
         router.replace('/login');
         return;
@@ -135,7 +169,8 @@ export default function DashboardTab() {
           name: 'Exercise',
         }))
       );
-      setLoading(false);
+      hasLoadedOnceRef.current = true;
+      if (isInitialLoad) setLoading(false);
       setShowHeatmap(true);
 
       // Phase 2: fill in PR names (no loading gate; UI already visible)
@@ -180,7 +215,7 @@ export default function DashboardTab() {
       }
       showToast('Failed to load dashboard', 'error');
     } finally {
-      setLoading(false);
+      if (isInitialLoad) setLoading(false);
       loadInFlightRef.current = false;
     }
   }, [profile, router, setProfile, showToast, today]);
@@ -195,12 +230,16 @@ export default function DashboardTab() {
       // Cheap synchronous permission check — refresh on every focus so the
       // card flips to "Connected" right after returning from health-connect.
       setHealthConnected(isAppleHealthConnected());
+      const userId = profile?.id;
+      if (userId && isAppleHealthConnected()) {
+        void runBackgroundWeightSync(userId);
+      }
       const now = Date.now();
       if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
       lastFocusLoadRef.current = now;
       load();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [load])
+    }, [load, profile?.id, runBackgroundWeightSync])
   );
 
   /**
@@ -213,20 +252,29 @@ export default function DashboardTab() {
     loadInFlightRef.current = false;
     lastFocusLoadRef.current = 0;
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const userId = session?.user?.id ?? profile?.id;
+      if (userId && isAppleHealthConnected()) {
+        void runBackgroundWeightSync(userId);
+      }
       await load();
     } finally {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, load]);
+  }, [isRefreshing, load, profile?.id, runBackgroundWeightSync]);
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <TabHeader title="Dashboard" tabId="dashboard" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading dashboard...</Text>
-        </View>
+        <LoadingScreen
+          message="Loading dashboard..."
+          style={styles.loadingContainer}
+          centerInViewport
+          chrome={{ top: TAB_HEADER_HEIGHT }}
+        />
       </SafeAreaView>
     );
   }
@@ -274,14 +322,18 @@ export default function DashboardTab() {
             />
           ) : profile?.id ? (
             <View style={styles.heatmapPlaceholder}>
-              <ActivityIndicator size="small" color={colors.primary} />
+              <LogoEdgeLoader size="small" />
               <Text style={styles.heatmapPlaceholderText}>Loading…</Text>
             </View>
           ) : null}
         </View>
 
         {profile?.id && (
-          <WeightTrackerCard userId={profile.id} onRefresh={load} />
+          <WeightTrackerCard
+            userId={profile.id}
+            onRefresh={load}
+            refreshSignal={weightRefreshKey}
+          />
         )}
 
         <View style={styles.statGrid}>
@@ -494,9 +546,9 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.cardBorder,
+    backgroundColor: colors.mapControlSurface,
     borderWidth: 1,
-    borderColor: colors.cardBorder,
+    borderColor: colors.mapControlBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },

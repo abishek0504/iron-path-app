@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  ActivityIndicator,
   Animated,
   ScrollView,
 } from 'react-native';
@@ -15,6 +14,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { Check, X, Eye, EyeOff } from 'lucide-react-native';
 import { LegalLinks } from '../src/components/ui/LegalLinks';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 
 export default function Signup() {
   const router = useRouter();
@@ -359,7 +359,7 @@ export default function Signup() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color={colors.textPrimary} />
+            <LogoEdgeLoader size="small" variant="inverted" />
           ) : (
             <Text style={styles.buttonText}>Sign Up</Text>
           )}

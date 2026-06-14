@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,11 +12,12 @@ import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { useUIStore } from '../src/stores/uiStore';
 import { supabase } from '../src/lib/supabase/client';
 import {
   requestAppleHealthAccess,
-  importHealthSamplesForDashboard,
+  syncBodyMassWithHealth,
 } from '../src/lib/health/healthIntegration';
 
 export default function HealthConnectScreen() {
@@ -33,7 +33,7 @@ export default function HealthConnectScreen() {
       const res = await requestAppleHealthAccess();
       if (res.state === 'authorized') {
         const { data: { user } } = await supabase.auth.getUser();
-        if (user) void importHealthSamplesForDashboard(user.id);
+        if (user) await syncBodyMassWithHealth(user.id);
         showToast('Apple Health connected', 'success');
         router.back();
         return;
@@ -65,6 +65,10 @@ export default function HealthConnectScreen() {
           for body mass, height, resting heart rate, active energy, and heart rate samples, and write
           access for workouts and body mass when you complete sessions or log weight.
         </Text>
+        <Text style={styles.lead}>
+          Weight data syncs both ways — existing Apple Health entries import into IronPath, and your
+          IronPath weight history exports to Apple Health. New entries continue syncing after you connect.
+        </Text>
 
         <Text style={styles.sectionTitle}>Privacy</Text>
         <Text style={styles.para}>
@@ -84,7 +88,7 @@ export default function HealthConnectScreen() {
           accessibilityLabel="Request Apple Health permission"
         >
           {busy ? (
-            <ActivityIndicator color={colors.onPrimaryContrast} />
+            <LogoEdgeLoader size="small" variant="inverted" />
           ) : (
             <Text style={styles.primaryBtnText}>Continue with Apple Health</Text>
           )}

@@ -284,7 +284,7 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
+      backgroundColor: colors.modalBackdropTint,
       justifyContent: 'center',
       alignItems: 'center',
       padding: spacing.lg,

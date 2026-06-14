@@ -11,6 +11,10 @@ import { useTheme } from '../../lib/utils/ThemeContext';
 import { useModal } from '../../hooks/useModal';
 import { devLog } from '../../lib/utils/logger';
 
+/** Content height below safe area — used to balance full-screen loaders on tab screens. */
+export const TAB_HEADER_HEIGHT =
+  spacing.md + spacing.sm + typography.sizes['2xl'] + 4;
+
 interface TabHeaderProps {
   title: string;
   tabId: 'workout' | 'plan' | 'progress' | 'dashboard';

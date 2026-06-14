@@ -11,12 +11,12 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { spacing, typography, borderRadius } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import type { SmartRefreshPlan } from '../../lib/supabase/queries/workouts_helpers';
+import { LogoEdgeLoader } from './LogoEdgeLoader';
 
 interface SmartRefreshConfirmationSheetProps {
   visible: boolean;
@@ -37,7 +37,7 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
   const styles = useMemo(() => StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      backgroundColor: colors.modalBackdropTint,
       justifyContent: 'flex-end',
       alignItems: 'stretch',
     },
@@ -166,7 +166,7 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
             disabled={applying}
           >
             {applying ? (
-              <ActivityIndicator size="small" color={colors.background} />
+              <LogoEdgeLoader size="small" variant="inverted" />
             ) : (
               <Text style={styles.applyButtonText}>Apply Updates</Text>
             )}

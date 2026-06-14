@@ -1,5 +1,6 @@
 import { Tabs, useRouter } from "expo-router";
-import { View, StyleSheet, Platform, TouchableOpacity, Text, ActivityIndicator } from "react-native";
+import { View, StyleSheet, Platform, TouchableOpacity, Text } from "react-native";
+import { LogoEdgeLoader } from "../../src/components/ui/LogoEdgeLoader";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { Dumbbell, Calendar, TrendingUp, Trophy } from "lucide-react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
@@ -215,7 +216,7 @@ export default function TabLayout() {
   if (!ready || !authenticated) {
     return (
       <View style={styles.guardContainer}>
-        <ActivityIndicator color={colors.primary} />
+        <LogoEdgeLoader size="xlarge" />
       </View>
     );
   }
@@ -297,19 +298,20 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.cardBorder,
       top: 12,
       left: 0,
+      zIndex: 0,
     },
     tabBarWrapper: {
       position: Platform.OS === 'web' ? 'relative' as const : 'absolute' as const,
       bottom: 0,
       left: 0,
       right: 0,
-      backgroundColor: Platform.OS === 'web' ? colors.background : 'transparent',
+      backgroundColor: colors.background,
       paddingHorizontal: spacing.md,
       zIndex: 1000,
       pointerEvents: 'box-none',
     },
     tabBarCapsule: {
-      backgroundColor: colors.card,
+      backgroundColor: colors.background,
       borderRadius: 36,
       borderWidth: 1,
       borderColor: colors.cardBorder,

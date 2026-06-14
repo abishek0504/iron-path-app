@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
-import { TabHeader } from '../src/components/ui/TabHeader';
+import { TAB_HEADER_HEIGHT, TabHeader } from '../src/components/ui/TabHeader';
 import { useUIStore } from '../src/stores/uiStore';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
@@ -77,10 +78,12 @@ export default function PRsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="PRs" tabId="dashboard" showSettings={false} />
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading PRs...</Text>
-        </View>
+        <LoadingScreen
+          message="Loading PRs..."
+          style={styles.loadingContainer}
+          centerInViewport
+          chrome={{ top: TAB_HEADER_HEIGHT, bottom: 0 }}
+        />
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
           {prs.length === 0 ? (

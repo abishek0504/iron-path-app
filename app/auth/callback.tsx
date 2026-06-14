@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
@@ -110,7 +111,7 @@ export default function AuthCallbackScreen() {
         {message ? <Text style={styles.infoText}>{message}</Text> : null}
 
         {status === 'pending' ? (
-          <ActivityIndicator color={colors.primary} />
+          <LogoEdgeLoader size="large" />
         ) : cbType === 'email_change' || status === 'done' ? (
           <TouchableOpacity style={styles.button} onPress={handleContinue} activeOpacity={0.85}>
             <Text style={styles.buttonText}>Continue</Text>
@@ -149,7 +150,7 @@ export default function AuthCallbackScreen() {
               activeOpacity={0.85}
             >
               {saving ? (
-                <ActivityIndicator color={colors.background} />
+                <LogoEdgeLoader size="small" variant="inverted" />
               ) : (
                 <Text style={styles.buttonText}>Update password</Text>
               )}

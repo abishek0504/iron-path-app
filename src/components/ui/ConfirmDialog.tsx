@@ -11,6 +11,10 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   /** When true, styles the cancel button as destructive (red). */
   cancelDestructive?: boolean;
+  /** When true, styles the confirm button as destructive (red). */
+  confirmDestructive?: boolean;
+  /** When true, disables the confirm button. */
+  confirmDisabled?: boolean;
   onConfirm: (event?: GestureResponderEvent) => void;
   onCancel: (event?: GestureResponderEvent) => void;
 }
@@ -26,6 +30,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmLabel = 'Discard',
   cancelLabel = 'Cancel',
   cancelDestructive = false,
+  confirmDestructive = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }) => {
@@ -33,7 +39,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const styles = useMemo(() => StyleSheet.create({
     backdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.6)',
+      backgroundColor: colors.dialogBackdropTint,
       alignItems: 'center',
       justifyContent: 'center',
       padding: spacing.lg,
@@ -95,10 +101,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       fontSize: typography.sizes.base,
       fontWeight: typography.weights.semibold,
     },
+    buttonDisabled: {
+      opacity: 0.45,
+    },
   }), [colors]);
 
   const cancelButtonStyle = cancelDestructive ? styles.destructive : styles.secondary;
   const cancelTextStyle = cancelDestructive ? styles.destructiveText : styles.secondaryText;
+  const confirmButtonStyle = confirmDestructive ? styles.destructive : styles.primary;
+  const confirmTextStyle = confirmDestructive ? styles.destructiveText : styles.primaryText;
   return (
     <Modal
       transparent
@@ -114,8 +125,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             <TouchableOpacity style={[styles.button, cancelButtonStyle]} onPress={onCancel}>
               <Text style={cancelTextStyle}>{cancelLabel}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.button, styles.primary]} onPress={onConfirm}>
-              <Text style={styles.primaryText}>{confirmLabel}</Text>
+            <TouchableOpacity
+              style={[styles.button, confirmButtonStyle, confirmDisabled && styles.buttonDisabled]}
+              onPress={onConfirm}
+              disabled={confirmDisabled}
+            >
+              <Text style={confirmTextStyle}>{confirmLabel}</Text>
             </TouchableOpacity>
           </View>
         </View>

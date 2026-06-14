@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -16,6 +15,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../src/l
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -180,7 +180,7 @@ export default function ChangePasswordScreen() {
             activeOpacity={0.85}
           >
             {submitting ? (
-              <ActivityIndicator color={colors.background} />
+              <LogoEdgeLoader size="small" variant="inverted" />
             ) : (
               <Text style={styles.buttonText}>Update password</Text>
             )}

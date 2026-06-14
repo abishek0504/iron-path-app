@@ -14,8 +14,8 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sun, Moon, Monitor, Sparkles, RefreshCw } from 'lucide-react-native';
-import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
+import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw } from 'lucide-react-native';
+import { spacing, borderRadius, typography, THEME_OPTIONS, getThemeLabel, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase/client';
@@ -35,7 +35,7 @@ interface SettingsMenuProps {
 export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { themeMode, setThemeMode } = useThemeMode();
+  const { themeMode } = useThemeMode();
   const router = useRouter();
   const showToast = useUIStore((state) => state.showToast);
   const profile = useUserStore((state) => state.profile);
@@ -112,9 +112,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     }
   };
 
-  const themeIcon = themeMode === 'dark' ? Moon : themeMode === 'light' ? Sun : Monitor;
-  const themeModeLabel = themeMode === 'dark' ? 'Dark' : themeMode === 'light' ? 'Light' : 'System';
-  const nextThemeMode = themeMode === 'dark' ? 'light' : themeMode === 'light' ? 'system' : 'dark';
+  const themeOption = THEME_OPTIONS.find((option) => option.id === themeMode) ?? THEME_OPTIONS[0];
+  const ThemeIcon = themeOption.icon;
+  const themeModeLabel = getThemeLabel(themeMode);
 
   const menuItems = [
     {
@@ -128,8 +128,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       id: 'appearance',
       label: 'Appearance',
       sublabel: themeModeLabel,
-      icon: themeIcon,
-      onPress: () => setThemeMode(nextThemeMode),
+      icon: ThemeIcon,
+      onPress: () => handleNavigate('/appearance'),
     },
     {
       id: 'notifications',

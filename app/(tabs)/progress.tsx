@@ -6,13 +6,14 @@
  */
 
 import React, { useCallback, useRef, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, RefreshControl } from 'react-native';
+import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
-import { TabHeader } from '../../src/components/ui/TabHeader';
+import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
 import { supabase } from '../../src/lib/supabase/client';
 import { getSessionsInRangeCached } from '../../src/lib/cache/sessionsCache';
 import type { WorkoutSession } from '../../src/lib/supabase/queries/workouts';
@@ -194,10 +195,12 @@ export default function ProgressTab() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Progress" tabId="progress" />
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>Loading progress...</Text>
-        </View>
+        <LoadingScreen
+          message="Loading progress..."
+          style={styles.loadingContainer}
+          centerInViewport
+          chrome={{ top: TAB_HEADER_HEIGHT }}
+        />
       ) : (
         <ScrollView
           contentContainerStyle={[
@@ -306,7 +309,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   toggleChipActive: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(163, 230, 53, 0.15)',
+    backgroundColor: colors.primarySelectedBg,
   },
   toggleChipText: {
     color: colors.textSecondary,

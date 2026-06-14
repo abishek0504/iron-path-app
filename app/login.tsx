@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -17,6 +16,7 @@ import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/d
 import { useUserStore } from '../src/stores/userStore';
 import { devLog } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
+import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { restoreAccount } from '../src/lib/supabase/queries/users';
 import type { UserProfile } from '../src/stores/userStore';
 
@@ -183,7 +183,7 @@ export default function Login() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color={colors.textPrimary} />
+            <LogoEdgeLoader size="small" variant="inverted" />
           ) : (
             <Text style={styles.buttonText}>Log In</Text>
           )}

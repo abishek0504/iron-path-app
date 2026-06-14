@@ -155,7 +155,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
     },
     backdrop: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      backgroundColor: colors.modalBackdropTint,
     },
     sheet: {
       backgroundColor: colors.background,
@@ -164,7 +164,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       borderWidth: 1,
       borderColor: colors.cardBorder,
       borderBottomWidth: 0,
-      shadowColor: '#000',
+      shadowColor: colors.shadowColor,
       shadowOffset: { width: 0, height: -4 },
       shadowOpacity: 0.3,
       shadowRadius: 8,

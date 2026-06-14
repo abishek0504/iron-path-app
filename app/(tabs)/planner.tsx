@@ -10,17 +10,15 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   FlatList,
-  Modal,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Trash2, CheckCircle, Link2 } from 'lucide-react-native';
+import { Plus, Trash2, CheckCircle, Link2, Bookmark } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
-import { TabHeader } from '../../src/components/ui/TabHeader';
+import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
 import { useToast } from '../../src/hooks/useToast';
 import { useDateContext } from '../../src/hooks/useDateContext';
 import { useUserStore } from '../../src/stores/userStore';
@@ -50,7 +48,6 @@ import {
   invalidateTemplate,
 } from '../../src/lib/cache/templateCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
-import { getMergedExercise } from '../../src/lib/supabase/queries/exercises';
 import {
   selectExerciseTargets,
   type ExerciseTarget,
@@ -61,7 +58,6 @@ import {
   deleteSessionWithExercises,
   getSessionsForToday,
   prefillSessionSets,
-  getLast7DaysSessionStructure,
   getUniqueSetRepCombinations,
   syncTemplateSlotToSessionsForDay,
   type WorkoutSession,
@@ -71,10 +67,29 @@ import { devLog, devError } from '../../src/lib/utils/logger';
 import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS, SHORT_WEEKDAY_LABELS } from '../../src/lib/utils/date';
 import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
-import { applyStructureEditToTemplate, applySessionStructureToTemplate, createTemplateSlot, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
+import { applyStructureEditToTemplate, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
+import {
+  listWorkoutPresets,
+  createWorkoutPresetFromSession,
+  renameWorkoutPreset,
+  deleteWorkoutPreset,
+  applyWorkoutPresetToDay,
+  createSessionFromPreset,
+  replaceDayTemplateSlotsFromPreset,
+  getWorkoutPresetSlots,
+  type WorkoutPreset,
+  type PresetLoadMode,
+} from '../../src/lib/supabase/queries/presets';
+import { SaveWorkoutPresetSheet } from '../../src/components/planner/SaveWorkoutPresetSheet';
+import { WorkoutPresetPickerSheet } from '../../src/components/planner/WorkoutPresetPickerSheet';
+import { WorkoutPresetLoadOptionsSheet } from '../../src/components/planner/WorkoutPresetLoadOptionsSheet';
+import { WorkoutTargetPickerSheet } from '../../src/components/planner/WorkoutTargetPickerSheet';
+import { ConfirmDialog } from '../../src/components/ui/ConfirmDialog';
 import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
-import { generateAiDay, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
+import { DEFAULT_DAY_CONSTRAINTS, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
 import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
+import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
+import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { usePaywall } from '../../src/components/paywall/PaywallProvider';
 
 const SHORT_DAY_NAMES = SHORT_WEEKDAY_LABELS;
@@ -91,7 +106,7 @@ export default function PlannerTab() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const { requestGenerateAi, showPaywall } = usePaywall();
+  const { requestGenerateAi } = usePaywall();
   const profile = useUserStore((state) => state.profile);
   const plannerNeedsRefetch = useUIStore((s) => s.plannerNeedsRefetch);
   const setPlannerNeedsRefetch = useUIStore((s) => s.setPlannerNeedsRefetch);
@@ -101,7 +116,6 @@ export default function PlannerTab() {
   const [isLoadingTemplate, setIsLoadingTemplate] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [templateData, setTemplateData] = useState<FullTemplate | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
@@ -128,6 +142,20 @@ export default function PlannerTab() {
   >(new Map());
   const [showSessionEditSheet, setShowSessionEditSheet] = useState(false);
   const [showGenerateDayForm, setShowGenerateDayForm] = useState(false);
+  const [showSavePresetSheet, setShowSavePresetSheet] = useState(false);
+  const [savePresetMode, setSavePresetMode] = useState<'create' | 'rename'>('create');
+  const [savePresetDefaultName, setSavePresetDefaultName] = useState('');
+  const [savePresetSessionId, setSavePresetSessionId] = useState<string | null>(null);
+  const [renamePresetId, setRenamePresetId] = useState<string | null>(null);
+  const [isSavingPreset, setIsSavingPreset] = useState(false);
+  const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const [workoutPresets, setWorkoutPresets] = useState<WorkoutPreset[]>([]);
+  const [isLoadingPresets, setIsLoadingPresets] = useState(false);
+  const [selectedPresetForLoad, setSelectedPresetForLoad] = useState<WorkoutPreset | null>(null);
+  const [showPresetLoadOptions, setShowPresetLoadOptions] = useState(false);
+  const [pendingPresetLoadMode, setPendingPresetLoadMode] = useState<PresetLoadMode | null>(null);
+  const [showPresetTargetPicker, setShowPresetTargetPicker] = useState(false);
+  const [presetToDelete, setPresetToDelete] = useState<WorkoutPreset | null>(null);
   const [isLoadingSessionsForDay, setIsLoadingSessionsForDay] = useState(false);
   const [editingSessionExercise, setEditingSessionExercise] = useState<{
     id: string;
@@ -1129,6 +1157,267 @@ export default function PlannerTab() {
     [activeTemplateId, templateData, loadTemplate, loadTodaySessionExercises, getCurrentUserId, toast]
   );
 
+  const refreshWorkoutPresets = useCallback(async () => {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      setWorkoutPresets([]);
+      return;
+    }
+    setIsLoadingPresets(true);
+    try {
+      const presets = await listWorkoutPresets(userId);
+      setWorkoutPresets(presets);
+    } finally {
+      setIsLoadingPresets(false);
+    }
+  }, [getCurrentUserId]);
+
+  const handleOpenSavePreset = useCallback(
+    (sessionId: string, workoutIndex: number) => {
+      const dayName = selectedDay?.day.day_name ?? 'Workout';
+      setSavePresetMode('create');
+      setRenamePresetId(null);
+      setSavePresetSessionId(sessionId);
+      setSavePresetDefaultName(`Workout ${workoutIndex + 1} – ${dayName}`);
+      setShowSavePresetSheet(true);
+    },
+    [selectedDay?.day.day_name]
+  );
+
+  const handleSavePreset = useCallback(
+    async (name: string) => {
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        toast.error('Please log in');
+        return;
+      }
+
+      setIsSavingPreset(true);
+      try {
+        if (savePresetMode === 'rename' && renamePresetId) {
+          const success = await renameWorkoutPreset(renamePresetId, name);
+          if (success) {
+            toast.success('Preset renamed');
+            setShowSavePresetSheet(false);
+            await refreshWorkoutPresets();
+          } else {
+            toast.error('Failed to rename preset');
+          }
+          return;
+        }
+
+        if (!savePresetSessionId) {
+          toast.error('No workout selected');
+          return;
+        }
+
+        const preset = await createWorkoutPresetFromSession(userId, savePresetSessionId, name);
+        if (preset) {
+          toast.success('Workout saved as preset');
+          setShowSavePresetSheet(false);
+          await refreshWorkoutPresets();
+        } else {
+          toast.error('Failed to save preset');
+        }
+      } catch (error) {
+        if (__DEV__) devError('planner', error, { action: 'handleSavePreset' });
+        toast.error('Failed to save preset');
+      } finally {
+        setIsSavingPreset(false);
+      }
+    },
+    [
+      getCurrentUserId,
+      savePresetMode,
+      renamePresetId,
+      savePresetSessionId,
+      refreshWorkoutPresets,
+      toast,
+    ]
+  );
+
+  const applySelectedPreset = useCallback(
+    async (presetId: string, mode: PresetLoadMode, targetSessionId?: string) => {
+      if (!activeTemplateId || !selectedDay) {
+        toast.error('No day selected');
+        return;
+      }
+
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        toast.error('Please log in');
+        return;
+      }
+
+      const experience = profile?.experience_level || 'beginner';
+      const startedAt = dateContext.isToday
+        ? undefined
+        : getDateBoundsForDayName(selectedDay.day.day_name).startIso;
+      const sessionCount = sessionsTodayWithExercises.length;
+
+      setIsSaving(true);
+      try {
+        let success = false;
+
+        if (sessionCount === 0) {
+          const slots = await getWorkoutPresetSlots(presetId);
+          if (slots.length === 0) {
+            toast.error('Preset has no exercises');
+            return;
+          }
+          const session = await createSessionFromPreset(
+            userId,
+            activeTemplateId,
+            selectedDay.day.day_name,
+            slots,
+            startedAt,
+            experience
+          );
+          if (session) {
+            success = await replaceDayTemplateSlotsFromPreset(selectedDay.day.id, slots);
+          }
+        } else {
+          success = await applyWorkoutPresetToDay({
+            userId,
+            templateId: activeTemplateId,
+            dayId: selectedDay.day.id,
+            dayName: selectedDay.day.day_name,
+            presetId,
+            mode,
+            targetSessionId,
+            sessionCountOnDay: sessionCount,
+            startedAt,
+            experience,
+          });
+        }
+
+        if (success) {
+          invalidateTemplate(activeTemplateId);
+          await loadTemplate(activeTemplateId);
+          if (dateContext.isToday) {
+            setPlannerNeedsRefetch(true);
+          } else {
+            invalidateSessionsInRangeForUser(userId);
+          }
+          await loadSessionsForDay(userId, {
+            forceRefresh: true,
+            dayName: selectedDay.day.day_name,
+            templateExerciseKeys: dateContext.isToday ? todayTemplateKeys : selectedDayTemplateKeys,
+          });
+          toast.success('Preset loaded');
+          setShowPresetPicker(false);
+          setShowPresetLoadOptions(false);
+          setShowPresetTargetPicker(false);
+          setSelectedPresetForLoad(null);
+          setPendingPresetLoadMode(null);
+        } else {
+          toast.error('Failed to load preset');
+        }
+      } catch (error) {
+        if (__DEV__) devError('planner', error, { action: 'applySelectedPreset', presetId, mode });
+        toast.error('Failed to load preset');
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [
+      activeTemplateId,
+      selectedDay,
+      getCurrentUserId,
+      profile?.experience_level,
+      dateContext.isToday,
+      sessionsTodayWithExercises.length,
+      loadTemplate,
+      loadSessionsForDay,
+      todayTemplateKeys,
+      selectedDayTemplateKeys,
+      setPlannerNeedsRefetch,
+      toast,
+    ]
+  );
+
+  const handleSelectPresetForLoad = useCallback(
+    (preset: WorkoutPreset) => {
+      setSelectedPresetForLoad(preset);
+      if (sessionsTodayWithExercises.length === 0) {
+        void applySelectedPreset(preset.id, 'replace');
+        return;
+      }
+      setShowPresetLoadOptions(true);
+    },
+    [sessionsTodayWithExercises.length, applySelectedPreset]
+  );
+
+  const handlePresetLoadMode = useCallback(
+    (mode: PresetLoadMode) => {
+      if (!selectedPresetForLoad) return;
+      setPendingPresetLoadMode(mode);
+      setShowPresetLoadOptions(false);
+
+      if (mode === 'newWorkout') {
+        void applySelectedPreset(selectedPresetForLoad.id, mode);
+        return;
+      }
+
+      if (sessionsTodayWithExercises.length === 1) {
+        void applySelectedPreset(
+          selectedPresetForLoad.id,
+          mode,
+          sessionsTodayWithExercises[0].session.id
+        );
+        return;
+      }
+
+      setShowPresetTargetPicker(true);
+    },
+    [selectedPresetForLoad, sessionsTodayWithExercises, applySelectedPreset]
+  );
+
+  const handlePresetTargetSelected = useCallback(
+    (sessionId: string) => {
+      if (!selectedPresetForLoad || !pendingPresetLoadMode) return;
+      void applySelectedPreset(selectedPresetForLoad.id, pendingPresetLoadMode, sessionId);
+    },
+    [selectedPresetForLoad, pendingPresetLoadMode, applySelectedPreset]
+  );
+
+  const handleOpenLoadPreset = useCallback(async () => {
+    if (!selectedDay) {
+      toast.error('No day selected');
+      return;
+    }
+    await refreshWorkoutPresets();
+    setShowPresetPicker(true);
+  }, [selectedDay, refreshWorkoutPresets, toast]);
+
+  const handleRenamePreset = useCallback((preset: WorkoutPreset) => {
+    setSavePresetMode('rename');
+    setRenamePresetId(preset.id);
+    setSavePresetSessionId(null);
+    setSavePresetDefaultName(preset.name);
+    setShowSavePresetSheet(true);
+  }, []);
+
+  const handleConfirmDeletePreset = useCallback(async () => {
+    if (!presetToDelete) return;
+    setIsSaving(true);
+    try {
+      const success = await deleteWorkoutPreset(presetToDelete.id);
+      if (success) {
+        toast.success('Preset deleted');
+        await refreshWorkoutPresets();
+      } else {
+        toast.error('Failed to delete preset');
+      }
+    } catch (error) {
+      if (__DEV__) devError('planner', error, { action: 'deleteWorkoutPreset' });
+      toast.error('Failed to delete preset');
+    } finally {
+      setIsSaving(false);
+      setPresetToDelete(null);
+    }
+  }, [presetToDelete, refreshWorkoutPresets, toast]);
+
   // Add a workout (session) for the selected day. First workout of the day is
   // seeded from the day's template slots; additional workouts start empty.
   const handleAddWorkout = useCallback(async () => {
@@ -1285,7 +1574,6 @@ export default function PlannerTab() {
           constraints: constraints ?? null,
         });
       }
-      setIsGenerating(true);
       try {
         if (sessionsPerDay === 0) {
           // Rest day: clear the day's planned slots and remove unstarted
@@ -1334,242 +1622,35 @@ export default function PlannerTab() {
           return;
         }
 
-        const aiResult = await generateAiDay({
-          template: templateData,
-          userId,
-          profile,
-          dayIndex,
-          sessionsPerDay,
-          constraints,
-        });
-
-        if (aiResult.source === 'paywall_required') {
-          showPaywall('generate_ai');
-          return;
-        }
-
-        if (aiResult.source === 'quota_exceeded') {
-          toast.error("You've reached this week's AI limit. Try again later.");
-          return;
-        }
-
-        if (aiResult.source === 'auth_error') {
-          toast.error('Session expired — please log in again to use AI generation');
-          return;
-        }
-
-        if (aiResult.source === 'ai_unavailable') {
-          const reason = aiResult.reason ?? '';
-          if (reason.includes('quota') || reason.includes('HTTP 429')) {
-            toast.error("You've reached this week's AI limit. Try again later.");
-          } else if (
-            reason.startsWith('session_count_mismatch') ||
-            reason.startsWith('too_few_exercises') ||
-            reason === 'allow_list_validation_failed'
-          ) {
-            toast.error('AI returned an invalid workout plan. Please try again.');
-          } else {
-            toast.error('AI generation is currently unavailable. Please try again later.');
-          }
-          return;
-        }
-
-        if (aiResult.source === 'rest') {
-          toast.success(`${selectedDay.day.day_name} set as rest day`);
-          return;
-        }
-
-        const sessionGroups = aiResult.sessions;
-        if (sessionGroups.length === 0 || sessionGroups.every((g) => g.length === 0)) {
-          toast.error('No exercises available for AI generation');
-          return;
-        }
-
-        const day = selectedDay;
-        const slotsBefore = day.slots.length;
-        let slotsCreated = 0;
-
-        let sortOrder = day.slots.length;
-        const exp = profile?.experience_level || 'beginner';
-
-        for (let sIdx = 0; sIdx < sessionGroups.length; sIdx++) {
-          const group = sessionGroups[sIdx];
-          if (!group || group.length === 0) continue;
-
-          let targetSessionId: string | null = null;
-          if (sessionsTodayWithExercises && sIdx < sessionsTodayWithExercises.length) {
-            targetSessionId = sessionsTodayWithExercises[sIdx].session.id;
-          } else {
-            const { startIso } = getDateBoundsForDayName(day.day.day_name);
-            const newSession = await createWorkoutSession(
-              userId,
-              activeTemplateId,
-              day.day.day_name,
-              startIso
-            );
-            if (newSession) {
-              targetSessionId = newSession.id;
-            }
-          }
-
-          const sessionExercises: Array<{ id: string; exercise_id?: string }> = [];
-          const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
-
-          for (const aiPlan of group) {
-            const exerciseId = aiPlan.exercise_id;
-            sortOrder += 1;
-            
-            const newSlot = await createTemplateSlot(day.day.id, {
-              exerciseId,
-              experience: null,
-              notes: null,
-              sortOrder,
-            });
-
-            if (newSlot) {
-              slotsCreated++;
-
-              const mergedExercise = await getMergedExercise({ exerciseId }, userId);
-              if (mergedExercise) {
-                setExerciseNames((prev) => {
-                  const next = new Map(prev);
-                  next.set(exerciseId, mergedExercise.name);
-                  return next;
-                });
-              }
-
-              setTemplateData((prev) => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  days: prev.days.map((d) =>
-                    d.day.id === day.day.id ? { ...d, slots: [...d.slots, newSlot] } : d
-                  ),
-                };
-              });
-
-              if (targetSessionId) {
-                const { data: se, error: seErr } = await supabase
-                  .from('v2_session_exercises')
-                  .insert({
-                    session_id: targetSessionId,
-                    exercise_id: exerciseId,
-                    custom_exercise_id: null,
-                    sort_order: sortOrder,
-                  })
-                  .select()
-                  .single();
-
-                if (!seErr && se) {
-                  sessionExercises.push(se);
-
-                  const isStretch = mergedExercise?.is_stretch === true;
-                  if (isStretch) {
-                    if (aiPlan.sets != null && aiPlan.duration_sec != null) {
-                      targetsMap.set(exerciseId, {
-                        sets: aiPlan.sets,
-                        duration_sec: aiPlan.duration_sec,
-                      });
-                    } else {
-                      const target = await selectExerciseTargets(
-                        { exerciseId },
-                        userId,
-                        { experience: exp },
-                        0,
-                        mergedExercise ?? undefined,
-                      );
-                      if (target) {
-                        targetsMap.set(exerciseId, {
-                          sets: target.sets,
-                          duration_sec: target.duration_sec,
-                        });
-                      }
-                    }
-                  } else {
-                    const hasAiTargets =
-                      aiPlan.sets != null &&
-                      (aiPlan.reps != null || aiPlan.duration_sec != null);
-                    if (hasAiTargets) {
-                      targetsMap.set(exerciseId, {
-                        sets: aiPlan.sets!,
-                        reps: aiPlan.reps ?? undefined,
-                        duration_sec: aiPlan.duration_sec ?? undefined,
-                        weight: aiPlan.weight ?? undefined,
-                      });
-                    } else {
-                      const target = await selectExerciseTargets(
-                        { exerciseId },
-                        userId,
-                        { experience: exp },
-                        0,
-                        mergedExercise ?? undefined,
-                      );
-                      if (target) {
-                        targetsMap.set(exerciseId, {
-                          sets: target.sets,
-                          reps: target.reps,
-                          duration_sec: target.duration_sec,
-                          weight: target.weight,
-                        });
-                      }
-                    }
-                  }
-                } else if (__DEV__) {
-                  devError('planner-ai', seErr || new Error('Failed to create session exercise'), { sessionId: targetSessionId, exerciseId });
-                }
-              }
-
-            } else if (__DEV__) {
-              devError('planner-ai', new Error('createTemplateSlot returned null'), { dayId: day.day.id, exerciseId, sortOrder });
-            }
-          }
-
-          if (targetSessionId && sessionExercises.length > 0 && targetsMap.size > 0) {
-            await prefillSessionSets(targetSessionId, sessionExercises, targetsMap);
-          }
-        }
-
-        if (slotsCreated === 0) {
-          if (__DEV__) devLog('planner-ai', { action: 'generateDay_noSlotsCreated', templateId: activeTemplateId, dayName: day.day.day_name });
-          toast.error('No exercises were added. Check the console for details.');
-          return;
-        }
-
-        invalidateTemplate(activeTemplateId);
-        invalidateSessionsInRangeForUser(userId);
-        await loadTemplate(activeTemplateId);
-        useUIStore.getState().setPlannerNeedsRefetch(true);
-        if (__DEV__) {
-          devLog('planner-ai', {
-            action: 'generateDay_result',
+        router.push({
+          pathname: '/generate-ai',
+          params: {
             templateId: activeTemplateId,
-            dayName: day.day.day_name,
-            slotsCreated,
-            source: aiResult.source,
-          });
-        }
-        toast.success(`${day.day.day_name} generated`);
+            dayId: selectedDay.day.id,
+            dayName: selectedDay.day.day_name,
+            dayIndex: String(dayIndex),
+            sessionsPerDay: String(sessionsPerDay),
+            constraints: JSON.stringify(constraints ?? DEFAULT_DAY_CONSTRAINTS),
+          },
+        });
       } catch (error) {
         if (__DEV__) {
           devError('planner-ai', error, {
-            action: 'generateWeek',
+            action: 'generateDay',
             templateId: activeTemplateId,
           });
         }
-        toast.error('Failed to generate week');
-      } finally {
-        setIsGenerating(false);
+        toast.error('Failed to start AI generation');
       }
     },
     [
       templateData,
       activeTemplateId,
       selectedDay,
-      profile,
       getCurrentUserId,
       loadTemplate,
       toast,
-      showPaywall,
+      router,
     ]
   );
 
@@ -1578,10 +1659,12 @@ export default function PlannerTab() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <TabHeader title="Plan" tabId="plan" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading planner...</Text>
-        </View>
+        <LoadingScreen
+          message="Loading planner..."
+          style={styles.loadingContainer}
+          centerInViewport
+          chrome={{ top: TAB_HEADER_HEIGHT }}
+        />
       </SafeAreaView>
     );
   }
@@ -1671,7 +1754,7 @@ export default function PlannerTab() {
             <>
               {isLoadingSessionsForDay ? (
                 <View style={styles.emptySlotsContainer}>
-                  <ActivityIndicator size="small" color={colors.primary} style={{ marginBottom: spacing.sm }} />
+                  <LogoEdgeLoader size="small" style={{ marginBottom: spacing.sm }} />
                   <Text style={styles.emptySlotsSubtext}>Loading workouts...</Text>
                 </View>
               ) : sessionsTodayWithExercises.length === 0 ? (
@@ -1793,14 +1876,6 @@ export default function PlannerTab() {
                       {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
                     </Text>
                     <Text style={styles.emptySlotsSubtext}>Add a workout or generate with AI to get started</Text>
-                    <TouchableOpacity
-                      style={[styles.addButton, styles.addExerciseInContent, { marginTop: spacing.md }]}
-                      onPress={handleAddWorkout}
-                      disabled={isSaving}
-                    >
-                      <Plus size={20} color={colors.primary} />
-                      <Text style={styles.addExerciseButtonText}>Add Workout</Text>
-                    </TouchableOpacity>
                   </View>
                 )
               ) : (
@@ -1813,7 +1888,23 @@ export default function PlannerTab() {
                             <CheckCircle size={20} color={colors.success} style={styles.workoutCompletedBadge} />
                           )}
                         </View>
-                        <TouchableOpacity
+                        <View style={styles.workoutHeaderActions}>
+                          <TouchableOpacity
+                            onPress={() =>
+                              handleOpenSavePreset(session.id, idx)
+                            }
+                            disabled={isSaving || exercises.length === 0}
+                            style={styles.savePresetButton}
+                            accessibilityLabel={`Save workout ${idx + 1} as preset`}
+                          >
+                            <Bookmark
+                              size={18}
+                              color={
+                                exercises.length === 0 ? colors.textMuted : colors.textSecondary
+                              }
+                            />
+                          </TouchableOpacity>
+                          <TouchableOpacity
                           onPress={async () => {
                             const userId = await getCurrentUserId();
                             if (!userId) return;
@@ -1894,6 +1985,7 @@ export default function PlannerTab() {
                         >
                           <Trash2 size={18} color={colors.errorText} />
                         </TouchableOpacity>
+                        </View>
                       </View>
                       <View style={[styles.slotsList, styles.workoutContainerContent]}>
                         {(() => {
@@ -2028,63 +2120,24 @@ export default function PlannerTab() {
                 )}
               </>
 
-            {/* Copy last week button */}
             <TouchableOpacity
-              style={[styles.copyLastWeekButton, isSaving && styles.copyLastWeekButtonDisabled]}
-              onPress={async () => {
+              style={[styles.loadPresetButton, isSaving && styles.loadPresetButtonDisabled]}
+              onPress={() => {
                 if (!activeTemplateId) {
-                  if (__DEV__) devLog('planner', { action: 'copyLastWeek_skipped', missing: ['activeTemplateId'] });
+                  if (__DEV__) devLog('planner', { action: 'loadPreset_skipped', missing: ['activeTemplateId'] });
                   toast.error('No active template');
                   return;
                 }
-
-                setIsSaving(true);
-                try {
-                  const userId = await getCurrentUserId();
-                  if (!userId) {
-                    if (__DEV__) devLog('planner', { action: 'copyLastWeek_skipped', missing: ['userId'] });
-                    toast.error('User not found');
-                    return;
-                  }
-
-                  // Get last 7 days structure
-                  const structure = await getLast7DaysSessionStructure(userId);
-                  if (structure.length === 0) {
-                    toast.error('No completed sessions found in last 7 days');
-                    return;
-                  }
-
-                  // Apply structure to template
-                  const success = await applySessionStructureToTemplate(
-                    userId,
-                    activeTemplateId,
-                    structure
-                  );
-
-                  if (success) {
-                    invalidateTemplate(activeTemplateId);
-                    await loadTemplate(activeTemplateId);
-                    toast.success('Copied last week\'s structure to template');
-                  } else {
-                    toast.error('Failed to copy structure');
-                  }
-                } catch (error) {
-                  if (__DEV__) {
-                    devError('planner', error, { action: 'copyLastWeek' });
-                  }
-                  toast.error('Failed to copy structure');
-                } finally {
-                  setIsSaving(false);
-                }
+                void handleOpenLoadPreset();
               }}
               disabled={isSaving}
             >
-              <Text style={styles.copyLastWeekButtonText}>Copy last week</Text>
+              <Text style={styles.loadPresetButtonText}>Load from preset</Text>
             </TouchableOpacity>
 
             {/* Generate with AI button */}
             <TouchableOpacity
-              style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
+              style={styles.generateButton}
               onPress={() => {
                 const missing: string[] = [];
                 if (!templateData) missing.push('templateData');
@@ -2096,11 +2149,8 @@ export default function PlannerTab() {
                 }
                 requestGenerateAi(() => setShowGenerateDayForm(true));
               }}
-              disabled={isGenerating}
             >
-              <Text style={styles.generateButtonText}>
-                {isGenerating ? 'Generating...' : 'Generate with AI'}
-              </Text>
+              <Text style={styles.generateButtonText}>Generate with AI</Text>
             </TouchableOpacity>
 
           </View>
@@ -2126,18 +2176,58 @@ export default function PlannerTab() {
         }}
       />
 
-      {/* Full-screen overlay while the AI builds the day */}
-      <Modal visible={isGenerating} transparent animationType="fade">
-        <View style={styles.generatingOverlay}>
-          <View style={styles.generatingCard}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.generatingTitle}>Generating workout…</Text>
-            <Text style={styles.generatingSubtitle}>
-              Building {selectedDay?.day.day_name ?? 'your day'} with AI
-            </Text>
-          </View>
-        </View>
-      </Modal>
+      <SaveWorkoutPresetSheet
+        visible={showSavePresetSheet}
+        mode={savePresetMode}
+        defaultName={savePresetDefaultName}
+        saving={isSavingPreset}
+        onClose={() => setShowSavePresetSheet(false)}
+        onSave={handleSavePreset}
+      />
+
+      <WorkoutPresetPickerSheet
+        visible={showPresetPicker}
+        presets={workoutPresets}
+        loading={isLoadingPresets}
+        onClose={() => setShowPresetPicker(false)}
+        onSelect={handleSelectPresetForLoad}
+        onRename={handleRenamePreset}
+        onDelete={setPresetToDelete}
+      />
+
+      <WorkoutPresetLoadOptionsSheet
+        visible={showPresetLoadOptions}
+        presetName={selectedPresetForLoad?.name ?? ''}
+        onClose={() => {
+          setShowPresetLoadOptions(false);
+          setSelectedPresetForLoad(null);
+        }}
+        onSelect={handlePresetLoadMode}
+      />
+
+      <WorkoutTargetPickerSheet
+        visible={showPresetTargetPicker}
+        workouts={sessionsTodayWithExercises.map(({ session }, index) => ({
+          sessionId: session.id,
+          label: `Workout ${index + 1}`,
+        }))}
+        onClose={() => {
+          setShowPresetTargetPicker(false);
+          setPendingPresetLoadMode(null);
+        }}
+        onSelect={handlePresetTargetSelected}
+      />
+
+      <ConfirmDialog
+        visible={!!presetToDelete}
+        title="Delete preset?"
+        message={`Delete "${presetToDelete?.name ?? 'this preset'}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        confirmDestructive
+        onConfirm={() => void handleConfirmDeletePreset()}
+        onCancel={() => setPresetToDelete(null)}
+      />
 
       {editingSessionExercise && (
         <SessionExerciseEditSheet
@@ -2522,7 +2612,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
   },
-  copyLastWeekButton: {
+  loadPresetButton: {
     width: '100%',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
@@ -2534,10 +2624,10 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     justifyContent: 'center',
     marginTop: spacing.sm,
   },
-  copyLastWeekButtonDisabled: {
+  loadPresetButtonDisabled: {
     opacity: 0.5,
   },
-  copyLastWeekButtonText: {
+  loadPresetButtonText: {
     color: colors.textPrimary,
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.medium,
@@ -2556,8 +2646,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   addExerciseInContent: {
     marginTop: spacing.sm,
     alignSelf: 'flex-start',
-    backgroundColor: colors.inverseActionBg,
-    borderColor: colors.inverseActionBg,
   },
   addButtonText: {
     color: colors.primary,
@@ -2609,6 +2697,14 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   workoutCompletedBadge: {
     marginLeft: 0,
+  },
+  workoutHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  savePresetButton: {
+    padding: spacing.xs,
   },
   deleteWorkoutButton: {
     padding: spacing.xs,
@@ -2756,9 +2852,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.sm,
   },
-  generateButtonDisabled: {
-    opacity: 0.5,
-  },
   generateButtonText: {
     color: colors.primary,
     fontSize: typography.sizes.base,
@@ -2769,32 +2862,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontWeight: typography.weights.semibold,
     color: colors.primary,
     marginTop: 2,
-  },
-  generatingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  generatingCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.xl,
-    alignItems: 'center',
-    gap: spacing.md,
-    minWidth: 240,
-  },
-  generatingTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-  },
-  generatingSubtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
   },
   emptyContainer: {
     flex: 1,

@@ -28,7 +28,7 @@ export const SmartAdjustPrompt: React.FC<SmartAdjustPromptProps> = ({
   const styles = useMemo(() => StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      backgroundColor: colors.modalBackdropTint,
       justifyContent: 'center',
       alignItems: 'center',
       padding: spacing.lg,

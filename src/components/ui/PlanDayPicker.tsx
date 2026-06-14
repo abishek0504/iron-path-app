@@ -81,7 +81,7 @@ export const PlanDayPicker: React.FC<Props> = ({
       alignItems: 'center',
     },
     primaryButtonText: {
-      color: '#000',
+      color: colors.onPrimaryContrast,
       fontSize: typography.sizes.base,
       fontWeight: typography.weights.semibold,
     },

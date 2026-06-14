@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable } from 'react-native';
+import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { Trash2 } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -291,7 +292,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color={colors.primary} />
+        <LogoEdgeLoader size="medium" />
         <Text style={styles.loadingText}>Loading sessions...</Text>
       </View>
     );
@@ -520,7 +521,7 @@ function createStyles(colors: ThemeColors) {
   },
   deleteModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.modalBackdropTint,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,

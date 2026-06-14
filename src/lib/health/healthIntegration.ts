@@ -241,29 +241,28 @@ export async function writeBodyMassToHealth(input: {
   }
 }
 
-/** How far back to look for external body-mass samples on first import. */
-const IMPORT_LOOKBACK_DAYS = 30;
-const IMPORT_SAMPLE_LIMIT = 60;
+/** How far back to look for external body-mass samples on sync/import. */
+const SYNC_LOOKBACK_DAYS = 365;
+const SYNC_SAMPLE_LIMIT = 200;
 const KG_TO_LB = 2.20462262;
+const LB_TO_KG = 0.45359237;
 
 /**
- * Pull recent external body-mass samples from Apple Health into v2_weight_logs.
- * Samples written by IronPath itself (tracked via hk_sample_uuid) are skipped.
- * Weights are converted from kg into the user's display unit, matching how
- * insertWeightLog stores rows.
+ * Pull body-mass samples from Apple Health into v2_weight_logs.
+ * Samples already linked via hk_sample_uuid are skipped.
  */
-export async function importHealthSamplesForDashboard(userId: string): Promise<void> {
+async function importBodyMassFromHealth(userId: string): Promise<number> {
   const hk = getHealthKit();
-  if (!hk) return;
+  if (!hk) return 0;
 
   try {
-    const since = new Date(Date.now() - IMPORT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const since = new Date(Date.now() - SYNC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
     const samples = await hk.queryQuantitySamples(BODY_MASS, {
       filter: { date: { startDate: since } },
       unit: 'kg',
-      limit: IMPORT_SAMPLE_LIMIT,
+      limit: SYNC_SAMPLE_LIMIT,
     });
-    if (!samples || samples.length === 0) return;
+    if (!samples || samples.length === 0) return 0;
 
     const { data: existingRows } = await supabase
       .from('v2_weight_logs')
@@ -273,7 +272,7 @@ export async function importHealthSamplesForDashboard(userId: string): Promise<v
     const knownUuids = new Set((existingRows ?? []).map((r) => r.hk_sample_uuid as string));
 
     const newSamples = samples.filter((s) => s.uuid && !knownUuids.has(s.uuid));
-    if (newSamples.length === 0) return;
+    if (newSamples.length === 0) return 0;
 
     const { data: profile } = await supabase
       .from('v2_profiles')
@@ -290,20 +289,135 @@ export async function importHealthSamplesForDashboard(userId: string): Promise<v
     }));
     const { error } = await supabase.from('v2_weight_logs').insert(rows);
     if (error) {
-      if (__DEV__) devError('health-sync', error, { action: 'importSamples:insert' });
-      return;
+      if (__DEV__) devError('health-sync', error, { action: 'importBodyMass:insert' });
+      return 0;
     }
 
     await updateSyncLedger(userId, 'import');
 
     if (__DEV__) {
       devLog('health-sync', {
-        action: 'importSamples:done',
+        action: 'importBodyMass:done',
         totalSamples: samples.length,
         imported: rows.length,
       });
     }
+
+    return rows.length;
   } catch (error) {
-    if (__DEV__) devError('health-sync', error, { action: 'importSamples' });
+    if (__DEV__) devError('health-sync', error, { action: 'importBodyMass' });
+    return 0;
   }
+}
+
+/**
+ * Export IronPath weight logs that are not yet linked to HealthKit samples.
+ */
+async function exportUnlinkedBodyMassToHealth(userId: string): Promise<number> {
+  const hk = getHealthKit();
+  if (!hk || !canShare(hk, BODY_MASS)) return 0;
+
+  try {
+    const { data: logs, error } = await supabase
+      .from('v2_weight_logs')
+      .select('id, weight, recorded_at')
+      .eq('user_id', userId)
+      .is('hk_sample_uuid', null);
+    if (error || !logs || logs.length === 0) return 0;
+
+    const { data: profile } = await supabase
+      .from('v2_profiles')
+      .select('use_imperial')
+      .eq('id', userId)
+      .maybeSingle();
+    const useImperial = profile?.use_imperial === true;
+
+    let exported = 0;
+    const logIds = logs.map((l) => l.id as string);
+    for (const log of logs) {
+      const weightKg = useImperial ? log.weight * LB_TO_KG : log.weight;
+      await writeBodyMassToHealth({
+        logId: log.id as string,
+        weightKg,
+        recordedAtIso: log.recorded_at as string,
+      });
+    }
+
+    const { data: linkedRows } = await supabase
+      .from('v2_weight_logs')
+      .select('id')
+      .in('id', logIds)
+      .not('hk_sample_uuid', 'is', null);
+    exported = linkedRows?.length ?? 0;
+
+    if (exported > 0) {
+      await updateSyncLedger(userId, 'body_mass');
+    }
+
+    if (__DEV__) {
+      devLog('health-sync', { action: 'exportBodyMass:done', exported, candidates: logs.length });
+    }
+
+    return exported;
+  } catch (error) {
+    if (__DEV__) devError('health-sync', error, { action: 'exportBodyMass' });
+    return 0;
+  }
+}
+
+/** Update profile.current_weight when the newest log differs. */
+async function syncProfileWeightFromLogs(userId: string): Promise<void> {
+  try {
+    const { data: newest } = await supabase
+      .from('v2_weight_logs')
+      .select('weight')
+      .eq('user_id', userId)
+      .order('recorded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!newest) return;
+
+    const { data: profile } = await supabase
+      .from('v2_profiles')
+      .select('current_weight')
+      .eq('id', userId)
+      .maybeSingle();
+    if (profile?.current_weight === newest.weight) return;
+
+    await supabase
+      .from('v2_profiles')
+      .update({ current_weight: newest.weight, updated_at: new Date().toISOString() })
+      .eq('id', userId);
+  } catch (error) {
+    if (__DEV__) devError('health-sync', error, { action: 'syncProfileWeight' });
+  }
+}
+
+/**
+ * Bidirectional body-mass sync: import new Health samples and export unlinked IronPath logs.
+ */
+export async function syncBodyMassWithHealth(
+  userId: string,
+): Promise<{ imported: number; exported: number }> {
+  const hk = getHealthKit();
+  if (!hk || !isAppleHealthConnected()) {
+    return { imported: 0, exported: 0 };
+  }
+
+  const imported = await importBodyMassFromHealth(userId);
+  const exported = await exportUnlinkedBodyMassToHealth(userId);
+  await syncProfileWeightFromLogs(userId);
+
+  if (__DEV__) {
+    devLog('health-sync', { action: 'syncBodyMassWithHealth:done', imported, exported });
+  }
+
+  return { imported, exported };
+}
+
+/**
+ * Pull recent external body-mass samples from Apple Health into v2_weight_logs.
+ */
+export async function importHealthSamplesForDashboard(userId: string): Promise<void> {
+  await importBodyMassFromHealth(userId);
 }
