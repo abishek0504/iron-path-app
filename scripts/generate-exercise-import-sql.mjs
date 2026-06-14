@@ -7,7 +7,6 @@
  * Outputs:
  *   supabase/migrations/YYYYMMDD_import_master_exercises_from_csv.sql
  *   scripts/output/muscle-key-normalization.json
- *   scripts/output/exercise-image-manifest.json
  */
 
 import fs from 'fs';
@@ -42,20 +41,6 @@ const EXISTING_EXERCISE_NAMES = new Set([
   'Side Plank', 'Skullcrusher', 'Squat (Barbell)', 'Superman Hold',
   'Tricep Pushdown', 'V-Sit', 'Walking Lunge',
 ]);
-
-const EXISTING_IMAGE_SLUGS = new Set(
-  fs.readdirSync(path.join(ROOT, 'assets/exercises'))
-    .filter((f) => f.endsWith('.jpg'))
-    .map((f) => f.replace(/\.jpg$/, '')),
-);
-
-function slugify(name) {
-  return name
-    .toLowerCase()
-    .replace(/'/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 /** Minimal CSV parser handling quoted fields with embedded commas and doubled quotes. */
 function parseCsv(text) {
@@ -250,18 +235,8 @@ function main() {
 
   const updates = [];
   const inserts = [];
-  const manifest = [];
 
   for (const n of normalized) {
-    const slug = slugify(n.name);
-    manifest.push({
-      name: n.name,
-      slug,
-      primary_muscles: n.primary_muscles,
-      is_stretch: n.is_stretch,
-      has_image: EXISTING_IMAGE_SLUGS.has(slug),
-    });
-
     if (EXISTING_EXERCISE_NAMES.has(n.name)) {
       updates.push(buildUpdateSql(n));
     } else {
@@ -296,17 +271,10 @@ ${inserts.join('\n\n')}
       2,
     ),
   );
-  fs.writeFileSync(
-    path.join(OUTPUT_DIR, 'exercise-image-manifest.json'),
-    JSON.stringify(manifest, null, 2),
-  );
 
   console.log(`Wrote ${migrationPath}`);
   console.log(`  Updates: ${updates.length}, Inserts: ${inserts.length}`);
   console.log(`  Muscle mappings: ${audit.mapped.length}`);
-  console.log(
-    `  Images needed: ${manifest.filter((m) => !m.has_image).length}`,
-  );
 }
 
 main();

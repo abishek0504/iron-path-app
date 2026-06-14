@@ -1020,6 +1020,15 @@ function computeTrainingDayPosition(dayName: string, workoutDays: string[]): str
 // Main handler
 // ============================================================================
 
+function toPublicFallbackReason(internal: string | null): string {
+  if (!internal) return 'generation_unavailable';
+  if (internal === 'no_openai_key' || internal === 'openai_failed') return 'generation_unavailable';
+  if (internal === 'allow_list_validation_failed' || internal.includes('allow_list')) {
+    return 'validation_failed';
+  }
+  return 'generation_unavailable';
+}
+
 Deno.serve(async (req) => {
   const startedAt = Date.now();
 
@@ -1413,7 +1422,7 @@ Deno.serve(async (req) => {
         sessions: resultSessions ?? [],
         model,
         source,
-        ...(source === 'fallback' ? { fallbackReason: lastError } : {}),
+        ...(source === 'fallback' ? { fallbackReason: toPublicFallbackReason(lastError) } : {}),
       },
       200,
     );

@@ -17,9 +17,12 @@ IronPath ("the App", "we", "us") is a workout planning and tracking app for iPho
 ### Apple Health (optional)
 If you choose to connect Apple Health:
 - **We write**: completed workouts and body weight entries you log in IronPath.
-- **We read**: body weight, height, heart rate, resting heart rate, and active energy — used only to personalize your dashboard and workout suggestions.
+- **We read**: body weight only — used to import your existing weight history and keep IronPath in sync.
 - Health data is processed on your device and stored in your IronPath account only where needed for app functionality (e.g. imported weight entries). **Health data is never used for advertising or sold to third parties**, and is never shared with the AI service described below.
 - You can revoke access anytime in iOS Settings → Privacy & Security → Health.
+
+### Apple Watch (optional)
+If you use the IronPath Apple Watch companion, workout state (such as the active session, exercise name, and set progress) may be sent between your iPhone and Watch over Apple's WatchConnectivity framework so you can log sets from your wrist. This data stays on your devices and is not sent to third parties.
 
 ### Diagnostics
 - Crash reports and performance diagnostics are collected via Sentry to keep the App stable. These may include device model, OS version, and app state at the time of a crash. They are not used to track you across other apps.
@@ -40,16 +43,17 @@ Your data is stored with Supabase (PostgreSQL) with row-level security: only you
 
 ## Data retention and account deletion
 
-You can delete your account in the App (Settings → Account → Delete account). Deletion is scheduled immediately and your data is permanently purged from our systems after a short grace period (30 days), during which you can contact us to cancel the deletion. Workouts written to Apple Health remain in Apple Health unless you remove them there.
+You can delete your account in the App (Settings → Account → Delete account). Deletion is scheduled immediately and your data is permanently purged from our systems after a short grace period (30 days), during which you can contact us to cancel the deletion. When configured, we also request deletion of your RevenueCat subscriber record. Workouts written to Apple Health remain in Apple Health unless you remove them there.
 
 ## Third-party services
 
 | Service | Purpose | Data involved |
 | --- | --- | --- |
 | Supabase | Database, authentication, backend functions | Account, profile, workout data |
+| RevenueCat | In-app subscription management (iOS) | Anonymous app user ID linked to your account; purchase and entitlement status |
 | OpenAI API | AI workout generation (on request) | Training context summary only |
 | Sentry | Crash and performance diagnostics | Device/app diagnostics |
-| Apple HealthKit | Optional health sync | Workouts, body weight, heart metrics |
+| Apple HealthKit | Optional health sync | Body weight (read/write), workouts (write) |
 
 ## Children
 

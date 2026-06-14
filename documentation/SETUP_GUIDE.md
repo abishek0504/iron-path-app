@@ -114,7 +114,6 @@ The app calls Supabase Edge Functions in `supabase/functions/`:
 - `generate-workout` — AI workout generation (requires `OPENAI_API_KEY` secret; optional `OPENAI_MODEL`)
 - `update-muscle-freshness` — recomputes muscle freshness/stress caches
 - `delete-account` — account soft-delete flow
-- `generate-exercise-image` — exercise illustration generation (requires `OPENAI_API_KEY`; optional `OPENAI_IMAGE_MODEL`)
 
 ```bash
 # Set secrets once
@@ -124,7 +123,6 @@ npx supabase secrets set OPENAI_API_KEY=sk-...
 npx supabase functions deploy generate-workout
 npx supabase functions deploy update-muscle-freshness
 npx supabase functions deploy delete-account
-npx supabase functions deploy generate-exercise-image
 ```
 
 ### 7. Generate TypeScript Types
@@ -232,11 +230,11 @@ iron-path-app/
 ├── supabase/
 │   ├── migrations/       # Database migrations
 │   ├── functions/        # Edge Functions (generate-workout, update-muscle-freshness,
-│   │                     #   delete-account, generate-exercise-image)
+│   │                     #   delete-account, revenuecat-webhook)
 │   ├── seed/             # Seed source data (master exercise/stretch CSV)
 │   └── exports/          # Database exports (schema, data)
 │
-├── scripts/              # Dev/ops scripts (dev-log-server, exercise import + image generation)
+├── scripts/              # Dev/ops scripts (dev-log-server, exercise import SQL generation)
 │
 ├── documentation/        # Project documentation
 │   ├── 00_INDEX.md      # Documentation index
@@ -299,17 +297,10 @@ npm run lint:eslint   # ESLint (expo lint)
 npm test              # vitest run
 ```
 
-### Exercise Catalog & Image Tooling (scripts/)
+### Exercise Catalog Tooling (scripts/)
 ```bash
-# Regenerate the exercise import migration + manifests from the master CSV
+# Regenerate the exercise import migration + muscle-key manifest from the master CSV
 node scripts/generate-exercise-import-sql.mjs
-
-# Batch-generate exercise images via the generate-exercise-image Edge Function
-# (needs EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY in .env)
-node scripts/run-exercise-image-batch.mjs --resume
-
-# Direct OpenAI image generation (needs local OPENAI_API_KEY)
-node scripts/generate-exercise-images.mjs
 ```
 
 ## Development Workflow

@@ -22,6 +22,36 @@ const MAX_YTD_SETS = 100000;
 const MAX_SESSIONS_IN_RANGE = 1000;
 const MAX_UNIQUE_COMBO_SETS = 5000;
 
+async function isSessionOwnedByUser(sessionId: string, userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('v2_workout_sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  return data != null;
+}
+
+async function isSessionExerciseOwnedByUser(sessionExerciseId: string, userId: string): Promise<boolean> {
+  const { data: exercise } = await supabase
+    .from('v2_session_exercises')
+    .select('session_id')
+    .eq('id', sessionExerciseId)
+    .maybeSingle();
+  if (!exercise?.session_id) return false;
+  return isSessionOwnedByUser(exercise.session_id, userId);
+}
+
+async function isSessionSetOwnedByUser(setId: string, userId: string): Promise<boolean> {
+  const { data: setRow } = await supabase
+    .from('v2_session_sets')
+    .select('session_exercise_id')
+    .eq('id', setId)
+    .maybeSingle();
+  if (!setRow?.session_exercise_id) return false;
+  return isSessionExerciseOwnedByUser(setRow.session_exercise_id, userId);
+}
+
 export interface WorkoutSession {
   id: string;
   user_id: string;
@@ -572,7 +602,8 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    const userId = user?.id || null;
+    const userId = user?.id;
+    if (!userId) return false;
 
     const { error } = await supabase
       .from('v2_workout_sessions')
@@ -580,7 +611,8 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
         status: 'completed',
         completed_at: new Date().toISOString(),
       })
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .eq('user_id', userId);
 
     if (error) {
       if (__DEV__) {
@@ -624,13 +656,20 @@ export async function abandonWorkoutSession(sessionId: string): Promise<boolean>
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id;
+    if (!userId) return false;
+
     const { error } = await supabase
       .from('v2_workout_sessions')
       .update({
         status: 'abandoned',
         completed_at: new Date().toISOString(),
       })
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .eq('user_id', userId);
 
     if (error) {
       if (__DEV__) devError('workout-query', error, { sessionId });
@@ -671,6 +710,14 @@ export async function saveSessionSet(
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id;
+    if (!userId || !(await isSessionExerciseOwnedByUser(sessionExerciseId, userId))) {
+      return null;
+    }
+
     // Check if set already exists
     const { data: existing } = await supabase
       .from('v2_session_sets')
@@ -2129,6 +2176,14 @@ export async function markSetComplete(
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id;
+    if (!userId || !(await isSessionSetOwnedByUser(setId, userId))) {
+      return false;
+    }
+
     const { error } = await supabase
       .from('v2_session_sets')
       .update({
@@ -2184,11 +2239,18 @@ export async function getSessionWithSets(sessionId: string): Promise<{
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id;
+    if (!userId) return null;
+
     // Fetch session
     const { data: session, error: sessionError } = await supabase
       .from('v2_workout_sessions')
       .select('*')
       .eq('id', sessionId)
+      .eq('user_id', userId)
       .single();
 
     if (sessionError) {

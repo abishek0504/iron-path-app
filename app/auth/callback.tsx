@@ -7,6 +7,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../src/l
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { mapAuthError } from '../../src/lib/auth/authErrors';
 
 type CallbackType = 'recovery' | 'password' | 'email_change' | string | null;
 
@@ -39,12 +40,15 @@ export default function AuthCallbackScreen() {
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
           setStatus('error');
-          setMessage(error.message || 'Unable to verify link.');
+          setMessage(mapAuthError(error, 'Unable to verify link.'));
           if (__DEV__) devError('auth-callback', error, { type });
           return;
         }
         if (__DEV__) {
           devLog('auth-callback', { action: 'session-exchanged', type, userId: data.session?.user?.id });
+        }
+        if (typeof window !== 'undefined' && window.history?.replaceState) {
+          window.history.replaceState({}, document.title, window.location.pathname);
         }
         if (type === 'email_change') {
           setStatus('done');
@@ -65,8 +69,8 @@ export default function AuthCallbackScreen() {
   }, [params, showToast]);
 
   const handleSetPassword = async () => {
-    if (!password || password.length < 6) {
-      setMessage('Password must be at least 6 characters.');
+    if (!password || password.length < 8) {
+      setMessage('Password must be at least 8 characters.');
       return;
     }
     if (password !== confirmPassword) {
@@ -77,7 +81,7 @@ export default function AuthCallbackScreen() {
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) {
-        setMessage(error.message || 'Unable to update password.');
+        setMessage(mapAuthError(error, 'Unable to update password.'));
         if (__DEV__) devError('auth-callback', error, { action: 'update-password' });
         return;
       }

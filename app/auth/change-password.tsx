@@ -15,6 +15,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../src/l
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { mapAuthError } from '../../src/lib/auth/authErrors';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -44,15 +45,20 @@ export default function ChangePasswordScreen() {
     const loadCurrentEmail = async () => {
       try {
         const { data } = await supabase.auth.getUser();
-        if (data.user?.email) {
+        if (!data.user) {
+          router.replace('/login');
+          return;
+        }
+        if (data.user.email) {
           setEmail(data.user.email);
         }
       } catch (error) {
         if (__DEV__) devError('change-password', error);
+        router.replace('/login');
       }
     };
     loadCurrentEmail();
-  }, []);
+  }, [router]);
 
   const handleSubmit = async () => {
     setInfo(null);
@@ -94,7 +100,7 @@ export default function ChangePasswordScreen() {
         password: newPassword,
       });
       if (updateError) {
-        setInfo(updateError.message || 'Unable to update password.');
+        setInfo(mapAuthError(updateError, 'Unable to update password.'));
         if (__DEV__) devError('change-password', updateError, { email });
         return;
       }

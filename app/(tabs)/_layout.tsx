@@ -9,6 +9,8 @@ import { useState, useEffect, useMemo } from "react";
 import { spacing, typography, type ThemeColors } from "../../src/lib/utils/theme";
 import { useTheme } from "../../src/lib/utils/ThemeContext";
 import { supabase } from "../../src/lib/supabase/client";
+import { getUserProfile } from "../../src/lib/supabase/queries/users";
+import { isAccountPendingDeletion } from "../../src/lib/auth/accountLifecycle";
 import { hapticSelection } from "../../src/lib/utils/haptics";
 import { usePaywall } from "../../src/components/paywall/PaywallProvider";
 import { APP_OPEN_PAYWALL_DELAY_MS } from "../../src/lib/subscriptions/constants";
@@ -164,7 +166,15 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
         router.replace('/get-started');
         setAuthenticated(false);
       } else {
-        setAuthenticated(true);
+        const profile = await getUserProfile(session.user.id);
+        if (cancelled) return;
+        if (isAccountPendingDeletion(profile)) {
+          await supabase.auth.signOut();
+          router.replace('/login');
+          setAuthenticated(false);
+        } else {
+          setAuthenticated(true);
+        }
       }
       setReady(true);
     })();

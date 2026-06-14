@@ -64,6 +64,27 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    const { data: existing, error: fetchErr } = await serviceClient
+      .from('v2_profiles')
+      .select('deleted_at, scheduled_purge_at')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (fetchErr) {
+      return jsonResponse({ error: 'Failed to mark account for deletion' }, 500);
+    }
+
+    if (existing?.deleted_at && existing.scheduled_purge_at) {
+      return jsonResponse(
+        {
+          success: true,
+          scheduled_purge_at: existing.scheduled_purge_at,
+          grace_days: GRACE_PERIOD_DAYS,
+        },
+        200,
+      );
+    }
+
     const now = new Date();
     const purgeAt = new Date(now.getTime() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
 
@@ -87,6 +108,19 @@ Deno.serve(async (req) => {
       // Non-fatal — the row is already marked, client also calls signOut().
     }
 
+    // Optional GDPR subscriber purge when RevenueCat secret API key is configured.
+    const rcSecret = Deno.env.get('REVENUECAT_SECRET_API_KEY');
+    if (rcSecret) {
+      try {
+        await fetch(`https://api.revenuecat.com/v1/subscribers/${userId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${rcSecret}` },
+        });
+      } catch {
+        // Non-fatal — account is still marked for deletion.
+      }
+    }
+
     return jsonResponse(
       {
         success: true,
@@ -98,6 +132,6 @@ Deno.serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error in delete-account:', message);
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse({ error: 'Account deletion failed' }, 500);
   }
 });

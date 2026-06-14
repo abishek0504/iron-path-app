@@ -7,7 +7,8 @@ import {
 
 export type PurchasesModule = typeof import('react-native-purchases');
 
-let configuredForUserId: string | null = null;
+let configured = false;
+let activeUserId: string | null = null;
 
 function getPurchases(): PurchasesModule | null {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return null;
@@ -32,23 +33,28 @@ export async function configureRevenueCat(userId: string): Promise<boolean> {
   const apiKey = getRevenueCatApiKey();
   if (!Purchases || !apiKey) return false;
 
-  if (configuredForUserId === userId) return true;
+  if (!configured) {
+    Purchases.default.setLogLevel(
+      __DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN,
+    );
+    await Purchases.default.configure({ apiKey });
+    configured = true;
+  }
 
-  Purchases.default.setLogLevel(
-    __DEV__ ? Purchases.LOG_LEVEL.DEBUG : Purchases.LOG_LEVEL.WARN,
-  );
-  await Purchases.default.configure({ apiKey, appUserID: userId });
-  configuredForUserId = userId;
+  if (activeUserId === userId) return true;
+
+  await Purchases.default.logIn(userId);
+  activeUserId = userId;
   return true;
 }
 
 export async function logOutRevenueCat(): Promise<void> {
   const Purchases = getPurchases();
-  if (!Purchases || !configuredForUserId) return;
+  if (!Purchases || !configured || !activeUserId) return;
   try {
     await Purchases.default.logOut();
   } finally {
-    configuredForUserId = null;
+    activeUserId = null;
   }
 }
 

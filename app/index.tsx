@@ -13,6 +13,7 @@ import { useTheme } from '../src/lib/utils/ThemeContext';
 import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore } from '../src/stores/userStore';
 import { getActiveSession } from '../src/lib/supabase/queries/workouts';
+import { isAccountPendingDeletion } from '../src/lib/auth/accountLifecycle';
 
 export default function Index() {
   const router = useRouter();
@@ -36,6 +37,11 @@ export default function Index() {
 
         if (profile) {
           setProfile(profile);
+        }
+
+        if (isAccountPendingDeletion(profile)) {
+          router.replace('/login');
+          return;
         }
 
         const hasRequired =

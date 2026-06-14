@@ -55,7 +55,7 @@ import { useUIStore } from '../../../src/stores/uiStore';
 import { useToast } from '../../../src/hooks/useToast';
 import { calculateWeightSuggestion } from '../../../src/lib/utils/weightSuggestions';
 import { hapticHeavy, hapticSuccess } from '../../../src/lib/utils/haptics';
-import { devError } from '../../../src/lib/utils/logger';
+import { devError, devLog } from '../../../src/lib/utils/logger';
 import { selectExerciseTargets } from '../../../src/lib/engine/targetSelection';
 import { detectSessionStaleness } from '../../../src/lib/engine/sessionStaleness';
 import {
@@ -222,6 +222,8 @@ export default function ActiveWorkoutScreen() {
   const handleCompleteSetRef = useRef<() => void>(() => {});
   const workoutPhaseRef = useRef(workoutPhase);
   workoutPhaseRef.current = workoutPhase;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const exerciseTimerEndsAtRef = useRef<number | null>(null);
   const [exerciseTimerEndsAt, setExerciseTimerEndsAt] = useState<number | null>(null);
 
@@ -241,10 +243,47 @@ export default function ActiveWorkoutScreen() {
   };
 
   useEffect(() => {
-    const unsubscribe = addSetCompletedListener(() => {
-      if (workoutPhaseRef.current.type === 'execution') {
-        handleCompleteSetRef.current();
+    const unsubscribe = addSetCompletedListener((event) => {
+      if (workoutPhaseRef.current.type !== 'execution') return;
+
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId || event.sessionId !== activeSessionId) {
+        if (__DEV__) {
+          devLog('workout-active', {
+            action: 'watch_completeSet_ignored',
+            reason: 'session_mismatch',
+            expectedSessionId: activeSessionId,
+            receivedSessionId: event.sessionId,
+          });
+        }
+        return;
       }
+
+      const expectedSetNumber =
+        workoutPhaseRef.current.type === 'execution'
+          ? workoutPhaseRef.current.setIndex + 1
+          : -1;
+      if (event.setNumber !== expectedSetNumber) {
+        if (__DEV__) {
+          devLog('workout-active', {
+            action: 'watch_completeSet_ignored',
+            reason: 'set_mismatch',
+            expectedSetNumber,
+            receivedSetNumber: event.setNumber,
+          });
+        }
+        return;
+      }
+
+      const WATCH_EVENT_MAX_AGE_MS = 5 * 60 * 1000;
+      if (event.sentAt && Date.now() - event.sentAt * 1000 > WATCH_EVENT_MAX_AGE_MS) {
+        if (__DEV__) {
+          devLog('workout-active', { action: 'watch_completeSet_ignored', reason: 'stale_event' });
+        }
+        return;
+      }
+
+      handleCompleteSetRef.current();
     });
     return () => {
       unsubscribe();

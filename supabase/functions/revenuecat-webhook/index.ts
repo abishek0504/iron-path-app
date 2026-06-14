@@ -42,6 +42,10 @@ function tierFromEventType(type: string, event: RevenueCatEvent): 'free' | 'pro'
     case 'SUBSCRIPTION_EXTENDED':
       return hasProEntitlement(event) ? 'pro' : 'free';
     case 'CANCELLATION':
+      if (event.expiration_at_ms != null && event.expiration_at_ms > Date.now()) {
+        return hasProEntitlement(event) ? 'pro' : 'free';
+      }
+      return 'free';
     case 'EXPIRATION':
     case 'BILLING_ISSUE':
       return 'free';
@@ -49,6 +53,18 @@ function tierFromEventType(type: string, event: RevenueCatEvent): 'free' | 'pro'
       return hasProEntitlement(event) ? 'pro' : 'free';
   }
 }
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i++) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function expirationFromEvent(event: RevenueCatEvent): string | null {
   if (event.expiration_at_ms == null) return null;
@@ -70,7 +86,7 @@ Deno.serve(async (req) => {
 
   const authHeader = req.headers.get('authorization') ?? '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  if (!token || token !== secret) {
+  if (!token || !timingSafeEqual(token, secret)) {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
@@ -87,6 +103,9 @@ Deno.serve(async (req) => {
   }
 
   const userId = event.app_user_id;
+  if (!UUID_RE.test(userId)) {
+    return jsonResponse({ error: 'Invalid app_user_id' }, 400);
+  }
   const tier = tierFromEventType(event.type, event);
   const expiresAt = tier === 'pro' ? expirationFromEvent(event) : null;
 

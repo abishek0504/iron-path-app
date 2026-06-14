@@ -8,6 +8,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../src/l
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { mapAuthError } from '../../src/lib/auth/authErrors';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -47,7 +48,7 @@ export default function ForgotPasswordScreen() {
         redirectTo,
       });
       if (error) {
-        setInfo(error.message || 'Unable to send reset email.');
+        setInfo(mapAuthError(error, 'Unable to send reset email.'));
         if (__DEV__) devError('forgot-password', error, { email });
         return;
       }

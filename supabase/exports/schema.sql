@@ -1,4 +1,8 @@
 --
+-- WARNING: This export is NOT authoritative for security audits.
+-- It may be stale relative to supabase/migrations/. Use live DB or migrations for RLS/policy review.
+-- Last security audit: 2026-06-14 (see documentation/AUDIT_2026-06-14_VIBESEC_SECURITY.md)
+--
 -- PostgreSQL database dump
 --
 

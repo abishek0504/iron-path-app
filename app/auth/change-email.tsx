@@ -8,6 +8,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../src/l
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
+import { mapAuthError } from '../../src/lib/auth/authErrors';
 
 export default function ChangeEmailScreen() {
   const router = useRouter();
@@ -24,15 +25,20 @@ export default function ChangeEmailScreen() {
     const loadEmail = async () => {
       try {
         const { data } = await supabase.auth.getUser();
-        if (data.user?.email) {
+        if (!data.user) {
+          router.replace('/login');
+          return;
+        }
+        if (data.user.email) {
           setCurrentEmail(data.user.email);
         }
       } catch (error) {
         if (__DEV__) devError('change-email', error);
+        router.replace('/login');
       }
     };
     loadEmail();
-  }, []);
+  }, [router]);
 
   const handleSend = async () => {
     setInfo(null);
@@ -49,7 +55,7 @@ export default function ChangeEmailScreen() {
         { emailRedirectTo }
       );
       if (error) {
-        setInfo(error.message || 'Unable to send email change link.');
+        setInfo(mapAuthError(error, 'Unable to send email change link.'));
         if (__DEV__) devError('change-email', error, { newEmail });
         return;
       }

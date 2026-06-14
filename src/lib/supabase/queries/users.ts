@@ -7,6 +7,38 @@ import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
 import type { UserProfile } from '../../../stores/userStore';
 
+const PROFILE_UPDATE_FIELDS = [
+  'first_name',
+  'last_name',
+  'date_of_birth',
+  'gender',
+  'height',
+  'current_weight',
+  'goal_weight',
+  'experience_level',
+  'equipment_access',
+  'days_per_week',
+  'workout_days',
+  'preferred_training_style',
+  'use_imperial',
+  'avatar_url',
+] as const satisfies readonly (keyof UserProfile)[];
+
+const PROFILE_CREATE_FIELDS = [...PROFILE_UPDATE_FIELDS] as const;
+
+function pickProfileFields<T extends readonly (keyof UserProfile)[]>(
+  source: Partial<UserProfile>,
+  allowed: T,
+): Partial<UserProfile> {
+  const result: Partial<UserProfile> = {};
+  for (const key of allowed) {
+    if (key in source && source[key] !== undefined) {
+      (result as Record<string, unknown>)[key] = source[key];
+    }
+  }
+  return result;
+}
+
 /**
  * Get user profile
  */
@@ -54,10 +86,11 @@ export async function updateUserProfile(
   }
 
   try {
+    const safeUpdates = pickProfileFields(updates, PROFILE_UPDATE_FIELDS);
     const { error } = await supabase
       .from('v2_profiles')
       .update({
-        ...updates,
+        ...safeUpdates,
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId);
@@ -90,9 +123,10 @@ export async function createUserProfile(
   }
 
   try {
+    const safeProfile = pickProfileFields(profile, PROFILE_CREATE_FIELDS);
     const { error } = await supabase.from('v2_profiles').insert({
       id: userId,
-      ...profile,
+      ...safeProfile,
     });
 
     if (error) {
@@ -167,14 +201,24 @@ export async function restoreAccount(userId: string): Promise<boolean> {
   }
 
   try {
-    const { error } = await supabase
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.user.id !== userId) {
+      if (__DEV__) {
+        devError('user-query', new Error('restoreAccount user mismatch'), { userId });
+      }
+      return false;
+    }
+
+    const { data, error } = await supabase
       .from('v2_profiles')
       .update({
         deleted_at: null,
         scheduled_purge_at: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', userId);
+      .eq('id', userId)
+      .select('id')
+      .maybeSingle();
 
     if (error) {
       if (__DEV__) {
@@ -182,7 +226,7 @@ export async function restoreAccount(userId: string): Promise<boolean> {
       }
       return false;
     }
-    return true;
+    return !!data?.id;
   } catch (error) {
     if (__DEV__) {
       devError('user-query', error, { userId, action: 'restoreAccount' });

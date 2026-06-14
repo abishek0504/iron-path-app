@@ -18,6 +18,7 @@ import { devLog } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { restoreAccount } from '../src/lib/supabase/queries/users';
+import { mapAuthError } from '../src/lib/auth/authErrors';
 import type { UserProfile } from '../src/stores/userStore';
 
 export default function Login() {
@@ -79,7 +80,7 @@ export default function Login() {
       });
 
       if (error) {
-        setErrorText(error.message);
+        setErrorText(mapAuthError(error, 'Unable to sign in right now.'));
         return;
       }
 
@@ -106,8 +107,8 @@ export default function Login() {
       }
 
       continueAfterLogin(profile ?? null);
-    } catch (error: any) {
-      setErrorText(error?.message || 'Unable to sign in right now.');
+    } catch (error: unknown) {
+      setErrorText(mapAuthError(error, 'Unable to sign in right now.'));
     } finally {
       setLoading(false);
     }

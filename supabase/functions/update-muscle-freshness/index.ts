@@ -66,6 +66,13 @@ const MUSCLE_DECAY_CONSTANTS: Record<string, number> = {
 
 const DEFAULT_LAMBDA = 0.041;
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
 function normalizeMuscleKey(raw: unknown): string | null {
   if (!raw || typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -100,6 +107,10 @@ function jsonResponse(body: unknown, status: number): Response {
 
 Deno.serve(async (req) => {
   try {
+    if (req.method !== 'POST') {
+      return jsonResponse({ error: 'Method not allowed' }, 405);
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
@@ -117,7 +128,7 @@ Deno.serve(async (req) => {
       | { user_id?: unknown; session_id?: unknown }
       | null;
     const sessionIdRaw = body?.session_id;
-    if (typeof sessionIdRaw !== 'string' || !sessionIdRaw) {
+    if (typeof sessionIdRaw !== 'string' || !sessionIdRaw || !isUuid(sessionIdRaw)) {
       return jsonResponse({ error: 'Missing or invalid session_id' }, 400);
     }
     const sessionId = sessionIdRaw;
@@ -152,11 +163,12 @@ Deno.serve(async (req) => {
     // Ownership check: session must belong to userId. Always enforced (both paths).
     const { data: ownership, error: ownershipErr } = await serviceClient
       .from('v2_workout_sessions')
-      .select('user_id')
+      .select('user_id, status')
       .eq('id', sessionId)
       .maybeSingle();
 
     if (ownershipErr) {
+      console.error('Ownership check failed:', ownershipErr.message);
       return jsonResponse({ error: 'Failed to verify session ownership' }, 500);
     }
     if (!ownership) {
@@ -164,6 +176,9 @@ Deno.serve(async (req) => {
     }
     if (ownership.user_id !== userId) {
       return jsonResponse({ error: 'Forbidden' }, 403);
+    }
+    if (ownership.status !== 'completed') {
+      return jsonResponse({ error: 'Session must be completed' }, 409);
     }
 
     // 1. Fetch session exercises
@@ -363,6 +378,6 @@ Deno.serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error updating muscle freshness:', message);
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse({ error: 'Failed to update muscle freshness' }, 500);
   }
 });

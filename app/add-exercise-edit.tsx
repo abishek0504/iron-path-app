@@ -51,9 +51,23 @@ import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache
 import { getExerciseImage } from '../src/lib/exerciseImages';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
-import { getDateBoundsForDayName } from '../src/lib/utils/date';
+import { getDateBoundsForDayName, WEEK_DAYS } from '../src/lib/utils/date';
 
 const DEFAULT_REST_SEC = 90;
+const DEEP_LINK_PARAM_MAX_LENGTH = 200;
+const VALID_DAY_NAMES = new Set<string>(WEEK_DAYS);
+
+function normalizeDeepLinkParam(value: string | string[] | undefined, maxLength: number): string | undefined {
+  const raw = typeof value === 'string' ? value : Array.isArray(value) ? value[0] : undefined;
+  if (!raw) return undefined;
+  return raw.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, maxLength) || undefined;
+}
+
+function normalizeDayName(value: string | string[] | undefined): string | undefined {
+  const day = normalizeDeepLinkParam(value, DEEP_LINK_PARAM_MAX_LENGTH);
+  if (!day || !VALID_DAY_NAMES.has(day)) return undefined;
+  return day;
+}
 const REPS_MIN = 1;
 const REPS_MAX = 50;
 const DURATION_MIN = 5;
@@ -143,23 +157,15 @@ export default function AddExerciseEditScreen() {
     isTimed: string;
     editSlotId?: string;
   }>();
-  const {
-    dayId,
-    templateId,
-    dayName,
-    exerciseId,
-    customExerciseId,
-    exerciseName,
-    isTimed,
-    editSlotId,
-  } = params;
-  // Expo Router can return string | string[] for query params; normalize to string | undefined
-  const sessionId =
-    typeof params.sessionId === 'string'
-      ? params.sessionId
-      : Array.isArray(params.sessionId)
-        ? params.sessionId[0]
-        : undefined;
+  const dayId = normalizeDeepLinkParam(params.dayId, DEEP_LINK_PARAM_MAX_LENGTH);
+  const templateId = normalizeDeepLinkParam(params.templateId, DEEP_LINK_PARAM_MAX_LENGTH);
+  const dayName = normalizeDayName(params.dayName);
+  const exerciseId = normalizeDeepLinkParam(params.exerciseId, DEEP_LINK_PARAM_MAX_LENGTH);
+  const customExerciseId = normalizeDeepLinkParam(params.customExerciseId, DEEP_LINK_PARAM_MAX_LENGTH);
+  const exerciseName = normalizeDeepLinkParam(params.exerciseName, DEEP_LINK_PARAM_MAX_LENGTH);
+  const isTimed = normalizeDeepLinkParam(params.isTimed, 4);
+  const editSlotId = normalizeDeepLinkParam(params.editSlotId, DEEP_LINK_PARAM_MAX_LENGTH);
+  const sessionId = normalizeDeepLinkParam(params.sessionId, DEEP_LINK_PARAM_MAX_LENGTH);
   const isEditSlot = !!editSlotId;
   const dateContext = useDateContext(dayName);
 
@@ -448,7 +454,7 @@ export default function AddExerciseEditScreen() {
     }
   };
 
-  const validateAddContext = (): boolean => {
+  const validateAddContext = (): { dayId: string; templateId: string; dayName: string; userId: string } | null => {
     const missingContext: string[] = [];
     if (!userId) missingContext.push('userId');
     if (!dayId) missingContext.push('dayId');
@@ -457,18 +463,23 @@ export default function AddExerciseEditScreen() {
     if (missingContext.length > 0) {
       if (__DEV__) devLog('add-exercise-edit', { action: 'confirm_fail', missing: missingContext });
       toast.error('Missing context');
-      return false;
+      return null;
     }
     if (!exerciseIdVal && !customExerciseIdVal) {
       if (__DEV__) devLog('add-exercise-edit', { action: 'confirm_fail', missing: ['exerciseId and customExerciseId (need one)'] });
       toast.error('Missing exercise');
-      return false;
+      return null;
     }
     if (!allSetsValid(sets, isTimedMode)) {
       toast.error('Fix errors before adding');
-      return false;
+      return null;
     }
-    return true;
+    return {
+      dayId: dayId as string,
+      templateId: templateId as string,
+      dayName: dayName as string,
+      userId: userId as string,
+    };
   };
 
   const insertExerciseWithSetsIntoSession = async (targetSessionId: string): Promise<boolean> => {
@@ -503,14 +514,16 @@ export default function AddExerciseEditScreen() {
 
   /** Add to routine: template slot + sync to the day's existing session(s). */
   const handleAddToRoutine = async () => {
-    if (!validateAddContext()) return;
+    const ctx = validateAddContext();
+    if (!ctx) return;
+    const { dayId: validatedDayId, templateId: validatedTemplateId, dayName: validatedDayName, userId: validatedUserId } = ctx;
     setSavingAction('routine');
     try {
-      const slots = await getTemplateSlotsForDay(templateId, dayName);
+      const slots = await getTemplateSlotsForDay(validatedTemplateId, validatedDayName);
       const sortOrder = slots.length + 1;
-      const success = await applyStructureEditToTemplate(templateId, {
+      const success = await applyStructureEditToTemplate(validatedTemplateId, {
         type: 'addSlot',
-        dayId,
+        dayId: validatedDayId,
         exerciseId: exerciseIdVal,
         customExerciseId: customExerciseIdVal,
         sortOrder,
@@ -519,7 +532,7 @@ export default function AddExerciseEditScreen() {
         toast.error('Failed to add to routine');
         return;
       }
-      invalidateTemplate(templateId);
+      invalidateTemplate(validatedTemplateId);
 
       let syncedSessions = 0;
       if (sessionId) {
@@ -530,7 +543,7 @@ export default function AddExerciseEditScreen() {
         }
         syncedSessions = 1;
       } else {
-        syncedSessions = await syncTemplateSlotToSessionsForDay(userId!, dayName, {
+        syncedSessions = await syncTemplateSlotToSessionsForDay(validatedUserId, validatedDayName, {
           exerciseId: exerciseIdVal,
           customExerciseId: customExerciseIdVal,
           experience,
@@ -542,7 +555,7 @@ export default function AddExerciseEditScreen() {
         devLog('add-exercise-edit', {
           action: 'add_complete',
           scope: 'routine',
-          dayName,
+          dayName: validatedDayName,
           targetSessionId: sessionId ?? null,
           syncedSessions,
           setCount: sets.length,
@@ -563,7 +576,9 @@ export default function AddExerciseEditScreen() {
 
   /** Add to this day only: insert into the targeted session, no template change. */
   const handleAddDayOnly = async () => {
-    if (!validateAddContext()) return;
+    const ctx = validateAddContext();
+    if (!ctx) return;
+    const { dayName: validatedDayName, userId: validatedUserId } = ctx;
     setSavingAction('dayOnly');
     try {
       let targetSessionId: string | null = null;
@@ -572,7 +587,7 @@ export default function AddExerciseEditScreen() {
           .from('v2_workout_sessions')
           .select('id')
           .eq('id', sessionId)
-          .eq('user_id', userId)
+          .eq('user_id', validatedUserId)
           .maybeSingle();
         targetSessionId = data?.id ?? null;
         if (!targetSessionId) {
@@ -580,7 +595,7 @@ export default function AddExerciseEditScreen() {
           return;
         }
       } else if (dateContext.isToday) {
-        const session = await getOrCreateActiveSessionForToday(userId!, dayName);
+        const session = await getOrCreateActiveSessionForToday(validatedUserId, validatedDayName);
         if (!session) {
           toast.error("Failed to get today's session");
           return;
@@ -588,8 +603,8 @@ export default function AddExerciseEditScreen() {
         targetSessionId = session.id;
       } else {
         // Materialized day (non-today): target that day's most recent session.
-        const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
-        const sessions = await getSessionsForToday(userId!, startIso, endIsoExclusive);
+        const { startIso, endIsoExclusive } = getDateBoundsForDayName(validatedDayName);
+        const sessions = await getSessionsForToday(validatedUserId, startIso, endIsoExclusive);
         targetSessionId = sessions[0]?.id ?? null;
         if (!targetSessionId) {
           toast.error('No workout exists for this day');
@@ -607,14 +622,14 @@ export default function AddExerciseEditScreen() {
         devLog('add-exercise-edit', {
           action: 'add_complete',
           scope: 'dayOnly',
-          dayName,
+          dayName: validatedDayName,
           targetSessionId,
           setCount: sets.length,
           warmupCount: sets.filter((s) => s.set_type === 'warmup').length,
         });
       }
       useUIStore.getState().setPlannerNeedsRefetch(true);
-      toast.success(dateContext.isToday ? "Added to today's workout" : `Added to ${dayName} only`);
+      toast.success(dateContext.isToday ? "Added to today's workout" : `Added to ${validatedDayName} only`);
       tryRandomPaywallFromOutside('add_exercise');
       router.replace('/(tabs)/planner');
     } catch (e) {

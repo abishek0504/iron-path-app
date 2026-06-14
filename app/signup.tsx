@@ -15,6 +15,7 @@ import { useTheme } from '../src/lib/utils/ThemeContext';
 import { Check, X, Eye, EyeOff } from 'lucide-react-native';
 import { LegalLinks } from '../src/components/ui/LegalLinks';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { mapAuthError } from '../src/lib/auth/authErrors';
 
 export default function Signup() {
   const router = useRouter();
@@ -37,27 +38,6 @@ export default function Signup() {
   // Refs to preserve password values (workaround for React Native secureTextEntry bug)
   const passwordRef = useRef<string>('');
   const confirmPasswordRef = useRef<string>('');
-
-  const getPasswordErrorMessage = (error: any): string => {
-    const errorMessage = error?.message?.toLowerCase() || '';
-
-    // Map common Supabase password errors to user-friendly messages
-    if (errorMessage.includes('password') && errorMessage.includes('weak')) {
-      return 'Password is too weak. Use at least 8 characters with a mix of letters, numbers, and symbols.';
-    }
-    if (errorMessage.includes('password') && errorMessage.includes('length')) {
-      return 'Password must be at least 8 characters long.';
-    }
-    if (errorMessage.includes('password') && (errorMessage.includes('common') || errorMessage.includes('dictionary'))) {
-      return 'Password is too common. Please choose a more unique password.';
-    }
-    if (errorMessage.includes('password')) {
-      return 'Password does not meet security requirements. Use at least 8 characters with a mix of letters, numbers, and symbols.';
-    }
-
-    // Return original message for non-password errors
-    return error?.message || 'Unable to sign up right now.';
-  };
 
   // Animate password dropdown
   useEffect(() => {
@@ -156,7 +136,7 @@ export default function Signup() {
       });
 
       if (error) {
-        setErrorText(getPasswordErrorMessage(error));
+        setErrorText(mapAuthError(error, 'Unable to sign up right now.'));
         return;
       }
 
@@ -168,7 +148,7 @@ export default function Signup() {
         router.replace('/signup-success');
       }
     } catch (error: any) {
-      setErrorText(error?.message || 'Unable to sign up right now.');
+      setErrorText(mapAuthError(error, 'Unable to sign up right now.'));
     } finally {
       setLoading(false);
     }

@@ -61,9 +61,9 @@ export default function HealthConnectScreen() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.lead}>
-          Connect Apple Health to sync body metrics and logged workouts. IronPath will request read access
-          for body mass, height, resting heart rate, active energy, and heart rate samples, and write
-          access for workouts and body mass when you complete sessions or log weight.
+          Connect Apple Health to sync body weight and logged workouts. IronPath requests read access
+          for body weight and write access for workouts and body mass when you complete sessions or
+          log weight.
         </Text>
         <Text style={styles.lead}>
           Weight data syncs both ways — existing Apple Health entries import into IronPath, and your

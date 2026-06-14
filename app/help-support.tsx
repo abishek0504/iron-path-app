@@ -26,6 +26,8 @@ import { LegalLinks } from '../src/components/ui/LegalLinks';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 
+const SUPPORT_MESSAGE_MAX_LENGTH = 5000;
+
 export default function HelpSupportScreen() {
   const router = useRouter();
   const profile = useUserStore((state) => state.profile);
@@ -68,6 +70,10 @@ export default function HelpSupportScreen() {
     const trimmedMessage = message.trim();
     if (!trimmedName || !trimmedEmail || !trimmedMessage) {
       showToast('Please fill in name, email, and your message', 'error');
+      return;
+    }
+    if (trimmedMessage.length > SUPPORT_MESSAGE_MAX_LENGTH) {
+      showToast(`Message must be ${SUPPORT_MESSAGE_MAX_LENGTH} characters or fewer`, 'error');
       return;
     }
     const { data: { user } } = await supabase.auth.getUser();

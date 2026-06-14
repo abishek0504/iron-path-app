@@ -32,6 +32,6 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
-server.listen(PORT, () => {
-  console.log(`Dev log server: http://localhost:${PORT}/log (logs will appear here)`);
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Dev log server: http://127.0.0.1:${PORT}/log (logs will appear here)`);
 });

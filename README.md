@@ -100,7 +100,7 @@ All executed volume is natively indexed into your tracking timeline. The Engine 
 ### Backend & Database
 - **Supabase** - PostgreSQL database with Row Level Security (RLS)
 - **Supabase Auth** - Email/password authentication with secure session management
-- **Supabase Edge Functions** - `generate-workout` (OpenAI-powered week generation), `update-muscle-freshness`, `delete-account`, `generate-exercise-image`
+- **Supabase Edge Functions** - `generate-workout` (OpenAI-powered week generation), `update-muscle-freshness`, `delete-account`
 - **RLS Policies** - Client-side security with anon key, no service role exposure
 - **Type-Safe Queries** - Generated TypeScript types from database schema
 
@@ -218,7 +218,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 npx supabase functions deploy generate-workout
 npx supabase functions deploy update-muscle-freshness
 npx supabase functions deploy delete-account
-npx supabase functions deploy generate-exercise-image
+npx supabase functions deploy revenuecat-webhook
 ```
 
 6. Generate TypeScript types:

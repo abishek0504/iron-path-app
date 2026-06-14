@@ -4,6 +4,13 @@
 **Last Updated**: 2026-06-11 (Exercise Library Expansion, Stretches & Image Pipeline)  
 **Philosophy**: Document what matters - architecture decisions, data flows, and setup procedures. Let well-written code document itself.
 
+**Last Updated**: 2026-06-14 (VibeSec security audit)
+
+## Security Audits
+
+1. **[AUDIT_2026-06-14_VIBESEC_SECURITY.md](AUDIT_2026-06-14_VIBESEC_SECURITY.md)** — Full VibeSec security audit: findings, fixes, database hardening, edge functions, manual steps
+2. **[AUDIT_2026-06-09_APP_STORE_FINISHING_PLAN.md](AUDIT_2026-06-09_APP_STORE_FINISHING_PLAN.md)** — App Store finishing / feature parity audit (June 2026)
+
 ## Core Documentation
 
 1. **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** - Core principles, data layering, architectural decisions (WHY)
@@ -82,9 +89,15 @@ Old documentation archived in [`archive/`](archive/) with timestamps.
 
 ## Recent Updates
 
+### 2026-06-14: VibeSec Security Audit
+- Full security audit per VibeSec checklist; report in `AUDIT_2026-06-14_VIBESEC_SECURITY.md`
+- Migration `vibesec_security_hardening`: subscription INSERT protection, soft-delete field triggers, support message length
+- Watch bridge validation; profile field whitelisting
+- Removed exercise image batch pipeline (`generate-exercise-image` edge function + batch scripts)
+
 ### 2026-06-11: Documentation Refresh — Exercise Library, Stretches, Images, Workout Flow
 - **Exercise library expansion**: 388 master entries (340 strength + 48 stretches) imported from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`; new `is_stretch` flag, `adductors` muscle key (29 canonical muscles), rule-based prescriptions for all new exercises, AI allow-list refreshed (340 exercises).
-- **Exercise image pipeline**: `generate-exercise-image` Edge Function (OpenAI Images) + batch scripts in `scripts/`; 45 of 388 images generated into `assets/exercises/` (mapped in `src/lib/exerciseImages.ts`).
+- **Bundled exercise images**: 45 illustrations in `assets/exercises/` (mapped in `src/lib/exerciseImages.ts`).
 - **Workout flow enhancements** (June 2026): set types/supersets/per-exercise rest, PR trigger + freshness function exclude warm-ups, soft-deleted account purge cron, security advisor remediation, AI backend migrated Gemini → OpenAI with `source` audit tracking.
 - **IMPLEMENTATION_STATUS.md** updated to reflect all of the above (feature matrix, changelog, remaining manual steps).
 

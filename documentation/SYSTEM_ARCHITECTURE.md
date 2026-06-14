@@ -224,13 +224,9 @@ To visualize the 28-muscle freshness state without dropping frames during naviga
 - Skia rendering: ~2-3ms render time per frame
 - Allows smooth animations and transitions
 
-### 4.2 Exercise Image Pipeline (build-time, not runtime)
+### 4.2 Exercise images (bundled assets)
 
-Anatomical illustrations for master exercises are generated offline and bundled with the app — no runtime image fetching or storage bucket:
-
-1. **Generation**: `scripts/run-exercise-image-batch.mjs` (or `scripts/generate-exercise-images.mjs` with a local key) batch-generates JPGs per CSV entry; the former calls the `generate-exercise-image` Edge Function (OpenAI Images, `gpt-image-1`, key held in Supabase secrets), writing to `assets/exercises/<slug>.jpg` and tracking progress in `scripts/output/exercise-image-manifest.json`
-2. **Mapping**: `scripts/generate-exercise-images-ts.mjs` regenerates `src/lib/exerciseImages.ts` — a static name → `require()` map (React Native needs static requires)
-3. **Display**: `getExerciseImage(exerciseName)` returns the bundled asset (e.g. hero image in `add-exercise-edit`); custom exercises return null
+Master exercise illustrations ship as static JPGs in `assets/exercises/`, mapped by `src/lib/exerciseImages.ts`. `getExerciseImage(exerciseName)` returns the bundled asset (e.g. hero image in `add-exercise-edit`); custom exercises return null. There is no runtime image generation or storage bucket.
 
 ## State Management (Zustand)
 
@@ -523,18 +519,18 @@ src/
       client.ts       # Supabase client config
       queries/        # Query functions (organized by domain)
     utils/            # Pure utilities
-    exerciseImages.ts # Generated name → bundled asset map (do not edit by hand)
+    exerciseImages.ts # Static name → bundled asset map
   stores/             # Zustand stores
   types/              # TypeScript types
 
 assets/exercises/      # Bundled exercise illustrations (JPG, generated)
 
-scripts/               # Dev tooling (exercise image batch generation, SQL import generation)
+scripts/               # Dev tooling (SQL import generation)
 
 supabase/
   migrations/         # SQL migrations (apply in order)
   functions/          # Edge Functions: generate-workout, update-muscle-freshness,
-                      #   delete-account, generate-exercise-image
+                      #   delete-account, revenuecat-webhook
   seed/               # Master exercise CSV source
 
 modules/watch-connectivity/  # Local Expo Module wrapping WCSession (iPhone side)

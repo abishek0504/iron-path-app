@@ -24,14 +24,7 @@ export interface HealthAuthResult {
 const BODY_MASS = 'HKQuantityTypeIdentifierBodyMass' as const;
 const WORKOUT_TYPE = 'HKWorkoutTypeIdentifier' as const;
 
-const READ_TYPES = [
-  BODY_MASS,
-  'HKQuantityTypeIdentifierHeight',
-  'HKQuantityTypeIdentifierHeartRate',
-  'HKQuantityTypeIdentifierRestingHeartRate',
-  'HKQuantityTypeIdentifierActiveEnergyBurned',
-  WORKOUT_TYPE,
-] as const;
+const READ_TYPES = [BODY_MASS] as const;
 
 const WRITE_TYPES = [WORKOUT_TYPE, BODY_MASS] as const;
 
