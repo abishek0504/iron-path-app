@@ -13,6 +13,7 @@ type Props = {
   visible: boolean;
   workouts: WorkoutTargetItem[];
   onClose: () => void;
+  onClosed?: () => void;
   onSelect: (sessionId: string) => void;
 };
 
@@ -20,6 +21,7 @@ export const WorkoutTargetPickerSheet: React.FC<Props> = ({
   visible,
   workouts,
   onClose,
+  onClosed,
   onSelect,
 }) => {
   const colors = useTheme();
@@ -58,7 +60,7 @@ export const WorkoutTargetPickerSheet: React.FC<Props> = ({
   );
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Choose workout" height={280}>
+    <BottomSheet visible={visible} onClose={onClose} onClosed={onClosed} title="Choose workout" height={280}>
       <View style={styles.content}>
         <Text style={styles.subtitle}>Which workout should receive the preset?</Text>
         <ScrollView contentContainerStyle={styles.chipRow}>

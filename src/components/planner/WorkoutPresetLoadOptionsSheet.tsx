@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { BottomSheet } from '../ui/BottomSheet';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -9,6 +9,7 @@ type Props = {
   visible: boolean;
   presetName: string;
   onClose: () => void;
+  onClosed?: () => void;
   onSelect: (mode: PresetLoadMode) => void;
 };
 
@@ -16,6 +17,7 @@ export const WorkoutPresetLoadOptionsSheet: React.FC<Props> = ({
   visible,
   presetName,
   onClose,
+  onClosed,
   onSelect,
 }) => {
   const colors = useTheme();
@@ -23,14 +25,18 @@ export const WorkoutPresetLoadOptionsSheet: React.FC<Props> = ({
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        content: {
-          padding: spacing.lg,
+        scroll: {
+          flex: 1,
+          marginHorizontal: -spacing.md,
+        },
+        scrollContent: {
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.xl,
           gap: spacing.md,
         },
         subtitle: {
           color: colors.textSecondary,
           fontSize: typography.sizes.sm,
-          marginBottom: spacing.xs,
         },
         option: {
           borderWidth: 1,
@@ -72,8 +78,19 @@ export const WorkoutPresetLoadOptionsSheet: React.FC<Props> = ({
   ];
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="How to load preset" height={420}>
-      <View style={styles.content}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      onClosed={onClosed}
+      title="How to load preset"
+      height="52%"
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.subtitle}>Loading &quot;{presetName}&quot;</Text>
         {options.map((option) => (
           <TouchableOpacity
@@ -85,7 +102,7 @@ export const WorkoutPresetLoadOptionsSheet: React.FC<Props> = ({
             <Text style={styles.optionDescription}>{option.description}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
     </BottomSheet>
   );
 };

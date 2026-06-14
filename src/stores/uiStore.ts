@@ -36,6 +36,9 @@ interface UIState {
   
   /** Set true when add-exercise-edit adds to routine; planner refetches on focus and clears */
   plannerNeedsRefetch: boolean;
+
+  /** Set true after finishing a workout; workout tab refetches on focus and clears */
+  workoutNeedsRefetch: boolean;
   
   // Actions
   openBottomSheet: (id: BottomSheetId, props?: Record<string, any>) => void;
@@ -45,6 +48,7 @@ interface UIState {
   showToast: (message: string, type?: Toast['type'], duration?: number) => void;
   removeToast: (id: string) => void;
   setPlannerNeedsRefetch: (value: boolean) => void;
+  setWorkoutNeedsRefetch: (value: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -55,9 +59,14 @@ export const useUIStore = create<UIState>((set) => ({
   pendingBottomSheetProps: {},
   toasts: [],
   plannerNeedsRefetch: false,
+  workoutNeedsRefetch: false,
 
   setPlannerNeedsRefetch: (value) => {
     set({ plannerNeedsRefetch: value });
+  },
+
+  setWorkoutNeedsRefetch: (value) => {
+    set({ workoutNeedsRefetch: value });
   },
 
   openBottomSheet: (id, props = {}) => {

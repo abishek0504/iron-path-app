@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { BottomSheet } from '../ui/BottomSheet';
+import { BottomSheet, type BottomSheetHandle } from '../ui/BottomSheet';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { PRESET_NAME_MAX_LENGTH } from '../../lib/supabase/queries/presets';
@@ -32,6 +32,10 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
   onSave,
 }) => {
   const colors = useTheme();
+  const sheetRef = useRef<BottomSheetHandle>(null);
+  const requestClose = useCallback(() => {
+    sheetRef.current?.requestClose();
+  }, []);
   const [name, setName] = useState(defaultName);
 
   useEffect(() => {
@@ -109,10 +113,12 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
 
   return (
     <BottomSheet
+      ref={sheetRef}
       visible={visible}
       onClose={onClose}
       title={mode === 'create' ? 'Save as preset' : 'Rename preset'}
       height={320}
+      avoidKeyboard
     >
       <View style={styles.content}>
         <Text style={styles.label}>Preset name</Text>
@@ -132,7 +138,7 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
         <View style={styles.actions}>
           <TouchableOpacity
             style={[styles.button, styles.cancelButton]}
-            onPress={onClose}
+            onPress={requestClose}
             disabled={saving}
           >
             <Text style={styles.cancelText}>Cancel</Text>

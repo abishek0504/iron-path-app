@@ -10,12 +10,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   FlatList,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Trash2, CheckCircle, Link2, Bookmark } from 'lucide-react-native';
+import { Plus, Trash2, CheckCircle, Bookmark } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
@@ -40,7 +41,6 @@ import {
 } from 'react-native-draggable-flatlist';
 import { hapticSelection, hapticSuccess } from '../../src/lib/utils/haptics';
 import { formatTimedSetsTarget } from '../../src/lib/utils/formatDuration';
-import { GripVertical } from 'lucide-react-native';
 import {
   getUserTemplatesCached,
   getTemplateWithDaysAndSlotsCached,
@@ -60,8 +60,10 @@ import {
   prefillSessionSets,
   getUniqueSetRepCombinations,
   syncTemplateSlotToSessionsForDay,
+  materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
+import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/lib/supabase/queries/workouts_helpers';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS, SHORT_WEEKDAY_LABELS } from '../../src/lib/utils/date';
@@ -102,6 +104,14 @@ function getTodayDayName(): string {
   return WEEK_DAYS[dayIndex];
 }
 
+type PlannerSessionExercise = {
+  id: string;
+  exercise_id?: string;
+  custom_exercise_id?: string;
+  sort_order: number;
+  superset_group?: number | null;
+};
+
 export default function PlannerTab() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -134,7 +144,7 @@ export default function PlannerTab() {
   }>>([]);
   /** When selected day is Today: one entry per session with its exercises (for workout containers) */
   const [sessionsTodayWithExercises, setSessionsTodayWithExercises] = useState<
-    Array<{ session: WorkoutSession; exercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string; sort_order: number }> }>
+    Array<{ session: WorkoutSession; exercises: PlannerSessionExercise[] }>
   >([]);
   /** Per session-exercise set/rep variations (working sets only) + warmup count, keyed by session_exercise id. */
   const [sessionExerciseVariations, setSessionExerciseVariations] = useState<
@@ -153,14 +163,23 @@ export default function PlannerTab() {
   const [isLoadingPresets, setIsLoadingPresets] = useState(false);
   const [selectedPresetForLoad, setSelectedPresetForLoad] = useState<WorkoutPreset | null>(null);
   const [showPresetLoadOptions, setShowPresetLoadOptions] = useState(false);
-  const [pendingPresetLoadMode, setPendingPresetLoadMode] = useState<PresetLoadMode | null>(null);
   const [showPresetTargetPicker, setShowPresetTargetPicker] = useState(false);
+  const [pendingPresetLoadMode, setPendingPresetLoadMode] = useState<PresetLoadMode | null>(null);
   const [presetToDelete, setPresetToDelete] = useState<WorkoutPreset | null>(null);
+  const [isApplyingPreset, setIsApplyingPreset] = useState(false);
+  const [isDeletingPreset, setIsDeletingPreset] = useState(false);
+  const presetPickerPendingActionRef = useRef<'loadOptions' | 'applyDirect' | 'delete' | null>(null);
+  const presetOptionsPendingActionRef = useRef<'targetPicker' | null>(null);
+  const pendingPresetForLoadRef = useRef<WorkoutPreset | null>(null);
+  const pendingPresetToDeleteRef = useRef<WorkoutPreset | null>(null);
   const [isLoadingSessionsForDay, setIsLoadingSessionsForDay] = useState(false);
   const [editingSessionExercise, setEditingSessionExercise] = useState<{
     id: string;
     name: string;
     mode: 'reps' | 'timed';
+    sessionId: string;
+    supersetGroup: number | null;
+    isLastExercise: boolean;
   } | null>(null);
 
   const loadTemplateInFlightRef = useRef(false);
@@ -176,11 +195,23 @@ export default function PlannerTab() {
   /** Refs for load callbacks so useFocusEffect doesn't re-run when their identity changes (e.g. loadTemplate when hasInitializedSelection flips). */
   const loadTemplateRef = useRef<(id: string) => Promise<void>>(() => Promise.resolve());
   const loadTodaySessionExercisesRef = useRef<(userId: string) => Promise<void>>(() => Promise.resolve());
-  const loadTodaySessionsRef = useRef<(_userId: string, _opts?: { forceRefresh?: boolean; templateExerciseKeys?: string[]; dayName?: string }) => Promise<void>>(() => Promise.resolve());
+  const loadTodaySessionsRef = useRef<(
+    _userId: string,
+    _opts?: {
+      forceRefresh?: boolean;
+      templateExerciseKeys?: string[];
+      dayName?: string;
+      templateId?: string;
+      templateSlots?: TemplateSlot[];
+      skipMaterialize?: boolean;
+    },
+  ) => Promise<void>>(() => Promise.resolve());
   /** Set by loadTemplate after it runs loadTodaySessionExercises + loadTodaySessions; cleared when useFocusEffect/useEffect would run the same. Skips duplicate today load on first focus. */
   const loadTemplateDidTodayLoadRef = useRef(false);
   /** Current selected day name; used to ignore stale loadSessionsForDay results when user switches days quickly. */
   const selectedDayNameRef = useRef<string>(getTodayDayName());
+  /** Prevents duplicate auto-materialize when a day has template slots but no sessions yet. */
+  const materializeInFlightRef = useRef<Set<string>>(new Set());
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -470,7 +501,17 @@ export default function PlannerTab() {
 
   /** Load sessions for a given day (today or another weekday in the current week). Used for workout containers. */
   const loadSessionsForDay = useCallback(
-    async (userId: string, options?: { forceRefresh?: boolean; templateExerciseKeys?: string[]; dayName?: string }) => {
+    async (
+      userId: string,
+      options?: {
+        forceRefresh?: boolean;
+        templateExerciseKeys?: string[];
+        dayName?: string;
+        templateId?: string;
+        templateSlots?: TemplateSlot[];
+        skipMaterialize?: boolean;
+      },
+    ) => {
       loadTodaySessionsInFlightRef.current = true;
       setIsLoadingSessionsForDay(true);
       const dayName = options?.dayName ?? getTodayDayName();
@@ -488,17 +529,8 @@ export default function PlannerTab() {
           endLocalExclusive: new Date(endIsoExclusive).toString(),
         });
       }
-      try {
-        const sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
-        if (__DEV__) {
-          devLog('planner', {
-            action: 'loadTodaySessions_fetched',
-            sessionIds: sessions.map((s) => s.id),
-            count: sessions.length,
-            startIso,
-            endIsoExclusive,
-          });
-        }
+
+      const applySessionsToState = async (sessions: WorkoutSession[]): Promise<void> => {
         if (sessions.length === 0) {
           if (__DEV__) {
             devLog('planner', {
@@ -535,21 +567,19 @@ export default function PlannerTab() {
               return next;
             });
           }
-          loadTodaySessionsInFlightRef.current = false;
-          if (requestedDayName === selectedDayNameRef.current) setIsLoadingSessionsForDay(false);
           return;
         }
 
         const sessionIds = sessions.map((s) => s.id);
         const { data: allSessionExercises } = await supabase
           .from('v2_session_exercises')
-          .select('id, session_id, exercise_id, custom_exercise_id, sort_order')
+          .select('id, session_id, exercise_id, custom_exercise_id, sort_order, superset_group')
           .in('session_id', sessionIds)
           .order('sort_order', { ascending: true });
 
         const withExercises: Array<{
           session: WorkoutSession;
-          exercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string; sort_order: number }>;
+          exercises: PlannerSessionExercise[];
         }> = [];
         const exerciseKeys = new Set<string>();
 
@@ -563,6 +593,7 @@ export default function PlannerTab() {
               exercise_id: se.exercise_id,
               custom_exercise_id: se.custom_exercise_id,
               sort_order: se.sort_order ?? 0,
+              superset_group: se.superset_group ?? null,
             };
           });
           withExercises.push({ session, exercises });
@@ -578,7 +609,6 @@ export default function PlannerTab() {
             .from('v2_session_sets')
             .select('session_exercise_id, reps, duration_sec, set_type')
             .in('session_exercise_id', sessionExerciseIds);
-          // Warmups are excluded from the set/rep variation strings and counted separately.
           const setsBySe = new Map<string, Array<{ reps?: number; duration_sec?: number }>>();
           const warmupCountBySe = new Map<string, number>();
           for (const row of setsRows || []) {
@@ -610,7 +640,6 @@ export default function PlannerTab() {
               variationsBySessionExercise.set(seId, { variations: arr, warmupCount });
             }
           }
-          // Exercises whose sets are all warmups still need their warmup count surfaced.
           for (const [seId, warmupCount] of warmupCountBySe) {
             if (!variationsBySessionExercise.has(seId)) {
               variationsBySessionExercise.set(seId, { variations: [], warmupCount });
@@ -677,6 +706,60 @@ export default function PlannerTab() {
             return next;
           });
         }
+      };
+
+      try {
+        let sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
+        if (__DEV__) {
+          devLog('planner', {
+            action: 'loadTodaySessions_fetched',
+            sessionIds: sessions.map((s) => s.id),
+            count: sessions.length,
+            startIso,
+            endIsoExclusive,
+          });
+        }
+
+        if (
+          sessions.length === 0 &&
+          !options?.skipMaterialize &&
+          options?.templateId &&
+          options?.templateSlots &&
+          options.templateSlots.length > 0
+        ) {
+          const materializeKey = `${requestedDayName}:${startIso}`;
+          if (!materializeInFlightRef.current.has(materializeKey)) {
+            materializeInFlightRef.current.add(materializeKey);
+            try {
+              if (__DEV__) {
+                devLog('planner', {
+                  action: 'autoMaterializeWorkout',
+                  dayName: requestedDayName,
+                  slotCount: options.templateSlots.length,
+                });
+              }
+              const startedAt = dayName === getTodayDayName() ? undefined : startIso;
+              const created = await materializeWorkoutFromTemplateSlots({
+                userId,
+                templateId: options.templateId,
+                dayName: requestedDayName,
+                slots: options.templateSlots,
+                startedAt,
+                experience: profile?.experience_level || 'beginner',
+              });
+              if (created && requestedDayName === selectedDayNameRef.current) {
+                invalidateSessionsInRangeForUser(userId);
+                sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
+              }
+            } catch (materializeError) {
+              if (__DEV__) devError('planner', materializeError, { action: 'autoMaterializeWorkout' });
+            } finally {
+              materializeInFlightRef.current.delete(materializeKey);
+            }
+          }
+        }
+
+        await applySessionsToState(sessions);
       } catch (error) {
         if (__DEV__) devError('planner', error, { action: 'loadSessionsForDay' });
       } finally {
@@ -774,7 +857,12 @@ export default function PlannerTab() {
               if (dayName === todayDayName) {
                 await loadTodaySessionExercises(userId);
               }
-              await loadSessionsForDay(userId, { dayName, templateExerciseKeys: templateKeys });
+              await loadSessionsForDay(userId, {
+                dayName,
+                templateExerciseKeys: templateKeys,
+                templateId,
+                templateSlots: dayToLoad?.slots ?? [],
+              });
               loadTemplateDidTodayLoadRef.current = true;
             } catch (sessionErr) {
               if (__DEV__) devError('planner', sessionErr, { action: 'loadTodaySessionExercises_inLoadTemplate' });
@@ -901,106 +989,391 @@ export default function PlannerTab() {
     [selectedDay]
   );
 
-  /**
-   * Persist a new slot order after a drag-and-drop reorder. We optimistically update local
-   * templateData so the UI doesn't snap back during the round-trip; on failure we reload
-   * from server to resolve the divergence visually.
-   */
-  const handleSlotsReordered = useCallback(
-    async (orderedSlots: TemplateSlot[]) => {
-      if (!templateData || !selectedDay) return;
-      const previousSlots = selectedDay.slots;
-      const sameOrder = orderedSlots.every((s, i) => s.id === previousSlots[i]?.id);
+  const mapSessionExerciseToTemplateSlot = useCallback(
+    (sessionExercise: PlannerSessionExercise, daySlots: TemplateSlot[]): TemplateSlot | null => {
+      const key = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
+      if (!key) return null;
+      const matching = [...daySlots]
+        .filter((s) => (s.exercise_id || s.custom_exercise_id) === key)
+        .sort((a, b) => a.sort_order - b.sort_order);
+      if (matching.length === 0) return null;
+      const usedBefore = sessionsTodayWithExercises.flatMap(({ exercises }) => exercises).filter((se) => {
+        const seKey = se.exercise_id || se.custom_exercise_id;
+        if (seKey !== key) return false;
+        return se.sort_order < sessionExercise.sort_order ||
+          (se.sort_order === sessionExercise.sort_order && se.id < sessionExercise.id);
+      }).length;
+      return matching[usedBefore] ?? matching[0] ?? null;
+    },
+    [sessionsTodayWithExercises],
+  );
+
+  const computeRoutineSessionExerciseIds = useCallback((): Set<string> => {
+    const templateCountByExercise = new Map<string, number>();
+    if (selectedDay) {
+      for (const s of selectedDay.slots) {
+        const key = s.exercise_id || s.custom_exercise_id;
+        if (key) templateCountByExercise.set(key, (templateCountByExercise.get(key) ?? 0) + 1);
+      }
+    }
+    const usedCountByExercise = new Map<string, number>();
+    const routineSessionExerciseIds = new Set<string>();
+    for (const { exercises: sessExs } of sessionsTodayWithExercises) {
+      for (const se of sessExs) {
+        const key = se.exercise_id || se.custom_exercise_id;
+        if (!key) continue;
+        const templateCount = templateCountByExercise.get(key) ?? 0;
+        const used = usedCountByExercise.get(key) ?? 0;
+        if (used < templateCount) {
+          routineSessionExerciseIds.add(se.id);
+          usedCountByExercise.set(key, used + 1);
+        }
+      }
+    }
+    return routineSessionExerciseIds;
+  }, [selectedDay, sessionsTodayWithExercises]);
+
+  const computeReorderedTemplateSlotIds = useCallback(
+    (
+      allSlots: TemplateSlot[],
+      previousExercises: PlannerSessionExercise[],
+      orderedExercises: PlannerSessionExercise[],
+      routineIds: Set<string>,
+    ): string[] | null => {
+      const sortedSlots = [...allSlots].sort((a, b) => a.sort_order - b.sort_order);
+      const mapToSlotIds = (exercises: PlannerSessionExercise[]) => {
+        const used = new Map<string, number>();
+        return exercises
+          .filter((se) => routineIds.has(se.id))
+          .map((se) => {
+            const key = se.exercise_id || se.custom_exercise_id;
+            if (!key) return null;
+            const idx = used.get(key) ?? 0;
+            used.set(key, idx + 1);
+            const matching = sortedSlots.filter((s) => (s.exercise_id || s.custom_exercise_id) === key);
+            return matching[idx]?.id ?? null;
+          })
+          .filter((id): id is string => id != null);
+      };
+
+      const oldSlotIds = mapToSlotIds(previousExercises);
+      const newSlotIds = mapToSlotIds(orderedExercises);
+      if (oldSlotIds.length === 0 || oldSlotIds.length !== newSlotIds.length) return null;
+
+      const result = sortedSlots.map((s) => s.id);
+      const positions = oldSlotIds.map((id) => result.indexOf(id)).filter((i) => i >= 0);
+      if (positions.length !== newSlotIds.length) return null;
+      newSlotIds.forEach((id, i) => {
+        result[positions[i]] = id;
+      });
+      return result;
+    },
+    [],
+  );
+
+  const handleSessionExercisesReordered = useCallback(
+    async (sessionId: string, orderedExercises: PlannerSessionExercise[]) => {
+      if (!selectedDay || !activeTemplateId) return;
+      const previousEntry = sessionsTodayWithExercises.find(({ session }) => session.id === sessionId);
+      if (!previousEntry) return;
+      const previousExercises = previousEntry.exercises;
+      const sameOrder = orderedExercises.every((e, i) => e.id === previousExercises[i]?.id);
       if (sameOrder) return;
 
       hapticSelection();
-
-      const optimistic: FullTemplate = {
-        ...templateData,
-        days: templateData.days.map((d) =>
-          d.day.id === selectedDay.day.id
-            ? { ...d, slots: orderedSlots.map((s, idx) => ({ ...s, sort_order: idx })) }
-            : d,
+      setSessionsTodayWithExercises((prev) =>
+        prev.map((entry) =>
+          entry.session.id === sessionId ? { ...entry, exercises: orderedExercises } : entry,
         ),
-      };
-      setTemplateData(optimistic);
+      );
+
+      const userId = await getCurrentUserId();
+      if (!userId) return;
 
       try {
-        const success = await reorderTemplateSlots(orderedSlots.map((s) => s.id));
-        if (!success) {
+        const ok = await applyStructureEditToSession(sessionId, userId, {
+          type: 'reorderSlots',
+          orderedSessionExerciseIds: orderedExercises.map((e) => e.id),
+        });
+        if (!ok) {
           toast.error('Failed to save new order');
-          if (activeTemplateId) {
-            invalidateTemplate(activeTemplateId);
-            await loadTemplate(activeTemplateId);
-          }
+          await loadSessionsForDay(userId, {
+            forceRefresh: true,
+            skipMaterialize: true,
+            dayName: selectedDay.day.day_name,
+            templateExerciseKeys: selectedDayTemplateKeys,
+            templateId: activeTemplateId,
+            templateSlots: selectedDay.slots,
+          });
           return;
         }
-        if (activeTemplateId) {
-          invalidateTemplate(activeTemplateId);
+
+        const routineIds = computeRoutineSessionExerciseIds();
+        const reorderedSlotIds = computeReorderedTemplateSlotIds(
+          selectedDay.slots,
+          previousExercises,
+          orderedExercises,
+          routineIds,
+        );
+        if (reorderedSlotIds) {
+          const templateOk = await reorderTemplateSlots(reorderedSlotIds);
+          if (!templateOk) {
+            toast.error('Failed to sync plan order');
+          } else {
+            invalidateTemplate(activeTemplateId);
+            setTemplateData((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                days: prev.days.map((d) =>
+                  d.day.id === selectedDay.day.id
+                    ? {
+                        ...d,
+                        slots: reorderedSlotIds
+                          .map((id, idx) => {
+                            const slot = d.slots.find((s) => s.id === id);
+                            return slot ? { ...slot, sort_order: idx } : null;
+                          })
+                          .filter((s): s is TemplateSlot => s != null),
+                      }
+                    : d,
+                ),
+              };
+            });
+          }
         }
+
         hapticSuccess();
       } catch (error) {
-        if (__DEV__) devError('planner', error, { action: 'reorderTemplateSlots' });
+        if (__DEV__) devError('planner', error, { action: 'reorderSessionExercises' });
         toast.error('Failed to save new order');
-        if (activeTemplateId) {
-          invalidateTemplate(activeTemplateId);
-          await loadTemplate(activeTemplateId);
-        }
+        await loadSessionsForDay(userId, {
+          forceRefresh: true,
+          skipMaterialize: true,
+          dayName: selectedDay.day.day_name,
+          templateExerciseKeys: selectedDayTemplateKeys,
+          templateId: activeTemplateId,
+          templateSlots: selectedDay.slots,
+        });
       }
     },
-    [templateData, selectedDay, activeTemplateId, loadTemplate, toast],
+    [
+      selectedDay,
+      activeTemplateId,
+      sessionsTodayWithExercises,
+      getCurrentUserId,
+      computeRoutineSessionExerciseIds,
+      computeReorderedTemplateSlotIds,
+      selectedDayTemplateKeys,
+      loadSessionsForDay,
+      toast,
+    ],
   );
 
-  /**
-   * Hevy-style superset toggle on template slots: grouped slots alternate during
-   * the active workout. Ungrouped slots pair with the slot below them; leaving a
-   * group dissolves it if fewer than two members remain.
-   */
-  const handleToggleSlotSuperset = useCallback(
-    async (slot: TemplateSlot) => {
-      if (!activeTemplateId || !selectedDay || isSaving) return;
-      const daySlots = [...selectedDay.slots].sort((a, b) => a.sort_order - b.sort_order);
+  const handleToggleSessionExerciseSuperset = useCallback(
+    async (sessionId: string, sessionExercise: PlannerSessionExercise, exercisesInSession: PlannerSessionExercise[]) => {
+      if (!selectedDay || isSaving) return;
+      const sorted = [...exercisesInSession].sort((a, b) => a.sort_order - b.sort_order);
+      const idx = sorted.findIndex((e) => e.id === sessionExercise.id);
+      if (idx < 0) return;
+
+      const routineIds = computeRoutineSessionExerciseIds();
+      const isRoutine = routineIds.has(sessionExercise.id);
+      const matchingSlot = isRoutine ? mapSessionExerciseToTemplateSlot(sessionExercise, selectedDay.slots) : null;
 
       setIsSaving(true);
       try {
-        let success: boolean;
-        if (slot.superset_group != null) {
-          const remaining = daySlots.filter(
-            (s) => s.superset_group === slot.superset_group && s.id !== slot.id,
+        if (sessionExercise.superset_group != null) {
+          const remaining = sorted.filter(
+            (ex, i) => i !== idx && ex.superset_group === sessionExercise.superset_group,
           );
-          const idsToClear =
-            remaining.length < 2 ? [slot.id, ...remaining.map((s) => s.id)] : [slot.id];
-          success = await setTemplateSlotSupersetGroup(idsToClear, null);
+          const ok = await setSessionSupersetGroup([sessionExercise.id], null);
+          if (!ok) {
+            toast.error('Failed to update superset');
+            return;
+          }
+          if (remaining.length === 1) {
+            await setSessionSupersetGroup([remaining[0].id], null);
+          }
+          if (isRoutine && matchingSlot?.superset_group != null) {
+            const daySlots = [...selectedDay.slots].sort((a, b) => a.sort_order - b.sort_order);
+            const templateRemaining = daySlots.filter(
+              (s) => s.superset_group === matchingSlot.superset_group && s.id !== matchingSlot.id,
+            );
+            const idsToClear =
+              templateRemaining.length < 2
+                ? [matchingSlot.id, ...templateRemaining.map((s) => s.id)]
+                : [matchingSlot.id];
+            await setTemplateSlotSupersetGroup(idsToClear, null);
+            if (activeTemplateId) {
+              invalidateTemplate(activeTemplateId);
+              await loadTemplate(activeTemplateId);
+            }
+          }
+          const userId = await getCurrentUserId();
+          if (userId) {
+            await loadSessionsForDay(userId, {
+              forceRefresh: true,
+              skipMaterialize: true,
+              dayName: selectedDay.day.day_name,
+              templateExerciseKeys: selectedDayTemplateKeys,
+              templateId: activeTemplateId ?? undefined,
+              templateSlots: selectedDay.slots,
+            });
+          }
+          hapticSelection();
         } else {
-          const idx = daySlots.findIndex((s) => s.id === slot.id);
-          const next = idx >= 0 ? daySlots[idx + 1] : undefined;
+          const next = sorted[idx + 1];
           if (!next) {
             toast.error('Add an exercise below to superset with');
             return;
           }
-          if (next.superset_group != null) {
-            success = await setTemplateSlotSupersetGroup([slot.id], next.superset_group);
-          } else {
-            const maxGroup = Math.max(0, ...daySlots.map((s) => s.superset_group ?? 0));
-            success = await setTemplateSlotSupersetGroup([slot.id, next.id], maxGroup + 1);
+          const existingGroup = next.superset_group;
+          const group = existingGroup ?? Math.max(0, ...sorted.map((e) => e.superset_group ?? 0)) + 1;
+          const ids = existingGroup != null ? [sessionExercise.id] : [sessionExercise.id, next.id];
+          const ok = await setSessionSupersetGroup(ids, group);
+          if (!ok) {
+            toast.error('Failed to create superset');
+            return;
           }
-        }
-
-        if (success) {
-          hapticSelection();
-          invalidateTemplate(activeTemplateId);
-          await loadTemplate(activeTemplateId);
-        } else {
-          toast.error('Failed to update superset');
+          if (isRoutine && matchingSlot) {
+            const nextSlot = mapSessionExerciseToTemplateSlot(next, selectedDay.slots);
+            if (nextSlot && matchingSlot.superset_group == null) {
+              const daySlots = [...selectedDay.slots].sort((a, b) => a.sort_order - b.sort_order);
+              const maxGroup = Math.max(0, ...daySlots.map((s) => s.superset_group ?? 0));
+              await setTemplateSlotSupersetGroup([matchingSlot.id, nextSlot.id], maxGroup + 1);
+              if (activeTemplateId) {
+                invalidateTemplate(activeTemplateId);
+                await loadTemplate(activeTemplateId);
+              }
+            } else if (nextSlot) {
+              await setTemplateSlotSupersetGroup([matchingSlot.id], nextSlot.superset_group!);
+              if (activeTemplateId) {
+                invalidateTemplate(activeTemplateId);
+                await loadTemplate(activeTemplateId);
+              }
+            }
+          }
+          await loadSessionsForDay((await getCurrentUserId())!, {
+            forceRefresh: true,
+            skipMaterialize: true,
+            dayName: selectedDay.day.day_name,
+            templateExerciseKeys: selectedDayTemplateKeys,
+            templateId: activeTemplateId ?? undefined,
+            templateSlots: selectedDay.slots,
+          });
+          hapticSuccess();
         }
       } catch (error) {
-        if (__DEV__) devError('planner', error, { action: 'toggleSlotSuperset' });
+        if (__DEV__) devError('planner', error, { action: 'toggleSessionExerciseSuperset' });
         toast.error('Failed to update superset');
       } finally {
         setIsSaving(false);
       }
     },
-    [activeTemplateId, selectedDay, isSaving, loadTemplate, toast],
+    [
+      selectedDay,
+      isSaving,
+      computeRoutineSessionExerciseIds,
+      mapSessionExerciseToTemplateSlot,
+      loadSessionsForDay,
+      selectedDayTemplateKeys,
+      activeTemplateId,
+      loadTemplate,
+      getCurrentUserId,
+      toast,
+    ],
+  );
+
+  useEffect(() => {
+    if (!showSessionEditSheet || !editingSessionExercise) return;
+    const entry = sessionsTodayWithExercises.find(
+      ({ session }) => session.id === editingSessionExercise.sessionId,
+    );
+    const exercise = entry?.exercises.find((e) => e.id === editingSessionExercise.id);
+    if (!entry || !exercise) return;
+    const sorted = [...entry.exercises].sort((a, b) => a.sort_order - b.sort_order);
+    const idx = sorted.findIndex((e) => e.id === editingSessionExercise.id);
+    const isLastExercise = idx >= sorted.length - 1;
+    const supersetGroup = exercise.superset_group ?? null;
+    setEditingSessionExercise((prev) => {
+      if (!prev || prev.id !== editingSessionExercise.id) return prev;
+      if (prev.supersetGroup === supersetGroup && prev.isLastExercise === isLastExercise) return prev;
+      return { ...prev, supersetGroup, isLastExercise };
+    });
+  }, [sessionsTodayWithExercises, showSessionEditSheet, editingSessionExercise?.id, editingSessionExercise?.sessionId]);
+
+  const handleEditSheetToggleSuperset = useCallback(async () => {
+    if (!editingSessionExercise) return;
+    const entry = sessionsTodayWithExercises.find(
+      ({ session }) => session.id === editingSessionExercise.sessionId,
+    );
+    const sessionExercise = entry?.exercises.find((e) => e.id === editingSessionExercise.id);
+    if (!entry || !sessionExercise) return;
+    const sortedExercises = [...entry.exercises].sort((a, b) => a.sort_order - b.sort_order);
+    await handleToggleSessionExerciseSuperset(
+      editingSessionExercise.sessionId,
+      sessionExercise,
+      sortedExercises,
+    );
+  }, [editingSessionExercise, sessionsTodayWithExercises, handleToggleSessionExerciseSuperset]);
+
+  const handleRemoveSessionExercise = useCallback(
+    async (sessionId: string, sessionExercise: PlannerSessionExercise) => {
+      if (!selectedDay || !activeTemplateId || isSaving) return;
+      const userId = await getCurrentUserId();
+      if (!userId) return;
+
+      const routineIds = computeRoutineSessionExerciseIds();
+      const isRoutine = routineIds.has(sessionExercise.id);
+      const matchingSlot = isRoutine ? mapSessionExerciseToTemplateSlot(sessionExercise, selectedDay.slots) : null;
+
+      setIsSaving(true);
+      try {
+        const ok = await applyStructureEditToSession(sessionId, userId, {
+          type: 'removeSlot',
+          sessionExerciseId: sessionExercise.id,
+        });
+        if (!ok) {
+          toast.error('Failed to remove exercise');
+          return;
+        }
+        if (isRoutine && matchingSlot) {
+          await applyStructureEditToTemplate(activeTemplateId, {
+            type: 'removeSlot',
+            slotId: matchingSlot.id,
+          });
+          invalidateTemplate(activeTemplateId);
+          await loadTemplate(activeTemplateId);
+        }
+        toast.success('Exercise removed');
+        await loadSessionsForDay(userId, {
+          forceRefresh: true,
+          skipMaterialize: true,
+          dayName: selectedDay.day.day_name,
+          templateExerciseKeys: selectedDayTemplateKeys,
+          templateId: activeTemplateId,
+          templateSlots: selectedDay.slots,
+        });
+      } catch (error) {
+        if (__DEV__) devError('planner', error, { action: 'removeSessionExercise' });
+        toast.error('Failed to remove exercise');
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [
+      selectedDay,
+      activeTemplateId,
+      isSaving,
+      computeRoutineSessionExerciseIds,
+      mapSessionExerciseToTemplateSlot,
+      loadTemplate,
+      loadSessionsForDay,
+      selectedDayTemplateKeys,
+      getCurrentUserId,
+      toast,
+    ],
   );
 
   // Refetch when needed: flag set (e.g. after add/remove in add-exercise-edit), or templateData lost (e.g. back from workout). Throttle recovery to avoid infinite retry when load fails.
@@ -1081,7 +1454,12 @@ export default function PlannerTab() {
                 loadTodaySessionExercises(id);
               }
               const loadSessions = loadTodaySessionsRef.current;
-              loadSessions(id, { dayName, templateExerciseKeys: templateKeys });
+              loadSessions(id, {
+                dayName,
+                templateExerciseKeys: templateKeys,
+                templateId: activeTemplateId ?? undefined,
+                templateSlots: selectedDay.slots,
+              });
             }
           });
         }
@@ -1105,7 +1483,12 @@ export default function PlannerTab() {
       if (selectedDay.day.day_name === getTodayDayName()) {
         loadTodaySessionExercises(id);
       }
-      await loadSessionsForDay(id, { dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
+      await loadSessionsForDay(id, {
+        dayName: selectedDay.day.day_name,
+        templateExerciseKeys: selectedDayTemplateKeys,
+        templateId: activeTemplateId ?? undefined,
+        templateSlots: selectedDay.slots,
+      });
       if (selectedDay.slots.length > 0) {
         await calculateTargetsForSlots(templateData, id, selectedDay.day.day_name);
       }
@@ -1255,7 +1638,7 @@ export default function PlannerTab() {
         : getDateBoundsForDayName(selectedDay.day.day_name).startIso;
       const sessionCount = sessionsTodayWithExercises.length;
 
-      setIsSaving(true);
+      setIsApplyingPreset(true);
       try {
         let success = false;
 
@@ -1301,10 +1684,16 @@ export default function PlannerTab() {
           }
           await loadSessionsForDay(userId, {
             forceRefresh: true,
+            skipMaterialize: true,
             dayName: selectedDay.day.day_name,
             templateExerciseKeys: dateContext.isToday ? todayTemplateKeys : selectedDayTemplateKeys,
+            templateId: activeTemplateId,
+            templateSlots: selectedDay.slots,
           });
           toast.success('Preset loaded');
+          pendingPresetForLoadRef.current = null;
+          presetPickerPendingActionRef.current = null;
+          presetOptionsPendingActionRef.current = null;
           setShowPresetPicker(false);
           setShowPresetLoadOptions(false);
           setShowPresetTargetPicker(false);
@@ -1317,7 +1706,7 @@ export default function PlannerTab() {
         if (__DEV__) devError('planner', error, { action: 'applySelectedPreset', presetId, mode });
         toast.error('Failed to load preset');
       } finally {
-        setIsSaving(false);
+        setIsApplyingPreset(false);
       }
     },
     [
@@ -1336,30 +1725,70 @@ export default function PlannerTab() {
     ]
   );
 
-  const handleSelectPresetForLoad = useCallback(
+  const handleSelectPresetForLoad = useCallback((preset: WorkoutPreset) => {
+    setSelectedPresetForLoad(preset);
+    setPendingPresetLoadMode(null);
+  }, []);
+
+  const handleLoadPresetRow = useCallback(
     (preset: WorkoutPreset) => {
+      if (isApplyingPreset) return;
+      pendingPresetForLoadRef.current = preset;
       setSelectedPresetForLoad(preset);
-      if (sessionsTodayWithExercises.length === 0) {
-        void applySelectedPreset(preset.id, 'replace');
-        return;
-      }
-      setShowPresetLoadOptions(true);
+      setPendingPresetLoadMode(null);
+
+      presetPickerPendingActionRef.current =
+        sessionsTodayWithExercises.length === 0 ? 'applyDirect' : 'loadOptions';
+      setShowPresetPicker(false);
     },
-    [sessionsTodayWithExercises.length, applySelectedPreset]
+    [isApplyingPreset, sessionsTodayWithExercises.length]
+  );
+
+  const handlePresetPickerClosed = useCallback(() => {
+    const pending = presetPickerPendingActionRef.current;
+    presetPickerPendingActionRef.current = null;
+
+    if (pending === 'delete') {
+      const preset = pendingPresetToDeleteRef.current;
+      pendingPresetToDeleteRef.current = null;
+      if (preset) setPresetToDelete(preset);
+      return;
+    }
+
+    const preset = pendingPresetForLoadRef.current;
+    if (!pending || !preset) return;
+
+    if (pending === 'applyDirect') {
+      void applySelectedPreset(preset.id, 'replace');
+      return;
+    }
+
+    setShowPresetLoadOptions(true);
+  }, [applySelectedPreset]);
+
+  const handleDeletePresetRow = useCallback(
+    (preset: WorkoutPreset) => {
+      if (isApplyingPreset || isDeletingPreset) return;
+      pendingPresetToDeleteRef.current = preset;
+      presetPickerPendingActionRef.current = 'delete';
+      setShowPresetPicker(false);
+    },
+    [isApplyingPreset, isDeletingPreset]
   );
 
   const handlePresetLoadMode = useCallback(
     (mode: PresetLoadMode) => {
-      if (!selectedPresetForLoad) return;
+      if (!selectedPresetForLoad || isApplyingPreset) return;
       setPendingPresetLoadMode(mode);
-      setShowPresetLoadOptions(false);
 
       if (mode === 'newWorkout') {
+        setShowPresetLoadOptions(false);
         void applySelectedPreset(selectedPresetForLoad.id, mode);
         return;
       }
 
       if (sessionsTodayWithExercises.length === 1) {
+        setShowPresetLoadOptions(false);
         void applySelectedPreset(
           selectedPresetForLoad.id,
           mode,
@@ -1368,10 +1797,18 @@ export default function PlannerTab() {
         return;
       }
 
-      setShowPresetTargetPicker(true);
+      presetOptionsPendingActionRef.current = 'targetPicker';
+      setShowPresetLoadOptions(false);
     },
-    [selectedPresetForLoad, sessionsTodayWithExercises, applySelectedPreset]
+    [selectedPresetForLoad, isApplyingPreset, sessionsTodayWithExercises, applySelectedPreset]
   );
+
+  const handlePresetLoadOptionsClosed = useCallback(() => {
+    if (presetOptionsPendingActionRef.current === 'targetPicker') {
+      presetOptionsPendingActionRef.current = null;
+      setShowPresetTargetPicker(true);
+    }
+  }, []);
 
   const handlePresetTargetSelected = useCallback(
     (sessionId: string) => {
@@ -1386,26 +1823,27 @@ export default function PlannerTab() {
       toast.error('No day selected');
       return;
     }
+    setSelectedPresetForLoad(null);
+    setShowPresetLoadOptions(false);
+    setShowPresetTargetPicker(false);
+    setPendingPresetLoadMode(null);
+    presetPickerPendingActionRef.current = null;
+    presetOptionsPendingActionRef.current = null;
+    pendingPresetForLoadRef.current = null;
+    pendingPresetToDeleteRef.current = null;
     await refreshWorkoutPresets();
     setShowPresetPicker(true);
   }, [selectedDay, refreshWorkoutPresets, toast]);
 
-  const handleRenamePreset = useCallback((preset: WorkoutPreset) => {
-    setSavePresetMode('rename');
-    setRenamePresetId(preset.id);
-    setSavePresetSessionId(null);
-    setSavePresetDefaultName(preset.name);
-    setShowSavePresetSheet(true);
-  }, []);
-
   const handleConfirmDeletePreset = useCallback(async () => {
-    if (!presetToDelete) return;
-    setIsSaving(true);
+    if (!presetToDelete || isDeletingPreset) return;
+    setIsDeletingPreset(true);
     try {
       const success = await deleteWorkoutPreset(presetToDelete.id);
       if (success) {
         toast.success('Preset deleted');
         await refreshWorkoutPresets();
+        setShowPresetPicker(true);
       } else {
         toast.error('Failed to delete preset');
       }
@@ -1413,10 +1851,10 @@ export default function PlannerTab() {
       if (__DEV__) devError('planner', error, { action: 'deleteWorkoutPreset' });
       toast.error('Failed to delete preset');
     } finally {
-      setIsSaving(false);
+      setIsDeletingPreset(false);
       setPresetToDelete(null);
     }
-  }, [presetToDelete, refreshWorkoutPresets, toast]);
+  }, [presetToDelete, isDeletingPreset, refreshWorkoutPresets, toast]);
 
   // Add a workout (session) for the selected day. First workout of the day is
   // seeded from the day's template slots; additional workouts start empty.
@@ -1432,52 +1870,33 @@ export default function PlannerTab() {
       const startedAt = dateContext.isToday
         ? undefined
         : getDateBoundsForDayName(selectedDay.day.day_name).startIso;
-      const session = await createWorkoutSession(
-        userId,
-        activeTemplateId,
-        selectedDay.day.day_name,
-        startedAt
-      );
-      if (!session) {
-        toast.error('Failed to add workout');
-        return;
-      }
-      const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
-      const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
-      if (sessionsTodayWithExercises.length === 0) {
-        for (const slot of selectedDay.slots) {
-          const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-          if (!exerciseId) continue;
-          const { data: se, error: seErr } = await supabase
-            .from('v2_session_exercises')
-            .insert({
-              session_id: session.id,
-              exercise_id: slot.exercise_id || null,
-              custom_exercise_id: slot.custom_exercise_id || null,
-              sort_order: slot.sort_order,
-              superset_group: slot.superset_group ?? null,
-              rest_sec: slot.rest_sec ?? null,
-            })
-            .select()
-            .single();
-          if (seErr || !se) {
-            if (__DEV__) devError('planner', seErr || new Error('Failed to create session exercise'), { sessionId: session.id });
-            continue;
-          }
-          sessionExercises.push(se);
-          const effectiveExperience = profile?.experience_level || 'beginner';
-          const target = await selectExerciseTargets(
-            { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
-            userId,
-            { experience: slot.experience || effectiveExperience },
-            0
-          );
-          if (target) targetsMap.set(exerciseId, { sets: target.sets, reps: target.reps, duration_sec: target.duration_sec, weight: target.weight });
+
+      if (sessionsTodayWithExercises.length === 0 && selectedDay.slots.length > 0) {
+        const session = await materializeWorkoutFromTemplateSlots({
+          userId,
+          templateId: activeTemplateId,
+          dayName: selectedDay.day.day_name,
+          slots: selectedDay.slots,
+          startedAt,
+          experience: profile?.experience_level || 'beginner',
+        });
+        if (!session) {
+          toast.error('Failed to add workout');
+          return;
+        }
+      } else {
+        const session = await createWorkoutSession(
+          userId,
+          activeTemplateId,
+          selectedDay.day.day_name,
+          startedAt,
+        );
+        if (!session) {
+          toast.error('Failed to add workout');
+          return;
         }
       }
-      if (sessionExercises.length > 0 && targetsMap.size > 0) {
-        await prefillSessionSets(session.id, sessionExercises, targetsMap);
-      }
+
       toast.success('Workout added');
       if (dateContext.isToday) {
         setPlannerNeedsRefetch(true);
@@ -1486,8 +1905,11 @@ export default function PlannerTab() {
       }
       await loadSessionsForDay(userId, {
         forceRefresh: true,
+        skipMaterialize: true,
         dayName: selectedDay.day.day_name,
         templateExerciseKeys: dateContext.isToday ? todayTemplateKeys : selectedDayTemplateKeys,
+        templateId: activeTemplateId,
+        templateSlots: selectedDay.slots,
       });
     } catch (error) {
       if (__DEV__) devError('planner', error, { action: 'addWorkout' });
@@ -1499,7 +1921,7 @@ export default function PlannerTab() {
     activeTemplateId,
     selectedDay,
     dateContext.isToday,
-    sessionsTodayWithExercises,
+    sessionsTodayWithExercises.length,
     profile,
     todayTemplateKeys,
     selectedDayTemplateKeys,
@@ -1757,129 +2179,18 @@ export default function PlannerTab() {
                   <LogoEdgeLoader size="small" style={{ marginBottom: spacing.sm }} />
                   <Text style={styles.emptySlotsSubtext}>Loading workouts...</Text>
                 </View>
-              ) : sessionsTodayWithExercises.length === 0 ? (
-                selectedDay.slots.length > 0 ? (
-                  <View style={styles.workoutContainer}>
-                    <View style={styles.workoutContainerHeader}>
-                      <Text style={styles.planForDayHeader}>Plan for {selectedDay.day.day_name}</Text>
-                    </View>
-                    <View style={[styles.slotsList, styles.workoutContainerContent]}>
-                      <NestableDraggableFlatList<TemplateSlot>
-                        data={selectedDay.slots}
-                        keyExtractor={(slot) => slot.id}
-                        scrollEnabled={false}
-                        activationDistance={12}
-                        onDragEnd={({ data }) => {
-                          void handleSlotsReordered(data);
-                        }}
-                        renderItem={({ item: slot, drag, isActive }: RenderItemParams<TemplateSlot>) => {
-                          const key = slot.exercise_id || slot.custom_exercise_id;
-                          const name = key ? exerciseNames.get(key) || 'Loading...' : 'Unknown';
-                          const target = key ? slotTargets.get(key) : null;
-                          const targetText = target
-                            ? target.mode === 'reps'
-                              ? `${target.sets} sets × ${target.reps} reps`
-                              : formatTimedSetsTarget(target.sets, target.duration_sec)
-                            : null;
-                          const supersetLabel = (() => {
-                            if (slot.superset_group == null) return null;
-                            const groups = Array.from(
-                              new Set(
-                                selectedDay.slots
-                                  .map((s) => s.superset_group)
-                                  .filter((g): g is number => g != null),
-                              ),
-                            ).sort((a, b) => a - b);
-                            const letter = String.fromCharCode(65 + groups.indexOf(slot.superset_group));
-                            return `Superset ${letter}`;
-                          })();
-                          return (
-                            <View
-                              style={[styles.slotCard, isActive && styles.slotCardDragging]}
-                            >
-                              <TouchableOpacity
-                                style={styles.dragHandle}
-                                onLongPress={drag}
-                                delayLongPress={120}
-                                disabled={isSaving}
-                                accessibilityRole="button"
-                                accessibilityLabel="Reorder exercise"
-                              >
-                                <GripVertical size={18} color={colors.textMuted} />
-                              </TouchableOpacity>
-                              <View style={styles.slotContent}>
-                                <Text style={styles.slotExerciseName}>{name}</Text>
-                                {targetText && (
-                                  <Text style={styles.slotTargets}>{targetText}</Text>
-                                )}
-                                {supersetLabel && (
-                                  <Text style={styles.slotSupersetChip}>{supersetLabel}</Text>
-                                )}
-                              </View>
-                              <TouchableOpacity
-                                style={[styles.deleteButton, styles.editButton]}
-                                onPress={() => handleToggleSlotSuperset(slot)}
-                                disabled={isSaving}
-                                accessibilityRole="button"
-                                accessibilityLabel={
-                                  slot.superset_group != null
-                                    ? 'Remove from superset'
-                                    : 'Superset with next exercise'
-                                }
-                              >
-                                <Link2
-                                  size={16}
-                                  color={slot.superset_group != null ? colors.primary : colors.textMuted}
-                                />
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={[styles.deleteButton, styles.editButton]}
-                                onPress={async () => {
-                                  if (!activeTemplateId || isSaving) return;
-                                  setIsSaving(true);
-                                  try {
-                                    const success = await applyStructureEditToTemplate(
-                                      activeTemplateId,
-                                      { type: 'removeSlot', slotId: slot.id },
-                                    );
-                                    if (success) {
-                                      invalidateTemplate(activeTemplateId);
-                                      await loadTemplate(activeTemplateId);
-                                      toast.success('Exercise removed from plan');
-                                    } else {
-                                      toast.error('Failed to remove');
-                                    }
-                                  } catch (e) {
-                                    if (__DEV__)
-                                      devError('planner', e, { action: 'removeTemplateSlot' });
-                                    toast.error('Failed to remove');
-                                  } finally {
-                                    setIsSaving(false);
-                                  }
-                                }}
-                                disabled={isSaving}
-                              >
-                                <Trash2 size={16} color={colors.errorText} />
-                              </TouchableOpacity>
-                            </View>
-                          );
-                        }}
-                      />
-                    </View>
-                    <View style={[styles.emptySlotsContainer, { paddingTop: 0 }]}>
-                      <Text style={styles.emptySlotsSubtext}>Add a workout to begin</Text>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.emptySlotsContainer}>
-                    <Text style={styles.emptySlotsText}>
-                      {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
-                    </Text>
-                    <Text style={styles.emptySlotsSubtext}>Add a workout or generate with AI to get started</Text>
-                  </View>
-                )
+              ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length === 0 ? (
+                <View style={styles.emptySlotsContainer}>
+                  <Text style={styles.emptySlotsText}>
+                    {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
+                  </Text>
+                  <Text style={styles.emptySlotsSubtext}>Add a workout or generate with AI to get started</Text>
+                </View>
               ) : (
-                  sessionsTodayWithExercises.map(({ session, exercises }, idx) => (
+                sessionsTodayWithExercises.map(({ session, exercises }, idx) => {
+                  const routineSessionExerciseIds = computeRoutineSessionExerciseIds();
+                  const sortedExercises = [...exercises].sort((a, b) => a.sort_order - b.sort_order);
+                  return (
                     <View key={session.id} style={styles.workoutContainer}>
                       <View style={styles.workoutContainerHeader}>
                         <View style={styles.workoutContainerTitleRow}>
@@ -1890,127 +2201,109 @@ export default function PlannerTab() {
                         </View>
                         <View style={styles.workoutHeaderActions}>
                           <TouchableOpacity
-                            onPress={() =>
-                              handleOpenSavePreset(session.id, idx)
-                            }
+                            onPress={() => handleOpenSavePreset(session.id, idx)}
                             disabled={isSaving || exercises.length === 0}
                             style={styles.savePresetButton}
                             accessibilityLabel={`Save workout ${idx + 1} as preset`}
                           >
                             <Bookmark
                               size={18}
-                              color={
-                                exercises.length === 0 ? colors.textMuted : colors.textSecondary
-                              }
+                              color={exercises.length === 0 ? colors.textMuted : colors.textSecondary}
                             />
                           </TouchableOpacity>
                           <TouchableOpacity
-                          onPress={async () => {
-                            const userId = await getCurrentUserId();
-                            if (!userId) return;
-                            const sessionIdToRemove = session.id;
-                            if (__DEV__) {
-                              devLog('planner', {
-                                action: 'deleteWorkout_start',
-                                sessionId: sessionIdToRemove,
-                                currentSessionIds: sessionsTodayWithExercises.map(({ session: s }) => s.id),
-                              });
-                            }
-                            
-                            const slotIdsToRemove: string[] = [];
-                            if (selectedDay && activeTemplateId) {
-                               const availableSlots = [...selectedDay.slots];
-                               for (const se of exercises) {
+                            onPress={async () => {
+                              const userId = await getCurrentUserId();
+                              if (!userId) return;
+                              const sessionIdToRemove = session.id;
+                              const slotIdsToRemove: string[] = [];
+                              if (selectedDay && activeTemplateId) {
+                                const availableSlots = [...selectedDay.slots];
+                                for (const se of exercises) {
                                   const key = se.exercise_id || se.custom_exercise_id;
                                   if (!key) continue;
                                   const matchIdx = availableSlots.findIndex(
-                                     (s) => (s.exercise_id || s.custom_exercise_id) === key
+                                    (s) => (s.exercise_id || s.custom_exercise_id) === key,
                                   );
                                   if (matchIdx !== -1) {
-                                     slotIdsToRemove.push(availableSlots[matchIdx].id);
-                                     availableSlots.splice(matchIdx, 1);
-                                  }
-                               }
-                            }
-
-                            setSessionsTodayWithExercises((prev) =>
-                              prev.filter(({ session: s }) => s.id !== sessionIdToRemove)
-                            );
-                            setIsSaving(true);
-                            try {
-                              const { error } = await deleteSessionWithExercises(userId, sessionIdToRemove);
-                              if (__DEV__) {
-                                devLog('planner', {
-                                  action: 'deleteWorkout_complete',
-                                  sessionId: sessionIdToRemove,
-                                  error: error?.message,
-                                });
-                              }
-                              if (error) {
-                                toast.error('Failed to delete workout');
-                                if (__DEV__) devError('planner', error, { sessionId: sessionIdToRemove });
-                              } else {
-                                toast.success('Workout removed');
-                                invalidateSessionsInRangeForUser(userId);
-                                
-                                if (activeTemplateId && slotIdsToRemove.length > 0) {
-                                  let templateChanged = false;
-                                  for (const sId of slotIdsToRemove) {
-                                    const success = await applyStructureEditToTemplate(activeTemplateId, { type: 'removeSlot', slotId: sId });
-                                    if (success) templateChanged = true;
-                                  }
-                                  if (templateChanged) {
-                                    invalidateTemplate(activeTemplateId);
-                                    await loadTemplate(activeTemplateId);
+                                    slotIdsToRemove.push(availableSlots[matchIdx].id);
+                                    availableSlots.splice(matchIdx, 1);
                                   }
                                 }
                               }
-                              await loadSessionsForDay(userId, { forceRefresh: true, dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
-                              if (__DEV__) {
-                                devLog('planner', {
-                                  action: 'deleteWorkout_afterReload',
-                                  sessionId: sessionIdToRemove,
+
+                              setSessionsTodayWithExercises((prev) =>
+                                prev.filter(({ session: s }) => s.id !== sessionIdToRemove),
+                              );
+                              setIsSaving(true);
+                              try {
+                                const { error } = await deleteSessionWithExercises(userId, sessionIdToRemove);
+                                if (error) {
+                                  toast.error('Failed to delete workout');
+                                  if (__DEV__) devError('planner', error, { sessionId: sessionIdToRemove });
+                                } else {
+                                  toast.success('Workout removed');
+                                  invalidateSessionsInRangeForUser(userId);
+                                  if (activeTemplateId && slotIdsToRemove.length > 0) {
+                                    let templateChanged = false;
+                                    for (const sId of slotIdsToRemove) {
+                                      const success = await applyStructureEditToTemplate(activeTemplateId, {
+                                        type: 'removeSlot',
+                                        slotId: sId,
+                                      });
+                                      if (success) templateChanged = true;
+                                    }
+                                    if (templateChanged) {
+                                      invalidateTemplate(activeTemplateId);
+                                      await loadTemplate(activeTemplateId);
+                                    }
+                                  }
+                                }
+                                await loadSessionsForDay(userId, {
+                                  forceRefresh: true,
+                                  skipMaterialize: true,
+                                  dayName: selectedDay.day.day_name,
+                                  templateExerciseKeys: selectedDayTemplateKeys,
+                                  templateId: activeTemplateId ?? undefined,
+                                  templateSlots: selectedDay.slots,
                                 });
+                              } catch (err) {
+                                if (__DEV__) devError('planner', err, { action: 'deleteWorkout_exception', sessionId: sessionIdToRemove });
+                                toast.error('Failed to delete workout');
+                                await loadSessionsForDay(userId, {
+                                  forceRefresh: true,
+                                  skipMaterialize: true,
+                                  dayName: selectedDay.day.day_name,
+                                  templateExerciseKeys: selectedDayTemplateKeys,
+                                  templateId: activeTemplateId ?? undefined,
+                                  templateSlots: selectedDay.slots,
+                                });
+                              } finally {
+                                setIsSaving(false);
                               }
-                            } catch (err) {
-                              if (__DEV__) devError('planner', err, { action: 'deleteWorkout_exception', sessionId: sessionIdToRemove });
-                              toast.error('Failed to delete workout');
-                              await loadSessionsForDay(userId, { forceRefresh: true, dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
-                            } finally {
-                              setIsSaving(false);
-                            }
-                          }}
-                          disabled={isSaving}
-                          style={styles.deleteWorkoutButton}
-                        >
-                          <Trash2 size={18} color={colors.errorText} />
-                        </TouchableOpacity>
+                            }}
+                            disabled={isSaving}
+                            style={styles.deleteWorkoutButton}
+                          >
+                            <Trash2 size={18} color={colors.errorText} />
+                          </TouchableOpacity>
                         </View>
                       </View>
                       <View style={[styles.slotsList, styles.workoutContainerContent]}>
-                        {(() => {
-                          const templateCountByExercise = new Map<string, number>();
-                          if (selectedDay) {
-                            for (const s of selectedDay.slots) {
-                              const key = s.exercise_id || s.custom_exercise_id;
-                              if (key) templateCountByExercise.set(key, (templateCountByExercise.get(key) ?? 0) + 1);
-                            }
-                          }
-                          const usedCountByExercise = new Map<string, number>();
-                          const routineSessionExerciseIds = new Set<string>();
-                          for (const { exercises: sessExs } of sessionsTodayWithExercises) {
-                            for (const se of sessExs) {
-                              const key = se.exercise_id || se.custom_exercise_id;
-                              if (!key) continue;
-                              const templateCount = templateCountByExercise.get(key) ?? 0;
-                              const used = usedCountByExercise.get(key) ?? 0;
-                              if (used < templateCount) {
-                                routineSessionExerciseIds.add(se.id);
-                                usedCountByExercise.set(key, used + 1);
-                              }
-                            }
-                          }
-                          return exercises.map((sessionExercise) => {
+                        <NestableDraggableFlatList<PlannerSessionExercise>
+                          data={sortedExercises}
+                          keyExtractor={(item) => item.id}
+                          scrollEnabled={false}
+                          activationDistance={12}
+                          onDragEnd={({ data }) => {
+                            void handleSessionExercisesReordered(session.id, data);
+                          }}
+                          renderItem={({
+                            item: sessionExercise,
+                            drag,
+                            isActive,
+                            getIndex,
+                          }: RenderItemParams<PlannerSessionExercise>) => {
                             const exerciseId = sessionExercise.exercise_id || sessionExercise.custom_exercise_id;
                             const exerciseName = exerciseId ? exerciseNames.get(exerciseId) || 'Loading...' : 'Unknown';
                             const target = exerciseId ? slotTargets.get(exerciseId) : null;
@@ -2020,18 +2313,14 @@ export default function PlannerTab() {
 
                             let targetContent: React.ReactNode;
                             if ((variations && variations.length > 0) || warmupCount > 0) {
-                              const variationStrings = (variations ?? []).map(v => {
-                                if (v.reps != null) {
-                                  return `${v.sets} sets × ${v.reps} reps`;
-                                }
-                                if (v.duration_sec != null) {
-                                  return formatTimedSetsTarget(v.sets, v.duration_sec);
-                                }
-                                return '';
-                              }).filter(Boolean);
-                              if (warmupCount > 0) {
-                                variationStrings.push(`+ ${warmupCount} warmup`);
-                              }
+                              const variationStrings = (variations ?? [])
+                                .map((v) => {
+                                  if (v.reps != null) return `${v.sets} sets × ${v.reps} reps`;
+                                  if (v.duration_sec != null) return formatTimedSetsTarget(v.sets, v.duration_sec);
+                                  return '';
+                                })
+                                .filter(Boolean);
+                              if (warmupCount > 0) variationStrings.push(`+ ${warmupCount} warmup`);
                               targetContent = (
                                 <View style={styles.slotTargetsStack}>
                                   {variationStrings.map((s, i) => (
@@ -2040,61 +2329,98 @@ export default function PlannerTab() {
                                 </View>
                               );
                             } else if (target) {
-                              const targetText = target.mode === 'reps'
-                                ? `${target.sets} sets × ${target.reps} reps`
-                                : formatTimedSetsTarget(target.sets, target.duration_sec);
+                              const targetText =
+                                target.mode === 'reps'
+                                  ? `${target.sets} sets × ${target.reps} reps`
+                                  : formatTimedSetsTarget(target.sets, target.duration_sec);
                               targetContent = <Text style={styles.slotTargets}>{targetText}</Text>;
                             } else {
                               targetContent = <Text style={styles.slotTargets}>Loading targets...</Text>;
                             }
-                            
+
                             const isTodayOnly = !routineSessionExerciseIds.has(sessionExercise.id);
+                            const supersetLabel = (() => {
+                              if (sessionExercise.superset_group == null) return null;
+                              const groups = Array.from(
+                                new Set(sortedExercises.map((e) => e.superset_group).filter((g): g is number => g != null)),
+                              ).sort((a, b) => a - b);
+                              const letter = String.fromCharCode(65 + groups.indexOf(sessionExercise.superset_group));
+                              return `Superset ${letter}`;
+                            })();
+                            const exerciseIndex = getIndex() ?? sortedExercises.findIndex((e) => e.id === sessionExercise.id);
+
                             return (
-                            <View key={sessionExercise.id} style={styles.slotCard}>
-                              <View style={styles.slotContent}>
-                                <Text style={styles.slotExerciseName}>{exerciseName}</Text>
-                                <View style={styles.slotTargetRow}>
-                                  {targetContent}
-                                  {isTodayOnly && (
-                                    <View style={styles.todayOnlyTag}>
-                                      <Text style={styles.todayOnlyTagText}>Today Only</Text>
+                              <View style={[styles.slotCard, styles.slotCardInWorkout, isActive && styles.slotCardDragging]}>
+                                <Pressable
+                                  style={styles.slotDragArea}
+                                  onLongPress={drag}
+                                  delayLongPress={200}
+                                  disabled={isSaving}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Reorder exercise"
+                                >
+                                  <View style={styles.slotContent}>
+                                    <Text style={styles.slotExerciseName}>{exerciseName}</Text>
+                                    <View style={styles.slotTargetRow}>
+                                      {targetContent}
+                                      {isTodayOnly && (
+                                        <View style={styles.todayOnlyTag}>
+                                          <Text style={styles.todayOnlyTagText}>Today Only</Text>
+                                        </View>
+                                      )}
                                     </View>
-                                  )}
-                                </View>
-                                {isTodayOnly && selectedDay && (
-                                  <TouchableOpacity
-                                    style={styles.saveToRoutineButton}
-                                    onPress={() =>
-                                      handleSaveToRoutine(
-                                        selectedDay.day.id,
-                                        sessionExercise.exercise_id,
-                                        sessionExercise.custom_exercise_id,
-                                      )
-                                    }
-                                    disabled={isSaving}
-                                  >
-                                    <Text style={styles.saveToRoutineButtonText}>Save to Routine</Text>
-                                  </TouchableOpacity>
-                                )}
+                                    {supersetLabel && (
+                                      <Text style={styles.slotSupersetChip}>{supersetLabel}</Text>
+                                    )}
+                                    {isTodayOnly && selectedDay && (
+                                      <TouchableOpacity
+                                        style={styles.saveToRoutineButton}
+                                        onPress={() =>
+                                          handleSaveToRoutine(
+                                            selectedDay.day.id,
+                                            sessionExercise.exercise_id,
+                                            sessionExercise.custom_exercise_id,
+                                          )
+                                        }
+                                        disabled={isSaving}
+                                      >
+                                        <Text style={styles.saveToRoutineButtonText}>Save to Routine</Text>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                </Pressable>
+                                <TouchableOpacity
+                                  style={[styles.deleteButton, styles.editButton]}
+                                  onPress={() => {
+                                    const idx =
+                                      exerciseIndex >= 0 ? exerciseIndex : sortedExercises.findIndex((e) => e.id === sessionExercise.id);
+                                    setEditingSessionExercise({
+                                      id: sessionExercise.id,
+                                      name: exerciseName,
+                                      mode: target?.mode || 'reps',
+                                      sessionId: session.id,
+                                      supersetGroup: sessionExercise.superset_group ?? null,
+                                      isLastExercise: idx >= sortedExercises.length - 1,
+                                    });
+                                    setShowSessionEditSheet(true);
+                                  }}
+                                  disabled={isSaving}
+                                >
+                                  <Text style={[styles.deleteButtonText, styles.editButtonText]}>Edit</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[styles.deleteButton, styles.editButton]}
+                                  onPress={() => void handleRemoveSessionExercise(session.id, sessionExercise)}
+                                  disabled={isSaving}
+                                  accessibilityRole="button"
+                                  accessibilityLabel="Remove exercise"
+                                >
+                                  <Trash2 size={16} color={colors.errorText} />
+                                </TouchableOpacity>
                               </View>
-                              <TouchableOpacity
-                                style={[styles.deleteButton, styles.editButton]}
-                                onPress={() => {
-                                  setEditingSessionExercise({
-                                    id: sessionExercise.id,
-                                    name: exerciseName,
-                                    mode: target?.mode || 'reps',
-                                  });
-                                  setShowSessionEditSheet(true);
-                                }}
-                                disabled={isSaving}
-                              >
-                                <Text style={[styles.deleteButtonText, styles.editButtonText]}>Edit</Text>
-                              </TouchableOpacity>
-                            </View>
                             );
-                          });
-                        })()}
+                          }}
+                        />
                         <TouchableOpacity
                           style={[styles.addButton, styles.addExerciseInContent]}
                           onPress={() => {
@@ -2116,12 +2442,13 @@ export default function PlannerTab() {
                         </TouchableOpacity>
                       </View>
                     </View>
-                  ))
-                )}
-              </>
+                  );
+                })
+              )}
+            </>
 
             <TouchableOpacity
-              style={[styles.loadPresetButton, isSaving && styles.loadPresetButtonDisabled]}
+              style={[styles.loadPresetButton, isApplyingPreset && styles.loadPresetButtonDisabled]}
               onPress={() => {
                 if (!activeTemplateId) {
                   if (__DEV__) devLog('planner', { action: 'loadPreset_skipped', missing: ['activeTemplateId'] });
@@ -2130,7 +2457,7 @@ export default function PlannerTab() {
                 }
                 void handleOpenLoadPreset();
               }}
-              disabled={isSaving}
+              disabled={isApplyingPreset}
             >
               <Text style={styles.loadPresetButtonText}>Load from preset</Text>
             </TouchableOpacity>
@@ -2188,20 +2515,33 @@ export default function PlannerTab() {
       <WorkoutPresetPickerSheet
         visible={showPresetPicker}
         presets={workoutPresets}
+        selectedPreset={selectedPresetForLoad}
         loading={isLoadingPresets}
-        onClose={() => setShowPresetPicker(false)}
-        onSelect={handleSelectPresetForLoad}
-        onRename={handleRenamePreset}
-        onDelete={setPresetToDelete}
+        applying={isApplyingPreset || isDeletingPreset}
+        onClose={() => {
+          presetPickerPendingActionRef.current = null;
+          pendingPresetForLoadRef.current = null;
+          pendingPresetToDeleteRef.current = null;
+          setShowPresetPicker(false);
+          setSelectedPresetForLoad(null);
+          setPendingPresetLoadMode(null);
+        }}
+        onClosed={handlePresetPickerClosed}
+        onSelectPreset={handleSelectPresetForLoad}
+        onLoadPreset={handleLoadPresetRow}
+        onDelete={handleDeletePresetRow}
       />
 
       <WorkoutPresetLoadOptionsSheet
         visible={showPresetLoadOptions}
         presetName={selectedPresetForLoad?.name ?? ''}
         onClose={() => {
+          presetOptionsPendingActionRef.current = null;
           setShowPresetLoadOptions(false);
           setSelectedPresetForLoad(null);
+          setPendingPresetLoadMode(null);
         }}
+        onClosed={handlePresetLoadOptionsClosed}
         onSelect={handlePresetLoadMode}
       />
 
@@ -2211,10 +2551,7 @@ export default function PlannerTab() {
           sessionId: session.id,
           label: `Workout ${index + 1}`,
         }))}
-        onClose={() => {
-          setShowPresetTargetPicker(false);
-          setPendingPresetLoadMode(null);
-        }}
+        onClose={() => setShowPresetTargetPicker(false)}
         onSelect={handlePresetTargetSelected}
       />
 
@@ -2225,8 +2562,13 @@ export default function PlannerTab() {
         confirmLabel="Delete"
         cancelLabel="Cancel"
         confirmDestructive
+        confirmDisabled={isDeletingPreset}
         onConfirm={() => void handleConfirmDeletePreset()}
-        onCancel={() => setPresetToDelete(null)}
+        onCancel={() => {
+          if (isDeletingPreset) return;
+          setPresetToDelete(null);
+          setShowPresetPicker(true);
+        }}
       />
 
       {editingSessionExercise && (
@@ -2240,7 +2582,14 @@ export default function PlannerTab() {
             toast.success('Defaults saved');
             const userId = await getCurrentUserId();
             if (userId && selectedDay) {
-              await loadSessionsForDay(userId, { dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
+              await loadSessionsForDay(userId, {
+                forceRefresh: true,
+                skipMaterialize: true,
+                dayName: selectedDay.day.day_name,
+                templateExerciseKeys: selectedDayTemplateKeys,
+                templateId: activeTemplateId ?? undefined,
+                templateSlots: selectedDay.slots,
+              });
             }
           }}
           onDelete={async () => {
@@ -2269,7 +2618,14 @@ export default function PlannerTab() {
                 toast.success('Exercise removed from today\'s session');
                 const userId = await getCurrentUserId();
                 if (userId && selectedDay) {
-                  await loadSessionsForDay(userId, { dayName: selectedDay.day.day_name, templateExerciseKeys: selectedDayTemplateKeys });
+                  await loadSessionsForDay(userId, {
+                forceRefresh: true,
+                skipMaterialize: true,
+                dayName: selectedDay.day.day_name,
+                templateExerciseKeys: selectedDayTemplateKeys,
+                templateId: activeTemplateId ?? undefined,
+                templateSlots: selectedDay.slots,
+              });
                 }
               }
             } catch (error) {
@@ -2285,6 +2641,10 @@ export default function PlannerTab() {
           exerciseName={editingSessionExercise.name}
           mode={editingSessionExercise.mode}
           useImperial={profile?.use_imperial ?? true}
+          supersetGroup={editingSessionExercise.supersetGroup}
+          canAddToSuperset={!editingSessionExercise.isLastExercise || editingSessionExercise.supersetGroup != null}
+          onToggleSuperset={handleEditSheetToggleSuperset}
+          supersetToggleDisabled={isSaving}
         />
       )}
 
@@ -2680,11 +3040,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     borderBottomColor: colors.cardBorder,
     backgroundColor: colors.background,
   },
-  planForDayHeader: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-    color: colors.textSecondary,
-  },
   workoutContainerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2739,6 +3094,13 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
+  slotCardInWorkout: {
+    backgroundColor: colors.textPrimary === '#ffffff' ? colors.background : colors.cardHover,
+    borderColor: colors.borderLight,
+  },
+  slotDragArea: {
+    flex: 1,
+  },
   slotCardDragging: {
     borderColor: colors.primary,
     shadowColor: colors.shadowColor,
@@ -2746,11 +3108,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 8,
-  },
-  dragHandle: {
-    paddingVertical: spacing.sm,
-    paddingRight: spacing.xs,
-    justifyContent: 'center',
   },
   slotContent: {
     flex: 1,

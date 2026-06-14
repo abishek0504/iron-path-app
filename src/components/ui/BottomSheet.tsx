@@ -4,32 +4,60 @@
  * Prevents modal-in-modal issues by being managed globally
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Modal,
   TouchableOpacity,
-  Animated,
   Dimensions,
   TouchableWithoutFeedback,
-  PanResponder,
+  Keyboard,
+  Platform,
+  type KeyboardEvent,
 } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  Extrapolation,
+  cancelAnimation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { spacing, borderRadius } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 
+type BottomSheetCloseFn = () => void;
+const BottomSheetCloseContext = createContext<BottomSheetCloseFn | null>(null);
+
+/** Animated close for buttons rendered inside BottomSheet content (e.g. custom headers). */
+export function useBottomSheetClose(): BottomSheetCloseFn {
+  const close = useContext(BottomSheetCloseContext);
+  return close ?? (() => {});
+}
+
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-/**
- * Distance (px) the user must drag down before the sheet commits to dismiss on release.
- * Lower threshold makes it easier to close; we balance with a velocity check below to
- * also support a "flick" gesture without long drags.
- */
-const SWIPE_DISMISS_DISTANCE = 100;
-/** Downward velocity (px/ms) at which a flick alone dismisses, regardless of distance. */
-const SWIPE_DISMISS_VELOCITY = 0.6;
+/** Minimum touch height for the draggable top chrome (iOS HIG). */
+const DRAG_ZONE_MIN_HEIGHT = 48;
+/** Distance (px) the user must drag down before the sheet commits to dismiss on release. */
+const SWIPE_DISMISS_DISTANCE = 80;
+/** Downward velocity (px/s) at which a flick alone dismisses, regardless of distance. */
+const SWIPE_DISMISS_VELOCITY = 800;
+
+const ENTER_DURATION_MS = 300;
+const EXIT_DURATION_MS = 280;
+const DRAG_SNAP_BACK_DURATION_MS = 180;
+/** Velocity (px/s) above which we treat the release as a flick. */
+const FLICK_VELOCITY_THRESHOLD = 500;
+
+const ENTER_EASING = Easing.out(Easing.cubic);
+const EXIT_EASING = Easing.in(Easing.cubic);
 
 interface BottomSheetProps {
   visible: boolean;
@@ -38,63 +66,124 @@ interface BottomSheetProps {
   title?: string;
   children: React.ReactNode;
   height?: number | string; // number for pixels, string for percentage
+  /** Shift the sheet above the software keyboard (for sheets with text inputs). */
+  avoidKeyboard?: boolean;
 }
 
-export const BottomSheet: React.FC<BottomSheetProps> = ({
+export type BottomSheetHandle = {
+  requestClose: () => void;
+};
+
+export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(function BottomSheet({
   visible,
   onClose,
   onClosed,
   title,
   children,
   height = '80%',
-}) => {
+  avoidKeyboard = false,
+}, ref) {
   const colors = useTheme();
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const dragOffset = useRef(new Animated.Value(0)).current;
+  const slideOffset = useSharedValue(SCREEN_HEIGHT);
+  const dragOffset = useSharedValue(0);
+  const keyboardOffset = useSharedValue(0);
+  const isAnimatingCloseRef = useRef(false);
   const [isMounted, setIsMounted] = useState(visible);
 
-  /**
-   * Swipe-down dismiss. We restrict capture to clearly downward gestures so we don't
-   * fight inner ScrollViews; we also reject pure vertical jitter under a 6px threshold
-   * to keep tap interactions inside the sheet content responsive.
-   */
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        return gestureState.dy > 6 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
-      },
-      onPanResponderMove: (_evt, gestureState) => {
-        if (gestureState.dy >= 0) {
-          dragOffset.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_evt, gestureState) => {
-        const shouldDismiss =
-          gestureState.dy > SWIPE_DISMISS_DISTANCE || gestureState.vy > SWIPE_DISMISS_VELOCITY;
-        if (shouldDismiss) {
-          dragOffset.setValue(0);
-          onClose();
+  const finishExitAnimation = useCallback(() => {
+    isAnimatingCloseRef.current = false;
+    setIsMounted(false);
+    onClosed?.();
+  }, [onClosed]);
+
+  const completeGestureDismiss = useCallback(() => {
+    isAnimatingCloseRef.current = true;
+    onClose();
+    finishExitAnimation();
+  }, [onClose, finishExitAnimation]);
+
+  const handleAnimatedCloseComplete = useCallback(() => {
+    isAnimatingCloseRef.current = false;
+    onClose();
+    finishExitAnimation();
+  }, [onClose, finishExitAnimation]);
+
+  const resetAnimatingClose = useCallback(() => {
+    isAnimatingCloseRef.current = false;
+  }, []);
+
+  const animateClose = useCallback(() => {
+    if (isAnimatingCloseRef.current) return;
+    isAnimatingCloseRef.current = true;
+    cancelAnimation(slideOffset);
+    cancelAnimation(dragOffset);
+    dragOffset.value = 0;
+    slideOffset.value = withTiming(
+      SCREEN_HEIGHT,
+      { duration: EXIT_DURATION_MS, easing: EXIT_EASING },
+      (finished) => {
+        if (finished) {
+          runOnJS(handleAnimatedCloseComplete)();
         } else {
-          Animated.spring(dragOffset, {
-            toValue: 0,
-            tension: 60,
-            friction: 9,
-            useNativeDriver: true,
-          }).start();
+          runOnJS(resetAnimatingClose)();
         }
-      },
-      onPanResponderTerminate: () => {
-        Animated.spring(dragOffset, {
-          toValue: 0,
-          tension: 60,
-          friction: 9,
-          useNativeDriver: true,
-        }).start();
-      },
-    })
-  ).current;
+      }
+    );
+  }, [slideOffset, dragOffset, handleAnimatedCloseComplete, resetAnimatingClose]);
+
+  useImperativeHandle(ref, () => ({ requestClose: animateClose }), [animateClose]);
+
+  const panGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([8, Infinity])
+        .failOffsetX([-20, 20])
+        .onUpdate((event) => {
+          if (event.translationY >= 0) {
+            dragOffset.value = event.translationY;
+          }
+        })
+        .onEnd((event) => {
+          const shouldDismiss =
+            event.translationY > SWIPE_DISMISS_DISTANCE ||
+            event.velocityY > SWIPE_DISMISS_VELOCITY;
+
+          if (shouldDismiss) {
+            const draggedY = event.translationY;
+            const remaining = SCREEN_HEIGHT - draggedY;
+            cancelAnimation(dragOffset);
+            cancelAnimation(slideOffset);
+            dragOffset.value = 0;
+            slideOffset.value = draggedY;
+
+            const releaseVelocity =
+              event.velocityY > 120
+                ? event.velocityY
+                : Math.max(remaining * 2.5, 900);
+            const duration = Math.min(
+              280,
+              Math.max(100, (remaining / releaseVelocity) * 1000)
+            );
+            const easing =
+              event.velocityY > FLICK_VELOCITY_THRESHOLD
+                ? Easing.out(Easing.quad)
+                : Easing.linear;
+
+            slideOffset.value = withTiming(
+              SCREEN_HEIGHT,
+              { duration, easing },
+              (finished) => {
+                if (finished) {
+                  runOnJS(completeGestureDismiss)();
+                }
+              }
+            );
+          } else {
+            dragOffset.value = withTiming(0, { duration: DRAG_SNAP_BACK_DURATION_MS });
+          }
+        }),
+    [completeGestureDismiss, dragOffset, slideOffset]
+  );
 
   // Mount when becoming visible
   useEffect(() => {
@@ -103,50 +192,97 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
     }
   }, [visible, isMounted]);
 
-  // Run enter/exit animations while mounted
+  // Run enter animation when opening; handle external visible=false (programmatic close)
   useEffect(() => {
     if (!isMounted) return;
 
     if (visible) {
-      // Reset starting positions for enter animation
-      slideAnim.setValue(SCREEN_HEIGHT);
-      backdropOpacity.setValue(0);
-      dragOffset.setValue(0);
+      isAnimatingCloseRef.current = false;
+      cancelAnimation(slideOffset);
+      cancelAnimation(dragOffset);
+      slideOffset.value = SCREEN_HEIGHT;
+      dragOffset.value = 0;
 
-      Animated.parallel([
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          tension: 50,
-          friction: 8,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: SCREEN_HEIGHT,
-          duration: 350,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 350,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        setIsMounted(false);
-        // Call onClosed callback after exit animation completes
-        if (onClosed) {
-          onClosed();
-        }
+      slideOffset.value = withTiming(0, {
+        duration: ENTER_DURATION_MS,
+        easing: ENTER_EASING,
       });
+    } else if (!isAnimatingCloseRef.current) {
+      // Parent set visible=false without our animateClose (e.g. programmatic close).
+      isAnimatingCloseRef.current = true;
+      cancelAnimation(slideOffset);
+      cancelAnimation(dragOffset);
+      dragOffset.value = 0;
+      slideOffset.value = withTiming(
+        SCREEN_HEIGHT,
+        { duration: EXIT_DURATION_MS, easing: EXIT_EASING },
+        (finished) => {
+          if (finished) {
+            runOnJS(finishExitAnimation)();
+          } else {
+            runOnJS(resetAnimatingClose)();
+          }
+        }
+      );
     }
-  }, [visible, isMounted, slideAnim, backdropOpacity, dragOffset, onClosed]);
+  }, [
+    visible,
+    isMounted,
+    slideOffset,
+    dragOffset,
+    finishExitAnimation,
+    resetAnimatingClose,
+  ]);
+
+  useEffect(() => {
+    if (!avoidKeyboard) return;
+
+    const animateKeyboardOffset = (toValue: number, duration?: number) => {
+      keyboardOffset.value = withTiming(toValue, { duration: duration ?? 250 });
+    };
+
+    const onKeyboardShow = (event: KeyboardEvent) => {
+      animateKeyboardOffset(event.endCoordinates.height, event.duration);
+    };
+
+    const onKeyboardHide = (event: KeyboardEvent) => {
+      animateKeyboardOffset(0, event.duration);
+    };
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, onKeyboardShow);
+    const hideSub = Keyboard.addListener(hideEvent, onKeyboardHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [avoidKeyboard, keyboardOffset]);
+
+  useEffect(() => {
+    if (!visible) {
+      keyboardOffset.value = 0;
+    }
+  }, [visible, keyboardOffset]);
+
+  const sheetAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: avoidKeyboard
+          ? slideOffset.value + dragOffset.value - keyboardOffset.value
+          : slideOffset.value + dragOffset.value,
+      },
+    ],
+  }));
+
+  const backdropAnimatedStyle = useAnimatedStyle(() => {
+    const sheetY = slideOffset.value + dragOffset.value;
+    return {
+      opacity: interpolate(sheetY, [0, SCREEN_HEIGHT], [1, 0], Extrapolation.CLAMP),
+    };
+  });
 
   const styles = useMemo(() => StyleSheet.create({
     container: {
@@ -170,6 +306,9 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       shadowRadius: 8,
       elevation: 10,
     },
+    dragZone: {
+      minHeight: DRAG_ZONE_MIN_HEIGHT,
+    },
     dragHandleContainer: {
       paddingTop: spacing.sm,
       paddingBottom: spacing.xs,
@@ -186,7 +325,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
+      paddingTop: spacing.sm,
       paddingBottom: spacing.md,
       borderBottomWidth: 1,
       borderBottomColor: colors.cardBorder,
@@ -216,60 +355,51 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       visible={isMounted}
       transparent
       animationType="none"
-      onRequestClose={onClose}
+      onRequestClose={animateClose}
       statusBarTranslucent
     >
-      <View style={styles.container}>
+      <GestureHandlerRootView style={styles.container}>
         {/* Backdrop */}
-        <TouchableWithoutFeedback onPress={onClose}>
-          <Animated.View
-            style={[
-              styles.backdrop,
-              {
-                opacity: backdropOpacity,
-              },
-            ]}
-          />
+        <TouchableWithoutFeedback onPress={animateClose}>
+          <Animated.View style={[styles.backdrop, backdropAnimatedStyle]} />
         </TouchableWithoutFeedback>
 
         {/* Sheet */}
         <Animated.View
           style={[
             styles.sheet,
-            {
-              height: sheetHeight,
-              transform: [
-                {
-                  translateY: Animated.add(slideAnim, dragOffset),
-                },
-              ],
-            },
+            { height: sheetHeight },
+            sheetAnimatedStyle,
           ]}
         >
-          {/* Drag handle: visual affordance + dedicated gesture surface so the user can
-              always swipe-to-dismiss even when the sheet body has its own scroll view. */}
-          <View style={styles.dragHandleContainer} {...panResponder.panHandlers}>
-            <View style={styles.dragHandle} />
-          </View>
+          {/* Top chrome: handle + title row — dedicated swipe-to-dismiss surface */}
+          <GestureDetector gesture={panGesture}>
+            <View style={styles.dragZone} collapsable={false}>
+              <View style={styles.dragHandleContainer}>
+                <View style={styles.dragHandle} />
+              </View>
 
-          {/* Header */}
-          {title && (
-            <View style={styles.header}>
-              <Text style={styles.title}>{title}</Text>
-              <TouchableOpacity
-                onPress={onClose}
-                style={styles.closeButton}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <X size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
+              {title && (
+                <View style={styles.header}>
+                  <Text style={styles.title}>{title}</Text>
+                  <TouchableOpacity
+                    onPress={animateClose}
+                    style={styles.closeButton}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <X size={24} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-          )}
+          </GestureDetector>
 
           {/* Content */}
-          <View style={styles.content}>{children}</View>
+          <BottomSheetCloseContext.Provider value={animateClose}>
+            <View style={styles.content}>{children}</View>
+          </BottomSheetCloseContext.Provider>
         </Animated.View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
-};
+});

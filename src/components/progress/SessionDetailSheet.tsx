@@ -3,10 +3,28 @@
  * Displays session details for a selected date
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Pressable,
+  type LayoutChangeEvent,
+  type TextStyle,
+  type ViewStyle,
+} from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
-import { Trash2 } from 'lucide-react-native';
+import { Trash2, ChevronDown } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { supabase } from '../../lib/supabase/client';
@@ -23,24 +41,191 @@ type Props = {
   onSessionDeleted?: () => void; // Callback to refresh calendar after deletion
 };
 
+type SetType = 'normal' | 'warmup' | 'drop' | 'failure';
+
+type PerformedSet = {
+  setNumber: number;
+  weight: number | null;
+  reps: number | null;
+  durationSec: number | null;
+  rpe: number | null;
+  setType: SetType;
+};
+
+type SessionExerciseDetail = {
+  sessionExerciseId: string;
+  name: string;
+  sets: PerformedSet[];
+};
+
 type SessionWithExercises = WorkoutSession & {
-  exercises: Array<{ name: string; summary?: string; warmupCount?: number }>;
+  exercises: SessionExerciseDetail[];
   exerciseCount: number;
 };
+
+const SET_TYPE_LABELS: Record<Exclude<SetType, 'normal'>, string> = {
+  warmup: 'Warmup',
+  drop: 'Drop',
+  failure: 'Failure',
+};
+
+const EXPAND_DURATION_MS = 220;
+
+type AnimatedChevronProps = {
+  expanded: boolean;
+  color: string;
+};
+
+function AnimatedChevron({ expanded, color }: AnimatedChevronProps) {
+  const rotation = useSharedValue(expanded ? 1 : 0);
+
+  useEffect(() => {
+    rotation.value = withTiming(expanded ? 1 : 0, {
+      duration: EXPAND_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [expanded, rotation]);
+
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(rotation.value, [0, 1], [0, 180])}deg` }],
+  }));
+
+  return (
+    <Animated.View style={chevronStyle}>
+      <ChevronDown size={18} color={color} />
+    </Animated.View>
+  );
+}
+
+type AnimatedExerciseSetsProps = {
+  expanded: boolean;
+  sets: PerformedSet[];
+  unitsLabel: string;
+  setListStyle: ViewStyle;
+  setRowStyle: ViewStyle;
+  setLineStyle: TextStyle;
+  setTypeBadgeStyle: ViewStyle;
+  setTypeBadgeTextStyle: TextStyle;
+};
+
+function AnimatedExerciseSets({
+  expanded,
+  sets,
+  unitsLabel,
+  setListStyle,
+  setRowStyle,
+  setLineStyle,
+  setTypeBadgeStyle,
+  setTypeBadgeTextStyle,
+}: AnimatedExerciseSetsProps) {
+  const contentHeight = useSharedValue(0);
+  const progress = useSharedValue(expanded ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withTiming(expanded ? 1 : 0, {
+      duration: EXPAND_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [expanded, progress]);
+
+  const containerStyle = useAnimatedStyle(() => ({
+    height: contentHeight.value * progress.value,
+    opacity: interpolate(progress.value, [0, 1], [0, 1]),
+  }));
+
+  const handleMeasureLayout = (event: LayoutChangeEvent) => {
+    const measured = event.nativeEvent.layout.height;
+    if (measured > 0 && Math.abs(contentHeight.value - measured) > 0.5) {
+      contentHeight.value = measured;
+    }
+  };
+
+  const setRows = sets.map((set) => (
+    <View key={set.setNumber} style={setRowStyle}>
+      <Text style={setLineStyle}>{formatPerformedSetLine(set, unitsLabel)}</Text>
+      {set.setType !== 'normal' && (
+        <View style={setTypeBadgeStyle}>
+          <Text style={setTypeBadgeTextStyle}>{SET_TYPE_LABELS[set.setType]}</Text>
+        </View>
+      )}
+    </View>
+  ));
+
+  return (
+    <View>
+      <View
+        style={stylesMeasureLayer}
+        pointerEvents="none"
+        onLayout={handleMeasureLayout}
+      >
+        <View style={setListStyle}>{setRows}</View>
+      </View>
+      <Animated.View style={[containerStyle, stylesHiddenOverflow]}>
+        <View style={setListStyle}>{setRows}</View>
+      </Animated.View>
+    </View>
+  );
+}
+
+const stylesMeasureLayer = {
+  position: 'absolute' as const,
+  left: 0,
+  right: 0,
+  opacity: 0,
+  zIndex: -1,
+};
+
+const stylesHiddenOverflow = { overflow: 'hidden' as const };
+
+function formatPerformedSetLine(set: PerformedSet, unitsLabel: string): string {
+  const setLabel = `Set ${set.setNumber}`;
+  let primary: string | null = null;
+
+  if (set.durationSec != null && set.durationSec > 0 && (set.weight == null || set.weight === 0)) {
+    primary = `${formatDurationDisplay(set.durationSec)} hold`;
+  } else if (set.reps != null) {
+    const weightStr =
+      set.weight == null || set.weight === 0
+        ? 'Bodyweight'
+        : `${Math.round(set.weight)} ${unitsLabel}`;
+    primary = `${weightStr} × ${Math.round(set.reps)} reps`;
+  } else if (set.durationSec != null && set.durationSec > 0) {
+    primary = `${formatDurationDisplay(set.durationSec)} hold`;
+  }
+
+  const rpeStr = set.rpe == null ? null : `RPE ${Math.round(set.rpe)}`;
+  const parts = [primary, rpeStr].filter(Boolean) as string[];
+  return parts.length ? `${setLabel}: ${parts.join(' • ')}` : setLabel;
+}
 
 export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onSessionDeleted }) => {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionWithExercises[]>([]);
+  const [expandedExerciseKeys, setExpandedExerciseKeys] = useState<Set<string>>(new Set());
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<{ id: string; name: string } | null>(null);
   const profile = useUserStore((state) => state.profile);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
 
   useEffect(() => {
+    setExpandedExerciseKeys(new Set());
     loadSessions();
   }, [selectedDate]);
+
+  const toggleExerciseExpanded = useCallback((sessionId: string, sessionExerciseId: string) => {
+    const key = `${sessionId}:${sessionExerciseId}`;
+    setExpandedExerciseKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   const loadSessions = async () => {
     setLoading(true);
@@ -75,14 +260,17 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
       const { data: exerciseRows, error: exercisesError } = await supabase
         .from('v2_session_exercises')
-        .select('id, session_id, exercise_id, custom_exercise_id')
+        .select('id, session_id, exercise_id, custom_exercise_id, sort_order')
         .in('session_id', sessionIds);
 
       if (exercisesError && __DEV__) {
         devError('session-detail', exercisesError, { userId, selectedDate });
       }
 
-      const exerciseBySession = new Map<string, Array<{ sessionExerciseId: string; exerciseKey: string }>>();
+      const exerciseBySession = new Map<
+        string,
+        Array<{ sessionExerciseId: string; exerciseKey: string; sortOrder: number }>
+      >();
       const exerciseIds = new Set<string>();
       const customExerciseIds = new Set<string>();
 
@@ -93,15 +281,23 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         }
         const exerciseKey = row.exercise_id || row.custom_exercise_id;
         if (!exerciseKey) continue;
-        exerciseBySession.get(sid)!.push({ sessionExerciseId: row.id as string, exerciseKey });
+        exerciseBySession.get(sid)!.push({
+          sessionExerciseId: row.id as string,
+          exerciseKey,
+          sortOrder: (row.sort_order as number) ?? 0,
+        });
         if (row.exercise_id) exerciseIds.add(row.exercise_id);
         if (row.custom_exercise_id) customExerciseIds.add(row.custom_exercise_id);
+      }
+
+      for (const rows of exerciseBySession.values()) {
+        rows.sort((a, b) => a.sortOrder - b.sortOrder);
       }
 
       const sessionExerciseIds = (exerciseRows || []).map((r) => r.id as string);
       const { data: setRows, error: setError } = await supabase
         .from('v2_session_sets')
-        .select('session_exercise_id, weight, reps, duration_sec, rpe, set_type, performed_at')
+        .select('session_exercise_id, set_number, weight, reps, duration_sec, rpe, set_type, performed_at')
         .in('session_exercise_id', sessionExerciseIds)
         .not('performed_at', 'is', null);
 
@@ -109,49 +305,24 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         devError('session-detail', setError, { userId, selectedDate, step: 'setRows' });
       }
 
-      // Pick the "best" performed set per session_exercise.
-      // Warmup sets never compete for "best"; they're surfaced as a separate badge.
-      // Ranking rules:
-      //   - If any set has weight > 0, prefer max weight, tie-break on reps (heaviest lift).
-      //   - Else if any set has duration_sec, prefer max duration (longest hold).
-      //   - Else if any set has reps, prefer max reps (bodyweight reps PR).
-      const bestSetBySessionExercise = new Map<
-        string,
-        { weight: number | null; reps: number | null; duration_sec: number | null; rpe: number | null }
-      >();
-      const warmupCountBySessionExercise = new Map<string, number>();
+      const setsBySessionExercise = new Map<string, PerformedSet[]>();
       for (const row of setRows || []) {
         const seId = row.session_exercise_id as string;
-        if (row.set_type === 'warmup') {
-          warmupCountBySessionExercise.set(seId, (warmupCountBySessionExercise.get(seId) ?? 0) + 1);
-          continue;
-        }
-        const weight = row.weight == null ? null : Number(row.weight);
-        const reps = row.reps == null ? null : Number(row.reps);
-        const duration_sec = row.duration_sec == null ? null : Number(row.duration_sec);
-        const rpe = row.rpe == null ? null : Number(row.rpe);
-        const existing = bestSetBySessionExercise.get(seId);
-        if (!existing) {
-          bestSetBySessionExercise.set(seId, { weight, reps, duration_sec, rpe });
-          continue;
-        }
-        const wA = existing.weight ?? -1;
-        const wB = weight ?? -1;
-        const dA = existing.duration_sec ?? -1;
-        const dB = duration_sec ?? -1;
-        const rA = existing.reps ?? -1;
-        const rB = reps ?? -1;
-        let winner = false;
-        if (wB > 0 || wA > 0) {
-          winner = wB > wA || (wB === wA && rB > rA);
-        } else if (dB > 0 || dA > 0) {
-          winner = dB > dA;
-        } else {
-          winner = rB > rA;
-        }
-        if (winner) {
-          bestSetBySessionExercise.set(seId, { weight, reps, duration_sec, rpe });
-        }
+        const performedSet: PerformedSet = {
+          setNumber: row.set_number as number,
+          weight: row.weight == null ? null : Number(row.weight),
+          reps: row.reps == null ? null : Number(row.reps),
+          durationSec: row.duration_sec == null ? null : Number(row.duration_sec),
+          rpe: row.rpe == null ? null : Number(row.rpe),
+          setType: (row.set_type as SetType) ?? 'normal',
+        };
+        const existing = setsBySessionExercise.get(seId) ?? [];
+        existing.push(performedSet);
+        setsBySessionExercise.set(seId, existing);
+      }
+
+      for (const sets of setsBySessionExercise.values()) {
+        sets.sort((a, b) => a.setNumber - b.setNumber);
       }
 
       const allExerciseIds = Array.from(exerciseIds);
@@ -173,30 +344,11 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
       const sessionsWithExercises: SessionWithExercises[] = dateSessions.map((s) => {
         const rows = exerciseBySession.get(s.id) || [];
-        const exercises = rows
-          .map(({ sessionExerciseId, exerciseKey }) => {
-            const name = exerciseIdToName.get(exerciseKey) || 'Exercise';
-            const warmupCount = warmupCountBySessionExercise.get(sessionExerciseId) ?? 0;
-            const best = bestSetBySessionExercise.get(sessionExerciseId);
-            if (!best) return { name, warmupCount };
-
-            // Timed summary takes precedence when no weight was lifted.
-            let primary: string | null = null;
-            if (best.duration_sec != null && best.duration_sec > 0 && (best.weight == null || best.weight === 0)) {
-              primary = `${formatDurationDisplay(best.duration_sec)} hold`;
-            } else if (best.weight != null) {
-              const weightStr = best.weight === 0 ? 'Bodyweight' : `${Math.round(best.weight)} ${unitsLabel}`;
-              const repsStr = best.reps == null ? null : `${Math.round(best.reps)} reps`;
-              primary = repsStr ? `${weightStr} × ${repsStr.replace(' reps', '')} reps` : weightStr;
-            } else if (best.reps != null) {
-              primary = `${Math.round(best.reps)} reps`;
-            }
-            const rpeStr = best.rpe == null ? null : `RPE ${Math.round(best.rpe)}`;
-
-            const parts = [primary, rpeStr].filter(Boolean) as string[];
-            return { name, summary: parts.length ? parts.join(' • ') : undefined, warmupCount };
-          })
-          .slice(0, 6);
+        const exercises: SessionExerciseDetail[] = rows.map(({ sessionExerciseId, exerciseKey }) => ({
+          sessionExerciseId,
+          name: exerciseIdToName.get(exerciseKey) || 'Exercise',
+          sets: setsBySessionExercise.get(sessionExerciseId) ?? [],
+        }));
         return {
           ...s,
           exercises,
@@ -212,6 +364,10 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
           selectedDate: selectedDate.toISOString(),
           sessionCount: sessionsWithExercises.length,
           totalExercises: sessionsWithExercises.reduce((sum, s) => sum + s.exerciseCount, 0),
+          totalSets: sessionsWithExercises.reduce(
+            (sum, s) => sum + s.exercises.reduce((setSum, ex) => setSum + ex.sets.length, 0),
+            0
+          ),
         });
       }
     } catch (error) {
@@ -324,9 +480,9 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
               onPress={() => openDeleteConfirm(session.id, session.day_name || 'Workout')}
               disabled={deletingSessionId === session.id}
             >
-              <Trash2 
-                size={20} 
-                color={deletingSessionId === session.id ? colors.textMuted : colors.error} 
+              <Trash2
+                size={20}
+                color={deletingSessionId === session.id ? colors.textMuted : colors.error}
               />
             </TouchableOpacity>
           </View>
@@ -339,24 +495,47 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
             </Text>
             {session.exercises.length > 0 && (
               <View style={styles.exerciseList}>
-                {session.exercises.map((ex, index) => (
-                  <View key={index} style={styles.exerciseItem}>
-                    <View style={styles.exerciseDot} />
-                    <View style={styles.exerciseTextCol}>
-                      <View style={styles.exerciseNameRow}>
-                        <Text style={styles.exerciseName}>{ex.name}</Text>
-                        {(ex.warmupCount ?? 0) > 0 && (
-                          <View style={styles.warmupBadge}>
-                            <Text style={styles.warmupBadgeText}>
-                              {ex.warmupCount === 1 ? '1 warmup' : `${ex.warmupCount} warmups`}
-                            </Text>
-                          </View>
+                {session.exercises.map((ex) => {
+                  const expandKey = `${session.id}:${ex.sessionExerciseId}`;
+                  const isExpanded = expandedExerciseKeys.has(expandKey);
+                  const hasSets = ex.sets.length > 0;
+                  const setCountLabel =
+                    ex.sets.length === 1 ? '1 set' : `${ex.sets.length} sets`;
+
+                  return (
+                    <View key={ex.sessionExerciseId} style={styles.exerciseItem}>
+                      <Pressable
+                        style={styles.exerciseHeader}
+                        onPress={() =>
+                          hasSets && toggleExerciseExpanded(session.id, ex.sessionExerciseId)
+                        }
+                        disabled={!hasSets}
+                      >
+                        <View style={styles.exerciseHeaderText}>
+                          <Text style={styles.exerciseName}>{ex.name}</Text>
+                          <Text style={styles.exerciseSetCount}>
+                            {hasSets ? setCountLabel : 'No sets logged'}
+                          </Text>
+                        </View>
+                        {hasSets && (
+                          <AnimatedChevron expanded={isExpanded} color={colors.textSecondary} />
                         )}
-                      </View>
-                      {!!ex.summary && <Text style={styles.exerciseSummary}>{ex.summary}</Text>}
+                      </Pressable>
+                      {hasSets && (
+                        <AnimatedExerciseSets
+                          expanded={isExpanded}
+                          sets={ex.sets}
+                          unitsLabel={unitsLabel}
+                          setListStyle={styles.setList}
+                          setRowStyle={styles.setRow}
+                          setLineStyle={styles.setLine}
+                          setTypeBadgeStyle={styles.setTypeBadge}
+                          setTypeBadgeTextStyle={styles.setTypeBadgeText}
+                        />
+                      )}
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -408,173 +587,184 @@ function createStyles(colors: ThemeColors) {
     },
     content: {
       gap: spacing.md,
-    paddingBottom: spacing.lg,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    minHeight: 200,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 200,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.base,
-  },
-  dateLabel: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.semibold,
-    marginBottom: spacing.sm,
-  },
-  sessionCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  sessionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.xs,
-  },
-  sessionHeaderLeft: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  sessionTitle: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  sessionTime: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  deleteButton: {
-    padding: spacing.xs,
-    marginLeft: spacing.sm,
-  },
-  exerciseSection: {
-    gap: spacing.xs,
-  },
-  exerciseCount: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-  },
-  exerciseList: {
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-  },
-  exerciseItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  exerciseTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  exerciseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.primary,
-  },
-  exerciseName: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.sm,
-  },
-  exerciseNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  warmupBadge: {
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 1,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  warmupBadgeText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.xs,
-  },
-  exerciseSummary: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.xs,
-  },
-  deleteModalOverlay: {
-    flex: 1,
-    backgroundColor: colors.modalBackdropTint,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  deleteModalCard: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.xl,
-    minWidth: 280,
-    maxWidth: 360,
-  },
-  deleteModalTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  deleteModalMessage: {
-    fontSize: typography.sizes.base,
-    color: colors.textSecondary,
-    lineHeight: 22,
-    marginBottom: spacing.lg,
-  },
-  deleteModalButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'flex-end',
-  },
-  deleteModalButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-  },
-  deleteModalButtonCancel: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  deleteModalButtonTextCancel: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.semibold,
-  },
-  deleteModalButtonDestructive: {
-    backgroundColor: colors.error,
-  },
-  deleteModalButtonTextDestructive: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.semibold,
-  },
+      paddingBottom: spacing.lg,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      minHeight: 200,
+    },
+    loadingText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+    },
+    emptyContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 200,
+    },
+    emptyText: {
+      color: colors.textMuted,
+      fontSize: typography.sizes.base,
+    },
+    dateLabel: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.lg,
+      fontWeight: typography.weights.semibold,
+      marginBottom: spacing.sm,
+    },
+    sessionCard: {
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    sessionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: spacing.xs,
+    },
+    sessionHeaderLeft: {
+      flex: 1,
+      gap: spacing.xs,
+    },
+    sessionTitle: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    sessionTime: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    deleteButton: {
+      padding: spacing.xs,
+      marginLeft: spacing.sm,
+    },
+    exerciseSection: {
+      gap: spacing.xs,
+    },
+    exerciseCount: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+    exerciseList: {
+      gap: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    exerciseItem: {
+      gap: spacing.xs,
+    },
+    exerciseHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    exerciseHeaderText: {
+      flex: 1,
+      gap: 2,
+    },
+    exerciseName: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+    exerciseSetCount: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.xs,
+    },
+    setList: {
+      marginLeft: spacing.sm,
+      paddingLeft: spacing.sm,
+      borderLeftWidth: 2,
+      borderLeftColor: colors.cardBorder,
+      gap: spacing.xs,
+    },
+    setRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+    },
+    setLine: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.xs,
+      flexShrink: 1,
+    },
+    setTypeBadge: {
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 1,
+      borderRadius: borderRadius.sm,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    setTypeBadgeText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.xs,
+    },
+    deleteModalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalBackdropTint,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: spacing.lg,
+    },
+    deleteModalCard: {
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.xl,
+      minWidth: 280,
+      maxWidth: 360,
+    },
+    deleteModalTitle: {
+      fontSize: typography.sizes.lg,
+      fontWeight: typography.weights.semibold,
+      color: colors.textPrimary,
+      marginBottom: spacing.sm,
+    },
+    deleteModalMessage: {
+      fontSize: typography.sizes.base,
+      color: colors.textSecondary,
+      lineHeight: 22,
+      marginBottom: spacing.lg,
+    },
+    deleteModalButtons: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+      justifyContent: 'flex-end',
+    },
+    deleteModalButton: {
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.md,
+    },
+    deleteModalButtonCancel: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+    },
+    deleteModalButtonTextCancel: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.semibold,
+    },
+    deleteModalButtonDestructive: {
+      backgroundColor: colors.error,
+    },
+    deleteModalButtonTextDestructive: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.semibold,
+    },
   });
 }
-

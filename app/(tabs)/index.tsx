@@ -26,6 +26,7 @@ import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
+import { useUIStore } from '../../src/stores/uiStore';
 import {
   createWorkoutSession,
   deleteSessionWithExercises,
@@ -194,6 +195,7 @@ export default function WorkoutTab() {
   const toast = useToast();
   const modal = useModal();
   const profile = useUserStore((state) => state.profile);
+  const setWorkoutNeedsRefetch = useUIStore((s) => s.setWorkoutNeedsRefetch);
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [activeTemplate, setActiveTemplate] = useState<any>(null);
@@ -524,6 +526,17 @@ export default function WorkoutTab() {
   useFocusEffect(
     useCallback(() => {
       if (!hasInitiallyLoaded) return;
+
+      const forceRefresh = useUIStore.getState().workoutNeedsRefetch;
+      if (forceRefresh) {
+        setWorkoutNeedsRefetch(false);
+        lastFocusLoadRef.current = 0;
+        loadInFlightRef.current = false;
+        if (__DEV__) {
+          devLog('workout-tab', { action: 'useFocusEffect: force refresh after workout complete' });
+        }
+      }
+
       const now = Date.now();
       if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
       lastFocusLoadRef.current = now;
@@ -532,7 +545,7 @@ export default function WorkoutTab() {
       }
       loadTodayWorkout();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hasInitiallyLoaded])
+    }, [hasInitiallyLoaded, setWorkoutNeedsRefetch])
   );
 
   /**
@@ -593,6 +606,9 @@ export default function WorkoutTab() {
 
   const handleStartWorkout = async () => {
     if (startInProgressRef.current) return;
+    if (selectedSession?.status === 'completed' || isWorkoutCompleted) {
+      return;
+    }
     hapticMedium();
     startInProgressRef.current = true;
     setIsStartingWorkout(true);
@@ -1085,8 +1101,8 @@ export default function WorkoutTab() {
             <Animated.View entering={FadeIn.duration(400).delay(150)} style={styles.buttonContainer}>
               {isWorkoutCompleted ? (
                 <CircularButton
-                  onPress={handleStartWorkout}
-                  disabled={isRestDay || isStartingWorkout}
+                  onPress={() => {}}
+                  disabled={true}
                   text="Completed"
                   isCompleted={true}
                 />

@@ -8,7 +8,6 @@ import { devLog, devError } from '../../utils/logger';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import {
   createTemplateSlot,
-  deleteTemplateSlot,
 } from './templates';
 import {
   createWorkoutSession,
@@ -318,19 +317,14 @@ export async function replaceDayTemplateSlotsFromPreset(
   }
 
   try {
-    const { data: existingSlots, error: fetchError } = await supabase
+    const { error: deleteError } = await supabase
       .from('v2_template_slots')
-      .select('id')
+      .delete()
       .eq('day_id', dayId);
 
-    if (fetchError) {
-      if (__DEV__) devError('preset-query', fetchError, { dayId });
+    if (deleteError) {
+      if (__DEV__) devError('preset-query', deleteError, { dayId });
       return false;
-    }
-
-    for (const slot of existingSlots || []) {
-      const deleted = await deleteTemplateSlot(slot.id);
-      if (!deleted) return false;
     }
 
     for (let i = 0; i < slots.length; i++) {
@@ -429,37 +423,34 @@ async function insertSessionExercisesFromSlots(
   slots: PresetSlotInput[],
   startSortOrder: number
 ): Promise<Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }>> {
-  const inserted: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+  if (slots.length === 0) return [];
 
-  for (let i = 0; i < slots.length; i++) {
-    const slot = slots[i];
-    const { data, error } = await supabase
-      .from('v2_session_exercises')
-      .insert({
-        session_id: sessionId,
-        exercise_id: slot.exercise_id,
-        custom_exercise_id: slot.custom_exercise_id,
-        sort_order: startSortOrder + i,
-        superset_group: slot.superset_group ?? null,
-        rest_sec: slot.rest_sec ?? null,
-      })
-      .select('id, exercise_id, custom_exercise_id')
-      .single();
+  const rows = slots.map((slot, index) => ({
+    session_id: sessionId,
+    exercise_id: slot.exercise_id,
+    custom_exercise_id: slot.custom_exercise_id,
+    sort_order: startSortOrder + index,
+    superset_group: slot.superset_group ?? null,
+    rest_sec: slot.rest_sec ?? null,
+  }));
 
-    if (error || !data) {
-      if (__DEV__) {
-        devError('preset-query', error || new Error('Failed to insert session exercise'), {
-          sessionId,
-          slotIndex: i,
-        });
-      }
-      return inserted;
+  const { data, error } = await supabase
+    .from('v2_session_exercises')
+    .insert(rows)
+    .select('id, exercise_id, custom_exercise_id');
+
+  if (error || !data || data.length !== slots.length) {
+    if (__DEV__) {
+      devError('preset-query', error || new Error('Failed to batch insert session exercises'), {
+        sessionId,
+        slotCount: slots.length,
+        insertedCount: data?.length ?? 0,
+      });
     }
-
-    inserted.push(data);
+    return [];
   }
 
-  return inserted;
+  return data;
 }
 
 export async function replaceSessionExercisesFromPreset(

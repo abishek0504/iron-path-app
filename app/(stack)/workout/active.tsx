@@ -26,6 +26,8 @@ import { ArrowLeft, ArrowDown, ArrowUp, CheckCircle, ChevronRight, Info, Link2, 
 import { spacing, borderRadius, typography, type ThemeColors } from '../../../src/lib/utils/theme';
 import { useTheme } from '../../../src/lib/utils/ThemeContext';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
+import { ExerciseTimer } from '../../../src/components/workout/ExerciseTimer';
+import { computeHeldDurationSec, clampSessionDurationSec } from '../../../src/lib/utils/workoutDuration';
 import { RPESlider } from '../../../src/components/workout/RPESlider';
 import { listMergedExercisesCached } from '../../../src/lib/cache/exerciseCache';
 import {
@@ -49,6 +51,7 @@ import { invalidateMuscleFreshnessCache } from '../../../src/lib/cache/muscleFre
 import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
 import { useUserStore } from '../../../src/stores/userStore';
+import { useUIStore } from '../../../src/stores/uiStore';
 import { useToast } from '../../../src/hooks/useToast';
 import { calculateWeightSuggestion } from '../../../src/lib/utils/weightSuggestions';
 import { hapticHeavy, hapticSuccess } from '../../../src/lib/utils/haptics';
@@ -112,6 +115,7 @@ interface SetLog {
 
 type WorkoutPhase = 
   | { type: 'execution'; setIndex: number } // Executing a set (minimal UI)
+  | { type: 'timedSetRpe'; setIndex: number; elapsedDurationSec: number } // RPE after timed hold
   | { type: 'rest'; nextExerciseIndex: number; nextSetIndex: number } // Resting between sets
   | { type: 'logging' } // Batch logging after all sets
   | { type: 'complete' }; // All exercises complete
@@ -218,6 +222,23 @@ export default function ActiveWorkoutScreen() {
   const handleCompleteSetRef = useRef<() => void>(() => {});
   const workoutPhaseRef = useRef(workoutPhase);
   workoutPhaseRef.current = workoutPhase;
+  const exerciseTimerEndsAtRef = useRef<number | null>(null);
+  const [exerciseTimerEndsAt, setExerciseTimerEndsAt] = useState<number | null>(null);
+
+  const resolveTimedHoldElapsed = (setIndex: number): number => {
+    const target = exercises[currentExerciseIndex]?.sets[setIndex]?.duration_sec ?? 0;
+    const endsAt = exerciseTimerEndsAtRef.current;
+    if (endsAt != null) {
+      const remaining = Math.max(0, Math.ceil(endsAt - Date.now() / 1000));
+      return computeHeldDurationSec(target, remaining);
+    }
+    return target;
+  };
+
+  const setExerciseTimerEnd = (endsAtEpochSec: number | null) => {
+    exerciseTimerEndsAtRef.current = endsAtEpochSec;
+    setExerciseTimerEndsAt(endsAtEpochSec);
+  };
 
   useEffect(() => {
     const unsubscribe = addSetCompletedListener(() => {
@@ -230,6 +251,14 @@ export default function ActiveWorkoutScreen() {
       void clearWorkoutContext();
     };
   }, []);
+
+  useEffect(() => {
+    if (workoutPhase.type !== 'execution') {
+      setExerciseTimerEnd(null);
+      return;
+    }
+    setExerciseTimerEnd(null);
+  }, [currentExerciseIndex, workoutPhase.type === 'execution' ? workoutPhase.setIndex : -1]);
 
   useEffect(() => {
     if (loading || !sessionId) return;
@@ -267,7 +296,19 @@ export default function ActiveWorkoutScreen() {
         targetText: formatSetTarget(set),
         setType: set?.set_type ?? 'normal',
         phase: 'execution',
+        ...(exerciseTimerEndsAt != null ? { exerciseEndsAt: exerciseTimerEndsAt } : {}),
         nextUp: nextSet ? `Set ${workoutPhase.setIndex + 2}` : exercises[currentExerciseIndex + 1]?.name,
+        supersetLabel,
+      });
+    } else if (workoutPhase.type === 'timedSetRpe') {
+      void updateWorkoutContext({
+        active: true,
+        sessionId,
+        exerciseName: exercise.name,
+        setNumber: workoutPhase.setIndex + 1,
+        totalSets: exercise.sets.length,
+        targetText: `${workoutPhase.elapsedDurationSec}s held`,
+        phase: 'setRpe',
         supersetLabel,
       });
     } else if (workoutPhase.type === 'rest') {
@@ -300,7 +341,7 @@ export default function ActiveWorkoutScreen() {
     } else {
       void updateWorkoutContext({ active: true, sessionId, phase: 'complete' });
     }
-  }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial]);
+  }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt]);
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -573,15 +614,39 @@ export default function ActiveWorkoutScreen() {
     setCurrentSetRPEs(rpes);
   };
 
-  const handleCompleteSet = async () => {
-    const exercise = exercises[currentExerciseIndex];
-    
-    if (workoutPhase.type !== 'execution') return;
+  const goToTimedSetRpeStep = (setIndex: number, elapsedDurationSec: number) => {
+    setExerciseTimerEnd(null);
+    setWorkoutPhase({ type: 'timedSetRpe', setIndex, elapsedDurationSec });
+  };
 
-    hapticHeavy();
+  const handleCompleteSet = async (elapsedDurationSec?: number) => {
+    const exercise = exercises[currentExerciseIndex];
+
+    if (workoutPhase.type !== 'execution' && workoutPhase.type !== 'timedSetRpe') return;
 
     const currentSetIdx = workoutPhase.setIndex;
     const isStretch = exercise.is_stretch === true;
+
+    // Timed strength: watch early-complete during execution → RPE step first
+    if (
+      workoutPhase.type === 'execution' &&
+      exercise.mode === 'timed' &&
+      !isStretch &&
+      elapsedDurationSec === undefined
+    ) {
+      const elapsed = resolveTimedHoldElapsed(currentSetIdx);
+      goToTimedSetRpeStep(currentSetIdx, elapsed);
+      return;
+    }
+
+    hapticHeavy();
+
+    let timedDurationSec = elapsedDurationSec;
+    if (workoutPhase.type === 'timedSetRpe') {
+      timedDurationSec = workoutPhase.elapsedDurationSec;
+    } else if (exercise.mode === 'timed' && timedDurationSec === undefined) {
+      timedDurationSec = resolveTimedHoldElapsed(currentSetIdx);
+    }
 
     // Update RPE for this set (strength only)
     const updatedRPEs = [...currentSetRPEs];
@@ -607,9 +672,20 @@ export default function ActiveWorkoutScreen() {
           set_type: currentSet.set_type ?? 'normal',
         });
       } else {
-        // timed
+        const heldSec = timedDurationSec ?? currentSet.duration_sec ?? 0;
+        const persistedSec = clampSessionDurationSec(heldSec);
+        if (__DEV__) {
+          const { devLog } = require('../../../src/lib/utils/logger');
+          devLog('workout-active', {
+            action: 'complete_timed_set',
+            setIndex: currentSetIdx,
+            targetDurationSec: currentSet.duration_sec,
+            heldSec,
+            persistedSec,
+          });
+        }
         await markSetComplete(currentSet.id, {
-          duration_sec: currentSet.duration_sec ?? 0,
+          duration_sec: persistedSec,
           ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
           set_type: currentSet.set_type ?? 'normal',
         });
@@ -624,6 +700,9 @@ export default function ActiveWorkoutScreen() {
                   ? {
                       ...s,
                       completed: true,
+                      ...(exercise.mode === 'timed'
+                        ? { duration_sec: timedDurationSec ?? s.duration_sec }
+                        : {}),
                       ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
                     }
                   : s
@@ -633,6 +712,8 @@ export default function ActiveWorkoutScreen() {
       );
       setExercises(updatedExercises);
     }
+
+    setExerciseTimerEnd(null);
 
     const next = findNextStep(updatedExercises, currentExerciseIndex);
 
@@ -769,6 +850,8 @@ export default function ActiveWorkoutScreen() {
         invalidateSessionsInRangeForUser(userId);
         invalidateMuscleFreshnessCache(userId);
       }
+      useUIStore.getState().setWorkoutNeedsRefetch(true);
+      void clearWorkoutContext();
       hapticSuccess();
       toast.success('Workout completed!');
       tryRandomPaywallFromOutside('finish_workout');
@@ -1308,8 +1391,8 @@ export default function ActiveWorkoutScreen() {
               </View>
             )}
 
-            {/* RPE Slider — strength only; stretches are not RPE-scored */}
-            {!currentExercise.is_stretch && (
+            {/* RPE during execution — reps only; timed sets rate effort after the hold */}
+            {!currentExercise.is_stretch && currentExercise.mode === 'reps' && (
             <View style={styles.rpeSection}>
               <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
               <RPESlider
@@ -1323,10 +1406,68 @@ export default function ActiveWorkoutScreen() {
             </View>
             )}
 
-            {/* Complete Set Button */}
-            <TouchableOpacity style={styles.completeSetButton} onPress={handleCompleteSet}>
+            {currentExercise.mode === 'timed' ? (
+              <ExerciseTimer
+                key={`${currentExercise.id}-${workoutPhase.setIndex}`}
+                durationSec={currentExercise.sets[workoutPhase.setIndex]?.duration_sec ?? 0}
+                onStarted={() => {
+                  const durationSec = currentExercise.sets[workoutPhase.setIndex]?.duration_sec ?? 0;
+                  setExerciseTimerEnd(Date.now() / 1000 + durationSec);
+                  if (__DEV__) {
+                    const { devLog } = require('../../../src/lib/utils/logger');
+                    devLog('workout-active', {
+                      action: 'exercise_timer_start',
+                      setIndex: workoutPhase.setIndex,
+                      durationSec,
+                    });
+                  }
+                }}
+                onComplete={(elapsedSec) => {
+                  if (currentExercise.is_stretch) {
+                    void handleCompleteSet(elapsedSec);
+                  } else {
+                    goToTimedSetRpeStep(workoutPhase.setIndex, elapsedSec);
+                  }
+                }}
+              />
+            ) : (
+              <TouchableOpacity style={styles.completeSetButton} onPress={() => void handleCompleteSet()}>
+                <CheckCircle size={20} color={colors.background} />
+                <Text style={styles.completeSetText}>Complete Set</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* TIMED SET RPE — after hold completes (strength timed exercises only) */}
+        {workoutPhase.type === 'timedSetRpe' && (
+          <View style={styles.executionContainer}>
+            <View style={styles.setInfoRow}>
+              <Text style={styles.setInfo}>
+                Set {workoutPhase.setIndex + 1} of {currentExercise.sets.length}
+              </Text>
+            </View>
+            <View style={styles.targetCard}>
+              <Text style={styles.targetLabel}>Held for</Text>
+              <Text style={styles.targetValue}>{workoutPhase.elapsedDurationSec} sec</Text>
+            </View>
+            <View style={styles.rpeSection}>
+              <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
+              <RPESlider
+                value={currentSetRPEs[workoutPhase.setIndex] || 7}
+                onChange={(value) => {
+                  const updated = [...currentSetRPEs];
+                  updated[workoutPhase.setIndex] = value;
+                  setCurrentSetRPEs(updated);
+                }}
+              />
+            </View>
+            <TouchableOpacity
+              style={styles.completeSetButton}
+              onPress={() => void handleCompleteSet()}
+            >
               <CheckCircle size={20} color={colors.background} />
-              <Text style={styles.completeSetText}>Complete Set</Text>
+              <Text style={styles.completeSetText}>Continue</Text>
             </TouchableOpacity>
           </View>
         )}

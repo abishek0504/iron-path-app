@@ -5,9 +5,10 @@
  * Shows countdown with skip button
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SkipForward } from 'lucide-react-native';
+import { formatCountdownTime, useCountdown } from '../../hooks/useCountdown';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 
@@ -19,34 +20,11 @@ interface RestTimerProps {
 
 export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, onSkip }) => {
   const colors = useTheme();
-  const [secondsLeft, setSecondsLeft] = useState(durationSec);
-
-  useEffect(() => {
-    if (secondsLeft <= 0) {
-      onComplete();
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setSecondsLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [secondsLeft, onComplete]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const progress = (durationSec - secondsLeft) / durationSec;
+  const { secondsLeft, progress } = useCountdown({
+    durationSec,
+    autoStart: true,
+    onComplete,
+  });
 
   const styles = useMemo(() => StyleSheet.create({
     container: {
@@ -103,7 +81,7 @@ export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, o
     <View style={styles.container}>
       <View style={styles.content}>
         <Text style={styles.label}>Rest</Text>
-        <Text style={styles.timer}>{formatTime(secondsLeft)}</Text>
+        <Text style={styles.timer}>{formatCountdownTime(secondsLeft)}</Text>
         <View style={styles.progressBar}>
           <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>

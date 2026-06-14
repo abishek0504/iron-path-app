@@ -9,6 +9,7 @@ import { getDateBoundsForDayName } from '../../utils/date';
 import { formatDurationCompact } from '../../utils/formatDuration';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
+import type { TemplateSlot } from './templates';
 
 /**
  * Defensive caps on aggregate-style queries. These exist to bound query payload + memory in
@@ -106,6 +107,79 @@ export async function createWorkoutSession(
     }
     return null;
   }
+}
+
+/**
+ * Create a workout session and seed it from template slots (routine exercises + prefilled sets).
+ * Used when the planner auto-materializes a day or when the user adds the first workout of the day.
+ */
+export async function materializeWorkoutFromTemplateSlots(input: {
+  userId: string;
+  templateId: string;
+  dayName: string;
+  slots: TemplateSlot[];
+  startedAt?: string;
+  experience?: string;
+}): Promise<WorkoutSession | null> {
+  const { userId, templateId, dayName, slots, startedAt, experience = 'beginner' } = input;
+  if (slots.length === 0) return null;
+
+  const session = await createWorkoutSession(userId, templateId, dayName, startedAt);
+  if (!session) return null;
+
+  const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+  const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
+
+  for (const slot of slots) {
+    const exerciseId = slot.exercise_id || slot.custom_exercise_id;
+    if (!exerciseId) continue;
+
+    const { data: se, error: seErr } = await supabase
+      .from('v2_session_exercises')
+      .insert({
+        session_id: session.id,
+        exercise_id: slot.exercise_id || null,
+        custom_exercise_id: slot.custom_exercise_id || null,
+        sort_order: slot.sort_order,
+        superset_group: slot.superset_group ?? null,
+        rest_sec: slot.rest_sec ?? null,
+      })
+      .select()
+      .single();
+
+    if (seErr || !se) {
+      if (__DEV__) {
+        devError('workout-query', seErr || new Error('Failed to create session exercise'), {
+          sessionId: session.id,
+          slotId: slot.id,
+        });
+      }
+      continue;
+    }
+
+    sessionExercises.push(se);
+
+    const target = await selectExerciseTargets(
+      { exerciseId: slot.exercise_id || undefined, customExerciseId: slot.custom_exercise_id || undefined },
+      userId,
+      { experience: slot.experience || experience },
+      0,
+    );
+    if (target) {
+      targetsMap.set(exerciseId, {
+        sets: target.sets,
+        reps: target.reps,
+        duration_sec: target.duration_sec,
+        weight: target.weight,
+      });
+    }
+  }
+
+  if (sessionExercises.length > 0 && targetsMap.size > 0) {
+    await prefillSessionSets(session.id, sessionExercises, targetsMap);
+  }
+
+  return session;
 }
 
 /**

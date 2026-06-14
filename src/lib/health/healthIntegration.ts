@@ -97,6 +97,59 @@ async function updateSyncLedger(userId: string, type: 'workouts' | 'body_mass' |
   }
 }
 
+const DISMISSED_BODY_MASS_KEY = 'dismissed_body_mass_uuids';
+const MAX_DISMISSED_BODY_MASS_UUIDS = 500;
+
+function parseDismissedBodyMassUuids(types: unknown): string[] {
+  if (!types || typeof types !== 'object') return [];
+  const raw = (types as Record<string, unknown>)[DISMISSED_BODY_MASS_KEY];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+/**
+ * Remember a HealthKit body-mass sample the user removed from IronPath so import
+ * does not recreate it on the next dashboard sync.
+ */
+export async function recordDismissedBodyMassHkUuid(
+  userId: string,
+  hkSampleUuid: string,
+): Promise<void> {
+  if (!hkSampleUuid) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    const { data: existing } = await supabase
+      .from('v2_health_sync')
+      .select('types, last_synced_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const types = { ...((existing?.types as Record<string, unknown>) ?? {}) };
+    const prev = parseDismissedBodyMassUuids(types);
+    if (prev.includes(hkSampleUuid)) return;
+
+    types[DISMISSED_BODY_MASS_KEY] = [hkSampleUuid, ...prev].slice(0, MAX_DISMISSED_BODY_MASS_UUIDS);
+
+    await supabase.from('v2_health_sync').upsert({
+      user_id: userId,
+      types,
+      updated_at: nowIso,
+      last_synced_at: existing?.last_synced_at ?? nowIso,
+    });
+
+    if (__DEV__) {
+      devLog('health-sync', {
+        action: 'recordDismissedBodyMassHkUuid',
+        userId,
+        dismissedCount: (types[DISMISSED_BODY_MASS_KEY] as string[]).length,
+      });
+    }
+  } catch (error) {
+    if (__DEV__) devError('health-sync', error, { action: 'recordDismissedBodyMassHkUuid', userId });
+  }
+}
+
 /**
  * Non-prompting connection check for UI state. HealthKit only exposes sharing
  * (write) status — read grants are invisible by design — so write access to
@@ -264,14 +317,20 @@ async function importBodyMassFromHealth(userId: string): Promise<number> {
     });
     if (!samples || samples.length === 0) return 0;
 
-    const { data: existingRows } = await supabase
-      .from('v2_weight_logs')
-      .select('hk_sample_uuid')
-      .eq('user_id', userId)
-      .not('hk_sample_uuid', 'is', null);
+    const [{ data: existingRows }, { data: syncRow }] = await Promise.all([
+      supabase
+        .from('v2_weight_logs')
+        .select('hk_sample_uuid')
+        .eq('user_id', userId)
+        .not('hk_sample_uuid', 'is', null),
+      supabase.from('v2_health_sync').select('types').eq('user_id', userId).maybeSingle(),
+    ]);
     const knownUuids = new Set((existingRows ?? []).map((r) => r.hk_sample_uuid as string));
+    const dismissedUuids = new Set(parseDismissedBodyMassUuids(syncRow?.types));
 
-    const newSamples = samples.filter((s) => s.uuid && !knownUuids.has(s.uuid));
+    const newSamples = samples.filter(
+      (s) => s.uuid && !knownUuids.has(s.uuid) && !dismissedUuids.has(s.uuid),
+    );
     if (newSamples.length === 0) return 0;
 
     const { data: profile } = await supabase

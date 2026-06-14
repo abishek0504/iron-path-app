@@ -1,10 +1,11 @@
 /**
  * Multi-step Onboarding Flow
- * Step 1: About you (name, DOB)
- * Step 2: Body & units (weight, units, gender)
- * Step 3: Experience & training (experience, days slider + preferred days)
- * Step 4: Equipment
- * Step 5: Review
+ * Step 1: Appearance (theme)
+ * Step 2: About you (name, DOB)
+ * Step 3: Body & units (weight, units, gender)
+ * Step 4: Experience & training (experience, days slider + preferred days)
+ * Step 5: Equipment
+ * Step 6: Review
  */
 
 import { useEffect, useState, useMemo } from 'react';
@@ -25,8 +26,9 @@ import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
-import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
-import { useTheme } from '../src/lib/utils/ThemeContext';
+import { spacing, borderRadius, typography, getThemeLabel, type ThemeColors } from '../src/lib/utils/theme';
+import { useTheme, useThemeMode } from '../src/lib/utils/ThemeContext';
+import { ThemePickerGrid } from '../src/components/settings/ThemePickerGrid';
 import { useUserStore } from '../src/stores/userStore';
 import {
   createUserProfile,
@@ -57,7 +59,7 @@ const EXPERIENCE_OPTIONS = ['beginner', 'intermediate', 'advanced'];
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
 const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'];
 const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -68,6 +70,7 @@ export default function Onboarding() {
   const setProfile = useUserStore((state) => state.setProfile);
   const toast = useToast();
   const colors = useTheme();
+  const { themeMode, setThemeMode } = useThemeMode();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -175,17 +178,17 @@ export default function Onboarding() {
   const validateStep = (step: number): boolean => {
     const errors: Record<string, string> = {};
 
-    if (step === 1) {
+    if (step === 2) {
       if (!firstName.trim()) errors.firstName = 'Enter your first name.';
       const dobValidation = validateDateOfBirth(dateOfBirth);
       if (!dobValidation.isValid) {
         errors.dateOfBirth = dobValidation.error || 'Enter your date of birth.';
       }
-    } else if (step === 2) {
+    } else if (step === 3) {
       if (!currentWeight || currentWeight <= 0) {
         errors.currentWeight = 'Enter your current weight.';
       }
-    } else if (step === 3) {
+    } else if (step === 4) {
       if (!experience) errors.experience = 'Select your experience level.';
       if (daysPerWeekSlider < 1 || daysPerWeekSlider > 7) {
         errors.daysPerWeek = 'Slide to choose 1–7 training days per week.';
@@ -195,7 +198,7 @@ export default function Onboarding() {
       if (!preferredSplit?.trim()) {
         errors.preferredSplit = 'Pick a split or describe your own.';
       }
-    } else if (step === 4) {
+    } else if (step === 5) {
       if (!equipment.length) errors.equipment = 'Select at least one option.';
     }
 
@@ -232,10 +235,10 @@ export default function Onboarding() {
     setErrorText(null);
 
     if (
-      !validateStep(1) ||
       !validateStep(2) ||
       !validateStep(3) ||
-      !validateStep(4)
+      !validateStep(4) ||
+      !validateStep(5)
     ) {
       setErrorText('Please complete all required fields.');
       return;
@@ -351,6 +354,20 @@ export default function Onboarding() {
           />
         </View>
       </View>
+  );
+
+  const renderAppearance = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Choose your appearance</Text>
+      <Text style={styles.stepSubtitle}>
+        Pick a theme for the app. You can change this anytime in Settings.
+      </Text>
+
+      <View style={styles.section}>
+        <Text style={styles.label}>Theme</Text>
+        <ThemePickerGrid selectedMode={themeMode} onSelect={setThemeMode} />
+      </View>
+    </View>
   );
 
   const renderAboutYou = () => (
@@ -630,6 +647,10 @@ export default function Onboarding() {
       </Text>
 
       <View style={styles.reviewRow}>
+        <Text style={styles.reviewLabel}>Appearance</Text>
+        <Text style={styles.reviewValue}>{getThemeLabel(themeMode)}</Text>
+      </View>
+      <View style={styles.reviewRow}>
         <Text style={styles.reviewLabel}>Name</Text>
         <Text style={styles.reviewValue}>
           {firstName.trim()}
@@ -693,11 +714,12 @@ export default function Onboarding() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.card}>
-          {currentStep === 1 && renderAboutYou()}
-          {currentStep === 2 && renderBodyAndUnits()}
-          {currentStep === 3 && renderExperienceAndTraining()}
-          {currentStep === 4 && renderEquipmentStep()}
-          {currentStep === 5 && renderReview()}
+          {currentStep === 1 && renderAppearance()}
+          {currentStep === 2 && renderAboutYou()}
+          {currentStep === 3 && renderBodyAndUnits()}
+          {currentStep === 4 && renderExperienceAndTraining()}
+          {currentStep === 5 && renderEquipmentStep()}
+          {currentStep === 6 && renderReview()}
 
           {errorText ? (
             <Text style={styles.errorText}>{errorText}</Text>

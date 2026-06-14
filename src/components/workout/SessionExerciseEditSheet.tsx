@@ -5,13 +5,13 @@
  * Pre-fills weight, reps, and duration so minimal typing is needed during workout
  */
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X } from 'lucide-react-native';
+import { Link2, X } from 'lucide-react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
-import { BottomSheet } from '../ui/BottomSheet';
+import { BottomSheet, type BottomSheetHandle } from '../ui/BottomSheet';
 import { supabase } from '../../lib/supabase/client';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { SetType } from '../../lib/supabase/queries/workouts';
@@ -45,6 +45,10 @@ interface SessionExerciseEditSheetProps {
   exerciseName: string;
   mode: 'reps' | 'timed';
   useImperial: boolean;
+  supersetGroup?: number | null;
+  canAddToSuperset?: boolean;
+  onToggleSuperset?: () => void | Promise<void>;
+  supersetToggleDisabled?: boolean;
 }
 
 export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> = ({
@@ -56,8 +60,16 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   exerciseName,
   mode,
   useImperial,
+  supersetGroup,
+  canAddToSuperset = true,
+  onToggleSuperset,
+  supersetToggleDisabled = false,
 }) => {
   const colors = useTheme();
+  const sheetRef = useRef<BottomSheetHandle>(null);
+  const requestClose = useCallback(() => {
+    sheetRef.current?.requestClose();
+  }, []);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [sets, setSets] = useState<SessionSet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,7 +216,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
       }
 
       onSave();
-      onClose();
+      requestClose();
     } catch (error) {
       if (__DEV__) {
         devError('session-edit', error, { action: 'saveSets' });
@@ -259,7 +271,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} height="75%">
+    <BottomSheet ref={sheetRef} visible={visible} onClose={onClose} height="75%">
       <View style={styles.container}>
         <View style={styles.header}>
           <View style={styles.titleContainer}>
@@ -267,7 +279,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
             <Text style={styles.exerciseName}>{exerciseName}</Text>
           </View>
           <TouchableOpacity 
-            onPress={onClose} 
+            onPress={requestClose} 
             style={styles.closeButton}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -304,6 +316,47 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                 maxLength={4}
               />
             </View>
+
+            {onToggleSuperset && (
+              <View style={styles.supersetRow}>
+                <View style={styles.restLabelGroup}>
+                  <Text style={styles.inputLabel}>Superset</Text>
+                  <Text style={styles.restHint}>
+                    {supersetGroup != null
+                      ? 'Paired with the next exercise in this group'
+                      : canAddToSuperset
+                        ? 'Alternate with the next exercise with minimal rest'
+                        : 'Add an exercise below to superset with'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.supersetToggle,
+                    supersetGroup != null && styles.supersetToggleActive,
+                    (!canAddToSuperset || supersetToggleDisabled) && styles.supersetToggleDisabled,
+                  ]}
+                  onPress={() => void onToggleSuperset()}
+                  disabled={supersetToggleDisabled || (!canAddToSuperset && supersetGroup == null)}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    supersetGroup != null ? 'Remove from superset' : 'Superset with next exercise'
+                  }
+                >
+                  <Link2
+                    size={16}
+                    color={supersetGroup != null ? colors.primary : colors.textMuted}
+                  />
+                  <Text
+                    style={[
+                      styles.supersetToggleText,
+                      supersetGroup != null && styles.supersetToggleTextActive,
+                    ]}
+                  >
+                    {supersetGroup != null ? 'Linked' : 'Link next'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {sets.map((set, index) => (
               <View key={set.id} style={styles.setCard}>
@@ -427,7 +480,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
               style={styles.deleteButton}
               onPress={() => {
                 onDelete();
-                onClose();
+                requestClose();
               }}
               disabled={saving || loading}
             >
@@ -614,6 +667,42 @@ function createStyles(colors: ThemeColors) {
   restInput: {
     width: 80,
     textAlign: 'center',
+  },
+  supersetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+  },
+  supersetToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  supersetToggleActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '15',
+  },
+  supersetToggleDisabled: {
+    opacity: 0.5,
+  },
+  supersetToggleText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.textMuted,
+  },
+  supersetToggleTextActive: {
+    color: colors.primary,
   },
   removeSetText: {
     fontSize: typography.sizes.sm,

@@ -14,6 +14,7 @@ struct WorkoutState: Equatable {
     var setType = "normal" // normal | warmup | drop | failure
     var phase = "execution" // execution | rest | logging | complete
     var restEndsAt: Date?
+    var exerciseEndsAt: Date?
     var nextUp: String?
     var supersetLabel: String?
 }
@@ -67,6 +68,9 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         next.supersetLabel = context["supersetLabel"] as? String
         if let restEndsAtEpoch = context["restEndsAt"] as? Double, restEndsAtEpoch > 0 {
             next.restEndsAt = Date(timeIntervalSince1970: restEndsAtEpoch)
+        }
+        if let exerciseEndsAtEpoch = context["exerciseEndsAt"] as? Double, exerciseEndsAtEpoch > 0 {
+            next.exerciseEndsAt = Date(timeIntervalSince1970: exerciseEndsAtEpoch)
         }
 
         state = next

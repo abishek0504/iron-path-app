@@ -5,7 +5,10 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
-import { writeBodyMassToHealth } from '../../health/healthIntegration';
+import {
+  writeBodyMassToHealth,
+  recordDismissedBodyMassHkUuid,
+} from '../../health/healthIntegration';
 
 /** Convert stored display weight from lb to kg for HealthKit. */
 const LB_TO_KG = 0.45359237;
@@ -99,15 +102,41 @@ export async function deleteWeightLog(
   }
 
   try {
-    const { error: deleteError } = await supabase
+    const { data: existingRow, error: fetchError } = await supabase
+      .from('v2_weight_logs')
+      .select('id, hk_sample_uuid')
+      .eq('id', logId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError) {
+      if (__DEV__) devError('weight-query', fetchError, { logId, userId });
+      return { success: false, currentWeight: null };
+    }
+
+    if (!existingRow) {
+      if (__DEV__) {
+        devLog('weight-query', { action: 'deleteWeightLog:notFound', logId, userId });
+      }
+      return { success: false, currentWeight: null };
+    }
+
+    const { data: deletedRows, error: deleteError } = await supabase
       .from('v2_weight_logs')
       .delete()
       .eq('id', logId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .select('id');
 
-    if (deleteError) {
-      if (__DEV__) devError('weight-query', deleteError);
+    if (deleteError || !deletedRows?.length) {
+      if (__DEV__) {
+        devError('weight-query', deleteError || new Error('No rows deleted'), { logId, userId });
+      }
       return { success: false, currentWeight: null };
+    }
+
+    if (existingRow.hk_sample_uuid) {
+      await recordDismissedBodyMassHkUuid(userId, existingRow.hk_sample_uuid);
     }
 
     const { data: latestRow, error: latestError } = await supabase

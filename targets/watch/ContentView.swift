@@ -16,6 +16,11 @@ struct ContentView: View {
                         title: "Logging",
                         subtitle: "Confirm your sets on iPhone"
                     )
+                case "setRpe":
+                    statusView(
+                        title: "Rate effort",
+                        subtitle: "How hard was the set? On iPhone"
+                    )
                 case "complete":
                     statusView(
                         title: "Workout complete",
@@ -74,10 +79,20 @@ struct ContentView: View {
                         .foregroundStyle(.tint)
                 }
 
-                if !workout.state.targetText.isEmpty {
+                if !workout.state.targetText.isEmpty && workout.state.exerciseEndsAt == nil {
                     Text(workout.state.targetText)
                         .font(.title3.weight(.semibold))
                         .padding(.vertical, 2)
+                }
+
+                if let exerciseEndsAt = workout.state.exerciseEndsAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                        let remaining = max(0, Int(exerciseEndsAt.timeIntervalSince(timeline.date).rounded()))
+                        Text(formatSeconds(remaining))
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(remaining == 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    }
                 }
 
                 Button {

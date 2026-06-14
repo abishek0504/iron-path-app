@@ -113,7 +113,7 @@ export const ModalManager: React.FC = () => {
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           title="Session Details"
-          height="60%"
+          height="70%"
           {...bottomSheetProps}
         >
           <SessionDetailSheet
