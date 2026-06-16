@@ -12,16 +12,16 @@ export interface StalenessInput {
     day_name?: string | null;
     started_at: string;
   };
-  sessionExercises: Array<{
+  sessionExercises: {
     exercise_id?: string | null;
     custom_exercise_id?: string | null;
     sort_order: number;
-  }>;
-  templateSlots: Array<{
+  }[];
+  templateSlots: {
     exercise_id?: string | null;
     custom_exercise_id?: string | null;
     sort_order: number;
-  }>;
+  }[];
   muscleFreshnessMap?: Record<string, number>;
   exercisePrimaryMuscles?: Record<string, string[]>;
   lastCompletedWorkoutAt?: string | null;

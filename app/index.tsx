@@ -24,6 +24,7 @@ export default function Index() {
 
   useEffect(() => {
     checkAuthAndRedirect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once on app entry
   }, []);
 
   const checkAuthAndRedirect = async () => {

@@ -43,7 +43,7 @@ const EXERCISE_COUNT_OPTIONS = [2, 3, 4, 5, 6, 7, 8];
 const STRETCH_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5];
 const MAX_SESSIONS_PER_DAY = 6;
 
-const INTENSITY_OPTIONS: Array<{ id: DayConstraints['intensity']; label: string }> = [
+const INTENSITY_OPTIONS: { id: DayConstraints['intensity']; label: string }[] = [
   { id: 'light', label: 'Light' },
   { id: 'standard', label: 'Standard' },
   { id: 'hard', label: 'Hard' },

@@ -1,6 +1,24 @@
 import Foundation
 import WatchConnectivity
 
+private func intFromPayload(_ value: Any?) -> Int? {
+    guard let value else { return nil }
+    if let intValue = value as? Int { return intValue }
+    if let number = value as? NSNumber {
+        let doubleValue = number.doubleValue
+        guard doubleValue.isFinite else { return nil }
+        let rounded = Int(doubleValue.rounded())
+        guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+        return rounded
+    }
+    if let doubleValue = value as? Double, doubleValue.isFinite {
+        let rounded = Int(doubleValue.rounded())
+        guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+        return rounded
+    }
+    return nil
+}
+
 /// Snapshot of the phone's active workout, mirrored over WCSession
 /// `applicationContext`. The phone is the single source of truth; the watch
 /// only renders this state and reports set-completion taps.
@@ -22,9 +40,9 @@ struct WorkoutState: Equatable {
 final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     @Published var state = WorkoutState()
     @Published var isSendingCompletion = false
-    /// Marks the (sessionId, setNumber) pair the user just tapped so the UI can
-    /// disable the button until the phone pushes the next state.
     @Published var pendingCompletionKey: String?
+
+    let healthManager = WatchHealthWorkoutManager()
 
     override init() {
         super.init()
@@ -59,8 +77,12 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         next.active = context["active"] as? Bool ?? false
         next.sessionId = context["sessionId"] as? String ?? ""
         next.exerciseName = context["exerciseName"] as? String ?? ""
-        next.setNumber = context["setNumber"] as? Int ?? 0
-        next.totalSets = context["totalSets"] as? Int ?? 0
+        if let setNumber = intFromPayload(context["setNumber"]) {
+            next.setNumber = setNumber
+        }
+        if let totalSets = intFromPayload(context["totalSets"]) {
+            next.totalSets = totalSets
+        }
         next.targetText = context["targetText"] as? String ?? ""
         next.setType = context["setType"] as? String ?? "normal"
         next.phase = context["phase"] as? String ?? "execution"
@@ -77,6 +99,12 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         // New state from the phone resolves any in-flight completion.
         pendingCompletionKey = nil
         isSendingCompletion = false
+
+        healthManager.syncWorkoutState(
+            active: next.active,
+            sessionId: next.sessionId,
+            phase: next.phase
+        )
     }
 
     private var currentCompletionKey: String {

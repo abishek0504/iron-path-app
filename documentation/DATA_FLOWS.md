@@ -431,7 +431,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
        ├→ getRecentSessions(userId, limit=5)
        │   └→ SELECT sessions WHERE status='completed' ORDER BY completed_at DESC
        │   └→ Display as list with dates
-       └→ getTopPRs(userId, limit=3)
+       └→ getCachedTopPRs(userId, limit=3)
            └→ Reads v2_user_exercise_prs cache table (kept fresh by upsert
                trigger on set completion; warm-up sets excluded)
            └→ Merge weight-based and timed PRs, sort by recency

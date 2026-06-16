@@ -139,7 +139,7 @@ This keeps **plan editing** (structure) and **performed truth** cleanly separate
 
 **Immutable Tables** (auth SELECT only):
 - `v2_muscles` - Canonical muscle keys (includes `adductors`)
-- `v2_exercises` - Master exercise list (~390 entries after the 2026-06 CSV import; `is_stretch` flags mobility/stretch entries)
+- `v2_exercises` - Master exercise list (388 entries after the 2026-06 CSV import; `is_stretch` flags mobility/stretch entries)
 - `v2_exercise_prescriptions` - Curated targets
 - `v2_ai_recommended_exercises` - AI allow-list
 
@@ -178,51 +178,38 @@ USING (
 
 ### 3.1 Frictionless Logging Pattern (Active Workout)
 
-**Location**: `app/(stack)/workout/active.tsx`, `src/components/workout/ActiveSetCard.tsx`
+**Location**: `app/(stack)/workout/active.tsx`, `src/components/workout/RPESlider.tsx`
 
-User research indicates high churn when logging is tedious. We adopt a "Management by Exception" philosophy.
+User research indicates high churn when logging is tedious. We adopt a "Management by Exception" philosophy: the plan pre-fills targets; the user only edits when they deviate.
 
 **Assumption:** The user follows the plan 90% of the time.
 
 **Interaction Pattern:**
-- **Swipe Right** gesture on a Set Card instantly logs the pre-filled target values (Weight/Reps) as performed
-- **Tap** the card opens the full editor only when the user deviates from the plan
+- **Exercise-by-exercise flow**: EXECUTION → REST → LOGGING phases (see Active Workout State Machine below)
+- **Tap "Complete Set"** (on-screen or Apple Watch) logs pre-filled target weight/reps/duration; preserves `set_type` (warm-up/drop/failure)
+- **Batch logging screen** after each exercise: editable weight, reps, duration, and RPE sliders for all sets in that exercise
 - **Optimistic UI**: Changes appear immediately, with background sync to database
-- **Error Handling**: Failed saves show toast notification and revert UI state
-
-**Set Card States:**
-1. **Collapsed (Default)**: Shows summary "Set 1: 135 lbs × 10 reps @ RPE 8"
-2. **Expanded (Editing)**: Shows editable TextInputs for Weight, Reps, RPE slider
-3. **Completed**: Green checkmark indicator, slightly faded appearance
+- **Error Handling**: Failed saves show toast notification
 
 **Implementation:**
-- Uses `@shopify/flash-list` for performant list rendering (hundreds of sets)
-- `react-native-reanimated` for smooth swipe gestures
-- `react-native-gesture-handler` for touch handling
+- `@shopify/flash-list` for performant list rendering
+- `react-native-reanimated` and `react-native-gesture-handler` for bottom sheets and transitions
+- Apple Watch mirror via `modules/watch-connectivity/` (validated `sessionId` / `setNumber` on completion events)
 
-### 4.1 High-Performance Visualization
+### 4.1 Muscle Freshness Visualization
 
-**Location**: `src/components/visualizations/BodyHeatmap.tsx`
+**Location**: `src/components/visualizations/BodyHeatmap.tsx`, `src/components/workout/WorkoutHeatmap.tsx`
 
-To visualize the 28-muscle freshness state without dropping frames during navigation, we utilize `@shopify/react-native-skia`. Standard SVGs are too heavy for complex animations on mobile devices.
+Maps `v2_muscle_freshness` values (0–100) to recovery colors using `react-native-body-highlighter` (29 canonical muscle keys from `v2_muscles`):
 
-**Logic:** Map `v2_muscle_freshness` values (0-100) to a color interpolation:
-- 0-30: Red (#ef4444) - Fully fatigued
-- 31-60: Orange (#f97316) - Moderate fatigue
-- 61-80: Yellow (#eab308) - Light fatigue
-- 81-100: Green (#22c55e) - Fully recovered
+- 0–30: Red (#ef4444) — fully fatigued
+- 31–60: Orange (#f97316) — moderate fatigue
+- 61–80: Yellow (#eab308) — light fatigue
+- 81–100: Green (#22c55e) — fully recovered
 
-**Implementation:**
-- Uses Skia Canvas for GPU-accelerated rendering
-- 28 SVG paths mapped to canonical muscle keys from `v2_muscles`
-- ViewBox: `0 0 360 720` for consistent scaling
-- Real-time color updates based on freshness queries
-- No frame drops even during navigation transitions
-
-**Performance Benefits:**
-- Standard SVG: ~15-20ms render time per frame
-- Skia rendering: ~2-3ms render time per frame
-- Allows smooth animations and transitions
+**Platform behavior:**
+- **Dev build / simulator**: full body diagram
+- **Expo Go / web**: list fallback (muscle groups + percentages) when the native body highlighter is unavailable
 
 ### 4.2 Exercise images (bundled assets)
 
@@ -315,18 +302,22 @@ type WorkoutPhase =
 
 **JS entry:** [`src/lib/health/healthIntegration.ts`](../src/lib/health/healthIntegration.ts), implemented on `@kingstinct/react-native-healthkit` (lazy-loaded; no-ops in Expo Go/web/Android). `completeWorkoutSession` calls `writeCompletedWorkoutToHealth`; [`insertWeightLog`](../src/lib/supabase/queries/weight.ts) calls `writeBodyMassToHealth` with kg converted from the user’s display unit (`healthDisplayUnit`). `importHealthSamplesForDashboard` pulls the last 30 days of external body-mass samples into `v2_weight_logs` (converted to the user's display unit) and runs after a successful connect on [`app/health-connect.tsx`](../app/health-connect.tsx).
 
-**DB linkage:** Columns `hk_workout_uuid`, `hk_sample_uuid`, ledger `v2_health_sync` (`supabase/migrations/20260510000000_health_hk_links_session_validation.sql`). Writes are idempotent: rows already carrying an HK UUID are never re-exported, and imports skip known sample UUIDs.
+**DB linkage:** `hk_workout_uuid`, `hk_sample_uuid`, `v2_session_health_metrics`, `v2_health_sync`. Idempotent writes.
 
 **Native config:** the `@kingstinct/react-native-healthkit` Expo plugin adds the HealthKit entitlement and usage strings at prebuild (`app.json`); versions are pinned (`react-native-nitro-modules@0.32.0`, healthkit `13.1.4`) for Expo SDK 54 compatibility.
 
 ### watchOS companion (architecture)
 
-Native SwiftUI mirror app managed by `@bacons/apple-targets` (sources in `targets/watch/`, survive `prebuild --clean`). The iPhone side is a local Expo Module (`modules/watch-connectivity/`) wrapping `WCSession`:
+Native SwiftUI mirror app managed by `@bacons/apple-targets` (sources in `targets/watch/`). **`WatchHealthWorkoutManager`** runs `HKWorkoutSession` for live heart rate; sends `heartRate` and `workoutEnded` (with `hkWorkoutUuid`) to the phone. iPhone module (`modules/watch-connectivity/`) wraps `WCSession`:
 
-- Phone → watch: [`active.tsx`](../app/(stack)/workout/active.tsx) pushes the workout state (exercise, set X of Y, target, phase, rest end, next up, superset position) via `updateApplicationContext` on every phase change.
-- Watch → phone: Complete Set sends `sendMessage` when reachable, else `transferUserInfo` (offline queue); the RN listener feeds the same `handleCompleteSet` path as the on-screen button. **The phone remains the canonical Supabase writer.**
+- Phone → watch: [`active.tsx`](../app/(stack)/workout/active.tsx) pushes workout state via `updateApplicationContext`.
+- Watch → phone: set completion, HR snapshots, workout UUID. **Phone remains canonical Supabase writer.**
 
 See [`native/watch/README.md`](../native/watch/README.md) for build steps.
+
+### Workout analytics (architecture)
+
+**Engine:** [`src/lib/analytics/`](../src/lib/analytics/). **Queries:** [`analytics.ts`](../src/lib/supabase/queries/analytics.ts). **UI:** Progress tab (Calendar/Trends/Exercises), exercise detail screen, session stats in `SessionDetailSheet`.
 
 ### Set Completion Tracking
 
@@ -508,7 +499,7 @@ src/
     settings/         # Settings-specific
     workout/          # Workout-specific
     progress/         # Progress-specific
-    visualizations/   # BodyHeatmap (Skia)
+    visualizations/   # BodyHeatmap (body-highlighter)
   hooks/              # React hooks (useToast, useModal, etc.)
   lib/
     ai/               # generateWorkoutDay (Edge Function client)
@@ -591,7 +582,7 @@ targets/watch/               # SwiftUI watchOS companion (@bacons/apple-targets)
 ### Decision: Stretches live in `v2_exercises` with an `is_stretch` flag
 **When**: Migrations 20260611120000-20260611120004 (CSV master import + flag)  
 **Why**: Reuse prescriptions, sessions, and image pipeline for mobility work instead of a parallel table  
-**Impact**: ~390 master exercises after import; AI generation excludes stretches from the strength catalog and only includes them when the user requests a per-session `stretchCount`  
+**Impact**: 388 master exercises after import; AI generation excludes stretches from the strength catalog and only includes them when the user requests a per-session `stretchCount`  
 
 ### Decision: Use Expo Router instead of React Navigation
 **Why**: File-based routing, simpler, better DX, built-in for Expo  

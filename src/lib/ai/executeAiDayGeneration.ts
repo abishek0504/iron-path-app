@@ -201,7 +201,7 @@ export async function executeAiDayGeneration(
         }
       }
 
-      const sessionExercises: Array<{ id: string; exercise_id?: string }> = [];
+      const sessionExercises: { id: string; exercise_id?: string }[] = [];
       const targetsMap = new Map<
         string,
         { sets: number; reps?: number; duration_sec?: number; weight?: number }

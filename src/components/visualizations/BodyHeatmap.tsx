@@ -109,7 +109,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
   const gender: 'male' | 'female' =
     (profile?.gender?.toLowerCase() === 'female' ? 'female' : 'male');
 
-  const trackedBodyData: Array<{ slug: string; intensity: number; avgFreshness: number }> = useMemo(() => {
+  const trackedBodyData: { slug: string; intensity: number; avgFreshness: number }[] = useMemo(() => {
     const slugToFreshnessSum = new Map<string, { sum: number; count: number }>();
 
     for (const [muscleKey, freshness] of Object.entries(freshnessData)) {
@@ -125,7 +125,7 @@ export const BodyHeatmap: React.FC<BodyHeatmapProps> = ({
       }
     }
 
-    const parts: Array<{ slug: string; intensity: number; avgFreshness: number }> = [];
+    const parts: { slug: string; intensity: number; avgFreshness: number }[] = [];
     for (const [slug, { sum, count }] of slugToFreshnessSum.entries()) {
       if (count === 0) continue;
       const avgFreshness = sum / count;

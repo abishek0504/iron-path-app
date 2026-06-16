@@ -11,7 +11,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Pressable,
-  FlatList,
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,12 +26,10 @@ import { useUIStore } from '../../src/stores/uiStore';
 import { supabase } from '../../src/lib/supabase/client';
 import {
   createTemplate,
-  upsertTemplateDay,
   ensureTemplateHasWeekDays,
   reorderTemplateSlots,
   type FullTemplate,
   type TemplateSlot,
-  type TemplateDay,
 } from '../../src/lib/supabase/queries/templates';
 import {
   NestableScrollContainer,
@@ -58,15 +55,13 @@ import {
   deleteSessionWithExercises,
   getSessionsForToday,
   prefillSessionSets,
-  getUniqueSetRepCombinations,
-  syncTemplateSlotToSessionsForDay,
   materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
 import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/lib/supabase/queries/workouts_helpers';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
-import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS, SHORT_WEEKDAY_LABELS } from '../../src/lib/utils/date';
+import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS } from '../../src/lib/utils/date';
 import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
@@ -93,8 +88,6 @@ import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { usePaywall } from '../../src/components/paywall/PaywallProvider';
-
-const SHORT_DAY_NAMES = SHORT_WEEKDAY_LABELS;
 
 /**
  * Get today's day name using Date.getDay() (0=Sunday, 6=Saturday)
@@ -132,23 +125,15 @@ export default function PlannerTab() {
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
   const [slotTargets, setSlotTargets] = useState<Map<string, ExerciseTarget>>(new Map());
-  const [exerciseVariations, setExerciseVariations] = useState<Map<string, Array<{ sets: number; reps?: number; duration_sec?: number }>>>(new Map());
-  const [isLoadingTargets, setIsLoadingTargets] = useState(false);
   const [showSmartAdjustPrompt, setShowSmartAdjustPrompt] = useState(false);
   const [rebalanceResult, setRebalanceResult] = useState<RebalanceResult | null>(null);
-  const [todaySessionExercises, setTodaySessionExercises] = useState<Array<{
-    id: string;
-    exercise_id?: string;
-    custom_exercise_id?: string;
-    sort_order: number;
-  }>>([]);
   /** When selected day is Today: one entry per session with its exercises (for workout containers) */
   const [sessionsTodayWithExercises, setSessionsTodayWithExercises] = useState<
-    Array<{ session: WorkoutSession; exercises: PlannerSessionExercise[] }>
+    { session: WorkoutSession; exercises: PlannerSessionExercise[] }[]
   >([]);
   /** Per session-exercise set/rep variations (working sets only) + warmup count, keyed by session_exercise id. */
   const [sessionExerciseVariations, setSessionExerciseVariations] = useState<
-    Map<string, { variations: Array<{ sets: number; reps?: number; duration_sec?: number }>; warmupCount: number }>
+    Map<string, { variations: { sets: number; reps?: number; duration_sec?: number }[]; warmupCount: number }>
   >(new Map());
   const [showSessionEditSheet, setShowSessionEditSheet] = useState(false);
   const [showGenerateDayForm, setShowGenerateDayForm] = useState(false);
@@ -278,13 +263,11 @@ export default function PlannerTab() {
         });
       }
 
-      setIsLoadingTargets(true);
       try {
         const effectiveExperience = profile?.experience_level || 'beginner';
-        const context: TargetSelectionContext = { experience: effectiveExperience };
 
         const targetsMap = new Map<string, ExerciseTarget>();
-        const slotDetails: Array<{ slotId: string; exerciseId?: string; customExerciseId?: string; hasTarget: boolean }> = [];
+        const slotDetails: { slotId: string; exerciseId?: string; customExerciseId?: string; hasTarget: boolean }[] = [];
 
         const daysToProcess = dayName
           ? fullTemplate.days.filter((d) => d.day.day_name === dayName)
@@ -356,36 +339,6 @@ export default function PlannerTab() {
           return next;
         });
 
-        // Fetch unique variations for all exercises
-        const variationsMap = new Map<string, Array<{ sets: number; reps?: number; duration_sec?: number }>>();
-        const exerciseIds = new Set<string>();
-        for (const { slot, target } of targetResults) {
-          const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-          if (exerciseId && target) {
-            exerciseIds.add(exerciseId);
-          }
-        }
-
-        const variationResults = await Promise.all(
-          Array.from(exerciseIds).map(async (exerciseId) => {
-            const target = targetResults.find(({ slot }) => 
-              (slot.exercise_id || slot.custom_exercise_id) === exerciseId
-            )?.target;
-            if (!target) return { exerciseId, variations: [] };
-            
-            const variations = await getUniqueSetRepCombinations(exerciseId, userId, target.mode);
-            return { exerciseId, variations };
-          })
-        );
-
-        for (const { exerciseId, variations } of variationResults) {
-          if (variations.length > 0) {
-            variationsMap.set(exerciseId, variations);
-          }
-        }
-
-        setExerciseVariations(variationsMap);
-
         if (__DEV__) {
           devLog('planner', {
             action: 'calculateTargetsForSlots_result',
@@ -393,20 +346,12 @@ export default function PlannerTab() {
             slotsWithoutPrescriptions,
             totalSlots: slotsWithPrescriptions + slotsWithoutPrescriptions,
             slotDetails,
-            variationsCount: variationsMap.size,
-            variationsDetails: Array.from(variationsMap.entries()).map(([id, vars]) => ({
-              exerciseId: id,
-              variationCount: vars.length,
-              variations: vars,
-            })),
           });
         }
       } catch (error) {
         if (__DEV__) {
           devError('planner', error, { action: 'calculateTargetsForSlots' });
         }
-      } finally {
-        setIsLoadingTargets(false);
       }
     },
     [profile]
@@ -440,8 +385,6 @@ export default function PlannerTab() {
             .select('id, exercise_id, custom_exercise_id, sort_order')
             .eq('session_id', session.id)
             .order('sort_order', { ascending: true });
-
-          setTodaySessionExercises(sessionExercises || []);
 
           if (sessionExercises && sessionExercises.length > 0) {
             const effectiveExperience = profile?.experience_level || 'beginner';
@@ -485,8 +428,6 @@ export default function PlannerTab() {
               return next;
             });
           }
-        } else {
-          setTodaySessionExercises([]);
         }
       } catch (error) {
         if (__DEV__) {
@@ -559,13 +500,6 @@ export default function PlannerTab() {
               }
               return next;
             });
-            setExerciseVariations((prev) => {
-              const next = new Map(prev);
-              for (const k of next.keys()) {
-                if (!keepKeys.has(k)) next.delete(k);
-              }
-              return next;
-            });
           }
           return;
         }
@@ -577,10 +511,10 @@ export default function PlannerTab() {
           .in('session_id', sessionIds)
           .order('sort_order', { ascending: true });
 
-        const withExercises: Array<{
+        const withExercises: {
           session: WorkoutSession;
           exercises: PlannerSessionExercise[];
-        }> = [];
+        }[] = [];
         const exerciseKeys = new Set<string>();
 
         for (const session of sessions) {
@@ -602,14 +536,14 @@ export default function PlannerTab() {
         const sessionExerciseIds = withExercises.flatMap(({ exercises }) => exercises.map((e) => e.id));
         const variationsBySessionExercise = new Map<
           string,
-          { variations: Array<{ sets: number; reps?: number; duration_sec?: number }>; warmupCount: number }
+          { variations: { sets: number; reps?: number; duration_sec?: number }[]; warmupCount: number }
         >();
         if (sessionExerciseIds.length > 0) {
           const { data: setsRows } = await supabase
             .from('v2_session_sets')
             .select('session_exercise_id, reps, duration_sec, set_type')
             .in('session_exercise_id', sessionExerciseIds);
-          const setsBySe = new Map<string, Array<{ reps?: number; duration_sec?: number }>>();
+          const setsBySe = new Map<string, { reps?: number; duration_sec?: number }[]>();
           const warmupCountBySe = new Map<string, number>();
           for (const row of setsRows || []) {
             const id = row.session_exercise_id;
@@ -1301,6 +1235,7 @@ export default function PlannerTab() {
       if (prev.supersetGroup === supersetGroup && prev.isLastExercise === isLastExercise) return prev;
       return { ...prev, supersetGroup, isLastExercise };
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync derived superset metadata for open edit sheet
   }, [sessionsTodayWithExercises, showSessionEditSheet, editingSessionExercise?.id, editingSessionExercise?.sessionId]);
 
   const handleEditSheetToggleSuperset = useCallback(async () => {
@@ -1382,7 +1317,6 @@ export default function PlannerTab() {
     useCallback(() => {
       const loadTemplate = loadTemplateRef.current;
       const loadTodaySessionExercises = loadTodaySessionExercisesRef.current;
-      const loadTodaySessions = loadTodaySessionsRef.current;
 
       if (plannerNeedsRefetch) {
         setPlannerNeedsRefetch(false);
@@ -1469,7 +1403,7 @@ export default function PlannerTab() {
         recoveryAttemptedThisFocusRef.current = false;
         loadTemplateDidTodayLoadRef.current = false;
       };
-    }, [plannerNeedsRefetch, activeTemplateId, setPlannerNeedsRefetch, selectedDay?.day.day_name, getCurrentUserId, templateData, isLoadingTemplate, todayTemplateKeys])
+    }, [plannerNeedsRefetch, activeTemplateId, setPlannerNeedsRefetch, selectedDay, getCurrentUserId, templateData, isLoadingTemplate])
   );
   const dateContext = useDateContext(selectedDay?.day.day_name);
 
@@ -1930,45 +1864,6 @@ export default function PlannerTab() {
     setPlannerNeedsRefetch,
     toast,
   ]);
-
-  // Handle removing slot (template structure only)
-  const handleRemoveSlot = useCallback(
-    async (slotId: string) => {
-      if (__DEV__) {
-        devLog('planner', { action: 'handleRemoveSlot', slotId });
-      }
-
-      if (!activeTemplateId) {
-        if (__DEV__) devLog('planner', { action: 'removeSlot_skipped', missing: ['activeTemplateId'] });
-        toast.error('No active template');
-        return;
-      }
-
-      setIsSaving(true);
-      try {
-        const success = await applyStructureEditToTemplate(activeTemplateId, {
-          type: 'removeSlot',
-          slotId,
-        });
-
-        if (success) {
-          invalidateTemplate(activeTemplateId);
-          await loadTemplate(activeTemplateId);
-          toast.success('Exercise removed from plan');
-        } else {
-          toast.error('Failed to remove exercise');
-        }
-      } catch (error) {
-        if (__DEV__) {
-          devError('planner', error, { action: 'handleRemoveSlot_apply', slotId });
-        }
-        toast.error('Failed to remove exercise');
-      } finally {
-        setIsSaving(false);
-      }
-    },
-    [activeTemplateId, loadTemplate, toast]
-  );
 
   const runGenerateWithAI = useCallback(
     async (sessionsPerDay: number, constraints?: DayConstraints) => {
@@ -2696,7 +2591,7 @@ export default function PlannerTab() {
             }
 
             // Create session exercises and prefill sets using prescription/history-based targets
-            const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+            const sessionExercises: { id: string; exercise_id?: string; custom_exercise_id?: string }[] = [];
             const targetsMap = new Map<string, {
               sets: number;
               reps?: number;

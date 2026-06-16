@@ -23,7 +23,7 @@ export default function PRsScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [loading, setLoading] = useState(true);
-  const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
+  const [prs, setPrs] = useState<(TopPR & { name?: string })[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);

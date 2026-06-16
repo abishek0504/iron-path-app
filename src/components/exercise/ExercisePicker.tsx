@@ -82,10 +82,12 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
 
   useEffect(() => {
     loadExercises();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load catalog once when picker opens
   }, []);
 
   useEffect(() => {
     filterExercises();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterExercises closes over searchQuery and exercises
   }, [searchQuery, exercises]);
 
   const loadExercises = async () => {

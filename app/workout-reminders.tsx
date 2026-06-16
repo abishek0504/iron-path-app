@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Platform,
   ScrollView,
   StyleSheet,
   Switch,

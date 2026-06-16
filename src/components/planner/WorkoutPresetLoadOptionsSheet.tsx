@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { BottomSheet } from '../ui/BottomSheet';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -59,7 +59,7 @@ export const WorkoutPresetLoadOptionsSheet: React.FC<Props> = ({
     [colors]
   );
 
-  const options: Array<{ mode: PresetLoadMode; title: string; description: string }> = [
+  const options: { mode: PresetLoadMode; title: string; description: string }[] = [
     {
       mode: 'replace',
       title: 'Replace workout',

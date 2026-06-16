@@ -85,6 +85,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
     if (visible) {
       loadSets();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload sets when sheet opens for this exercise
   }, [visible, sessionExerciseId]);
 
   const loadSets = async () => {

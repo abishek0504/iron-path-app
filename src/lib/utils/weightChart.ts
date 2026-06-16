@@ -61,7 +61,7 @@ export function aggregateWeightLogsByDay(logs: WeightLog[]): WeightLog[] {
   );
 }
 
-export function buildSmoothLinePath(points: Array<{ x: number; y: number }>): string {
+export function buildSmoothLinePath(points: { x: number; y: number }[]): string {
   if (points.length < 2) return '';
   if (points.length === 2) {
     return `M ${points[0].x},${points[0].y} L ${points[1].x},${points[1].y}`;

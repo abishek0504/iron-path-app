@@ -422,7 +422,7 @@ async function insertSessionExercisesFromSlots(
   sessionId: string,
   slots: PresetSlotInput[],
   startSortOrder: number
-): Promise<Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }>> {
+): Promise<{ id: string; exercise_id?: string; custom_exercise_id?: string }[]> {
   if (slots.length === 0) return [];
 
   const rows = slots.map((slot, index) => ({

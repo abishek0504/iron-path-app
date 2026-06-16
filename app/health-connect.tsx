@@ -18,6 +18,7 @@ import { supabase } from '../src/lib/supabase/client';
 import {
   requestAppleHealthAccess,
   syncBodyMassWithHealth,
+  syncWorkoutAnalyticsWithHealth,
 } from '../src/lib/health/healthIntegration';
 
 export default function HealthConnectScreen() {
@@ -33,7 +34,10 @@ export default function HealthConnectScreen() {
       const res = await requestAppleHealthAccess();
       if (res.state === 'authorized') {
         const { data: { user } } = await supabase.auth.getUser();
-        if (user) await syncBodyMassWithHealth(user.id);
+        if (user) {
+          await syncBodyMassWithHealth(user.id);
+          await syncWorkoutAnalyticsWithHealth(user.id);
+        }
         showToast('Apple Health connected', 'success');
         router.back();
         return;
@@ -61,13 +65,14 @@ export default function HealthConnectScreen() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.lead}>
-          Connect Apple Health to sync body weight and logged workouts. IronPath requests read access
-          for body weight and write access for workouts and body mass when you complete sessions or
-          log weight.
+          Connect Apple Health to sync workouts, heart rate, calories, and body weight. IronPath
+          requests read access for body weight and heart rate, and write access for workouts,
+          active energy, heart rate samples, and body mass.
         </Text>
         <Text style={styles.lead}>
-          Weight data syncs both ways — existing Apple Health entries import into IronPath, and your
-          IronPath weight history exports to Apple Health. New entries continue syncing after you connect.
+          Weight data syncs both ways. Completed workouts export duration, estimated or watch-measured
+          calories, heart rate, and training volume metadata. With Apple Watch, live heart rate appears
+          during your session on both devices.
         </Text>
 
         <Text style={styles.sectionTitle}>Privacy</Text>

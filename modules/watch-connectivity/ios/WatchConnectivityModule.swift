@@ -1,6 +1,50 @@
 import ExpoModulesCore
 import WatchConnectivity
 
+enum WatchPayloadParsing {
+  static func stringFromPayload(_ value: Any?) -> String? {
+    guard let value else { return nil }
+    if let string = value as? String {
+      let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }
+    return nil
+  }
+
+  static func intFromPayload(_ value: Any?) -> Int? {
+    guard let value else { return nil }
+    if let intValue = value as? Int { return intValue }
+    if let number = value as? NSNumber {
+      let doubleValue = number.doubleValue
+      guard doubleValue.isFinite else { return nil }
+      let rounded = Int(doubleValue.rounded())
+      guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+      return rounded
+    }
+    if let doubleValue = value as? Double, doubleValue.isFinite {
+      let rounded = Int(doubleValue.rounded())
+      guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+      return rounded
+    }
+    return nil
+  }
+
+  static func doubleFromPayload(_ value: Any?) -> Double? {
+    guard let value else { return nil }
+    if let doubleValue = value as? Double, doubleValue.isFinite { return doubleValue }
+    if let number = value as? NSNumber {
+      let doubleValue = number.doubleValue
+      return doubleValue.isFinite ? doubleValue : nil
+    }
+    if let intValue = value as? Int { return Double(intValue) }
+    return nil
+  }
+
+  static func isUuid(_ value: String) -> Bool {
+    UUID(uuidString: value) != nil
+  }
+}
+
 /**
  * iPhone-side WCSession bridge.
  *
@@ -16,11 +60,17 @@ public class WatchConnectivityModule: Module {
   public func definition() -> ModuleDefinition {
     Name("WatchConnectivity")
 
-    Events("onSetCompleted", "onWatchStateChanged")
+    Events("onSetCompleted", "onWatchStateChanged", "onHeartRate", "onWorkoutEnded")
 
     OnCreate {
       self.sessionDelegate.onSetCompleted = { [weak self] payload in
         self?.sendEvent("onSetCompleted", payload)
+      }
+      self.sessionDelegate.onHeartRate = { [weak self] payload in
+        self?.sendEvent("onHeartRate", payload)
+      }
+      self.sessionDelegate.onWorkoutEnded = { [weak self] payload in
+        self?.sendEvent("onWorkoutEnded", payload)
       }
       self.sessionDelegate.onStateChanged = { [weak self] payload in
         self?.sendEvent("onWatchStateChanged", payload)
@@ -62,6 +112,8 @@ public class WatchConnectivityModule: Module {
 
 final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   var onSetCompleted: (([String: Any]) -> Void)?
+  var onHeartRate: (([String: Any]) -> Void)?
+  var onWorkoutEnded: (([String: Any]) -> Void)?
   var onStateChanged: (([String: Any]) -> Void)?
 
   func activate() {
@@ -116,7 +168,62 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   }
 
   private func handleIncoming(_ payload: [String: Any]) {
-    guard let type = payload["type"] as? String, type == "completeSet" else { return }
-    onSetCompleted?(payload)
+    guard let type = WatchPayloadParsing.stringFromPayload(payload["type"]) else {
+      return
+    }
+
+    if type == "completeSet" {
+      guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
+            WatchPayloadParsing.isUuid(sessionId) else {
+        return
+      }
+      guard let setNumber = WatchPayloadParsing.intFromPayload(payload["setNumber"]), setNumber >= 1 else {
+        return
+      }
+      let sentAt = WatchPayloadParsing.doubleFromPayload(payload["sentAt"]) ?? Date().timeIntervalSince1970
+      guard sentAt > 0 else { return }
+
+      onSetCompleted?([
+        "type": "completeSet",
+        "sessionId": sessionId,
+        "setNumber": setNumber,
+        "sentAt": sentAt,
+      ])
+      return
+    }
+
+    if type == "heartRate" {
+      guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
+            WatchPayloadParsing.isUuid(sessionId) else {
+        return
+      }
+      guard let bpm = WatchPayloadParsing.intFromPayload(payload["bpm"]), bpm > 0, bpm < 250 else {
+        return
+      }
+      let timestamp = WatchPayloadParsing.doubleFromPayload(payload["timestamp"]) ?? Date().timeIntervalSince1970
+      onHeartRate?([
+        "type": "heartRate",
+        "sessionId": sessionId,
+        "bpm": bpm,
+        "timestamp": timestamp,
+      ])
+      return
+    }
+
+    if type == "workoutEnded" {
+      guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
+            WatchPayloadParsing.isUuid(sessionId) else {
+        return
+      }
+      guard let hkWorkoutUuid = WatchPayloadParsing.stringFromPayload(payload["hkWorkoutUuid"]),
+            WatchPayloadParsing.isUuid(hkWorkoutUuid) else {
+        return
+      }
+      onWorkoutEnded?([
+        "type": "workoutEnded",
+        "sessionId": sessionId,
+        "hkWorkoutUuid": hkWorkoutUuid,
+      ])
+    }
   }
 }

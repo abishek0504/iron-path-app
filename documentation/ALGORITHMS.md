@@ -385,7 +385,7 @@ Green (1-5) → Yellow (6-7) → Orange (8-9) → Red (10)
 - Uses `@react-native-community/slider` for smooth touch interaction
 - Integer steps 1-10 for discrete RPE values
 - Real-time label updates as user drags slider
-- Integrated into ActiveSetCard expanded state
+- Integrated into active workout batch logging screen (`app/(stack)/workout/active.tsx`)
 
 ## AI Week Generation (Biomechanical Fatigue Simulator)
 

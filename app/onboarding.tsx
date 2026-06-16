@@ -97,6 +97,7 @@ export default function Onboarding() {
 
   useEffect(() => {
     loadProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load profile once on mount
   }, []);
 
   const loadProfile = async () => {

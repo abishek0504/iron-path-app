@@ -9,6 +9,9 @@ import { getDateBoundsForDayName } from '../../utils/date';
 import { formatDurationCompact } from '../../utils/formatDuration';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
+import { consumeWorkoutHealthBuffer } from '../../health/workoutHealthBuffer';
+import { upsertDailyWorkoutStatsForSession } from './analytics';
+import { invalidateAnalyticsCache } from '../../cache/analyticsCache';
 import type { TemplateSlot } from './templates';
 
 /**
@@ -157,7 +160,7 @@ export async function materializeWorkoutFromTemplateSlots(input: {
   const session = await createWorkoutSession(userId, templateId, dayName, startedAt);
   if (!session) return null;
 
-  const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+  const sessionExercises: { id: string; exercise_id?: string; custom_exercise_id?: string }[] = [];
   const targetsMap = new Map<string, { sets: number; reps?: number; duration_sec?: number; weight?: number }>();
 
   for (const slot of slots) {
@@ -631,7 +634,10 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
       });
     }
 
-    void writeCompletedWorkoutToHealth(sessionId);
+    const healthPayload = consumeWorkoutHealthBuffer(sessionId);
+    void writeCompletedWorkoutToHealth(sessionId, healthPayload);
+    void upsertDailyWorkoutStatsForSession(userId, sessionId);
+    invalidateAnalyticsCache(userId);
 
     return true;
   } catch (error) {
@@ -1171,7 +1177,7 @@ export function formatPRDisplay(p: TopPR, unitsLabel: string): string {
 }
 
 export interface ExerciseHistory {
-  sets: Array<{
+  sets: {
     id: string;
     session_exercise_id: string;
     set_number: number;
@@ -1181,7 +1187,7 @@ export interface ExerciseHistory {
     rir?: number;
     duration_sec?: number;
     performed_at: string;
-  }>;
+  }[];
   lastRPE: number | null;
   lastRIR: number | null;
   lastWeight: number | null;
@@ -1191,146 +1197,6 @@ export interface ExerciseHistory {
 }
 
 export type MuscleStressMap = Record<string, number>;
-
-/**
- * @deprecated Use `getCachedTopPRs` instead, which reads the maintained
- * `v2_user_exercise_prs` table (kept up-to-date by the upsert trigger) and
- * supports all three PR types (`weight`, `reps_only`, `timed`).
- *
- * This legacy implementation computes only weight-based PRs by scanning the
- * last 500 completed sessions and skipping rows where weight is null, so it
- * does not surface bodyweight-reps PRs or timed-hold PRs. It is kept as a
- * fallback for backfills only and is not invoked from app code.
- */
-export async function getTopPRs(
-  userId: string,
-  limit = 3
-): Promise<TopPR[]> {
-  if (__DEV__) {
-    devLog('workout-query', { action: 'getTopPRs', userId, limit });
-  }
-
-  try {
-    // Step 1: all completed session ids (bounded for perf)
-    const { data: sessions, error: sessionsError } = await supabase
-      .from('v2_workout_sessions')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false, nullsFirst: false })
-      .limit(500);
-
-    if (sessionsError) {
-      if (__DEV__) {
-        devError('workout-query', sessionsError, { userId, limit, step: 'sessions' });
-      }
-      return [];
-    }
-
-    const sessionIds = (sessions || []).map((s) => s.id);
-    if (!sessionIds.length) return [];
-
-    // Step 2: session exercises for those sessions
-    const { data: sessionExercises, error: exercisesError } = await supabase
-      .from('v2_session_exercises')
-      .select('id, exercise_id, custom_exercise_id, session_id')
-      .in('session_id', sessionIds);
-
-    if (exercisesError) {
-      if (__DEV__) {
-        devError('workout-query', exercisesError, { userId, limit, step: 'session-exercises' });
-      }
-      return [];
-    }
-
-    const sessionExerciseIds = (sessionExercises || []).map((e) => e.id);
-    if (!sessionExerciseIds.length) return [];
-
-    const exerciseMap = new Map(
-      (sessionExercises || []).map((e) => [e.id, e])
-    );
-
-    // Step 3: Fetch sets for PR computation (completed only)
-    const { data: sets, error: setsError } = await supabase
-      .from('v2_session_sets')
-      .select('id, session_exercise_id, weight, reps, duration_sec, performed_at')
-      .in('session_exercise_id', sessionExerciseIds)
-      .not('performed_at', 'is', null);
-
-    if (setsError) {
-      if (__DEV__) {
-        devError('workout-query', setsError, { userId, limit, step: 'sets' });
-      }
-      return [];
-    }
-
-    const rows = sets || [];
-    if (!rows.length) return [];
-
-    type PrAccumulator = {
-      set_id: string;
-      session_exercise_id: string;
-      session_id: string;
-      exercise_id?: string;
-      custom_exercise_id?: string;
-      maxWeight: number;
-      performed_at?: string;
-      repsAtMax: Set<number>;
-    };
-
-    // One PR per exercise: highest weight lifetime (for reps-based sets)
-    const byExercise = new Map<string, PrAccumulator>();
-    for (const row of rows) {
-      const ex = exerciseMap.get(row.session_exercise_id);
-      if (!ex) continue;
-      const exerciseKey = ex.exercise_id || ex.custom_exercise_id;
-      if (!exerciseKey) continue;
-
-      const w = typeof row.weight === 'number' ? row.weight : row.weight == null ? null : Number(row.weight);
-      const reps = typeof row.reps === 'number' ? row.reps : row.reps == null ? null : Number(row.reps);
-      if (w == null) continue; // only weight PRs for now
-
-      const existing = byExercise.get(exerciseKey);
-      if (!existing || w > existing.maxWeight) {
-        const repsSet = new Set<number>();
-        if (reps != null && !Number.isNaN(reps)) repsSet.add(reps);
-        byExercise.set(exerciseKey, {
-          set_id: row.id,
-          session_exercise_id: row.session_exercise_id,
-          session_id: ex.session_id,
-          exercise_id: ex.exercise_id || undefined,
-          custom_exercise_id: ex.custom_exercise_id || undefined,
-          maxWeight: w,
-          performed_at: row.performed_at || undefined,
-          repsAtMax: repsSet,
-        });
-      } else if (w === existing.maxWeight) {
-        if (reps != null && !Number.isNaN(reps)) existing.repsAtMax.add(reps);
-      }
-    }
-
-    const prs = Array.from(byExercise.values())
-      .sort((a, b) => b.maxWeight - a.maxWeight)
-      .slice(0, limit)
-      .map((p) => ({
-        set_id: p.set_id,
-        session_exercise_id: p.session_exercise_id,
-        session_id: p.session_id,
-        exercise_id: p.exercise_id,
-        custom_exercise_id: p.custom_exercise_id,
-        weight: p.maxWeight,
-        reps_at_pr_weight: Array.from(p.repsAtMax).sort((a, b) => b - a),
-        performed_at: p.performed_at,
-      }));
-
-    return prs;
-  } catch (error) {
-    if (__DEV__) {
-      devError('workout-query', error, { userId, limit, step: 'top-prs' });
-    }
-    return [];
-  }
-}
 
 const CACHED_PR_SELECT_FULL =
   'set_id, session_id, session_exercise_id, pr_type, weight, reps, duration_sec, performed_at, exercise_id, custom_exercise_id';
@@ -1420,7 +1286,7 @@ export async function getUniqueSetRepCombinations(
   exerciseId: string,
   userId: string,
   mode: 'reps' | 'timed'
-): Promise<Array<{ sets: number; reps?: number; duration_sec?: number }>> {
+): Promise<{ sets: number; reps?: number; duration_sec?: number }[]> {
   if (__DEV__) {
     devLog('workout-query', {
       action: 'getUniqueSetRepCombinations',
@@ -1479,7 +1345,7 @@ export async function getUniqueSetRepCombinations(
     }
 
     // Group by session_exercise_id to count sets per exercise instance
-    const sessionExerciseMap = new Map<string, Array<{ reps?: number; duration_sec?: number }>>();
+    const sessionExerciseMap = new Map<string, { reps?: number; duration_sec?: number }[]>();
     
     for (const set of data) {
       const sessionExerciseId = set.session_exercise_id;
@@ -1508,7 +1374,7 @@ export async function getUniqueSetRepCombinations(
     // Find unique combinations: per (set_count, rep) or (set_count, duration) so e.g. 8,8,9 → 2×8 and 1×9
     const uniqueCombos = new Map<string, { sets: number; reps?: number; duration_sec?: number }>();
 
-    for (const [_, sets] of sessionExerciseMap) {
+    for (const [, sets] of sessionExerciseMap) {
       if (mode === 'reps') {
         const byRep = new Map<number, number>();
         for (const s of sets) {
@@ -1558,13 +1424,13 @@ export async function getUniqueSetRepCombinations(
 
 export interface PreviousPerformance {
   performed_at: string;
-  sets: Array<{
+  sets: {
     set_number: number;
     weight?: number;
     reps?: number;
     duration_sec?: number;
     set_type?: SetType;
-  }>;
+  }[];
 }
 
 /**
@@ -2071,11 +1937,11 @@ export async function getMuscleStressStats(
  */
 export async function prefillSessionSets(
   sessionId: string,
-  sessionExercises: Array<{
+  sessionExercises: {
     id: string;
     exercise_id?: string;
     custom_exercise_id?: string;
-  }>,
+  }[],
   targets: Map<string, {
     sets: number;
     reps?: number;
@@ -2223,7 +2089,7 @@ export async function markSetComplete(
  */
 export async function getSessionWithSets(sessionId: string): Promise<{
   session: WorkoutSession | null;
-  exercises: Array<{
+  exercises: {
     id: string;
     exercise_id?: string;
     custom_exercise_id?: string;
@@ -2232,7 +2098,7 @@ export async function getSessionWithSets(sessionId: string): Promise<{
     rest_sec?: number | null;
     notes?: string;
     sets: SessionSet[];
-  }>;
+  }[];
 } | null> {
   if (__DEV__) {
     devLog('workout-query', { action: 'getSessionWithSets', sessionId });

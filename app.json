@@ -26,8 +26,8 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSUserNotificationsUsageDescription": "IronPath sends reminders to help you stay consistent with your workouts.",
-        "NSHealthShareUsageDescription": "IronPath reads body weight from Apple Health to import your weight history when you connect.",
-        "NSHealthUpdateUsageDescription": "IronPath writes completed workouts and logged body weight to Apple Health when you choose to connect."
+        "NSHealthShareUsageDescription": "IronPath reads body weight and heart rate from Apple Health to import your history and enrich workout analytics.",
+        "NSHealthUpdateUsageDescription": "IronPath writes completed workouts, active energy, heart rate, and body weight to Apple Health when you connect."
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,
@@ -128,8 +128,8 @@
       [
         "@kingstinct/react-native-healthkit",
         {
-          "NSHealthShareUsageDescription": "IronPath reads body weight from Apple Health to import your weight history when you connect.",
-          "NSHealthUpdateUsageDescription": "IronPath writes completed workouts and logged body weight to Apple Health when you choose to connect.",
+          "NSHealthShareUsageDescription": "IronPath reads body weight and heart rate from Apple Health to import your history and enrich workout analytics.",
+          "NSHealthUpdateUsageDescription": "IronPath writes completed workouts, active energy, heart rate, and body weight to Apple Health when you connect.",
           "background": false
         }
       ],

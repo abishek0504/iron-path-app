@@ -204,9 +204,7 @@ export function validateCustomExerciseTargets(
 
   // Validate and clamp implicit_hits
   if (exercise.implicit_hits) {
-    const validated = validateAndClampImplicitHits(exercise.implicit_hits, availableMuscles);
-    // Note: This function clamps values, but we're just checking validation here
-    // The actual clamping should be done when saving
+    validateAndClampImplicitHits(exercise.implicit_hits, availableMuscles);
   }
 
   if (__DEV__ && errors.length > 0) {

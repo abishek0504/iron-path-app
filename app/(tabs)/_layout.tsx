@@ -29,7 +29,7 @@ const CustomTabBar = (props: BottomTabBarProps) => {
   const circlePosition = useSharedValue(0);
 
   // Store tab button positions
-  const [tabLayouts, setTabLayouts] = useState<Array<{ x: number; width: number } | null>>([
+  const [tabLayouts, setTabLayouts] = useState<({ x: number; width: number } | null)[]>([
     null, null, null, null
   ]);
 

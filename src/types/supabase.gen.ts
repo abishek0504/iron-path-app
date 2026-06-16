@@ -14,12 +14,88 @@ export type Database = {
   }
   public: {
     Tables: {
+      v2_ai_generation_jobs: {
+        Row: {
+          constraints: Json
+          created_at: string
+          day_id: string
+          day_name: string
+          error_code: string | null
+          expires_at: string
+          id: string
+          model: string | null
+          session_end_iso_exclusive: string
+          session_start_iso: string
+          sessions_json: Json | null
+          sessions_per_day: number
+          slots_created: number
+          status: string
+          template_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          constraints?: Json
+          created_at?: string
+          day_id: string
+          day_name: string
+          error_code?: string | null
+          expires_at?: string
+          id: string
+          model?: string | null
+          session_end_iso_exclusive: string
+          session_start_iso: string
+          sessions_json?: Json | null
+          sessions_per_day: number
+          slots_created?: number
+          status?: string
+          template_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          constraints?: Json
+          created_at?: string
+          day_id?: string
+          day_name?: string
+          error_code?: string | null
+          expires_at?: string
+          id?: string
+          model?: string | null
+          session_end_iso_exclusive?: string
+          session_start_iso?: string
+          sessions_json?: Json | null
+          sessions_per_day?: number
+          slots_created?: number
+          status?: string
+          template_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "v2_ai_generation_jobs_day_id_fkey"
+            columns: ["day_id"]
+            isOneToOne: false
+            referencedRelation: "v2_template_days"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "v2_ai_generation_jobs_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "v2_workout_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v2_ai_generations: {
         Row: {
           created_at: string
           day_name: string | null
           error_code: string | null
           exercise_count: number | null
+          generation_job_id: string | null
           id: string
           latency_ms: number | null
           model: string | null
@@ -33,6 +109,7 @@ export type Database = {
           day_name?: string | null
           error_code?: string | null
           exercise_count?: number | null
+          generation_job_id?: string | null
           id?: string
           latency_ms?: number | null
           model?: string | null
@@ -46,6 +123,7 @@ export type Database = {
           day_name?: string | null
           error_code?: string | null
           exercise_count?: number | null
+          generation_job_id?: string | null
           id?: string
           latency_ms?: number | null
           model?: string | null
@@ -55,6 +133,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "v2_ai_generations_generation_job_id_fkey"
+            columns: ["generation_job_id"]
+            isOneToOne: false
+            referencedRelation: "v2_ai_generation_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "v2_ai_generations_template_id_fkey"
             columns: ["template_id"]
@@ -249,6 +334,7 @@ export type Database = {
           equipment_needed?: string[] | null
           id?: string
           implicit_hits?: Json
+          is_stretch?: boolean
           is_timed?: boolean
           is_unilateral?: boolean
           movement_pattern?: string | null
@@ -354,7 +440,7 @@ export type Database = {
           deleted_at: string | null
           equipment_access: string[] | null
           experience_level: string | null
-          first_name: string | null
+          first_name: string
           gender: string | null
           goal: string | null
           goal_weight: number | null
@@ -362,7 +448,10 @@ export type Database = {
           id: string
           last_name: string | null
           preferred_training_style: string | null
+          revenuecat_app_user_id: string | null
           scheduled_purge_at: string | null
+          subscription_expires_at: string | null
+          subscription_tier: string
           updated_at: string | null
           use_imperial: boolean | null
           workout_days: string[] | null
@@ -376,7 +465,7 @@ export type Database = {
           deleted_at?: string | null
           equipment_access?: string[] | null
           experience_level?: string | null
-          first_name?: string | null
+          first_name: string
           gender?: string | null
           goal?: string | null
           goal_weight?: number | null
@@ -384,7 +473,10 @@ export type Database = {
           id: string
           last_name?: string | null
           preferred_training_style?: string | null
+          revenuecat_app_user_id?: string | null
           scheduled_purge_at?: string | null
+          subscription_expires_at?: string | null
+          subscription_tier?: string
           updated_at?: string | null
           use_imperial?: boolean | null
           workout_days?: string[] | null
@@ -398,7 +490,7 @@ export type Database = {
           deleted_at?: string | null
           equipment_access?: string[] | null
           experience_level?: string | null
-          first_name?: string | null
+          first_name?: string
           gender?: string | null
           goal?: string | null
           goal_weight?: number | null
@@ -406,7 +498,10 @@ export type Database = {
           id?: string
           last_name?: string | null
           preferred_training_style?: string | null
+          revenuecat_app_user_id?: string | null
           scheduled_purge_at?: string | null
+          subscription_expires_at?: string | null
+          subscription_tier?: string
           updated_at?: string | null
           use_imperial?: boolean | null
           workout_days?: string[] | null
@@ -659,7 +754,6 @@ export type Database = {
           equipment_needed: string[] | null
           id: string
           implicit_hits: Json
-          is_stretch: boolean
           is_timed: boolean
           is_unilateral: boolean
           movement_pattern: string | null
@@ -679,7 +773,6 @@ export type Database = {
           equipment_needed?: string[] | null
           id?: string
           implicit_hits: Json
-          is_stretch?: boolean
           is_timed?: boolean
           is_unilateral: boolean
           movement_pattern?: string | null
@@ -1045,7 +1138,25 @@ export type Database = {
     Functions: {
       adjust_bw_exercises: { Args: { pd: Json }; Returns: Json }
       adjust_plan_data: { Args: { pd: Json }; Returns: Json }
+      commit_ai_generation: { Args: { p_job_id: string }; Returns: Json }
       migrate_rep_range: { Args: { value: Json }; Returns: Json }
+      purge_expired_ai_generation_jobs: { Args: never; Returns: number }
+      purge_soft_deleted_accounts: { Args: never; Returns: number }
+      resolve_ai_exercise_targets: {
+        Args: {
+          p_ai_plan: Json
+          p_bodyweight?: number
+          p_exercise_id: string
+          p_experience: string
+          p_use_imperial?: boolean
+        }
+        Returns: {
+          duration_sec: number
+          reps: number
+          sets: number
+          weight: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

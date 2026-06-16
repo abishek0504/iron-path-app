@@ -45,10 +45,10 @@ export interface TemplateSummary extends Template {
 
 export interface FullTemplate {
   template: Template;
-  days: Array<{
+  days: {
     day: TemplateDay;
     slots: TemplateSlot[];
-  }>;
+  }[];
 }
 
 /**

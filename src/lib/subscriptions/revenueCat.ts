@@ -13,7 +13,6 @@ let activeUserId: string | null = null;
 function getPurchases(): PurchasesModule | null {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return null;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('react-native-purchases') as PurchasesModule;
   } catch {
     return null;

@@ -24,12 +24,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
-import { Trash2, ChevronDown } from 'lucide-react-native';
+import { Trash2, ChevronDown, Heart, Activity } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { supabase } from '../../lib/supabase/client';
-import { getSessionsInRangeCached, invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
-import { deleteSessionWithExercises, type WorkoutSession } from '../../lib/supabase/queries/workouts';
+import { invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
+import { invalidateAnalyticsCache } from '../../lib/cache/analyticsCache';
+import { deleteSessionWithExercises, getSessionStats, type WorkoutSession } from '../../lib/supabase/queries/workouts';
+import { getSessionHealthMetrics, type SessionHealthMetrics } from '../../lib/supabase/queries/analytics';
 import { listMergedExercisesCached } from '../../lib/cache/exerciseCache';
 import { devLog, devError } from '../../lib/utils/logger';
 import { formatDurationDisplay } from '../../lib/utils/formatDuration';
@@ -61,6 +63,13 @@ type SessionExerciseDetail = {
 type SessionWithExercises = WorkoutSession & {
   exercises: SessionExerciseDetail[];
   exerciseCount: number;
+  stats?: {
+    totalSets: number;
+    volumeLbs: number;
+    avgRpe: number | null;
+    durationMin: number;
+  };
+  health?: SessionHealthMetrics | null;
 };
 
 const SET_TYPE_LABELS: Record<Exclude<SetType, 'normal'>, string> = {
@@ -212,6 +221,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
   useEffect(() => {
     setExpandedExerciseKeys(new Set());
     loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when selected date changes
   }, [selectedDate]);
 
   const toggleExerciseExpanded = useCallback((sessionId: string, sessionExerciseId: string) => {
@@ -269,7 +279,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
       const exerciseBySession = new Map<
         string,
-        Array<{ sessionExerciseId: string; exerciseKey: string; sortOrder: number }>
+        { sessionExerciseId: string; exerciseKey: string; sortOrder: number }[]
       >();
       const exerciseIds = new Set<string>();
       const customExerciseIds = new Set<string>();
@@ -327,7 +337,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
       const allExerciseIds = Array.from(exerciseIds);
       const allCustomExerciseIds = Array.from(customExerciseIds);
-      let mergedExercises: Array<{ id: string; name: string }> = [];
+      let mergedExercises: { id: string; name: string }[] = [];
 
       if (allExerciseIds.length > 0 || allCustomExerciseIds.length > 0) {
         const merged = await listMergedExercisesCached(userId, [
@@ -342,19 +352,51 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         exerciseIdToName.set(ex.id, ex.name);
       }
 
-      const sessionsWithExercises: SessionWithExercises[] = dateSessions.map((s) => {
-        const rows = exerciseBySession.get(s.id) || [];
-        const exercises: SessionExerciseDetail[] = rows.map(({ sessionExerciseId, exerciseKey }) => ({
-          sessionExerciseId,
-          name: exerciseIdToName.get(exerciseKey) || 'Exercise',
-          sets: setsBySessionExercise.get(sessionExerciseId) ?? [],
-        }));
-        return {
-          ...s,
-          exercises,
-          exerciseCount: rows.length,
-        };
-      });
+      const sessionsWithExercises: SessionWithExercises[] = await Promise.all(
+        dateSessions.map(async (s) => {
+          const rows = exerciseBySession.get(s.id) || [];
+          const exercises: SessionExerciseDetail[] = rows.map(({ sessionExerciseId, exerciseKey }) => ({
+            sessionExerciseId,
+            name: exerciseIdToName.get(exerciseKey) || 'Exercise',
+            sets: setsBySessionExercise.get(sessionExerciseId) ?? [],
+          }));
+
+          const [dbStats, health] = await Promise.all([
+            getSessionStats(s.id),
+            getSessionHealthMetrics(s.id),
+          ]);
+
+          let volumeLbs = 0;
+          for (const ex of exercises) {
+            for (const set of ex.sets) {
+              if (set.setType === 'warmup') continue;
+              const w = set.weight ?? 0;
+              const r = set.reps ?? 0;
+              if (w > 0 && r > 0) volumeLbs += w * r;
+            }
+          }
+
+          const durationMin =
+            s.started_at && s.completed_at
+              ? Math.round(
+                  (new Date(s.completed_at).getTime() - new Date(s.started_at).getTime()) / 60000,
+                )
+              : 0;
+
+          return {
+            ...s,
+            exercises,
+            exerciseCount: rows.length,
+            stats: {
+              totalSets: dbStats?.totalSets ?? exercises.reduce((n, ex) => n + ex.sets.length, 0),
+              volumeLbs,
+              avgRpe: dbStats?.avgRPE ?? null,
+              durationMin,
+            },
+            health,
+          };
+        }),
+      );
 
       setSessions(sessionsWithExercises);
 
@@ -411,6 +453,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
 
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       invalidateSessionsInRangeForUser(userId);
+      invalidateAnalyticsCache(userId);
       if (onSessionDeleted) {
         onSessionDeleted();
       }
@@ -486,6 +529,65 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
               />
             </TouchableOpacity>
           </View>
+
+          {session.stats ? (
+            <View style={styles.statsRow}>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>{session.stats.totalSets}</Text>
+                <Text style={styles.statPillLabel}>sets</Text>
+              </View>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>
+                  {Math.round(
+                    (profile?.use_imperial !== false
+                      ? session.stats.volumeLbs
+                      : session.stats.volumeLbs / 2.20462),
+                  )}{' '}
+                  {unitsLabel}
+                </Text>
+                <Text style={styles.statPillLabel}>volume</Text>
+              </View>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>
+                  {session.stats.avgRpe != null ? session.stats.avgRpe.toFixed(1) : '—'}
+                </Text>
+                <Text style={styles.statPillLabel}>avg RPE</Text>
+              </View>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>{session.stats.durationMin}m</Text>
+                <Text style={styles.statPillLabel}>duration</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {session.health &&
+          (session.health.activeEnergyKcal != null ||
+            session.health.avgHeartRateBpm != null) ? (
+            <View style={styles.healthCard}>
+              <View style={styles.healthHeader}>
+                <Heart size={16} color={colors.primary} />
+                <Text style={styles.healthTitle}>Apple Health</Text>
+              </View>
+              <View style={styles.healthRow}>
+                {session.health.activeEnergyKcal != null ? (
+                  <View style={styles.healthMetaRow}>
+                    <Activity size={12} color={colors.textSecondary} />
+                    <Text style={styles.healthMeta}>
+                      {Math.round(session.health.activeEnergyKcal)} kcal
+                    </Text>
+                  </View>
+                ) : null}
+                {session.health.avgHeartRateBpm != null ? (
+                  <Text style={styles.healthMeta}>
+                    Avg HR {session.health.avgHeartRateBpm} bpm
+                    {session.health.maxHeartRateBpm != null
+                      ? ` · Max ${session.health.maxHeartRateBpm}`
+                      : ''}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.exerciseSection}>
             <Text style={styles.exerciseCount}>
@@ -646,6 +748,59 @@ function createStyles(colors: ThemeColors) {
     deleteButton: {
       padding: spacing.xs,
       marginLeft: spacing.sm,
+    },
+    statsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.sm,
+      marginVertical: spacing.sm,
+    },
+    statPill: {
+      flex: 1,
+      minWidth: '22%',
+      backgroundColor: colors.background,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      alignItems: 'center',
+    },
+    statPillValue: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.bold,
+    },
+    statPillLabel: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.xs,
+      marginTop: 2,
+    },
+    healthCard: {
+      backgroundColor: colors.primarySelectedBg,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      marginBottom: spacing.sm,
+      gap: spacing.xs,
+    },
+    healthHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    healthTitle: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.semibold,
+    },
+    healthRow: {
+      gap: spacing.xs,
+    },
+    healthMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    healthMeta: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
     },
     exerciseSection: {
       gap: spacing.xs,

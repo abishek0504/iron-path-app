@@ -85,6 +85,17 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                 }
 
+                if let hr = workout.healthManager.heartRateBpm {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                        Text("\(hr) BPM")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if let exerciseEndsAt = workout.state.exerciseEndsAt {
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
                         let remaining = max(0, Int(exerciseEndsAt.timeIntervalSince(timeline.date).rounded()))
@@ -135,6 +146,17 @@ struct ContentView: View {
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(remaining == 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                }
+            }
+
+            if let hr = workout.healthManager.heartRateBpm {
+                HStack(spacing: 4) {
+                    Image(systemName: "heart.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                    Text("\(hr) BPM")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
             }
 

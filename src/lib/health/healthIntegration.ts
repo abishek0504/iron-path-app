@@ -11,7 +11,18 @@
 import { Platform } from 'react-native';
 import type { WorkoutActivityType } from '@kingstinct/react-native-healthkit';
 import { supabase } from '../supabase/client';
+import { estimateActiveEnergyKcal } from './calorieEstimator';
+import {
+  aggregateHeartRate,
+  type HeartRateSample,
+  type WorkoutHealthPayload,
+} from './workoutHealthBuffer';
+import { computeActiveDurationSec } from '../analytics/duration';
+import type { AnalyticsSetRow } from '../analytics/types';
+import { sumVolumeLbs } from '../analytics/volume';
 import { devLog, devError } from '../utils/logger';
+
+const LB_TO_KG_HEALTH = 0.45359237;
 
 export type HealthPermissionState = 'unavailable' | 'not_determined' | 'denied' | 'authorized';
 
@@ -23,10 +34,12 @@ export interface HealthAuthResult {
 
 const BODY_MASS = 'HKQuantityTypeIdentifierBodyMass' as const;
 const WORKOUT_TYPE = 'HKWorkoutTypeIdentifier' as const;
+const ACTIVE_ENERGY = 'HKQuantityTypeIdentifierActiveEnergyBurned' as const;
+const HEART_RATE = 'HKQuantityTypeIdentifierHeartRate' as const;
 
-const READ_TYPES = [BODY_MASS] as const;
+const READ_TYPES = [BODY_MASS, HEART_RATE, ACTIVE_ENERGY] as const;
 
-const WRITE_TYPES = [WORKOUT_TYPE, BODY_MASS] as const;
+const WRITE_TYPES = [WORKOUT_TYPE, BODY_MASS, ACTIVE_ENERGY, HEART_RATE] as const;
 
 /** HKWorkoutActivityTypeTraditionalStrengthTraining */
 const ACTIVITY_TRADITIONAL_STRENGTH_TRAINING = 50 as WorkoutActivityType;
@@ -73,7 +86,10 @@ function canShare(hk: HealthKitModule, type: (typeof WRITE_TYPES)[number]): bool
  * Record the last successful sync per category in the v2_health_sync ledger.
  * Best-effort: ledger failures never block the actual Health write.
  */
-async function updateSyncLedger(userId: string, type: 'workouts' | 'body_mass' | 'import') {
+async function updateSyncLedger(
+  userId: string,
+  type: 'workouts' | 'body_mass' | 'import' | 'workout_metrics' | 'workout_backfill',
+) {
   try {
     const nowIso = new Date().toISOString();
     const { data: existing } = await supabase
@@ -197,11 +213,13 @@ export async function requestAppleHealthAccess(): Promise<HealthAuthResult> {
 }
 
 /**
- * After a session is marked completed in IronPath, mirror it to Apple Health as
- * an HKWorkout (traditional strength training) and persist the HK UUID for
- * deduplication. Never throws; silently skips when access is missing.
+ * After a session is marked completed in IronPath, mirror it to Apple Health with
+ * active energy, heart rate samples, and volume metadata. Never throws.
  */
-export async function writeCompletedWorkoutToHealth(sessionId: string): Promise<void> {
+export async function writeCompletedWorkoutToHealth(
+  sessionId: string,
+  payload?: WorkoutHealthPayload | null,
+): Promise<void> {
   const hk = getHealthKit();
   if (!hk || !canShare(hk, WORKOUT_TYPE)) return;
 
@@ -211,34 +229,329 @@ export async function writeCompletedWorkoutToHealth(sessionId: string): Promise<
       .select('id, user_id, started_at, completed_at, hk_workout_uuid')
       .eq('id', sessionId)
       .maybeSingle();
-    if (error || !session || session.hk_workout_uuid) return;
+    if (error || !session) return;
+
+    const watchUuid = payload?.watchHkWorkoutUuid;
+    if (session.hk_workout_uuid && !watchUuid) return;
 
     const start = new Date(session.started_at);
     const end = session.completed_at ? new Date(session.completed_at) : new Date();
     if (!(start.getTime() < end.getTime())) return;
 
-    const workout = await hk.saveWorkoutSample(
-      ACTIVITY_TRADITIONAL_STRENGTH_TRAINING,
-      [],
-      start,
-      end,
-    );
-    if (!workout?.uuid) return;
+    const metrics = await computeSessionHealthMetrics(sessionId, session.user_id, payload);
+    if (!metrics) return;
 
-    await supabase
-      .from('v2_workout_sessions')
-      .update({ hk_workout_uuid: workout.uuid })
-      .eq('id', sessionId)
-      .is('hk_workout_uuid', null);
+    let hkWorkoutUuid = session.hk_workout_uuid ?? watchUuid ?? null;
+
+    if (!hkWorkoutUuid) {
+      const quantities = buildHealthKitQuantities(
+        payload?.heartRateSamples ?? [],
+        start,
+        end,
+        metrics.activeEnergyKcal,
+      );
+
+      const workout = await hk.saveWorkoutSample(
+        ACTIVITY_TRADITIONAL_STRENGTH_TRAINING,
+        quantities as Parameters<typeof hk.saveWorkoutSample>[1],
+        start,
+        end,
+        metrics.activeEnergyKcal > 0
+          ? { energyBurned: metrics.activeEnergyKcal }
+          : undefined,
+        {
+          HKExternalUUID: sessionId,
+          iron_path_volume_kg: metrics.totalVolumeKg,
+          iron_path_sets: metrics.totalSets,
+        },
+      );
+      hkWorkoutUuid = workout?.uuid ?? null;
+
+      if (hkWorkoutUuid) {
+        await supabase
+          .from('v2_workout_sessions')
+          .update({ hk_workout_uuid: hkWorkoutUuid })
+          .eq('id', sessionId)
+          .is('hk_workout_uuid', null);
+      }
+    } else if (!session.hk_workout_uuid && watchUuid) {
+      await supabase
+        .from('v2_workout_sessions')
+        .update({ hk_workout_uuid: watchUuid })
+        .eq('id', sessionId)
+        .is('hk_workout_uuid', null);
+    }
+
+    await persistSessionHealthMetrics(sessionId, session.user_id, metrics, hkWorkoutUuid);
+    await importWorkoutMetricsFromHealth(sessionId, session.user_id, start, end, hkWorkoutUuid);
 
     await updateSyncLedger(session.user_id, 'workouts');
+    await updateSyncLedger(session.user_id, 'workout_metrics');
 
     if (__DEV__) {
-      devLog('health-sync', { action: 'writeWorkout:saved', sessionId, hkUuid: workout.uuid });
+      devLog('health-sync', {
+        action: 'writeWorkout:saved',
+        sessionId,
+        hkUuid: hkWorkoutUuid,
+        energyKcal: metrics.activeEnergyKcal,
+        hrSamples: metrics.heartRateSampleCount,
+      });
     }
   } catch (error) {
     if (__DEV__) devError('health-sync', error, { action: 'writeWorkout', sessionId });
   }
+}
+
+type ComputedHealthMetrics = {
+  activeEnergyKcal: number;
+  energySource: 'estimated' | 'watch' | 'healthkit';
+  avgHeartRateBpm: number | null;
+  maxHeartRateBpm: number | null;
+  activeDurationSec: number;
+  totalVolumeKg: number;
+  totalSets: number;
+  heartRateSampleCount: number;
+};
+
+async function computeSessionHealthMetrics(
+  sessionId: string,
+  userId: string,
+  payload?: WorkoutHealthPayload | null,
+): Promise<ComputedHealthMetrics | null> {
+  const { data: sessionExercises } = await supabase
+    .from('v2_session_exercises')
+    .select('id')
+    .eq('session_id', sessionId);
+
+  const seIds = (sessionExercises ?? []).map((se) => se.id);
+  if (seIds.length === 0) {
+    return {
+      activeEnergyKcal: 0,
+      energySource: 'estimated',
+      avgHeartRateBpm: null,
+      maxHeartRateBpm: null,
+      activeDurationSec: 0,
+      totalVolumeKg: 0,
+      totalSets: 0,
+      heartRateSampleCount: 0,
+    };
+  }
+
+  const { data: sets } = await supabase
+    .from('v2_session_sets')
+    .select('weight, reps, rpe, rir, duration_sec, set_type, rest_sec, performed_at')
+    .in('session_exercise_id', seIds)
+    .not('performed_at', 'is', null);
+
+  const analyticsSets: AnalyticsSetRow[] = (sets ?? []).map((s) => ({
+    weight: s.weight,
+    reps: s.reps,
+    duration_sec: s.duration_sec,
+    rpe: s.rpe,
+    rir: s.rir,
+    set_type: s.set_type,
+    rest_sec: s.rest_sec,
+    performed_at: s.performed_at,
+    session_exercise_id: '',
+  }));
+
+  const volumeLbs = sumVolumeLbs(analyticsSets);
+  const workingSets = analyticsSets.filter((s) => s.set_type !== 'warmup').length;
+  const activeDurationSec = computeActiveDurationSec(analyticsSets);
+
+  const hrSamples = payload?.heartRateSamples ?? [];
+  const { avg, max } = aggregateHeartRate(hrSamples);
+  const hasWatchHr = hrSamples.length > 0;
+
+  const { data: profile } = await supabase
+    .from('v2_profiles')
+    .select('current_weight, use_imperial')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const weightKg = profile?.use_imperial
+    ? (profile?.current_weight ?? 70) * LB_TO_KG_HEALTH
+    : (profile?.current_weight ?? 70);
+
+  const activeEnergyKcal = estimateActiveEnergyKcal(weightKg, activeDurationSec);
+
+  return {
+    activeEnergyKcal,
+    energySource: hasWatchHr ? 'watch' : 'estimated',
+    avgHeartRateBpm: avg,
+    maxHeartRateBpm: max,
+    activeDurationSec,
+    totalVolumeKg: Math.round(volumeLbs * LB_TO_KG_HEALTH * 10) / 10,
+    totalSets: workingSets,
+    heartRateSampleCount: hrSamples.length,
+  };
+}
+
+function buildHealthKitQuantities(
+  heartRateSamples: HeartRateSample[],
+  start: Date,
+  end: Date,
+  energyKcal: number,
+): {
+  quantityType: string;
+  quantity: number;
+  unit: string;
+  startDate: Date;
+  endDate: Date;
+}[] {
+  const quantities: {
+    quantityType: string;
+    quantity: number;
+    unit: string;
+    startDate: Date;
+    endDate: Date;
+  }[] = [];
+
+  for (const sample of heartRateSamples) {
+    const t = new Date(sample.timestamp * 1000);
+    quantities.push({
+      quantityType: HEART_RATE,
+      quantity: sample.bpm,
+      unit: 'count/min',
+      startDate: t,
+      endDate: t,
+    });
+  }
+
+  if (energyKcal > 0) {
+    quantities.push({
+      quantityType: ACTIVE_ENERGY,
+      quantity: energyKcal,
+      unit: 'kcal',
+      startDate: start,
+      endDate: end,
+    });
+  }
+
+  return quantities;
+}
+
+async function persistSessionHealthMetrics(
+  sessionId: string,
+  userId: string,
+  metrics: ComputedHealthMetrics,
+  hkWorkoutUuid: string | null,
+): Promise<void> {
+  try {
+    await supabase.from('v2_session_health_metrics').upsert({
+      session_id: sessionId,
+      user_id: userId,
+      active_energy_kcal: metrics.activeEnergyKcal,
+      energy_source: metrics.energySource,
+      avg_heart_rate_bpm: metrics.avgHeartRateBpm,
+      max_heart_rate_bpm: metrics.maxHeartRateBpm,
+      active_duration_sec: metrics.activeDurationSec,
+      total_volume_kg: metrics.totalVolumeKg,
+      heart_rate_sample_count: metrics.heartRateSampleCount,
+      updated_at: new Date().toISOString(),
+    });
+    void hkWorkoutUuid;
+  } catch (error) {
+    if (__DEV__) devError('health-sync', error, { action: 'persistSessionHealthMetrics', sessionId });
+  }
+}
+
+async function importWorkoutMetricsFromHealth(
+  sessionId: string,
+  userId: string,
+  start: Date,
+  end: Date,
+  hkWorkoutUuid: string | null,
+): Promise<void> {
+  const hk = getHealthKit();
+  if (!hk || !hkWorkoutUuid) return;
+
+  try {
+    const samples = await hk.queryQuantitySamples(HEART_RATE, {
+      filter: { date: { startDate: start, endDate: end } },
+      unit: 'count/min',
+      limit: 500,
+    });
+
+    if (!samples?.length) return;
+
+    const bpms = samples.map((s) => s.quantity).filter((v) => v > 0);
+    if (bpms.length === 0) return;
+
+    const avg = Math.round(bpms.reduce((a, b) => a + b, 0) / bpms.length);
+    const max = Math.round(Math.max(...bpms));
+
+    await supabase
+      .from('v2_session_health_metrics')
+      .update({
+        avg_heart_rate_bpm: avg,
+        max_heart_rate_bpm: max,
+        heart_rate_sample_count: bpms.length,
+        energy_source: 'healthkit',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('session_id', sessionId)
+      .eq('user_id', userId);
+
+    if (__DEV__) {
+      devLog('health-sync', {
+        action: 'importWorkoutMetrics',
+        sessionId,
+        hrCount: bpms.length,
+      });
+    }
+  } catch (error) {
+    if (__DEV__) devError('health-sync', error, { action: 'importWorkoutMetrics', sessionId });
+  }
+}
+
+/** Backfill completed sessions missing hk_workout_uuid. */
+export async function exportUnlinkedWorkoutsToHealth(userId: string): Promise<number> {
+  const hk = getHealthKit();
+  if (!hk || !canShare(hk, WORKOUT_TYPE)) return 0;
+
+  try {
+    const { data: sessions, error } = await supabase
+      .from('v2_workout_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .is('hk_workout_uuid', null)
+      .order('completed_at', { ascending: false })
+      .limit(50);
+
+    if (error || !sessions?.length) return 0;
+
+    let exported = 0;
+    for (const s of sessions) {
+      await writeCompletedWorkoutToHealth(s.id);
+      const { data: updated } = await supabase
+        .from('v2_workout_sessions')
+        .select('hk_workout_uuid')
+        .eq('id', s.id)
+        .maybeSingle();
+      if (updated?.hk_workout_uuid) exported += 1;
+    }
+
+    if (exported > 0) {
+      await updateSyncLedger(userId, 'workout_backfill');
+    }
+
+    if (__DEV__) {
+      devLog('health-sync', { action: 'exportUnlinkedWorkouts', exported, candidates: sessions.length });
+    }
+
+    return exported;
+  } catch (error) {
+    if (__DEV__) devError('health-sync', error, { action: 'exportUnlinkedWorkouts' });
+    return 0;
+  }
+}
+
+/** Full workout analytics sync after Health connect. */
+export async function syncWorkoutAnalyticsWithHealth(userId: string): Promise<number> {
+  if (!isAppleHealthConnected()) return 0;
+  return exportUnlinkedWorkoutsToHealth(userId);
 }
 
 /**

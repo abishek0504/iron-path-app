@@ -19,7 +19,8 @@
 4. **[PRESCRIPTION_RATIONALE.md](PRESCRIPTION_RATIONALE.md)** - Research, science, and guidelines for prescription values (multipliers, rep/set bands, progression) and adding new exercises
 5. **[DATA_FLOWS.md](DATA_FLOWS.md)** - How components/queries/stores connect, user flows (HOW things connect)
 6. **[SETUP_GUIDE.md](SETUP_GUIDE.md)** - Environment setup, running the app, type generation (HOW to get started)
-7. **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - What's complete, what's TODO, known issues (WHAT state we're in)
+7. **[SUBSCRIPTION_SETUP.md](SUBSCRIPTION_SETUP.md)** - RevenueCat, App Store products, webhook, Pro paywall (HOW to enable subscriptions)
+8. **[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)** - What's complete, what's TODO, known issues (WHAT state we're in)
 
 ## Quick Reference
 
@@ -27,7 +28,8 @@
 1. Read `SYSTEM_ARCHITECTURE.md` - understand core principles
 2. Read `DATABASE_SCHEMA.md` - understand data model
 3. Follow `SETUP_GUIDE.md` - get running
-4. Review `DATA_FLOWS.md` - understand how components connect
+4. For Pro/subscriptions, see `SUBSCRIPTION_SETUP.md`
+5. Review `DATA_FLOWS.md` - understand how components connect
 
 ### For Adding Features
 1. Check `IMPLEMENTATION_STATUS.md` - see what exists
@@ -54,6 +56,7 @@
 ✅ **Algorithms**: Mathematical formulas, worked examples, edge cases  
 ✅ **Data Flows**: How queries/stores/components connect, critical user flows  
 ✅ **Setup**: Environment, dependencies, running the app  
+✅ **Subscriptions**: RevenueCat, App Store products, webhook, Pro paywall  
 ✅ **Status**: What's implemented, what's TODO, known issues  
 
 ## What This Documentation Doesn't Cover
@@ -88,6 +91,14 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 Old documentation archived in [`archive/`](archive/) with timestamps.
 
 ## Recent Updates
+
+### 2026-06-17: Tech Debt & Documentation Cleanup
+- Removed deprecated `getTopPRs()` query; app uses `getCachedTopPRs` only
+- `first_name` NOT NULL enforced at DB level (migration 20260617120000)
+- Refreshed `SYSTEM_ARCHITECTURE.md` (active workout flow, body-highlighter heatmap)
+- Extended migration lists through 20260617* in `DATABASE_SCHEMA.md` and `SETUP_GUIDE.md`
+- Added `SUBSCRIPTION_SETUP.md` to doc index; RevenueCat env vars in setup guide
+- Watch bridge NSNumber-safe parsing; `PrivacyInfo.xcprivacy` CrashData sync; ESLint in CI
 
 ### 2026-06-14: VibeSec Security Audit
 - Full security audit per VibeSec checklist; report in `AUDIT_2026-06-14_VIBESEC_SECURITY.md`

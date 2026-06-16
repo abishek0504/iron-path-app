@@ -1,6 +1,6 @@
 # Implementation Status
 
-**Last Updated**: 2026-06-11  
+**Last Updated**: 2026-06-17  
 
 ## Summary
 
@@ -25,7 +25,7 @@
 - ✅ Privacy manifest wired via `expo.ios.privacyManifests` in app.json
 - ✅ Supabase security advisors remediated (search_path pins, trigger fn EXECUTE revokes, avatars bucket policies, anon table grants revoked)
 - ✅ Exercise library expanded to **388 master entries** (340 strength + 48 stretches) via CSV import (`supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`, migration 20260611120000); `is_stretch` column added; `adductors` muscle key added (29 canonical muscles); rule-based prescriptions seeded for all new exercises (1,164 active); AI allow-list refreshed to 340 non-stretch exercises
-- ✅ AI generation supports a `stretchCount` constraint server-side: `generate-workout` carries a separate stretch catalog and appends stretch/mobility work per session (client plumbing in `generateWorkoutDay.ts`, default 0 — no planner UI yet)
+- ✅ AI generation supports a `stretchCount` constraint: `generate-workout` appends stretch/mobility work per session; planner opens `GenerateDayForm` with a 0–5 stretch picker (defaults to 0)
 - ✅ `update-muscle-freshness` excludes warm-up sets from stress (`.neq('set_type','warmup')`, deployed v13); warm-up `set_type` now preserved on tap/watch set completion, so the PR-trigger warmup race is fixed
 - 🟡 Bundled exercise images: 45 illustrations in `assets/exercises/`, mapped via `src/lib/exerciseImages.ts` (no batch generation pipeline)
 
@@ -95,7 +95,7 @@
 | Generate button UI | ✅ Complete | Planner |
 | Loading state | ✅ Complete | Spinner while generating |
 | Error handling | ✅ Complete | Returns empty on error |
-| Stretch append (`stretchCount`) | ⚠️ Partial | Edge Function validates 0–5 stretches/session from stretch catalog; client always sends 0 (no planner UI yet) |
+| Stretch append (`stretchCount`) | ✅ Complete | Edge Function validates 0–5 stretches/session; planner UI in `GenerateDayForm.tsx` (0–5 picker, default 0) |
 
 ### Workout Execution
 
@@ -281,7 +281,7 @@
 - ✅ Added `adductors` canonical muscle key + heatmap slug mapping (20260611120002; `muscleHeatmapSlugs.ts`)
 - ✅ Seeded rule-based prescriptions for all new exercises — stretches get timed holds, strength gets experience-banded reps (20260611120003; 1,164 active prescriptions live)
 - ✅ Refreshed AI allow-list to all 340 non-stretch exercises with density-based priority (20260611120004)
-- ✅ Stretch-aware AI generation: `generate-workout` accepts `stretchCount` (0–5) and appends stretches from a dedicated stretch catalog (deployed v14); client plumbing defaults to 0
+- ✅ Stretch-aware AI generation: `generate-workout` accepts `stretchCount` (0–5) and appends stretches from a dedicated stretch catalog (deployed v14); planner UI in `GenerateDayForm` defaults to 0; user can select 0–5 per generation
 - ✅ Bundled exercise images: 45 JPGs in `assets/exercises/` wired through `src/lib/exerciseImages.ts` (batch pipeline removed 2026-06-14)
 - ✅ `update-muscle-freshness` excludes warm-up sets from stress (deployed v13)
 - ✅ Warm-up `set_type` preserved when completing sets via tap/watch — fixes the warmup PR race
@@ -384,7 +384,7 @@
 ### Phase 4: Advanced Features
 1. ⚠️ Implement derived cache rebuild jobs (daily stress still on-demand)
 2. ✅ PR tracking and history (`app/prs.tsx`, dashboard Top PRs, warm-ups excluded)
-3. ⚠️ Add workout analytics
+3. ⚠️ Add workout analytics — **In progress 2026-06-17**: Progress tab Trends/Exercises segments, `src/lib/analytics/*`, `analytics.ts` queries, exercise detail screen, session health metrics.
 4. ⚠️ Add exercise substitution suggestions
 5. ⚠️ Add workout templates library
 

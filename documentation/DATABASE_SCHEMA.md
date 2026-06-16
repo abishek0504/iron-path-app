@@ -53,6 +53,14 @@ Apply migrations in this exact order:
 43. **20260611120002_add_adductors_muscle_key.sql** - Adds 'adductors' as a 29th canonical muscle key (lower_body_front)
 44. **20260611120003_seed_prescriptions_for_new_exercises.sql** - Rule-based prescriptions for new exercises (stretch timed holds, timed strength, rep bands tiered by density_score)
 45. **20260611120004_refresh_ai_recommended_exercises.sql** - Refreshes AI allow-list: all non-stretch exercises with mode-matching prescriptions; priority by density_score; stretches deactivated
+46. **20260611200000_pr_trigger_exclude_stretches.sql** - PR trigger ignores stretch sets (`is_stretch = true` on linked exercise)
+47. **20260612120000_add_subscription_fields_to_v2_profiles.sql** - Adds `subscription_tier`, `subscription_expires_at`, `revenuecat_app_user_id` to v2_profiles
+48. **20260613000000_create_workout_presets.sql** - Workout presets table + slots + RLS
+49. **20260614080000_vibesec_security_hardening.sql** - VibeSec security hardening (subscription INSERT protection, soft-delete triggers, support message length)
+50. **20260614120000_deferred_security_fixes.sql** - Deferred avatar storage policy fixes
+51. **20260616120000_ai_generation_jobs.sql** - `v2_ai_generation_jobs` idempotency table
+52. **20260616120100_commit_ai_generation_rpc.sql** - `commit_ai_generation` + `purge_expired_ai_generation_jobs` RPCs
+53. **20260617120000_v2_profiles_first_name_not_null.sql** - Backfills blank `first_name` and enforces NOT NULL
 
 ## Table Relationships
 
@@ -73,6 +81,9 @@ v2_profiles (user settings, soft-delete markers)
 v2_workout_templates (planning)
   └→ v2_template_days
       └→ v2_template_slots
+
+v2_workout_presets (saved workout bundles)
+  └→ v2_workout_preset_slots
 
 v2_workout_sessions (performed truth)
   └→ v2_session_exercises
@@ -239,11 +250,12 @@ v2_support (Help & Support submissions)
 
 **Key Fields:**
 - `id` (PRIMARY KEY, FK to auth.users)
-- `first_name`, `last_name` (split from full_name in Patch)
+- `first_name`, `last_name` (split from full_name in Patch; `first_name` NOT NULL enforced in 20260617120000)
 - `date_of_birth`
 - `experience_level`, `days_per_week`, `equipment_access[]`, `workout_days[]`
 - `use_imperial`: Boolean for unit system
 - `current_weight`, `goal_weight`, `height`, `gender`, `goal`, `preferred_training_style`, `avatar_url` (all nullable)
+- `subscription_tier` (NOT NULL DEFAULT 'free'), `subscription_expires_at`, `revenuecat_app_user_id` (20260612120000; synced from RevenueCat webhook)
 - `deleted_at`, `scheduled_purge_at`: Account soft delete (20260508000001). delete-account sets both (purge = now + 30d); Restore during the grace window sets both back to NULL. A pg_cron job (`purge-soft-deleted-accounts`, daily 03:00 UTC, 20260609000002) hard-deletes `auth.users` rows past `scheduled_purge_at`; every v2_* table cascades. Partial index `idx_v2_profiles_scheduled_purge_at` supports the purge query.
 
 **Required for Onboarding:**
@@ -257,6 +269,7 @@ v2_support (Help & Support submissions)
 - Removed `full_name`
 - Added `first_name` (required), `last_name` (optional)
 - Migration splits existing full_name on first space
+- NOT NULL on `first_name` enforced in migration 20260617120000 (legacy NULL/blank rows backfilled to `'User'`)
 
 ### Planning Layer
 

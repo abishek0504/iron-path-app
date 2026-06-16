@@ -1,10 +1,4 @@
 /**
- * IronPath watchOS companion (mirror app).
- *
- * Pure SwiftUI — React Native cannot run on watchOS. The watch mirrors the
- * active workout pushed from the phone over WCSession and sends set-completion
- * taps back; the phone remains the canonical writer to Supabase.
- *
  * @type {import('@bacons/apple-targets/app.plugin').Config}
  */
 module.exports = {
@@ -16,5 +10,14 @@ module.exports = {
   icon: '../../assets/icon.png',
   colors: {
     $accent: '#a3e635',
+  },
+  entitlements: {
+    'com.apple.developer.healthkit': true,
+  },
+  infoPlist: {
+    NSHealthShareUsageDescription:
+      'IronPath reads heart rate during workouts to show live effort on your watch and sync to Apple Health.',
+    NSHealthUpdateUsageDescription:
+      'IronPath writes strength training workouts and heart rate to Apple Health when you complete a session.',
   },
 };

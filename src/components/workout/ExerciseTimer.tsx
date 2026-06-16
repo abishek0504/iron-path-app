@@ -66,6 +66,7 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
     onStarted?.();
     setPhase('hold');
     holdCountdown.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- holdCountdown.start is the stable hook API
   }, [durationSec, holdCountdown.start, onStarted]);
 
   const prepCountdown = useCountdown({

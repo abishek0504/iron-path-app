@@ -1,8 +1,5 @@
 /**
- * Progress tab
- * Shows weekly and monthly calendar views with completed workout sessions
- *
- * NOTE: Grouping is by completed_at date (performed truth), not day_name
+ * Progress tab — calendar, analytics trends, and exercise rankings.
  */
 
 import React, { useCallback, useRef, useState, useMemo } from 'react';
@@ -20,9 +17,18 @@ import type { WorkoutSession } from '../../src/lib/supabase/queries/workouts';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { useUIStore } from '../../src/stores/uiStore';
 import { ProgressCalendar } from '../../src/components/progress/ProgressCalendar';
+import { AnalyticsTrendsPanel } from '../../src/components/progress/AnalyticsTrendsPanel';
+import { ExerciseAnalyticsList } from '../../src/components/progress/ExerciseAnalyticsList';
 import { useModal } from '../../src/hooks/useModal';
 
-type ViewMode = 'week' | 'month';
+type CalendarMode = 'week' | 'month';
+type ProgressSegment = 'calendar' | 'trends' | 'exercises';
+
+const SEGMENTS: { key: ProgressSegment; label: string }[] = [
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'trends', label: 'Trends' },
+  { key: 'exercises', label: 'Exercises' },
+];
 
 export default function ProgressTab() {
   const insets = useSafeAreaInsets();
@@ -33,11 +39,12 @@ export default function ProgressTab() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('week');
+  const [segment, setSegment] = useState<ProgressSegment>('calendar');
+  const [viewMode, setViewMode] = useState<CalendarMode>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [sessionsByDate, setSessionsByDate] = useState<Map<string, { count: number }>>(
-    new Map()
+    new Map(),
   );
   const lastFocusLoadRef = useRef(0);
   const FOCUS_RELOAD_THROTTLE_MS = 4000;
@@ -49,7 +56,7 @@ export default function ProgressTab() {
     return `${year}-${month}-${day}`;
   };
 
-  const getDateRange = useCallback((date: Date, mode: ViewMode): [Date, Date] => {
+  const getDateRange = useCallback((date: Date, mode: CalendarMode): [Date, Date] => {
     if (mode === 'week') {
       const start = new Date(date);
       start.setHours(0, 0, 0, 0);
@@ -61,23 +68,26 @@ export default function ProgressTab() {
       end.setHours(23, 59, 59, 999);
 
       return [start, end];
-    } else {
-      const year = date.getFullYear();
-      const month = date.getMonth();
-      const firstDay = new Date(year, month, 1);
-      const startDate = new Date(firstDay);
-      startDate.setDate(startDate.getDate() - startDate.getDay());
-      startDate.setHours(0, 0, 0, 0);
-
-      const endDate = new Date(startDate);
-      endDate.setDate(startDate.getDate() + 41);
-      endDate.setHours(23, 59, 59, 999);
-
-      return [startDate, endDate];
     }
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const startDate = new Date(firstDay);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+    startDate.setHours(0, 0, 0, 0);
+
+    const endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 41);
+    endDate.setHours(23, 59, 59, 999);
+
+    return [startDate, endDate];
   }, []);
 
   const load = useCallback(async () => {
+    if (segment !== 'calendar') {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const {
@@ -95,7 +105,7 @@ export default function ProgressTab() {
       const sessions: WorkoutSession[] = await getSessionsInRangeCached(
         userId,
         start.toISOString(),
-        end.toISOString()
+        end.toISOString(),
       );
 
       const dateMap = new Map<string, { count: number }>();
@@ -114,10 +124,7 @@ export default function ProgressTab() {
         devLog('progress', {
           action: 'load_calendar_done',
           viewMode,
-          dateRange: {
-            start: start.toISOString(),
-            end: end.toISOString(),
-          },
+          dateRange: { start: start.toISOString(), end: end.toISOString() },
           sessionCount: sessions.length,
           datesWithSessions: dateMap.size,
         });
@@ -130,7 +137,7 @@ export default function ProgressTab() {
     } finally {
       setLoading(false);
     }
-  }, [currentDate, viewMode, getDateRange, showToast, router]);
+  }, [currentDate, viewMode, getDateRange, showToast, router, segment]);
 
   useFocusEffect(
     useCallback(() => {
@@ -138,7 +145,7 @@ export default function ProgressTab() {
       if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
       lastFocusLoadRef.current = now;
       load();
-    }, [load])
+    }, [load]),
   );
 
   const handleRefresh = useCallback(async () => {
@@ -154,10 +161,9 @@ export default function ProgressTab() {
 
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
-    openSheet('sessionDetail', { 
+    openSheet('sessionDetail', {
       selectedDate: date,
       onSessionDeleted: () => {
-        // Reload calendar after deletion
         load();
       },
     });
@@ -169,9 +175,7 @@ export default function ProgressTab() {
       newDate.setDate(newDate.getDate() - 7);
       setCurrentDate(newDate);
     } else {
-      const year = newDate.getFullYear();
-      const month = newDate.getMonth();
-      setCurrentDate(new Date(year, month - 1, 1));
+      setCurrentDate(new Date(newDate.getFullYear(), newDate.getMonth() - 1, 1));
     }
   };
 
@@ -181,20 +185,16 @@ export default function ProgressTab() {
       newDate.setDate(newDate.getDate() + 7);
       setCurrentDate(newDate);
     } else {
-      const year = newDate.getFullYear();
-      const month = newDate.getMonth();
-      setCurrentDate(new Date(year, month + 1, 1));
+      setCurrentDate(new Date(newDate.getFullYear(), newDate.getMonth() + 1, 1));
     }
   };
 
-  const handleViewModeChange = (mode: ViewMode) => {
-    setViewMode(mode);
-  };
+  const showCalendarLoading = segment === 'calendar' && loading;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Progress" tabId="progress" />
-      {loading ? (
+      {showCalendarLoading ? (
         <LoadingScreen
           message="Loading progress..."
           style={styles.loadingContainer}
@@ -216,130 +216,179 @@ export default function ProgressTab() {
             />
           }
         >
-          <View style={styles.controls}>
-            <View style={styles.viewToggle}>
+          <View style={styles.segmentRow}>
+            {SEGMENTS.map((s) => (
               <Pressable
-                style={[styles.toggleChip, viewMode === 'week' && styles.toggleChipActive]}
-                onPress={() => handleViewModeChange('week')}
+                key={s.key}
+                style={[styles.segmentChip, segment === s.key && styles.segmentChipActive]}
+                onPress={() => setSegment(s.key)}
               >
                 <Text
                   style={[
-                    styles.toggleChipText,
-                    viewMode === 'week' && styles.toggleChipTextActive,
+                    styles.segmentText,
+                    segment === s.key && styles.segmentTextActive,
                   ]}
                 >
-                  Week
+                  {s.label}
                 </Text>
               </Pressable>
-              <Pressable
-                style={[styles.toggleChip, viewMode === 'month' && styles.toggleChipActive]}
-                onPress={() => handleViewModeChange('month')}
-              >
-                <Text
-                  style={[
-                    styles.toggleChipText,
-                    viewMode === 'month' && styles.toggleChipTextActive,
-                  ]}
-                >
-                  Month
-                </Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.navigation}>
-              <Pressable style={styles.navButton} onPress={handlePrevious}>
-                <ChevronLeft size={20} color={colors.textPrimary} />
-              </Pressable>
-              <Pressable style={styles.navButton} onPress={handleNext}>
-                <ChevronRight size={20} color={colors.textPrimary} />
-              </Pressable>
-            </View>
+            ))}
           </View>
 
-          <View style={styles.card}>
-            <ProgressCalendar
-              viewMode={viewMode}
-              currentDate={currentDate}
-              sessionsByDate={sessionsByDate}
-              onDateSelect={handleDateSelect}
-              selectedDate={selectedDate}
-            />
-          </View>
+          {segment === 'calendar' ? (
+            <>
+              <View style={styles.controls}>
+                <View style={styles.viewToggle}>
+                  <Pressable
+                    style={[styles.toggleChip, viewMode === 'week' && styles.toggleChipActive]}
+                    onPress={() => setViewMode('week')}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleChipText,
+                        viewMode === 'week' && styles.toggleChipTextActive,
+                      ]}
+                    >
+                      Week
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toggleChip, viewMode === 'month' && styles.toggleChipActive]}
+                    onPress={() => setViewMode('month')}
+                  >
+                    <Text
+                      style={[
+                        styles.toggleChipText,
+                        viewMode === 'month' && styles.toggleChipTextActive,
+                      ]}
+                    >
+                      Month
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <View style={styles.navigation}>
+                  <Pressable style={styles.navButton} onPress={handlePrevious}>
+                    <ChevronLeft size={20} color={colors.textPrimary} />
+                  </Pressable>
+                  <Pressable style={styles.navButton} onPress={handleNext}>
+                    <ChevronRight size={20} color={colors.textPrimary} />
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.card}>
+                <ProgressCalendar
+                  viewMode={viewMode}
+                  currentDate={currentDate}
+                  sessionsByDate={sessionsByDate}
+                  onDateSelect={handleDateSelect}
+                  selectedDate={selectedDate}
+                />
+              </View>
+            </>
+          ) : null}
+
+          {segment === 'trends' ? <AnalyticsTrendsPanel granularity="week" /> : null}
+          {segment === 'exercises' ? <ExerciseAnalyticsList /> : null}
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
-function createStyles(colors: ThemeColors) { return StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-  },
-  content: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  controls: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  viewToggle: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  toggleChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.card,
-  },
-  toggleChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primarySelectedBg,
-  },
-  toggleChipText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-  },
-  toggleChipTextActive: {
-    color: colors.primary,
-    fontWeight: typography.weights.semibold,
-  },
-  navigation: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  navButton: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    padding: spacing.md,
-  },
-  }); }
-
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+    },
+    content: {
+      padding: spacing.lg,
+      gap: spacing.md,
+    },
+    segmentRow: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    segmentChip: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+    },
+    segmentChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySelectedBg,
+    },
+    segmentText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+    segmentTextActive: {
+      color: colors.primary,
+      fontWeight: typography.weights.semibold,
+    },
+    controls: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    viewToggle: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    toggleChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      backgroundColor: colors.card,
+    },
+    toggleChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySelectedBg,
+    },
+    toggleChipText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.medium,
+    },
+    toggleChipTextActive: {
+      color: colors.primary,
+      fontWeight: typography.weights.semibold,
+    },
+    navigation: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+    },
+    navButton: {
+      width: 36,
+      height: 36,
+      borderRadius: borderRadius.md,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.cardBorder,
+      padding: spacing.md,
+    },
+  });
+}

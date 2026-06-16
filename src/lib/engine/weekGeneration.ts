@@ -219,7 +219,7 @@ export async function generateWeekForTemplate(
   userId: string,
   profile: UserProfile | null,
   options?: { sessionsPerDay?: number; dayIndexOnly?: number }
-): Promise<string[] | string[][] | Array<Array<string[]>>> {
+): Promise<string[] | string[][] | string[][][]> {
   const sessionsPerDay = Math.max(1, Math.min(6, options?.sessionsPerDay ?? 1));
   const dayIndexOnly = options?.dayIndexOnly;
 
@@ -310,7 +310,7 @@ export async function generateWeekForTemplate(
     const profiles = new Map<string, ExerciseStressProfile>();
     const excluded: string[] = [];
     /** Exercises excluded due to missing prescription — we fail fast to surface data issues. */
-    const missingPrescription: Array<{ exerciseId: string; name: string; mode: 'reps' | 'timed' }> = [];
+    const missingPrescription: { exerciseId: string; name: string; mode: 'reps' | 'timed' }[] = [];
 
     for (const row of aiExercises) {
       const exerciseId = row.exercise_id;
@@ -443,7 +443,7 @@ export async function generateWeekForTemplate(
       return result;
     }
 
-    const resultPerDay: Array<Array<string[]>> = [];
+    const resultPerDay: string[][][] = [];
     for (const dayIndex of dayIndices) {
       const daySessions: string[][] = [];
       for (let sessionIndex = 0; sessionIndex < sessionsPerDay; sessionIndex++) {

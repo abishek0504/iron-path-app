@@ -92,7 +92,7 @@ export default function HelpSupportScreen() {
       if (error) throw error;
       showToast('Message sent. We\'ll get back to you soon.', 'success');
       handleClose();
-    } catch (e) {
+    } catch {
       showToast('Failed to send message', 'error');
     } finally {
       setSending(false);

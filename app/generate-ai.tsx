@@ -227,6 +227,7 @@ export default function GenerateAiScreen() {
     profile,
     router,
     toast,
+    constraints,
   ]);
 
   return (

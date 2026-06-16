@@ -114,6 +114,10 @@ export default function RootLayout() {
           name="weight-history"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
+        <Stack.Screen
+          name="analytics/exercise/[id]"
+          options={{ gestureEnabled: true, animation: 'slide_from_right' }}
+        />
       </Stack>
 
       {/* Global UI components */}

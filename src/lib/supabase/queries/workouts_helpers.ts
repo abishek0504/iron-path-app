@@ -381,8 +381,8 @@ export async function setSessionSupersetGroup(
 }
 
 export interface SmartRefreshPlan {
-  additions: Array<{ name: string; exercise_id?: string; custom_exercise_id?: string; sort_order: number }>;
-  removals: Array<{ session_exercise_id: string; name: string }>;
+  additions: { name: string; exercise_id?: string; custom_exercise_id?: string; sort_order: number }[];
+  removals: { session_exercise_id: string; name: string }[];
   hasAdjustments: boolean;
 }
 

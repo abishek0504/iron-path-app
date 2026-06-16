@@ -2,7 +2,7 @@
 
 **Purpose**: Get the project running from scratch.
 
-**Last Updated**: 2026-06-11
+**Last Updated**: 2026-06-17
 
 ## Prerequisites
 
@@ -49,6 +49,12 @@ EXPO_PUBLIC_SUPABASE_REDIRECT_URL=http://localhost:8081/auth/callback
 
 # Optional: Sentry crash reporting (production builds; set via EAS env)
 EXPO_PUBLIC_SENTRY_DSN=your-sentry-dsn
+
+# RevenueCat (iOS) — required for Pro / AI generation paywall
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_your_ios_public_key_here
+
+# Android (when shipping Play Store builds)
+# EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=goog_your_android_public_key_here
 ```
 
 **Get Supabase credentials:**
@@ -59,6 +65,10 @@ EXPO_PUBLIC_SENTRY_DSN=your-sentry-dsn
 5. Paste into `.env` file
 
 **⚠️ Never commit `.env` file** - Add to `.gitignore`
+
+### Subscriptions (optional for local dev, required for AI Pro)
+
+IronPath Pro gates AI workout generation. For App Store Connect products, RevenueCat dashboard setup, webhook deploy, and EAS env configuration, see **[SUBSCRIPTION_SETUP.md](SUBSCRIPTION_SETUP.md)**.
 
 ### 4. Setup Supabase Database
 
@@ -87,8 +97,8 @@ npx supabase db push
 2. Copy/paste **all** migration files from `supabase/migrations/` in filename (chronological) order, starting with:
    - `20240101000000_create_v2_tables.sql`
    - `20240101000001_create_v2_rls_policies.sql`
-   - ...through the latest `20260611*` exercise-import migrations
-3. Run each migration (there are 40+; the timestamp prefix defines the order)
+   - ...through the latest migration in `supabase/migrations/` (currently `20260617*`; see full ordered list in [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md))
+3. Run each migration (there are 50+; the timestamp prefix defines the order)
 
 ### 5. Seed Required Data
 
@@ -114,15 +124,18 @@ The app calls Supabase Edge Functions in `supabase/functions/`:
 - `generate-workout` — AI workout generation (requires `OPENAI_API_KEY` secret; optional `OPENAI_MODEL`)
 - `update-muscle-freshness` — recomputes muscle freshness/stress caches
 - `delete-account` — account soft-delete flow
+- `revenuecat-webhook` — syncs subscription tier from RevenueCat (requires `REVENUECAT_WEBHOOK_SECRET`)
 
 ```bash
 # Set secrets once
 npx supabase secrets set OPENAI_API_KEY=sk-...
+npx supabase secrets set REVENUECAT_WEBHOOK_SECRET=your-webhook-secret
 
 # Deploy all functions
 npx supabase functions deploy generate-workout
 npx supabase functions deploy update-muscle-freshness
 npx supabase functions deploy delete-account
+npx supabase functions deploy revenuecat-webhook --no-verify-jwt
 ```
 
 **AI generation reliability & cost monitoring**
@@ -264,6 +277,7 @@ iron-path-app/
 │   ├── ALGORITHMS.md
 │   ├── DATA_FLOWS.md
 │   ├── SETUP_GUIDE.md (this file)
+│   ├── SUBSCRIPTION_SETUP.md
 │   └── IMPLEMENTATION_STATUS.md
 │
 ├── .env                  # Environment variables (DO NOT COMMIT)

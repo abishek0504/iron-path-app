@@ -12,7 +12,7 @@ import { View, Text, StyleSheet, Pressable, Animated } from 'react-native';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { useFocusEffect } from 'expo-router';
 import { Info } from 'lucide-react-native';
-import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
+import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { BodyHeatmap } from '../visualizations/BodyHeatmap';
 import { devError, devLog } from '../../lib/utils/logger';

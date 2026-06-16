@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, ArrowDown, ArrowUp, CheckCircle, ChevronRight, Info, Link2, RefreshCcw, Repeat2, MoreVertical, Plus, Trash2, XCircle, ListOrdered } from 'lucide-react-native';
+import { ArrowLeft, ArrowDown, ArrowUp, CheckCircle, ChevronRight, Heart, Info, Link2, RefreshCcw, Repeat2, MoreVertical, Plus, Trash2, XCircle, ListOrdered } from 'lucide-react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../../src/lib/utils/theme';
 import { useTheme } from '../../../src/lib/utils/ThemeContext';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
@@ -72,7 +72,14 @@ import {
   updateWorkoutContext,
   clearWorkoutContext,
   addSetCompletedListener,
+  addHeartRateListener,
+  addWorkoutEndedListener,
 } from '../../../modules/watch-connectivity';
+import {
+  appendHeartRateSample,
+  setWatchHkWorkoutUuid,
+  clearWorkoutHealthBuffer,
+} from '../../../src/lib/health/workoutHealthBuffer';
 import {
   resolveRestSec,
   getSupersetMembers,
@@ -160,7 +167,7 @@ export default function ActiveWorkoutScreen() {
 
   // Reorder exercises modal
   const [showReorderModal, setShowReorderModal] = useState(false);
-  const [reorderDraft, setReorderDraft] = useState<Array<{ id: string; name: string }>>([]);
+  const [reorderDraft, setReorderDraft] = useState<{ id: string; name: string }[]>([]);
   const [isSavingReorder, setIsSavingReorder] = useState(false);
 
   // Exercise info modal
@@ -177,6 +184,7 @@ export default function ActiveWorkoutScreen() {
   const [refreshPlan, setRefreshPlan] = useState<SmartRefreshPlan | null>(null);
   const [isApplyingRefresh, setIsApplyingRefresh] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [liveHeartRateBpm, setLiveHeartRateBpm] = useState<number | null>(null);
 
   // Workout overflow menu (Add exercise / Remove current exercise / Abandon workout)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
@@ -190,6 +198,7 @@ export default function ActiveWorkoutScreen() {
     if (userId) {
       loadActiveSession();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadActiveSession is stable for session bootstrap
   }, [userId, params.sessionId]);
 
   // Load weight suggestion when exercise changes
@@ -197,6 +206,7 @@ export default function ActiveWorkoutScreen() {
     if (exercises.length > 0 && currentExerciseIndex < exercises.length) {
       loadWeightSuggestion();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadWeightSuggestion tracks exercise index only
   }, [currentExerciseIndex, exercises]);
 
   // Load previous performance when the exercise identity changes
@@ -214,6 +224,7 @@ export default function ActiveWorkoutScreen() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch when active exercise identity changes
   }, [currentExerciseIndex, exercises[currentExerciseIndex]?.id, userId]);
 
   // --- Apple Watch mirror ---------------------------------------------------
@@ -292,12 +303,40 @@ export default function ActiveWorkoutScreen() {
   }, []);
 
   useEffect(() => {
+    const unsubHr = addHeartRateListener((event) => {
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId || event.sessionId !== activeSessionId) return;
+      appendHeartRateSample(activeSessionId, event.bpm, event.timestamp);
+      setLiveHeartRateBpm(event.bpm);
+    });
+
+    const unsubEnded = addWorkoutEndedListener((event) => {
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId || event.sessionId !== activeSessionId) return;
+      setWatchHkWorkoutUuid(activeSessionId, event.hkWorkoutUuid);
+      if (__DEV__) {
+        devLog('workout-active', {
+          action: 'watch_workout_ended',
+          hkWorkoutUuid: event.hkWorkoutUuid,
+        });
+      }
+    });
+
+    return () => {
+      unsubHr();
+      unsubEnded();
+    };
+  }, []);
+
+  const executionSetIndex = workoutPhase.type === 'execution' ? workoutPhase.setIndex : -1;
+
+  useEffect(() => {
     if (workoutPhase.type !== 'execution') {
       setExerciseTimerEnd(null);
       return;
     }
     setExerciseTimerEnd(null);
-  }, [currentExerciseIndex, workoutPhase.type === 'execution' ? workoutPhase.setIndex : -1]);
+  }, [currentExerciseIndex, executionSetIndex, workoutPhase.type]);
 
   useEffect(() => {
     if (loading || !sessionId) return;
@@ -891,6 +930,7 @@ export default function ActiveWorkoutScreen() {
       }
       useUIStore.getState().setWorkoutNeedsRefetch(true);
       void clearWorkoutContext();
+      if (sessionId) clearWorkoutHealthBuffer(sessionId);
       hapticSuccess();
       toast.success('Workout completed!');
       tryRandomPaywallFromOutside('finish_workout');
@@ -1199,6 +1239,8 @@ export default function ActiveWorkoutScreen() {
         return;
       }
       if (userId) invalidateSessionsInRangeForUser(userId);
+      void clearWorkoutContext();
+      clearWorkoutHealthBuffer(sessionId);
       setShowAbandonConfirm(false);
       toast.success('Workout abandoned');
       goBack();
@@ -1212,7 +1254,7 @@ export default function ActiveWorkoutScreen() {
     setShowOverflowMenu(false);
     modal.openSheet('exercisePicker', {
       multiSelect: true,
-      onSelectMultiple: (selected: Array<{ id: string }>) => {
+      onSelectMultiple: (selected: { id: string }[]) => {
         const ids = (selected || []).map((e) => e.id).filter(Boolean);
         if (ids.length > 0) {
           void handleAddExercisesToSession(ids);
@@ -1256,7 +1298,15 @@ export default function ActiveWorkoutScreen() {
         >
           <ArrowLeft size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Active Workout</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Active Workout</Text>
+          {liveHeartRateBpm != null ? (
+            <View style={styles.heartRateBadge}>
+              <Heart size={12} color={colors.error} fill={colors.error} />
+              <Text style={styles.heartRateText}>{liveHeartRateBpm} BPM</Text>
+            </View>
+          ) : null}
+        </View>
         <View style={styles.headerActions}>
           {(() => {
             const hasDivergence =
@@ -1959,6 +2009,21 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.semibold,
     color: colors.textPrimary,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  heartRateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  heartRateText: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    fontWeight: typography.weights.medium,
   },
   headerSpacer: {
     width: 40,

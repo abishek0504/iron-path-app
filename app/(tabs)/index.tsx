@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Modal, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, Modal, RefreshControl } from 'react-native';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -199,9 +199,9 @@ export default function WorkoutTab() {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [activeTemplate, setActiveTemplate] = useState<any>(null);
-  const [templateDays, setTemplateDays] = useState<Array<{ day: { day_name: string }; slots: TemplateSlot[] }>>([]);
+  const [templateDays, setTemplateDays] = useState<{ day: { day_name: string }; slots: TemplateSlot[] }[]>([]);
   const [selectedPlanDayName, setSelectedPlanDayName] = useState<string>(getTodayDayName());
-  const [selectedDayExercises, setSelectedDayExercises] = useState<Array<{ id: string; name: string; isTodayOnly?: boolean }>>([]);
+  const [selectedDayExercises, setSelectedDayExercises] = useState<{ id: string; name: string; isTodayOnly?: boolean }[]>([]);
   const [currentDay, setCurrentDay] = useState<string>('');
   const [hasActiveWorkout, setHasActiveWorkout] = useState<boolean>(false);
   const [isWorkoutCompleted, setIsWorkoutCompleted] = useState<boolean>(false);
@@ -209,7 +209,6 @@ export default function WorkoutTab() {
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState<boolean>(false);
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
-  const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
   const [sessionsToday, setSessionsToday] = useState<WorkoutSession[]>([]);
   const [selectedWorkoutIndex, setSelectedWorkoutIndex] = useState<number>(0);
   const [isStartingWorkout, setIsStartingWorkout] = useState(false);
@@ -357,7 +356,7 @@ export default function WorkoutTab() {
 
       // When viewing a specific session: always show only that session's exercises (no template mix).
       // When no session exists for today: show template for selected day so user can Start and create a session.
-      let exercisesToShow: Array<{ id: string; name: string }> = [];
+      let exercisesToShow: { id: string; name: string }[] = [];
       const selectedDay = sortedDays.find(matchPlanDay);
 
       if (viewingSession) {
@@ -390,7 +389,6 @@ export default function WorkoutTab() {
             const key = se.exercise_id || se.custom_exercise_id;
             if (key) namesMap.set(se.id, nameByExerciseId.get(key) ?? 'Unknown Exercise');
           }
-          setExerciseNames(namesMap);
           const templateCountByExercise = new Map<string, number>();
           if (selectedDay) {
             for (const s of selectedDay.slots) {
@@ -406,7 +404,7 @@ export default function WorkoutTab() {
               .select('id, session_id, exercise_id, custom_exercise_id, sort_order')
               .in('session_id', allSessionIds)
               .order('sort_order', { ascending: true });
-            const bySession = new Map<string, Array<{ id: string; exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }>>();
+            const bySession = new Map<string, { id: string; exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }[]>();
             for (const se of allSessionExercises || []) {
               const sid = se.session_id as string;
               if (!bySession.has(sid)) bySession.set(sid, []);
@@ -447,7 +445,7 @@ export default function WorkoutTab() {
             });
           }
         } else {
-          setExerciseNames(new Map());
+          exercisesToShow = [];
         }
       } else if (selectedDay) {
         // No sessions for today: show template for selected day so user can Start and create a session
@@ -470,7 +468,6 @@ export default function WorkoutTab() {
           name: namesMap.get(slot.id) ?? 'Unknown Exercise',
           isTodayOnly: false,
         }));
-        setExerciseNames(namesMap);
         if (__DEV__ && selectedDay.slots.length > 0) {
           devLog('workout-tab', {
             action: 'loadTodayWorkout_template_loaded',
@@ -684,7 +681,7 @@ export default function WorkoutTab() {
         existingSession.day_name === selectedPlanDayName;
 
       // Collect Today Only from existing session (exercises not in template) so we preserve them when replacing
-      let todayOnlyFromExisting: Array<{ exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }> = [];
+      let todayOnlyFromExisting: { exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }[] = [];
       if (existingIsToday && existingSession) {
         const { data: existingSes } = await supabase
           .from('v2_session_exercises')
@@ -735,7 +732,7 @@ export default function WorkoutTab() {
         return;
       }
 
-      const sessionExercises: Array<{ id: string; exercise_id?: string; custom_exercise_id?: string }> = [];
+      const sessionExercises: { id: string; exercise_id?: string; custom_exercise_id?: string }[] = [];
       const targetsMap = new Map<
         string,
         { sets: number; reps?: number; duration_sec?: number; weight?: number }

@@ -3,7 +3,7 @@
  * Shared route reachable from all tabs via Settings bottom sheet.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   LayoutAnimation,
@@ -178,13 +178,7 @@ export default function EditProfileScreen() {
     setShowDiscardConfirm(true);
   });
 
-  useEffect(() => {
-    if (allowCloseAfterSave) {
-      navigateBackOrTabs();
-    }
-  }, [allowCloseAfterSave]);
-
-  const navigateBackOrTabs = () => {
+  const navigateBackOrTabs = useCallback(() => {
     const canGoBack = (router as any)?.canGoBack?.() ?? true;
     if (canGoBack) {
       try {
@@ -195,7 +189,13 @@ export default function EditProfileScreen() {
       }
     }
     router.replace('/(tabs)');
-  };
+  }, [router]);
+
+  useEffect(() => {
+    if (allowCloseAfterSave) {
+      navigateBackOrTabs();
+    }
+  }, [allowCloseAfterSave, navigateBackOrTabs]);
 
   const safeClose = () => {
     if (!hasChanges) {
@@ -221,56 +221,17 @@ export default function EditProfileScreen() {
     }
   };
 
-  const handleSaveAndClose = async () => {
-    if (!profile) return;
-    setShowDiscardConfirm(false);
-    setSaving(true);
-    try {
-      const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
-      const updates: Partial<UserProfile> = {
-        first_name: firstName.trim() || undefined,
-        last_name: lastName.trim() || undefined,
-        date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
-        gender: gender || undefined,
-        experience_level: experienceLevel.trim() || undefined,
-        days_per_week: daysNum,
-        workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
-        preferred_training_style: preferredSplit?.trim() || undefined,
-        use_imperial: useImperial,
-        equipment_access: equipment,
-      };
-      const success = await updateUserProfile(profile.id, updates);
-      if (!success) {
-        Alert.alert('Error', 'Failed to save profile.');
-        return;
-      }
-      invalidateProfileCache(profile.id);
-      setProfile({ ...profile, ...updates });
-      if (__DEV__) devLog('edit-profile', { action: 'saveAndClose', updateKeys: Object.keys(updates) });
-      await rescheduleRemindersAfterProfileWorkoutDays(updates.workout_days);
-      showToast('Profile saved', 'success');
-      const action = pendingRemoveActionRef.current;
-      pendingRemoveActionRef.current = null;
-      if (action) {
-        navigation.dispatch(action);
-      } else {
-        navigateBackOrTabs();
-      }
-    } catch (error) {
-      if (__DEV__) devError('edit-profile', error);
-      Alert.alert('Error', 'An error occurred while saving.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleSave = async () => {
     if (!profile) return;
+    if (!firstName.trim()) {
+      Alert.alert('Error', 'Enter your first name.');
+      return;
+    }
     setSaving(true);
     try {
       const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
       const updates: Partial<UserProfile> = {
-        first_name: firstName.trim() || undefined,
+        first_name: firstName.trim(),
         last_name: lastName.trim() || undefined,
         date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
         gender: gender || undefined,

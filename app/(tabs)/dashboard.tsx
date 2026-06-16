@@ -57,7 +57,7 @@ export default function DashboardTab() {
   const [yearTotalVolume, setYearTotalVolume] = useState<number>(0);
   const [streak, setStreak] = useState<number>(0);
   const [recentSessions, setRecentSessionsState] = useState<SessionSummary[]>([]);
-  const [prs, setPrs] = useState<Array<TopPR & { name?: string }>>([]);
+  const [prs, setPrs] = useState<(TopPR & { name?: string })[]>([]);
   const [bodySide, setBodySide] = useState<'front' | 'back'>('front');
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [healthConnected, setHealthConnected] = useState(false);
@@ -104,32 +104,22 @@ export default function DashboardTab() {
     return useImperial ? raw : raw / LBS_PER_KG;
   }, [profile?.use_imperial, yearTotalVolume]);
 
-  /**
-   * Calculate Sunday-Saturday week range for the current week
-   * Returns start (Sunday 00:00:00) and end (Saturday 23:59:59.999) as Date objects
-   * 
-   * Logic:
-   * - If today is Sunday (getDay() === 0), start stays on Sunday
-   * - If today is Monday (getDay() === 1), start goes back 1 day to Sunday
-   * - End is always 6 days after start (Saturday)
-   */
-  const getWeekRange = () => {
-    const start = new Date(today);
-    start.setHours(0, 0, 0, 0);
-    // Sunday = 0, so subtracting getDay() moves to the start of the week (Sunday)
-    start.setDate(start.getDate() - start.getDay());
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6); // Saturday (6 days after Sunday)
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
-  };
-
   const load = useCallback(async () => {
     if (loadInFlightRef.current) return;
     loadInFlightRef.current = true;
     const isInitialLoad = !hasLoadedOnceRef.current;
     if (isInitialLoad) setLoading(true);
     try {
+      const getWeekRange = () => {
+        const start = new Date(today);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - start.getDay());
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        return { start, end };
+      };
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -238,7 +228,7 @@ export default function DashboardTab() {
       if (now - lastFocusLoadRef.current < FOCUS_RELOAD_THROTTLE_MS) return;
       lastFocusLoadRef.current = now;
       load();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+       
     }, [load, profile?.id, runBackgroundWeightSync])
   );
 
@@ -368,7 +358,12 @@ export default function DashboardTab() {
             </View>
           </View>
           <View style={styles.statRow}>
-            <View style={[styles.card, styles.statCard]}>
+            <TouchableOpacity
+              style={[styles.card, styles.statCard]}
+              onPress={() => router.push('/(tabs)/progress')}
+              accessibilityRole="button"
+              accessibilityLabel="View volume trends in Progress"
+            >
               <View style={styles.cardTitleRow}>
                 <BarChart2 size={18} color={colors.primary} />
                 <Text style={styles.cardTitle}>Total volume</Text>
@@ -379,8 +374,8 @@ export default function DashboardTab() {
                 </Text>
                 <Text style={styles.metric}> {unitsLabel}</Text>
               </View>
-              <Text style={styles.metricSub}>This year</Text>
-            </View>
+              <Text style={styles.metricSub}>This year · View trends</Text>
+            </TouchableOpacity>
             <View style={[styles.card, styles.statCard]}>
               <View style={styles.cardTitleRow}>
                 <Flame size={18} color={colors.primary} />
