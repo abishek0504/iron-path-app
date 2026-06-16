@@ -27,6 +27,7 @@ import {
   type DayConstraints,
   DEFAULT_DAY_CONSTRAINTS,
 } from './generateWorkoutDay';
+import { addAiGenerationBreadcrumb } from '../monitoring/aiGenerationBreadcrumb';
 
 export type AiGenerationResult =
   | { ok: true; dayName: string; slotsCreated: number; outcome: 'generated' }
@@ -49,6 +50,9 @@ export interface ExecuteAiDayGenerationInput {
   dayId: string;
   dayName: string;
   dayIndex: number;
+  idempotencyKey: string;
+  sessionStartIso: string;
+  sessionEndIsoExclusive: string;
   sessionsPerDay: number;
   constraints?: DayConstraints;
   profile: UserProfile | null;
@@ -71,6 +75,9 @@ export async function executeAiDayGeneration(
     dayId,
     dayName,
     dayIndex,
+    idempotencyKey,
+    sessionStartIso,
+    sessionEndIsoExclusive,
     sessionsPerDay,
     constraints = DEFAULT_DAY_CONSTRAINTS,
     profile,
@@ -104,6 +111,10 @@ export async function executeAiDayGeneration(
       userId,
       profile,
       dayIndex,
+      dayId,
+      idempotencyKey,
+      sessionStartIso,
+      sessionEndIsoExclusive,
       sessionsPerDay,
       constraints,
     });
@@ -130,6 +141,34 @@ export async function executeAiDayGeneration(
 
     if (aiResult.source === 'rest') {
       return { ok: true, dayName, slotsCreated: 0, outcome: 'rest_day' };
+    }
+
+    if (aiResult.source === 'openai' && aiResult.committed === true) {
+      const slotsCreated = aiResult.slotsCreated ?? 0;
+      if (slotsCreated === 0) {
+        return { ok: false, code: 'no_slots' };
+      }
+
+      invalidateTemplate(templateId);
+      invalidateSessionsInRangeForUser(userId);
+      useUIStore.getState().setPlannerNeedsRefetch(true);
+
+      void addAiGenerationBreadcrumb({
+        action: 'execute_committed',
+        slotsCreated,
+        committed: true,
+      });
+
+      if (__DEV__) {
+        devLog('planner-ai', {
+          action: 'executeAiDayGeneration_committed',
+          templateId,
+          dayName,
+          slotsCreated,
+        });
+      }
+
+      return { ok: true, dayName, slotsCreated, outcome: 'generated' };
     }
 
     const sessionGroups = aiResult.sessions;

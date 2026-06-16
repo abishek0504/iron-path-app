@@ -2053,6 +2053,10 @@ export default function PlannerTab() {
             dayIndex: String(dayIndex),
             sessionsPerDay: String(sessionsPerDay),
             constraints: JSON.stringify(constraints ?? DEFAULT_DAY_CONSTRAINTS),
+            generationId:
+              typeof globalThis.crypto?.randomUUID === 'function'
+                ? globalThis.crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           },
         });
       } catch (error) {

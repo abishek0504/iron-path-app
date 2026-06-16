@@ -6,6 +6,12 @@ import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AiGenerateLoadingScreen } from '../src/components/ai/AiGenerateLoadingScreen';
+import {
+  clearPendingAiGeneration,
+  loadPendingAiGeneration,
+  matchesPendingGeneration,
+  savePendingAiGeneration,
+} from '../src/lib/ai/aiGenerationRecovery';
 import { executeAiDayGeneration } from '../src/lib/ai/executeAiDayGeneration';
 import {
   DEFAULT_DAY_CONSTRAINTS,
@@ -15,8 +21,20 @@ import { showPaywallFromOutside } from '../src/lib/subscriptions/paywallBridge';
 import { useToast } from '../src/hooks/useToast';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
+import { getDateBoundsForDayName } from '../src/lib/utils/date';
 import { devError } from '../src/lib/utils/logger';
 import { useTheme } from '../src/lib/utils/ThemeContext';
+
+function createGenerationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const rand = (Math.random() * 16) | 0;
+    const value = char === 'x' ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+}
 
 function parseConstraints(raw: string | string[] | undefined): DayConstraints {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -53,6 +71,7 @@ export default function GenerateAiScreen() {
     dayIndex: string;
     sessionsPerDay: string;
     constraints?: string;
+    generationId?: string;
   }>();
 
   const templateId = parseString(params.templateId);
@@ -62,6 +81,7 @@ export default function GenerateAiScreen() {
   const sessionsPerDay = parseIntParam(params.sessionsPerDay);
   const constraintsRaw = parseString(params.constraints);
   const constraints = useMemo(() => parseConstraints(constraintsRaw), [constraintsRaw]);
+  const routeGenerationId = parseString(params.generationId);
 
   useEffect(() => {
     if (hasStartedRef.current) return;
@@ -83,12 +103,43 @@ export default function GenerateAiScreen() {
           return;
         }
 
+        const paramSnapshot = {
+          templateId,
+          dayId,
+          dayName,
+          dayIndex,
+          sessionsPerDay,
+          constraintsRaw,
+        };
+
+        let idempotencyKey = routeGenerationId || createGenerationId();
+        const pending = await loadPendingAiGeneration();
+        if (pending && matchesPendingGeneration(pending, paramSnapshot)) {
+          idempotencyKey = pending.generationId;
+        }
+
+        const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
+
+        await savePendingAiGeneration({
+          generationId: idempotencyKey,
+          templateId,
+          dayId,
+          dayName,
+          dayIndex,
+          sessionsPerDay,
+          constraintsRaw,
+          savedAt: new Date().toISOString(),
+        });
+
         const result = await executeAiDayGeneration({
           userId,
           templateId,
           dayId,
           dayName,
           dayIndex,
+          idempotencyKey,
+          sessionStartIso: startIso,
+          sessionEndIsoExclusive: endIsoExclusive,
           sessionsPerDay,
           constraints,
           profile,
@@ -96,6 +147,7 @@ export default function GenerateAiScreen() {
 
         if (cancelled) return;
 
+        await clearPendingAiGeneration();
         router.back();
 
         if (result.ok) {
@@ -121,12 +173,22 @@ export default function GenerateAiScreen() {
             const reason = result.message ?? '';
             if (reason.includes('quota') || reason.includes('HTTP 429')) {
               toast.error("You've reached this week's AI limit. Try again later.");
+            } else if (reason === 'commit_failed') {
+              toast.error(
+                "Workout was generated but couldn't be saved. Try again — you won't be charged twice.",
+              );
             } else if (
+              reason === 'validation_failed' ||
               reason.startsWith('session_count_mismatch') ||
               reason.startsWith('too_few_exercises') ||
-              reason === 'allow_list_validation_failed'
+              reason === 'allow_list_validation_failed' ||
+              reason.includes('allow_list')
             ) {
               toast.error('AI returned an invalid workout plan. Please try again.');
+            } else if (reason === 'edge_unreachable') {
+              toast.error("Couldn't reach the server. Check your connection and try again.");
+            } else if (reason === 'generation_unavailable' || reason === 'edge_error') {
+              toast.error('AI generation is currently unavailable. Please try again later.');
             } else {
               toast.error('AI generation is currently unavailable. Please try again later.');
             }
@@ -144,6 +206,7 @@ export default function GenerateAiScreen() {
           devError('generate-ai', error, { action: 'generate' });
         }
         if (!cancelled) {
+          await clearPendingAiGeneration();
           router.back();
           toast.error('Failed to generate week');
         }
@@ -160,6 +223,7 @@ export default function GenerateAiScreen() {
     dayIndex,
     sessionsPerDay,
     constraintsRaw,
+    routeGenerationId,
     profile,
     router,
     toast,

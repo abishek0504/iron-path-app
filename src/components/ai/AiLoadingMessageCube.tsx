@@ -1,11 +1,12 @@
 /**
- * Whole-message 90° cube turn — next line on top face spins down into view.
+ * Rotating loading messages — vertical slide crossfade between lines.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
+  interpolate,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -18,11 +19,6 @@ import {
 } from '../../lib/ai/generateAiLoadingMessages';
 import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
-
-const CUBE_PERSPECTIVE = 1200;
-
-const preserve3dStyle = { transformStyle: 'preserve-3d' } as ViewStyle;
-const hiddenBackfaceStyle = { backfaceVisibility: 'hidden' } as ViewStyle;
 
 export interface AiLoadingMessageCubeProps {
   messages: string[];
@@ -39,7 +35,7 @@ export function AiLoadingMessageCube({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [index, setIndex] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
-  const rotation = useSharedValue(0);
+  const progress = useSharedValue(0);
   const isAnimatingRef = useRef(false);
 
   const currentMessage = messages[index] ?? messages[0] ?? '';
@@ -61,11 +57,11 @@ export function AiLoadingMessageCube({
   const commitNextMessage = useCallback(() => {
     if (messages.length <= 1) return;
     setIndex((prev) => (prev + 1) % messages.length);
-    rotation.value = 0;
+    progress.value = 0;
     isAnimatingRef.current = false;
-  }, [messages.length, rotation]);
+  }, [messages.length, progress]);
 
-  const runFlip = useCallback(() => {
+  const runTransition = useCallback(() => {
     if (messages.length <= 1 || isAnimatingRef.current) return;
     isAnimatingRef.current = true;
 
@@ -74,9 +70,9 @@ export function AiLoadingMessageCube({
       return;
     }
 
-    rotation.value = 0;
-    rotation.value = withTiming(
-      90,
+    progress.value = 0;
+    progress.value = withTiming(
+      1,
       { duration: flipMs, easing: Easing.inOut(Easing.cubic) },
       (finished) => {
         if (finished) {
@@ -88,24 +84,38 @@ export function AiLoadingMessageCube({
         }
       },
     );
-  }, [commitNextMessage, flipMs, messages.length, reduceMotion, rotation]);
+  }, [commitNextMessage, flipMs, messages.length, progress, reduceMotion]);
 
   useEffect(() => {
     if (messages.length <= 1) return;
-    const id = setInterval(runFlip, intervalMs);
+    const id = setInterval(runTransition, intervalMs);
     return () => clearInterval(id);
-  }, [intervalMs, messages.length, runFlip]);
+  }, [intervalMs, messages.length, runTransition]);
 
-  const cubeStyle = useAnimatedStyle(() => ({
-    transform: [{ perspective: CUBE_PERSPECTIVE }, { rotateX: `${rotation.value}deg` }],
+  const outgoingStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 0.4, 1], [1, 0.3, 0]),
+    transform: [
+      {
+        translateY: interpolate(
+          progress.value,
+          [0, 1],
+          [0, -AI_LOADING_MESSAGE_FACE_HEIGHT * 0.35],
+        ),
+      },
+    ],
   }));
 
-  const frontFaceStyle = useAnimatedStyle(() => ({
-    opacity: rotation.value < 45 ? 1 : 0,
-  }));
-
-  const topFaceStyle = useAnimatedStyle(() => ({
-    opacity: rotation.value >= 45 ? 1 : 0,
+  const incomingStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0, 0.4, 1], [0, 0.7, 1]),
+    transform: [
+      {
+        translateY: interpolate(
+          progress.value,
+          [0, 1],
+          [AI_LOADING_MESSAGE_FACE_HEIGHT * 0.35, 0],
+        ),
+      },
+    ],
   }));
 
   return (
@@ -115,14 +125,12 @@ export function AiLoadingMessageCube({
       accessibilityLiveRegion="polite"
       accessibilityLabel={currentMessage}
     >
-      <View style={styles.perspective}>
-        <Animated.View style={[styles.cube, preserve3dStyle, cubeStyle]}>
-          <Animated.View style={[styles.face, styles.frontFace, hiddenBackfaceStyle, frontFaceStyle]}>
-            <Text style={styles.message}>{currentMessage}</Text>
-          </Animated.View>
-          <Animated.View style={[styles.face, styles.topFace, hiddenBackfaceStyle, topFaceStyle]}>
-            <Text style={styles.message}>{nextMessage}</Text>
-          </Animated.View>
+      <View style={styles.viewport}>
+        <Animated.View style={[styles.face, outgoingStyle]}>
+          <Text style={styles.message}>{currentMessage}</Text>
+        </Animated.View>
+        <Animated.View style={[styles.face, styles.incomingFace, incomingStyle]}>
+          <Text style={styles.message}>{nextMessage}</Text>
         </Animated.View>
       </View>
     </View>
@@ -139,14 +147,11 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
       paddingHorizontal: spacing.md,
     },
-    perspective: {
+    viewport: {
       width: '100%',
       height: AI_LOADING_MESSAGE_FACE_HEIGHT,
-      transform: [{ perspective: CUBE_PERSPECTIVE }],
-    },
-    cube: {
-      width: '100%',
-      height: AI_LOADING_MESSAGE_FACE_HEIGHT,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     face: {
       position: 'absolute',
@@ -156,16 +161,8 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    frontFace: {
+    incomingFace: {
       top: 0,
-    },
-    topFace: {
-      top: 0,
-      transform: [
-        { translateY: -AI_LOADING_MESSAGE_FACE_HEIGHT / 2 },
-        { rotateX: '-90deg' },
-        { translateY: AI_LOADING_MESSAGE_FACE_HEIGHT / 2 },
-      ],
     },
     message: {
       color: colors.textPrimary,

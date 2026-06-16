@@ -365,46 +365,27 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    plus optional DayConstraints: dayFocus, exercisesPerSession (2-8 or auto),
    intensity (light/standard/hard), emphasizeMuscles, avoidMuscles, stretchCount 0-5)
    └→ app/(tabs)/planner.tsx → runGenerateWithAI(sessionsPerDay, constraints)
+   └→ mints generationId (idempotency key) → navigates to app/generate-ai.tsx
    └→ sessionsPerDay = 0 → rest day (clear slots + unstarted session exercises, no AI call)
-   └→ generateAiDay({ template, userId, profile, dayIndex, sessionsPerDay, constraints })
+   └→ generateAiDay({ idempotencyKey, dayId, template, sessionStartIso, ... })
        └→ src/lib/ai/generateWorkoutDay.ts
-       └→ supabase.functions.invoke('generate-workout', { templateId, dayName, sessionsPerDay, ... })
+       └→ supabase.functions.invoke('generate-workout', { idempotencyKey, dayId, templateId, ... })
 
 2. Edge Function: supabase/functions/generate-workout (OpenAI-powered)
-   └→ Auth via JWT; template ownership check; rolling 24h quota (10/day, v2_ai_generations)
-   └→ Context gathering (computed fresh per request, never persisted):
-       ├→ Allow-list: v2_ai_recommended_exercises + v2_exercises metadata (limit 80,
-       │   stretches excluded from the strength catalog via is_stretch)
-       ├→ Stretch catalog: v2_exercises WHERE is_stretch = true, included only
-       │   when stretchCount > 0
-       ├→ Profile: experience, equipment, days_per_week, preferred_training_style (split),
-       │   workout_days, use_imperial, current/goal weight
-       ├→ Muscle freshness: v2_muscle_freshness (last 48h, RPE/RIR-driven)
-       ├→ Per-exercise history: v2_session_sets via completed sessions (last 60 days,
-       │   warmups excluded, capped 300 rows) → per-exercise summary
-       │   { last_performed, last_set, top_set, avg_rpe, recent_set_count }
-       └→ Split compliance: "training day N of M this week" computed from workout_days
-   └→ OpenAI chat.completions (default gpt-5-nano, OPENAI_MODEL overridable)
-       └→ Strict structured outputs (response_format json_schema, strict: true)
-       └→ Output: sessions[][] of { exercise_id, sets, reps, duration_sec, weight, target_rpe }
-       └→ Prompt enforces: allow-list only, split compliance, freshness avoidance,
-           user constraints (focus/intensity/emphasize/avoid/stretches),
-           progressive overload from history (RPE-based up/hold/back-off)
-   └→ Server validation: allow-list check + dedupe + target bounds clamping
-       └→ Invalid exercise IDs dropped; invalid targets nulled (exercise kept)
-       └→ Per-session strength count bounded (2-8, ± tolerance around requested
-           exercisesPerSession); stretches capped at stretchCount per session
-   └→ Audit row to v2_ai_generations (source 'openai' | 'fallback' | 'error')
+   └→ Auth via JWT; template ownership check; idempotency job (v2_ai_generation_jobs)
+   └→ If job already committed → return { committed: true } (no OpenAI, no quota)
+   └→ If job has cached sessions_json → skip OpenAI, retry commit only
+   └→ Weekly quota: only source='openai' rows in v2_ai_generations (max 40 / 7 days)
+   └→ OpenAI + validation (up to 2 attempts on validation failure)
+   └→ commit_ai_generation RPC (Postgres transaction): template slots + sessions + sets
+   └→ Audit row only after successful commit (source 'openai')
+   └→ Fallback rows logged for observability; do not count toward quota
 
-3. Planner consumes result
-   └→ For each AI exercise plan:
-       └→ createTemplateSlot(dayId, { exerciseId, sortOrder })
-       └→ INSERT v2_session_exercises into existing/new session
-       └→ Targets: AI-prescribed (sets/reps/weight/duration) when present,
-           else selectExerciseTargets() prescription fallback
-   └→ prefillSessionSets(sessionId, sessionExercises, targetsMap)
-   └→ invalidateTemplate + invalidateSessionsInRangeForUser + Reload template
-   └→ toast.success('{day} generated · N AI left today')
+3. Client consumes result
+   └→ If committed: true → invalidate caches only (no client-side slot inserts)
+   └→ Else (legacy fallback during rollout): client persist loop in executeAiDayGeneration
+   └→ Crash recovery: pending job in SecureStore reuses same generationId on retry
+   └→ toast.success('{day} generated')
 ```
 
 ### Flow 5: Smart Refresh (Active Workout)

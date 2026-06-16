@@ -26,7 +26,11 @@ import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 
 const ICON_SIZE = 22;
-const PULSE_HALF_MS = 900;
+const RING_PULSE_HALF_MS = 300;
+const SCALE_PULSE_HALF_MS = 600;
+const CONNECTOR_FILL_MS = 800;
+
+const CONNECTOR_MIN_HEIGHT = AI_LOADING_STEP_ROW_HEIGHT - ICON_SIZE - 8;
 
 type StepStatus = 'done' | 'active' | 'pending';
 type StepStyles = ReturnType<typeof createStyles>;
@@ -69,27 +73,94 @@ function useEntranceMotion(index: number, reduceMotion: boolean) {
 }
 
 function useActivePulse(isActive: boolean, reduceMotion: boolean) {
-  const pulse = useSharedValue(1);
+  const ringOpacity = useSharedValue(1);
+  const scale = useSharedValue(1);
 
   useEffect(() => {
     if (!isActive || reduceMotion) {
-      pulse.value = 1;
+      ringOpacity.value = 1;
+      scale.value = 1;
       return;
     }
 
-    pulse.value = withRepeat(
+    ringOpacity.value = withRepeat(
       withSequence(
-        withTiming(0.45, { duration: PULSE_HALF_MS, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: PULSE_HALF_MS, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.35, { duration: RING_PULSE_HALF_MS, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: RING_PULSE_HALF_MS, easing: Easing.inOut(Easing.ease) }),
       ),
       -1,
       false,
     );
-  }, [isActive, pulse, reduceMotion]);
 
-  return useAnimatedStyle(() => ({
-    opacity: pulse.value,
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.15, { duration: SCALE_PULSE_HALF_MS, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: SCALE_PULSE_HALF_MS, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      false,
+    );
+  }, [isActive, ringOpacity, reduceMotion, scale]);
+
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: ringOpacity.value,
   }));
+
+  const containerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return { ringStyle, containerStyle };
+}
+
+function StepConnector({
+  index,
+  activeIndex,
+  reduceMotion,
+  colors,
+  styles,
+}: {
+  index: number;
+  activeIndex: number;
+  reduceMotion: boolean;
+  colors: ThemeColors;
+  styles: StepStyles;
+}) {
+  const fillProgress = useSharedValue(0);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      fillProgress.value = index < activeIndex ? 1 : 0;
+      return;
+    }
+
+    if (index < activeIndex - 1) {
+      fillProgress.value = 1;
+      return;
+    }
+
+    if (index === activeIndex - 1) {
+      fillProgress.value = 0;
+      fillProgress.value = withTiming(1, {
+        duration: CONNECTOR_FILL_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+      return;
+    }
+
+    fillProgress.value = 0;
+  }, [activeIndex, fillProgress, index, reduceMotion]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    height: fillProgress.value * CONNECTOR_MIN_HEIGHT,
+  }));
+
+  return (
+    <View style={styles.connectorTrack}>
+      <View style={[styles.connectorEmpty, { backgroundColor: colors.border }]} />
+      <Animated.View style={[styles.connectorFill, fillStyle, { backgroundColor: colors.primary }]} />
+    </View>
+  );
 }
 
 function StepIcon({
@@ -103,7 +174,7 @@ function StepIcon({
   styles: StepStyles;
   reduceMotion: boolean;
 }) {
-  const pulseStyle = useActivePulse(status === 'active', reduceMotion);
+  const { ringStyle, containerStyle } = useActivePulse(status === 'active', reduceMotion);
 
   if (status === 'done') {
     return (
@@ -115,10 +186,12 @@ function StepIcon({
 
   if (status === 'active') {
     return (
-      <View style={[styles.iconBase, { borderColor: colors.primary }]}>
-        <Animated.View style={[styles.activeRing, pulseStyle, { borderColor: colors.primary }]} />
-        <View style={[styles.activeDot, { backgroundColor: colors.primary }]} />
-      </View>
+      <Animated.View style={containerStyle}>
+        <View style={[styles.iconBase, { borderColor: colors.primary }]}>
+          <Animated.View style={[styles.activeRing, ringStyle, { borderColor: colors.primary }]} />
+          <View style={[styles.activeDot, { backgroundColor: colors.primary }]} />
+        </View>
+      </Animated.View>
     );
   }
 
@@ -151,7 +224,15 @@ function StepRow({
     <Animated.View style={[styles.row, rowStyle]}>
       <View style={styles.iconColumn}>
         <StepIcon status={status} colors={colors} styles={styles} reduceMotion={reduceMotion} />
-        {!isLast ? <View style={[styles.connector, { backgroundColor: colors.border }]} /> : null}
+        {!isLast ? (
+          <StepConnector
+            index={index}
+            activeIndex={activeIndex}
+            reduceMotion={reduceMotion}
+            colors={colors}
+            styles={styles}
+          />
+        ) : null}
       </View>
       <Text
         style={[
@@ -270,6 +351,7 @@ function createStyles() {
     iconColumn: {
       width: ICON_SIZE,
       alignItems: 'center',
+      alignSelf: 'stretch',
     },
     iconBase,
     activeRing: {
@@ -282,11 +364,26 @@ function createStyles() {
       height: 8,
       borderRadius: 4,
     },
-    connector: {
+    connectorTrack: {
       width: 2,
-      height: AI_LOADING_STEP_ROW_HEIGHT - ICON_SIZE - 8,
+      flex: 1,
+      minHeight: CONNECTOR_MIN_HEIGHT,
       marginTop: 4,
       marginBottom: 4,
+      borderRadius: 1,
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    connectorEmpty: {
+      ...StyleSheet.absoluteFillObject,
+      width: '100%',
+    },
+    connectorFill: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      width: '100%',
       borderRadius: 1,
     },
     label: {

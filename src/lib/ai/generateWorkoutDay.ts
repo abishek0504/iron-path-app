@@ -18,6 +18,7 @@
  */
 
 import { supabase } from '../supabase/client';
+import { addAiGenerationBreadcrumb } from '../monitoring/aiGenerationBreadcrumb';
 import { devLog, devError } from '../utils/logger';
 import type { FullTemplate } from '../supabase/queries/templates';
 import type { UserProfile } from '../../stores/userStore';
@@ -63,6 +64,8 @@ export type GenerateAiDayResult =
       source: 'openai';
       sessions: AiSessionExercise[][];
       model: string;
+      committed?: boolean;
+      slotsCreated?: number;
     }
   | {
       source: 'rest';
@@ -89,6 +92,8 @@ interface EdgeResponse {
   source?: 'openai' | 'fallback';
   model?: string;
   fallbackReason?: string;
+  committed?: boolean;
+  slotsCreated?: number;
 }
 
 interface EdgeError {
@@ -104,13 +109,31 @@ async function tryReadHttpError(
   error: unknown,
 ): Promise<{ status: number; body: EdgeError } | null> {
   if (!error || typeof error !== 'object') return null;
-  const ctx = (error as { context?: Response }).context;
-  if (!ctx || typeof ctx.status !== 'number') return null;
+
+  const err = error as { context?: Response; status?: number };
+  const response = err.context instanceof Response ? err.context : null;
+  const status =
+    typeof response?.status === 'number'
+      ? response.status
+      : typeof err.status === 'number'
+        ? err.status
+        : null;
+
+  if (status === null) {
+    if (__DEV__) {
+      devLog('ai-generate', {
+        action: 'http_error_parse_failed',
+        errorName: (error as { name?: string }).name ?? 'unknown',
+      });
+    }
+    return null;
+  }
+
   try {
-    const body = (await ctx.json()) as EdgeError;
-    return { status: ctx.status, body };
+    const body = response ? ((await response.json()) as EdgeError) : {};
+    return { status, body };
   } catch {
-    return { status: ctx.status, body: {} };
+    return { status, body: {} };
   }
 }
 
@@ -119,10 +142,14 @@ export async function generateAiDay(args: {
   userId: string;
   profile: UserProfile | null;
   dayIndex: number;
+  dayId: string;
+  idempotencyKey: string;
+  sessionStartIso: string;
+  sessionEndIsoExclusive: string;
   sessionsPerDay: number;
   constraints?: DayConstraints;
 }): Promise<GenerateAiDayResult> {
-  const { template, dayIndex, sessionsPerDay } = args;
+  const { template, dayIndex, dayId, idempotencyKey, sessionStartIso, sessionEndIsoExclusive, sessionsPerDay } = args;
   const constraints = args.constraints ?? DEFAULT_DAY_CONSTRAINTS;
 
   if (sessionsPerDay <= 0) {
@@ -137,21 +164,33 @@ export async function generateAiDay(args: {
     devLog('ai-generate', {
       action: 'invoke_edge',
       templateId,
+      dayId,
       dayName,
       sessionsPerDay,
+      idempotencyKeyPrefix: idempotencyKey.slice(0, 8),
       constraints,
     });
   }
+
+  void addAiGenerationBreadcrumb({
+    action: 'invoke_edge',
+    idempotencyKeyPrefix: idempotencyKey.slice(0, 8),
+    sessionsPerDay,
+  });
 
   try {
     const { data, error } = await supabase.functions.invoke<EdgeResponse>(
       'generate-workout',
       {
         body: {
+          idempotencyKey,
+          dayId,
           templateId,
           dayName,
           sessionsPerDay,
           constraints,
+          sessionStartIso,
+          sessionEndIsoExclusive,
         },
       },
     );
@@ -189,6 +228,31 @@ export async function generateAiDay(args: {
       return { source: 'ai_unavailable', reason: 'edge_error' };
     }
 
+    if (data?.source === 'openai' && data.committed === true) {
+      const slotsCreated = data.slotsCreated ?? 0;
+      if (__DEV__) {
+        devLog('ai-generate', {
+          action: 'openai_committed',
+          model: data.model ?? null,
+          slotsCreated,
+          idempotentReplay: !data.sessions?.length,
+        });
+      }
+      void addAiGenerationBreadcrumb({
+        action: 'openai_committed',
+        committed: true,
+        slotsCreated,
+        model: data.model ?? 'unknown',
+      });
+      return {
+        source: 'openai',
+        sessions: data.sessions ?? [],
+        model: data.model ?? 'unknown',
+        committed: true,
+        slotsCreated,
+      };
+    }
+
     if (data?.source === 'openai' && Array.isArray(data.sessions) && data.sessions.length > 0) {
       if (__DEV__) {
         devLog('ai-generate', {
@@ -211,6 +275,10 @@ export async function generateAiDay(args: {
         reason: data?.fallbackReason ?? 'edge_fallback',
       });
     }
+    void addAiGenerationBreadcrumb({
+      action: 'ai_unavailable',
+      reason: data?.fallbackReason ?? 'edge_fallback',
+    });
     return {
       source: 'ai_unavailable',
       reason: data?.fallbackReason ?? 'edge_fallback',

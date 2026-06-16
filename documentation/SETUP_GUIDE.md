@@ -125,6 +125,27 @@ npx supabase functions deploy update-muscle-freshness
 npx supabase functions deploy delete-account
 ```
 
+**AI generation reliability & cost monitoring**
+
+- Weekly user quota counts only successful commits (`v2_ai_generations.source = 'openai'`).
+- Idempotency: client sends `idempotencyKey` + `dayId`; server caches jobs in `v2_ai_generation_jobs` and commits slots via `commit_ai_generation` RPC (atomic).
+- Set an OpenAI dashboard **hard monthly budget** and email alert at ~80% usage.
+- Weekly fallback-rate check (Supabase SQL editor):
+
+```sql
+SELECT
+  date_trunc('day', created_at) AS day,
+  count(*) FILTER (WHERE source = 'openai') AS successes,
+  count(*) FILTER (WHERE source = 'fallback') AS fallbacks,
+  round(100.0 * count(*) FILTER (WHERE source = 'fallback')
+    / nullif(count(*), 0), 1) AS fallback_pct
+FROM v2_ai_generations
+WHERE created_at > now() - interval '7 days'
+GROUP BY 1 ORDER BY 1;
+```
+
+Investigate if `fallback_pct` exceeds ~15% over 24h.
+
 ### 7. Generate TypeScript Types
 
 ```bash
