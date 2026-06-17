@@ -28,6 +28,7 @@ export interface UserProfile {
   subscription_tier?: 'free' | 'pro';
   subscription_expires_at?: string | null;
   revenuecat_app_user_id?: string | null;
+  app_tour_completed_at?: string | null;
 }
 
 interface UserState {

@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 import { ToastProvider } from '../src/components/ui/ToastProvider';
 import { ModalManager } from '../src/components/ui/ModalManager';
 import { PaywallProvider } from '../src/components/paywall/PaywallProvider';
+import { TourProvider } from '../src/components/tour/TourProvider';
 import { ThemeProvider } from '../src/lib/utils/ThemeContext';
 import { initNotifications, setupNotificationResponseRouting } from '../src/lib/utils/notifications';
 import { initSentry } from '../src/lib/monitoring/initSentry';
@@ -44,6 +45,7 @@ export default function RootLayout() {
 
   const content = (
     <PaywallProvider>
+      <TourProvider>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -123,6 +125,7 @@ export default function RootLayout() {
       {/* Global UI components */}
       <ToastProvider />
       <ModalManager />
+      </TourProvider>
     </PaywallProvider>
   );
 

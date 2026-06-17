@@ -393,7 +393,7 @@
 2. ⚠️ Optimize queries (pagination, indexes)
 3. ⚠️ Add offline support (watch set-completions queue offline; app itself is online-only)
 4. ✅ Error handling (toasts, auth-error surfacing, graceful AI fallback)
-5. ⚠️ Add onboarding walkthrough
+5. ✅ Add onboarding walkthrough (post-profile spotlight tour → paywall)
 
 ## Testing Checklist
 

@@ -22,6 +22,7 @@ const PROFILE_UPDATE_FIELDS = [
   'preferred_training_style',
   'use_imperial',
   'avatar_url',
+  'app_tour_completed_at',
 ] as const satisfies readonly (keyof UserProfile)[];
 
 const PROFILE_CREATE_FIELDS = [...PROFILE_UPDATE_FIELDS] as const;

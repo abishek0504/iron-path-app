@@ -20,6 +20,7 @@ import { ProgressCalendar } from '../../src/components/progress/ProgressCalendar
 import { AnalyticsTrendsPanel } from '../../src/components/progress/AnalyticsTrendsPanel';
 import { ExerciseAnalyticsList } from '../../src/components/progress/ExerciseAnalyticsList';
 import { useModal } from '../../src/hooks/useModal';
+import { TourTarget } from '../../src/components/tour/TourTarget';
 
 type CalendarMode = 'week' | 'month';
 type ProgressSegment = 'calendar' | 'trends' | 'exercises';
@@ -238,6 +239,7 @@ export default function ProgressTab() {
           {segment === 'calendar' ? (
             <>
               <View style={styles.controls}>
+                <TourTarget id="tour.progress.viewToggle" testID="tour-progress-view-toggle">
                 <View style={styles.viewToggle}>
                   <Pressable
                     style={[styles.toggleChip, viewMode === 'week' && styles.toggleChipActive]}
@@ -266,6 +268,7 @@ export default function ProgressTab() {
                     </Text>
                   </Pressable>
                 </View>
+                </TourTarget>
 
                 <View style={styles.navigation}>
                   <Pressable style={styles.navButton} onPress={handlePrevious}>

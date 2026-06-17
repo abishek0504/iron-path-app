@@ -47,7 +47,7 @@ import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/not
 import { useToast } from '../src/hooks/useToast';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
-import { setPendingOnboardingPaywall } from '../src/lib/subscriptions/paywallBridge';
+import { setPendingAppTour } from '../src/lib/onboarding/tourBridge';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
@@ -328,7 +328,7 @@ export default function Onboarding() {
       }
 
       toast.success('Profile saved!');
-      setPendingOnboardingPaywall();
+      setPendingAppTour();
       router.replace('/(tabs)');
     } catch (error) {
       if (__DEV__) {

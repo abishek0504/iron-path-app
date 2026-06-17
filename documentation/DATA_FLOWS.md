@@ -172,9 +172,15 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
      └→ getUserTemplates(userId)
          └→ If no template: createTemplate(userId)
              └→ ensureTemplateHasWeekDays(templateId)
-     └→ Navigate to /(tabs)/planner
+     └→ Navigate to /(tabs) (Workout tab default)
+     └→ setPendingAppTour() → first-run spotlight tour (11 steps across tabs)
+     └→ On tour complete or skip: persist app_tour_completed_at, show Pro paywall
 
-5. Planner loads
+5. App tour (first run only)
+   └→ TourProvider + TourOverlay spotlight each key feature
+   └→ Skip or Done → updateUserProfile(app_tour_completed_at) → showPaywall('onboarding_complete')
+
+6. Planner loads (during/after tour)
    └→ Fetch template with days and slots
    └→ Calculate targets for each slot
    └→ Display weekly plan

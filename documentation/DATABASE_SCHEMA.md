@@ -61,6 +61,7 @@ Apply migrations in this exact order:
 51. **20260616120000_ai_generation_jobs.sql** - `v2_ai_generation_jobs` idempotency table
 52. **20260616120100_commit_ai_generation_rpc.sql** - `commit_ai_generation` + `purge_expired_ai_generation_jobs` RPCs
 53. **20260617120000_v2_profiles_first_name_not_null.sql** - Backfills blank `first_name` and enforces NOT NULL
+54. **20260618120000_v2_profiles_app_tour_completed_at.sql** - Adds `app_tour_completed_at` for first-run app tour completion tracking
 
 ## Table Relationships
 
@@ -256,6 +257,7 @@ v2_support (Help & Support submissions)
 - `use_imperial`: Boolean for unit system
 - `current_weight`, `goal_weight`, `height`, `gender`, `goal`, `preferred_training_style`, `avatar_url` (all nullable)
 - `subscription_tier` (NOT NULL DEFAULT 'free'), `subscription_expires_at`, `revenuecat_app_user_id` (20260612120000; synced from RevenueCat webhook)
+- `app_tour_completed_at`: Set when user completes or skips the post-onboarding app tour (20260618120000)
 - `deleted_at`, `scheduled_purge_at`: Account soft delete (20260508000001). delete-account sets both (purge = now + 30d); Restore during the grace window sets both back to NULL. A pg_cron job (`purge-soft-deleted-accounts`, daily 03:00 UTC, 20260609000002) hard-deletes `auth.users` rows past `scheduled_purge_at`; every v2_* table cascades. Partial index `idx_v2_profiles_scheduled_purge_at` supports the purge query.
 
 **Required for Onboarding:**

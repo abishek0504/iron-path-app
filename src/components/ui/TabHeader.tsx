@@ -10,6 +10,7 @@ import { spacing, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { useModal } from '../../hooks/useModal';
 import { devLog } from '../../lib/utils/logger';
+import { TourTarget } from '../tour/TourTarget';
 
 /** Content height below safe area — used to balance full-screen loaders on tab screens. */
 export const TAB_HEADER_HEIGHT =
@@ -20,9 +21,16 @@ interface TabHeaderProps {
   tabId: 'workout' | 'plan' | 'progress' | 'dashboard';
   /** When false, hides the settings button (e.g. PRs modal). Default: true only when tabId === 'dashboard'. */
   showSettings?: boolean;
+  /** Optional tour target id for the settings gear button. */
+  settingsTourTargetId?: string;
 }
 
-export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId, showSettings: showSettingsProp }) => {
+export const TabHeader: React.FC<TabHeaderProps> = ({
+  title,
+  tabId,
+  showSettings: showSettingsProp,
+  settingsTourTargetId,
+}) => {
   const colors = useTheme();
   const { openSheet } = useModal();
 
@@ -59,15 +67,29 @@ export const TabHeader: React.FC<TabHeaderProps> = ({ title, tabId, showSettings
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
       {showSettings && (
-        <TouchableOpacity
-          onPress={handleOpenSettings}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Open settings"
-          activeOpacity={0.7}
-        >
-          <Settings size={24} color={colors.textSecondary} />
-        </TouchableOpacity>
+        settingsTourTargetId ? (
+          <TourTarget id={settingsTourTargetId} testID="tour-dashboard-settings">
+            <TouchableOpacity
+              onPress={handleOpenSettings}
+              style={styles.iconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+              activeOpacity={0.7}
+            >
+              <Settings size={24} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </TourTarget>
+        ) : (
+          <TouchableOpacity
+            onPress={handleOpenSettings}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+            activeOpacity={0.7}
+          >
+            <Settings size={24} color={colors.textSecondary} />
+          </TouchableOpacity>
+        )
       )}
     </View>
   );

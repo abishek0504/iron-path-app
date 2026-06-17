@@ -14,9 +14,10 @@ import { isAccountPendingDeletion } from "../../src/lib/auth/accountLifecycle";
 import { hapticSelection } from "../../src/lib/utils/haptics";
 import { usePaywall } from "../../src/components/paywall/PaywallProvider";
 import { APP_OPEN_PAYWALL_DELAY_MS } from "../../src/lib/subscriptions/constants";
-import {
-  takePendingOnboardingPaywall,
-} from "../../src/lib/subscriptions/paywallBridge";
+import { hasPendingAppTour, takePendingAppTour } from "../../src/lib/onboarding/tourBridge";
+import { useTourStore } from "../../src/stores/tourStore";
+import { useUserStore } from "../../src/stores/userStore";
+import { TourTarget } from "../../src/components/tour/TourTarget";
 
 const CustomTabBar = (props: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
@@ -24,6 +25,7 @@ const CustomTabBar = (props: BottomTabBarProps) => {
   const activeIndex = state.index;
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const isTourActive = useTourStore((s) => s.isActive);
 
   // Animation for the sliding circle indicator
   const circlePosition = useSharedValue(0);
@@ -69,9 +71,10 @@ const CustomTabBar = (props: BottomTabBarProps) => {
 
   return (
     <View style={[styles.tabBarWrapper, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-      <View style={styles.tabBarCapsule}>
-        <Animated.View style={[styles.slidingCircle, circleStyle]} />
-        {state.routes.map((route, index) => {
+      <TourTarget id="tour.tabs.bar" testID="tour-tabs-bar">
+        <View style={styles.tabBarCapsule}>
+          <Animated.View style={[styles.slidingCircle, circleStyle]} />
+          {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
           const rawLabel = options.tabBarLabel !== undefined
             ? options.tabBarLabel
@@ -84,6 +87,10 @@ const CustomTabBar = (props: BottomTabBarProps) => {
           const isFocused = state.index === index;
 
           const onPress = () => {
+            if (isTourActive) {
+              return;
+            }
+
             const event = navigation.emit({
               type: 'tabPress',
               target: route.key,
@@ -139,7 +146,8 @@ const CustomTabBar = (props: BottomTabBarProps) => {
             </TouchableOpacity>
           );
         })}
-      </View>
+        </View>
+      </TourTarget>
     </View>
   );
 };
@@ -198,22 +206,35 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
   return { ready, authenticated };
 }
 
+function AppTourEffect() {
+  const startTour = useTourStore((s) => s.startTour);
+  const profile = useUserStore((s) => s.profile);
+
+  useEffect(() => {
+    if (profile?.app_tour_completed_at) {
+      return;
+    }
+    if (takePendingAppTour()) {
+      startTour();
+    }
+  }, [profile?.app_tour_completed_at, startTour]);
+
+  return null;
+}
+
 function AppOpenPaywallEffect() {
-  const { tryAppOpenPaywall, tryRandomPaywall, isLoading } = usePaywall();
+  const { tryAppOpenPaywall, isLoading } = usePaywall();
+  const isTourActive = useTourStore((s) => s.isActive);
 
   useEffect(() => {
     if (isLoading) return;
-
-    if (takePendingOnboardingPaywall()) {
-      tryRandomPaywall('onboarding_complete');
-      return;
-    }
+    if (isTourActive || hasPendingAppTour()) return;
 
     const timer = setTimeout(() => {
       tryAppOpenPaywall();
     }, APP_OPEN_PAYWALL_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [isLoading, tryAppOpenPaywall, tryRandomPaywall]);
+  }, [isLoading, isTourActive, tryAppOpenPaywall]);
 
   return null;
 }
@@ -233,6 +254,7 @@ export default function TabLayout() {
 
   return (
     <>
+    <AppTourEffect />
     <AppOpenPaywallEffect />
     <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}

@@ -19,6 +19,7 @@ import { Plus, Trash2, CheckCircle, Bookmark } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
+import { TourTarget } from '../../src/components/tour/TourTarget';
 import { useToast } from '../../src/hooks/useToast';
 import { useDateContext } from '../../src/hooks/useDateContext';
 import { useUserStore } from '../../src/stores/userStore';
@@ -2023,6 +2024,7 @@ export default function PlannerTab() {
         }
       >
         {/* Day selector - always show all 7 days in fixed order */}
+        <TourTarget id="tour.plan.daySelector" testID="tour-plan-day-selector">
         <View style={styles.daySelector}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {WEEK_DAYS.map((weekday, index) => {
@@ -2055,12 +2057,14 @@ export default function PlannerTab() {
             })}
           </ScrollView>
         </View>
+        </TourTarget>
 
         {/* Selected day content */}
         {selectedDay ? (
           <View style={styles.dayContent}>
             <View style={styles.dayHeader}>
               <Text style={styles.dayTitle}>{selectedDay.day.day_name}</Text>
+              <TourTarget id="tour.plan.addWorkout" testID="tour-plan-add-workout">
               <TouchableOpacity
                 style={styles.addButton}
                 onPress={handleAddWorkout}
@@ -2069,6 +2073,7 @@ export default function PlannerTab() {
                 <Plus size={20} color={colors.primary} />
                 <Text style={styles.addButtonText}>Add Workout</Text>
               </TouchableOpacity>
+              </TourTarget>
             </View>
 
             {/* Workout containers for selected day (sessions for today or chosen weekday) */}
@@ -2320,6 +2325,7 @@ export default function PlannerTab() {
                             );
                           }}
                         />
+                        <TourTarget id="tour.plan.addExercise" testID="tour-plan-add-exercise">
                         <TouchableOpacity
                           style={[styles.addButton, styles.addExerciseInContent]}
                           onPress={() => {
@@ -2339,6 +2345,7 @@ export default function PlannerTab() {
                           <Plus size={20} color={colors.primary} />
                           <Text style={styles.addExerciseButtonText}>Add Exercise</Text>
                         </TouchableOpacity>
+                        </TourTarget>
                       </View>
                     </View>
                   );
@@ -2362,6 +2369,7 @@ export default function PlannerTab() {
             </TouchableOpacity>
 
             {/* Generate with AI button */}
+            <TourTarget id="tour.plan.generateAi" testID="tour-plan-generate-ai">
             <TouchableOpacity
               style={styles.generateButton}
               onPress={() => {
@@ -2378,6 +2386,7 @@ export default function PlannerTab() {
             >
               <Text style={styles.generateButtonText}>Generate with AI</Text>
             </TouchableOpacity>
+            </TourTarget>
 
           </View>
         ) : (

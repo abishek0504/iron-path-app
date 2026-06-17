@@ -27,6 +27,7 @@ import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
+import { TourTarget } from '../../src/components/tour/TourTarget';
 import {
   createWorkoutSession,
   deleteSessionWithExercises,
@@ -993,6 +994,7 @@ export default function WorkoutTab() {
         }
       >
         {!activeTemplate ? (
+          <TourTarget id="tour.workout.card" testID="tour-workout-card">
           <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
             <View style={styles.iconContainer}>
               <Dumbbell size={48} color={colors.textMuted} />
@@ -1000,10 +1002,11 @@ export default function WorkoutTab() {
             <Text style={styles.cardTitle}>No Active Workout Plan</Text>
             <Text style={styles.cardSubtext}>Create a plan in the Planner tab to get started!</Text>
           </Animated.View>
+          </TourTarget>
         ) : (
           <>
             {isWorkoutCompleted && selectedDayExercises.length === 0 ? (
-              // Workout completed, no more exercises scheduled
+              <TourTarget id="tour.workout.card" testID="tour-workout-card">
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
                 <View style={styles.restDayIconContainer}>
                   <Text style={styles.completedEmoji}>✓</Text>
@@ -1014,7 +1017,9 @@ export default function WorkoutTab() {
                   You can start a new workout or add exercises in the Planner tab.
                 </Text>
               </Animated.View>
+              </TourTarget>
             ) : isRestDay ? (
+              <TourTarget id="tour.workout.card" testID="tour-workout-card">
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
                 <View style={styles.restDayIconContainer}>
                   <Timer size={40} color={colors.workoutRestTitle} />
@@ -1023,7 +1028,9 @@ export default function WorkoutTab() {
                 <Text style={styles.restDayText}>Take it easy!</Text>
                 <Text style={styles.cardSubtext}>You can pick another plan day to train today.</Text>
               </Animated.View>
+              </TourTarget>
             ) : (
+              <TourTarget id="tour.workout.card" testID="tour-workout-card">
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.workoutCard}>
                 <View style={styles.workoutCardContent}>
                   <View style={styles.badgeContainer}>
@@ -1092,10 +1099,12 @@ export default function WorkoutTab() {
                   )}
                 </View>
               </Animated.View>
+              </TourTarget>
             )}
 
             {/* Start/Continue Workout Button - Always visible */}
             <Animated.View entering={FadeIn.duration(400).delay(150)} style={styles.buttonContainer}>
+              <TourTarget id="tour.workout.start" testID="tour-workout-start">
               {isWorkoutCompleted ? (
                 <CircularButton
                   onPress={() => {}}
@@ -1111,6 +1120,7 @@ export default function WorkoutTab() {
                   isCompleted={false}
                 />
               )}
+              </TourTarget>
               {sessionsToday.length > 1 && (
                 <View style={styles.planDayRow}>
                   <Text style={styles.planDayLabel}>

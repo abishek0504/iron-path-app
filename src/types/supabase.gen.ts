@@ -432,6 +432,7 @@ export type Database = {
       }
       v2_profiles: {
         Row: {
+          app_tour_completed_at: string | null
           avatar_url: string | null
           created_at: string | null
           current_weight: number | null
@@ -457,6 +458,7 @@ export type Database = {
           workout_days: string[] | null
         }
         Insert: {
+          app_tour_completed_at?: string | null
           avatar_url?: string | null
           created_at?: string | null
           current_weight?: number | null
@@ -482,6 +484,7 @@ export type Database = {
           workout_days?: string[] | null
         }
         Update: {
+          app_tour_completed_at?: string | null
           avatar_url?: string | null
           created_at?: string | null
           current_weight?: number | null

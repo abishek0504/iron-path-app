@@ -30,6 +30,7 @@ import { WeightTrackerCard } from '@/components/ui/WeightTrackerCard';
 import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { isAppleHealthConnected, syncBodyMassWithHealth } from '../../src/lib/health/healthIntegration';
+import { TourTarget } from '../../src/components/tour/TourTarget';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
 const LBS_PER_KG = 2.20462;
@@ -258,7 +259,7 @@ export default function DashboardTab() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <TabHeader title="Dashboard" tabId="dashboard" />
+        <TabHeader title="Dashboard" tabId="dashboard" settingsTourTargetId="tour.dashboard.settings" />
         <LoadingScreen
           message="Loading dashboard..."
           style={styles.loadingContainer}
@@ -274,7 +275,7 @@ export default function DashboardTab() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TabHeader title="Dashboard" tabId="dashboard" />
+      <TabHeader title="Dashboard" tabId="dashboard" settingsTourTargetId="tour.dashboard.settings" />
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -289,6 +290,7 @@ export default function DashboardTab() {
           />
         }
       >
+        <TourTarget id="tour.dashboard.heatmap" testID="tour-dashboard-heatmap">
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardTitleRow}>
@@ -317,6 +319,7 @@ export default function DashboardTab() {
             </View>
           ) : null}
         </View>
+        </TourTarget>
 
         {profile?.id && (
           <WeightTrackerCard
@@ -326,6 +329,7 @@ export default function DashboardTab() {
           />
         )}
 
+        <TourTarget id="tour.dashboard.stats" testID="tour-dashboard-stats">
         <View style={styles.statGrid}>
           <View style={styles.statRow}>
             <View style={[styles.card, styles.statCard]}>
@@ -389,6 +393,7 @@ export default function DashboardTab() {
             </View>
           </View>
         </View>
+        </TourTarget>
 
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
