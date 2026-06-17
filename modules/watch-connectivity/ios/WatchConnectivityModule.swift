@@ -60,11 +60,28 @@ public class WatchConnectivityModule: Module {
   public func definition() -> ModuleDefinition {
     Name("WatchConnectivity")
 
-    Events("onSetCompleted", "onWatchStateChanged", "onHeartRate", "onWorkoutEnded")
+    Events(
+      "onSetCompleted",
+      "onSkipRest",
+      "onExtendRest",
+      "onSubmitRpe",
+      "onWatchStateChanged",
+      "onHeartRate",
+      "onWorkoutEnded"
+    )
 
     OnCreate {
       self.sessionDelegate.onSetCompleted = { [weak self] payload in
         self?.sendEvent("onSetCompleted", payload)
+      }
+      self.sessionDelegate.onSkipRest = { [weak self] payload in
+        self?.sendEvent("onSkipRest", payload)
+      }
+      self.sessionDelegate.onExtendRest = { [weak self] payload in
+        self?.sendEvent("onExtendRest", payload)
+      }
+      self.sessionDelegate.onSubmitRpe = { [weak self] payload in
+        self?.sendEvent("onSubmitRpe", payload)
       }
       self.sessionDelegate.onHeartRate = { [weak self] payload in
         self?.sendEvent("onHeartRate", payload)
@@ -107,11 +124,21 @@ public class WatchConnectivityModule: Module {
         "updatedAt": Date().timeIntervalSince1970,
       ])
     }
+
+    AsyncFunction("startWatchApp") { (sessionId: String) in
+      guard WCSession.isSupported() else { return }
+      let session = WCSession.default
+      guard session.isWatchAppInstalled else { return }
+      session.startWatchApp(withUserInfo: ["sessionId": sessionId])
+    }
   }
 }
 
 final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   var onSetCompleted: (([String: Any]) -> Void)?
+  var onSkipRest: (([String: Any]) -> Void)?
+  var onExtendRest: (([String: Any]) -> Void)?
+  var onSubmitRpe: (([String: Any]) -> Void)?
   var onHeartRate: (([String: Any]) -> Void)?
   var onWorkoutEnded: (([String: Any]) -> Void)?
   var onStateChanged: (([String: Any]) -> Void)?
@@ -142,7 +169,6 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   func sessionDidBecomeInactive(_ session: WCSession) {}
 
   func sessionDidDeactivate(_ session: WCSession) {
-    // Re-activate after a watch switch, per Apple guidance.
     session.activate()
   }
 
@@ -151,7 +177,7 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   }
 
   func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-    handleIncoming(message)
+    handleIncoming(message, replyHandler: nil)
   }
 
   func session(
@@ -159,29 +185,37 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     didReceiveMessage message: [String: Any],
     replyHandler: @escaping ([String: Any]) -> Void
   ) {
-    handleIncoming(message)
-    replyHandler(["ok": true])
+    handleIncoming(message, replyHandler: replyHandler)
   }
 
   func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-    handleIncoming(userInfo)
+    handleIncoming(userInfo, replyHandler: nil)
   }
 
-  private func handleIncoming(_ payload: [String: Any]) {
+  private func handleIncoming(
+    _ payload: [String: Any],
+    replyHandler: (([String: Any]) -> Void)?
+  ) {
     guard let type = WatchPayloadParsing.stringFromPayload(payload["type"]) else {
+      replyHandler?(["ok": false])
       return
     }
 
     if type == "completeSet" {
       guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
             WatchPayloadParsing.isUuid(sessionId) else {
+        replyHandler?(["ok": false])
         return
       }
       guard let setNumber = WatchPayloadParsing.intFromPayload(payload["setNumber"]), setNumber >= 1 else {
+        replyHandler?(["ok": false])
         return
       }
       let sentAt = WatchPayloadParsing.doubleFromPayload(payload["sentAt"]) ?? Date().timeIntervalSince1970
-      guard sentAt > 0 else { return }
+      guard sentAt > 0 else {
+        replyHandler?(["ok": false])
+        return
+      }
 
       onSetCompleted?([
         "type": "completeSet",
@@ -189,15 +223,77 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
         "setNumber": setNumber,
         "sentAt": sentAt,
       ])
+      replyHandler?(["ok": true, "setNumber": setNumber])
+      return
+    }
+
+    if type == "skipRest" {
+      guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
+            WatchPayloadParsing.isUuid(sessionId) else {
+        replyHandler?(["ok": false])
+        return
+      }
+      let sentAt = WatchPayloadParsing.doubleFromPayload(payload["sentAt"]) ?? Date().timeIntervalSince1970
+      onSkipRest?(["type": "skipRest", "sessionId": sessionId, "sentAt": sentAt])
+      replyHandler?(["ok": true])
+      return
+    }
+
+    if type == "extendRest" {
+      guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
+            WatchPayloadParsing.isUuid(sessionId) else {
+        replyHandler?(["ok": false])
+        return
+      }
+      guard let seconds = WatchPayloadParsing.intFromPayload(payload["seconds"]), seconds >= 1, seconds <= 300 else {
+        replyHandler?(["ok": false])
+        return
+      }
+      let sentAt = WatchPayloadParsing.doubleFromPayload(payload["sentAt"]) ?? Date().timeIntervalSince1970
+      onExtendRest?([
+        "type": "extendRest",
+        "sessionId": sessionId,
+        "seconds": seconds,
+        "sentAt": sentAt,
+      ])
+      replyHandler?(["ok": true])
+      return
+    }
+
+    if type == "submitRpe" {
+      guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
+            WatchPayloadParsing.isUuid(sessionId) else {
+        replyHandler?(["ok": false])
+        return
+      }
+      guard let setNumber = WatchPayloadParsing.intFromPayload(payload["setNumber"]), setNumber >= 1 else {
+        replyHandler?(["ok": false])
+        return
+      }
+      guard let rpe = WatchPayloadParsing.intFromPayload(payload["rpe"]), rpe >= 6, rpe <= 10 else {
+        replyHandler?(["ok": false])
+        return
+      }
+      let sentAt = WatchPayloadParsing.doubleFromPayload(payload["sentAt"]) ?? Date().timeIntervalSince1970
+      onSubmitRpe?([
+        "type": "submitRpe",
+        "sessionId": sessionId,
+        "setNumber": setNumber,
+        "rpe": rpe,
+        "sentAt": sentAt,
+      ])
+      replyHandler?(["ok": true])
       return
     }
 
     if type == "heartRate" {
       guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
             WatchPayloadParsing.isUuid(sessionId) else {
+        replyHandler?(["ok": false])
         return
       }
       guard let bpm = WatchPayloadParsing.intFromPayload(payload["bpm"]), bpm > 0, bpm < 250 else {
+        replyHandler?(["ok": false])
         return
       }
       let timestamp = WatchPayloadParsing.doubleFromPayload(payload["timestamp"]) ?? Date().timeIntervalSince1970
@@ -207,16 +303,19 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
         "bpm": bpm,
         "timestamp": timestamp,
       ])
+      replyHandler?(["ok": true])
       return
     }
 
     if type == "workoutEnded" {
       guard let sessionId = WatchPayloadParsing.stringFromPayload(payload["sessionId"]),
             WatchPayloadParsing.isUuid(sessionId) else {
+        replyHandler?(["ok": false])
         return
       }
       guard let hkWorkoutUuid = WatchPayloadParsing.stringFromPayload(payload["hkWorkoutUuid"]),
             WatchPayloadParsing.isUuid(hkWorkoutUuid) else {
+        replyHandler?(["ok": false])
         return
       }
       onWorkoutEnded?([
@@ -224,6 +323,10 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
         "sessionId": sessionId,
         "hkWorkoutUuid": hkWorkoutUuid,
       ])
+      replyHandler?(["ok": true])
+      return
     }
+
+    replyHandler?(["ok": false])
   }
 }

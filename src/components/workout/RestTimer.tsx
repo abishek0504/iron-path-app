@@ -2,27 +2,36 @@
  * Rest Timer
  *
  * Auto-starts after completing a set
- * Shows countdown with skip button
+ * Shows countdown with skip and optional +15s extend
  */
 
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { SkipForward } from 'lucide-react-native';
-import { formatCountdownTime, useCountdown } from '../../hooks/useCountdown';
+import { SkipForward, Plus } from 'lucide-react-native';
+import { formatCountdownTime, useCountdownToEpoch } from '../../hooks/useCountdown';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
+import { REST_EXTEND_SEC } from '../../lib/workout/restConstants';
 
 interface RestTimerProps {
-  durationSec: number;
+  endsAtEpoch: number;
+  startedAtEpoch?: number;
   onComplete: () => void;
   onSkip: () => void;
+  onExtend?: () => void;
 }
 
-export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, onSkip }) => {
+export const RestTimer: React.FC<RestTimerProps> = ({
+  endsAtEpoch,
+  startedAtEpoch,
+  onComplete,
+  onSkip,
+  onExtend,
+}) => {
   const colors = useTheme();
-  const { secondsLeft, progress } = useCountdown({
-    durationSec,
-    autoStart: true,
+  const { secondsLeft, progress } = useCountdownToEpoch({
+    endsAtEpoch,
+    startedAtEpoch,
     onComplete,
   });
 
@@ -34,6 +43,8 @@ export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, o
       borderWidth: 2,
       borderColor: colors.primary,
       marginBottom: spacing.md,
+    },
+    row: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -62,7 +73,12 @@ export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, o
       height: '100%',
       backgroundColor: colors.primary,
     },
-    skipButton: {
+    actions: {
+      flexDirection: 'row',
+      gap: spacing.xs,
+      marginLeft: spacing.sm,
+    },
+    actionButton: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.xs,
@@ -70,7 +86,7 @@ export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, o
       backgroundColor: colors.primary + '20',
       borderRadius: borderRadius.sm,
     },
-    skipText: {
+    actionText: {
       fontSize: typography.sizes.sm,
       fontWeight: typography.weights.semibold,
       color: colors.primary,
@@ -79,17 +95,27 @@ export const RestTimer: React.FC<RestTimerProps> = ({ durationSec, onComplete, o
 
   return (
     <View style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.label}>Rest</Text>
-        <Text style={styles.timer}>{formatCountdownTime(secondsLeft)}</Text>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+      <View style={styles.row}>
+        <View style={styles.content}>
+          <Text style={styles.label}>Rest</Text>
+          <Text style={styles.timer}>{formatCountdownTime(secondsLeft)}</Text>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+          </View>
+        </View>
+        <View style={styles.actions}>
+          {onExtend ? (
+            <TouchableOpacity style={styles.actionButton} onPress={onExtend}>
+              <Plus size={18} color={colors.primary} />
+              <Text style={styles.actionText}>{REST_EXTEND_SEC}s</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity style={styles.actionButton} onPress={onSkip}>
+            <SkipForward size={20} color={colors.primary} />
+            <Text style={styles.actionText}>Skip</Text>
+          </TouchableOpacity>
         </View>
       </View>
-      <TouchableOpacity style={styles.skipButton} onPress={onSkip}>
-        <SkipForward size={20} color={colors.primary} />
-        <Text style={styles.skipText}>Skip</Text>
-      </TouchableOpacity>
     </View>
   );
 };

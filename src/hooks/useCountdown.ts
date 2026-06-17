@@ -67,3 +67,54 @@ export function formatCountdownTime(seconds: number): string {
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
+
+interface UseCountdownToEpochOptions {
+  endsAtEpoch: number;
+  startedAtEpoch?: number;
+  onComplete?: () => void;
+}
+
+/** Wall-clock countdown to an absolute end time (stays in sync when extended). */
+export function useCountdownToEpoch({
+  endsAtEpoch,
+  startedAtEpoch,
+  onComplete,
+}: UseCountdownToEpochOptions) {
+  const computeSecondsLeft = useCallback(
+    () => Math.max(0, Math.ceil(endsAtEpoch - Date.now() / 1000)),
+    [endsAtEpoch],
+  );
+
+  const [secondsLeft, setSecondsLeft] = useState(computeSecondsLeft);
+  const onCompleteRef = useRef(onComplete);
+  const completedRef = useRef(false);
+
+  onCompleteRef.current = onComplete;
+
+  useEffect(() => {
+    setSecondsLeft(computeSecondsLeft());
+    completedRef.current = false;
+  }, [endsAtEpoch, computeSecondsLeft]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = computeSecondsLeft();
+      setSecondsLeft(next);
+      if (next <= 0 && !completedRef.current) {
+        completedRef.current = true;
+        onCompleteRef.current?.();
+      }
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [computeSecondsLeft]);
+
+  const totalSec =
+    startedAtEpoch != null && endsAtEpoch > startedAtEpoch
+      ? endsAtEpoch - startedAtEpoch
+      : endsAtEpoch - (Date.now() / 1000 - secondsLeft);
+  const elapsed = totalSec > 0 ? totalSec - secondsLeft : 0;
+  const progress = totalSec > 0 ? Math.min(1, elapsed / totalSec) : 1;
+
+  return { secondsLeft, progress };
+}

@@ -1,7 +1,10 @@
 import SwiftUI
+import WatchKit
 
 struct ContentView: View {
     @EnvironmentObject private var workout: WatchWorkoutSession
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @State private var restHapticFiredForEndsAt: Date?
 
     var body: some View {
         Group {
@@ -17,10 +20,14 @@ struct ContentView: View {
                         subtitle: "Confirm your sets on iPhone"
                     )
                 case "setRpe":
-                    statusView(
-                        title: "Rate effort",
-                        subtitle: "How hard was the set? On iPhone"
-                    )
+                    if workout.state.timedSetRpe {
+                        setRpeView
+                    } else {
+                        statusView(
+                            title: "Rate effort",
+                            subtitle: "How hard was the set? On iPhone"
+                        )
+                    }
                 case "complete":
                     statusView(
                         title: "Workout complete",
@@ -56,6 +63,12 @@ struct ContentView: View {
     private var executionView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
+                if !workout.state.progressText.isEmpty {
+                    Text(workout.state.progressText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
                 if let supersetLabel = workout.state.supersetLabel {
                     Text(supersetLabel)
                         .font(.caption2)
@@ -85,7 +98,13 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                 }
 
-                if let hr = workout.healthManager.heartRateBpm {
+                if !workout.state.lastTimeText.isEmpty && workout.state.exerciseEndsAt == nil {
+                    Text("Last time: \(workout.state.lastTimeText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !isLuminanceReduced, let hr = workout.healthManager.heartRateBpm {
                     HStack(spacing: 4) {
                         Image(systemName: "heart.fill")
                             .foregroundStyle(.red)
@@ -112,14 +131,16 @@ struct ContentView: View {
                     if workout.isSendingCompletion {
                         ProgressView()
                     } else {
-                        Text("Complete Set")
+                        Text(completionButtonTitle)
                             .fontWeight(.semibold)
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!workout.canCompleteSet)
 
-                if let nextUp = workout.state.nextUp {
+                completionStatusView
+
+                if !isLuminanceReduced, let nextUp = workout.state.nextUp {
                     Text("Next: \(nextUp)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -130,44 +151,148 @@ struct ContentView: View {
         }
     }
 
+    private var completionButtonTitle: String {
+        switch workout.completionSyncStatus {
+        case .retry:
+            return "Tap again"
+        default:
+            return "Complete Set"
+        }
+    }
+
+    @ViewBuilder
+    private var completionStatusView: some View {
+        switch workout.completionSyncStatus {
+        case .idle, .sending:
+            EmptyView()
+        case .sent:
+            Label("Sent", systemImage: "checkmark.circle.fill")
+                .font(.caption2)
+                .foregroundStyle(.green)
+        case .queued:
+            Text("Queued — syncs when nearby")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+        case .retry:
+            Text("Tap again")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    // MARK: - Timed set RPE
+
+    private var setRpeView: some View {
+        VStack(spacing: 8) {
+            if !workout.state.progressText.isEmpty {
+                Text(workout.state.progressText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("How hard?")
+                .font(.headline)
+
+            if !workout.state.targetText.isEmpty {
+                Text(workout.state.targetText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 4) {
+                ForEach([6, 7, 8, 9], id: \.self) { rpe in
+                    Button {
+                        workout.submitRpe(rpe)
+                    } label: {
+                        Text("\(rpe)")
+                            .font(.body.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding()
+    }
+
     // MARK: - Rest
 
     private var restView: some View {
         VStack(spacing: 8) {
-            Text("Rest")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+            if !isLuminanceReduced, !workout.state.progressText.isEmpty {
+                Text(workout.state.progressText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !isLuminanceReduced {
+                Text("Rest")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
 
             if let restEndsAt = workout.state.restEndsAt {
-                // TimelineView re-renders every second without manual timers.
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                     let remaining = max(0, Int(restEndsAt.timeIntervalSince(timeline.date).rounded()))
                     Text(formatSeconds(remaining))
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .font(.system(size: isLuminanceReduced ? 52 : 48, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(remaining == 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                        .foregroundStyle(
+                            isLuminanceReduced
+                                ? AnyShapeStyle(.white)
+                                : (remaining == 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                        )
+                        .onChange(of: remaining) { _, newRemaining in
+                            fireRestEndHapticIfNeeded(remaining: newRemaining, restEndsAt: restEndsAt)
+                        }
                 }
             }
 
-            if let hr = workout.healthManager.heartRateBpm {
-                HStack(spacing: 4) {
-                    Image(systemName: "heart.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                    Text("\(hr) BPM")
-                        .font(.caption.weight(.semibold))
+            if !isLuminanceReduced {
+                HStack(spacing: 6) {
+                    Button("+15s") {
+                        workout.extendRest(seconds: 15)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Skip") {
+                        workout.skipRest()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                if let hr = workout.healthManager.heartRateBpm {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                        Text("\(hr) BPM")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let nextUp = workout.state.nextUp {
+                    Text("Next: \(nextUp)")
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-            }
-
-            if let nextUp = workout.state.nextUp {
-                Text("Next: \(nextUp)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
         }
         .padding()
+        .onChange(of: workout.state.restEndsAt) { _, newEndsAt in
+            if newEndsAt != restHapticFiredForEndsAt {
+                restHapticFiredForEndsAt = nil
+            }
+        }
+    }
+
+    private func fireRestEndHapticIfNeeded(remaining: Int, restEndsAt: Date) {
+        guard remaining == 0, restHapticFiredForEndsAt != restEndsAt else { return }
+        restHapticFiredForEndsAt = restEndsAt
+        WKInterfaceDevice.current().play(.notification)
     }
 
     // MARK: - Shared

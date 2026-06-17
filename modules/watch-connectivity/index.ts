@@ -25,6 +25,12 @@ export interface WatchWorkoutContext {
   exerciseEndsAt?: number;
   nextUp?: string;
   supersetLabel?: string;
+  /** Previous performance label, e.g. "135 lbs × 8". */
+  lastTimeText?: string;
+  /** Session orientation, e.g. "Exercise 3 of 8". */
+  progressText?: string;
+  /** True during timed-set RPE step (watch shows quick picker). */
+  timedSetRpe?: boolean;
   updatedAt?: number;
 }
 
@@ -32,6 +38,27 @@ export interface WatchSetCompletedEvent {
   type: 'completeSet';
   sessionId: string;
   setNumber: number;
+  sentAt: number;
+}
+
+export interface WatchSkipRestEvent {
+  type: 'skipRest';
+  sessionId: string;
+  sentAt: number;
+}
+
+export interface WatchExtendRestEvent {
+  type: 'extendRest';
+  sessionId: string;
+  seconds: number;
+  sentAt: number;
+}
+
+export interface WatchSubmitRpeEvent {
+  type: 'submitRpe';
+  sessionId: string;
+  setNumber: number;
+  rpe: number;
   sentAt: number;
 }
 
@@ -56,6 +83,9 @@ export interface WatchWorkoutEndedEvent {
 
 type WatchConnectivityEvents = {
   onSetCompleted(event: WatchSetCompletedEvent): void;
+  onSkipRest(event: WatchSkipRestEvent): void;
+  onExtendRest(event: WatchExtendRestEvent): void;
+  onSubmitRpe(event: WatchSubmitRpeEvent): void;
   onWatchStateChanged(event: WatchStateChangedEvent): void;
   onHeartRate(event: WatchHeartRateEvent): void;
   onWorkoutEnded(event: WatchWorkoutEndedEvent): void;
@@ -71,6 +101,7 @@ declare class WatchConnectivityNativeModule extends NativeModule<WatchConnectivi
   }>;
   updateWorkoutContext(context: Record<string, unknown>): Promise<void>;
   clearWorkoutContext(): Promise<void>;
+  startWatchApp(sessionId: string): Promise<void>;
 }
 
 const native =
@@ -112,6 +143,22 @@ export async function clearWorkoutContext(): Promise<void> {
   }
 }
 
+/** Best-effort: open the watch app when a workout starts. */
+export async function startWatchApp(sessionId: string): Promise<void> {
+  if (!native) return;
+  try {
+    await native.startWatchApp(sessionId);
+  } catch {
+    // No paired watch or OS declined — safe to ignore.
+  }
+}
+
+const WATCH_EVENT_MAX_AGE_MS = 5 * 60 * 1000;
+
+function isFreshWatchEvent(sentAt: number): boolean {
+  return Date.now() - sentAt * 1000 <= WATCH_EVENT_MAX_AGE_MS;
+}
+
 /** Subscribe to set-completion taps from the watch. Returns an unsubscribe fn. */
 export function addSetCompletedListener(
   listener: (event: WatchSetCompletedEvent) => void,
@@ -119,7 +166,34 @@ export function addSetCompletedListener(
   if (!native) return () => {};
   const subscription = native.addListener('onSetCompleted', (raw: WatchSetCompletedEvent) => {
     const normalized = normalizeWatchSetCompletedEvent(raw as unknown as Record<string, unknown>);
-    if (normalized) listener(normalized);
+    if (normalized && isFreshWatchEvent(normalized.sentAt)) listener(normalized);
+  });
+  return () => subscription.remove();
+}
+
+export function addSkipRestListener(listener: (event: WatchSkipRestEvent) => void): () => void {
+  if (!native) return () => {};
+  const subscription = native.addListener('onSkipRest', (raw: WatchSkipRestEvent) => {
+    const normalized = normalizeWatchSkipRestEvent(raw as unknown as Record<string, unknown>);
+    if (normalized && isFreshWatchEvent(normalized.sentAt)) listener(normalized);
+  });
+  return () => subscription.remove();
+}
+
+export function addExtendRestListener(listener: (event: WatchExtendRestEvent) => void): () => void {
+  if (!native) return () => {};
+  const subscription = native.addListener('onExtendRest', (raw: WatchExtendRestEvent) => {
+    const normalized = normalizeWatchExtendRestEvent(raw as unknown as Record<string, unknown>);
+    if (normalized && isFreshWatchEvent(normalized.sentAt)) listener(normalized);
+  });
+  return () => subscription.remove();
+}
+
+export function addSubmitRpeListener(listener: (event: WatchSubmitRpeEvent) => void): () => void {
+  if (!native) return () => {};
+  const subscription = native.addListener('onSubmitRpe', (raw: WatchSubmitRpeEvent) => {
+    const normalized = normalizeWatchSubmitRpeEvent(raw as unknown as Record<string, unknown>);
+    if (normalized && isFreshWatchEvent(normalized.sentAt)) listener(normalized);
   });
   return () => subscription.remove();
 }
@@ -149,39 +223,79 @@ export function addWorkoutEndedListener(
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function parseSessionId(raw: Record<string, unknown>): string | null {
+  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : '';
+  if (!sessionId || !UUID_RE.test(sessionId)) return null;
+  return sessionId;
+}
+
+function parseSentAt(raw: Record<string, unknown>): number {
+  const sentAtRaw = raw.sentAt;
+  return typeof sentAtRaw === 'number' && Number.isFinite(sentAtRaw) && sentAtRaw > 0
+    ? sentAtRaw
+    : Date.now() / 1000;
+}
+
 function normalizeWatchSetCompletedEvent(
   raw: Record<string, unknown>,
 ): WatchSetCompletedEvent | null {
   if (raw.type !== 'completeSet') return null;
 
-  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : '';
-  if (!sessionId || !UUID_RE.test(sessionId)) return null;
+  const sessionId = parseSessionId(raw);
+  if (!sessionId) return null;
 
   const setNumber = Number(raw.setNumber);
   if (!Number.isFinite(setNumber) || setNumber < 1 || !Number.isInteger(setNumber)) {
     return null;
   }
 
-  const sentAtRaw = raw.sentAt;
-  const sentAt =
-    typeof sentAtRaw === 'number' && Number.isFinite(sentAtRaw) && sentAtRaw > 0
-      ? sentAtRaw
-      : Date.now() / 1000;
-
   return {
     type: 'completeSet',
     sessionId,
     setNumber,
-    sentAt,
+    sentAt: parseSentAt(raw),
   };
+}
+
+function normalizeWatchSkipRestEvent(raw: Record<string, unknown>): WatchSkipRestEvent | null {
+  if (raw.type !== 'skipRest') return null;
+  const sessionId = parseSessionId(raw);
+  if (!sessionId) return null;
+  return { type: 'skipRest', sessionId, sentAt: parseSentAt(raw) };
+}
+
+function normalizeWatchExtendRestEvent(raw: Record<string, unknown>): WatchExtendRestEvent | null {
+  if (raw.type !== 'extendRest') return null;
+  const sessionId = parseSessionId(raw);
+  if (!sessionId) return null;
+  const seconds = Number(raw.seconds);
+  if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300 || !Number.isInteger(seconds)) {
+    return null;
+  }
+  return { type: 'extendRest', sessionId, seconds, sentAt: parseSentAt(raw) };
+}
+
+function normalizeWatchSubmitRpeEvent(raw: Record<string, unknown>): WatchSubmitRpeEvent | null {
+  if (raw.type !== 'submitRpe') return null;
+  const sessionId = parseSessionId(raw);
+  if (!sessionId) return null;
+  const setNumber = Number(raw.setNumber);
+  if (!Number.isFinite(setNumber) || setNumber < 1 || !Number.isInteger(setNumber)) {
+    return null;
+  }
+  const rpe = Number(raw.rpe);
+  if (!Number.isFinite(rpe) || rpe < 6 || rpe > 10 || !Number.isInteger(rpe)) {
+    return null;
+  }
+  return { type: 'submitRpe', sessionId, setNumber, rpe, sentAt: parseSentAt(raw) };
 }
 
 function normalizeWatchHeartRateEvent(
   raw: Record<string, unknown>,
 ): WatchHeartRateEvent | null {
   if (raw.type !== 'heartRate') return null;
-  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : '';
-  if (!sessionId || !UUID_RE.test(sessionId)) return null;
+  const sessionId = parseSessionId(raw);
+  if (!sessionId) return null;
   const bpm = Number(raw.bpm);
   if (!Number.isFinite(bpm) || bpm <= 0 || bpm > 250) return null;
   const timestamp =
@@ -195,9 +309,9 @@ function normalizeWatchWorkoutEndedEvent(
   raw: Record<string, unknown>,
 ): WatchWorkoutEndedEvent | null {
   if (raw.type !== 'workoutEnded') return null;
-  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : '';
+  const sessionId = parseSessionId(raw);
   const hkWorkoutUuid = typeof raw.hkWorkoutUuid === 'string' ? raw.hkWorkoutUuid.trim() : '';
-  if (!sessionId || !UUID_RE.test(sessionId)) return null;
+  if (!sessionId) return null;
   if (!hkWorkoutUuid || !UUID_RE.test(hkWorkoutUuid)) return null;
   return { type: 'workoutEnded', sessionId, hkWorkoutUuid };
 }

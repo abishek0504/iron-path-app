@@ -72,9 +72,16 @@ import {
   updateWorkoutContext,
   clearWorkoutContext,
   addSetCompletedListener,
+  addSkipRestListener,
+  addExtendRestListener,
+  addSubmitRpeListener,
   addHeartRateListener,
   addWorkoutEndedListener,
+  getWatchState,
+  startWatchApp,
 } from '../../../modules/watch-connectivity';
+import { REST_EXTEND_SEC } from '../../../src/lib/workout/restConstants';
+import { formatPreviousPerformanceLabel } from '../../../src/lib/workout/formatPreviousPerformance';
 import {
   appendHeartRateSample,
   setWatchHkWorkoutUuid,
@@ -185,6 +192,8 @@ export default function ActiveWorkoutScreen() {
   const [isApplyingRefresh, setIsApplyingRefresh] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [liveHeartRateBpm, setLiveHeartRateBpm] = useState<number | null>(null);
+  const [restEndsAtEpoch, setRestEndsAtEpoch] = useState<number | null>(null);
+  const [restStartedAtEpoch, setRestStartedAtEpoch] = useState<number | null>(null);
 
   // Workout overflow menu (Add exercise / Remove current exercise / Abandon workout)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
@@ -230,11 +239,15 @@ export default function ActiveWorkoutScreen() {
   // --- Apple Watch mirror ---------------------------------------------------
   // The watch renders whatever state the phone pushes; completion taps come
   // back as events and reuse the exact same handler as the on-screen button.
-  const handleCompleteSetRef = useRef<() => void>(() => {});
+  const handleCompleteSetRef = useRef<(elapsedDurationSec?: number, rpeOverride?: number) => void>(() => {});
   const workoutPhaseRef = useRef(workoutPhase);
   workoutPhaseRef.current = workoutPhase;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const exercisesRef = useRef(exercises);
+  exercisesRef.current = exercises;
+  const currentExerciseIndexRef = useRef(currentExerciseIndex);
+  currentExerciseIndexRef.current = currentExerciseIndex;
   const exerciseTimerEndsAtRef = useRef<number | null>(null);
   const [exerciseTimerEndsAt, setExerciseTimerEndsAt] = useState<number | null>(null);
 
@@ -252,6 +265,33 @@ export default function ActiveWorkoutScreen() {
     exerciseTimerEndsAtRef.current = endsAtEpochSec;
     setExerciseTimerEndsAt(endsAtEpochSec);
   };
+
+  const advanceFromRestRef = useRef<() => void>(() => {});
+  const extendRestByRef = useRef<(seconds: number) => void>(() => {});
+
+  const advanceFromRest = () => {
+    const phase = workoutPhaseRef.current;
+    if (phase.type !== 'rest') return;
+
+    setRestEndsAtEpoch(null);
+    setRestStartedAtEpoch(null);
+
+    const exerciseList = exercisesRef.current;
+    const exerciseIdx = currentExerciseIndexRef.current;
+    if (phase.nextExerciseIndex !== exerciseIdx) {
+      const rpes = exerciseList[phase.nextExerciseIndex].sets.map((s) => s.rpe || 7);
+      setCurrentExerciseIndex(phase.nextExerciseIndex);
+      setCurrentSetRPEs(rpes);
+    }
+    setWorkoutPhase({ type: 'execution', setIndex: phase.nextSetIndex });
+  };
+  advanceFromRestRef.current = advanceFromRest;
+
+  const extendRestBy = (seconds: number) => {
+    if (workoutPhaseRef.current.type !== 'rest') return;
+    setRestEndsAtEpoch((prev) => (prev != null ? prev + seconds : prev));
+  };
+  extendRestByRef.current = extendRestBy;
 
   useEffect(() => {
     const unsubscribe = addSetCompletedListener((event) => {
@@ -301,6 +341,54 @@ export default function ActiveWorkoutScreen() {
       void clearWorkoutContext();
     };
   }, []);
+
+  useEffect(() => {
+    const unsubSkip = addSkipRestListener((event) => {
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId || event.sessionId !== activeSessionId) return;
+      if (workoutPhaseRef.current.type !== 'rest') return;
+      advanceFromRestRef.current();
+    });
+
+    const unsubExtend = addExtendRestListener((event) => {
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId || event.sessionId !== activeSessionId) return;
+      if (workoutPhaseRef.current.type !== 'rest') return;
+      extendRestByRef.current(event.seconds);
+    });
+
+    const unsubRpe = addSubmitRpeListener((event) => {
+      const activeSessionId = sessionIdRef.current;
+      if (!activeSessionId || event.sessionId !== activeSessionId) return;
+      const phase = workoutPhaseRef.current;
+      if (phase.type !== 'timedSetRpe') return;
+      if (event.setNumber !== phase.setIndex + 1) return;
+      setCurrentSetRPEs((prev) => {
+        const updated = [...prev];
+        updated[phase.setIndex] = event.rpe;
+        return updated;
+      });
+      handleCompleteSetRef.current(undefined, event.rpe);
+    });
+
+    return () => {
+      unsubSkip();
+      unsubExtend();
+      unsubRpe();
+    };
+  }, []);
+
+  const watchAppOpenedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || !sessionId) return;
+    if (watchAppOpenedRef.current === sessionId) return;
+    watchAppOpenedRef.current = sessionId;
+    void getWatchState().then((state) => {
+      if (state.installed) {
+        void startWatchApp(sessionId);
+      }
+    });
+  }, [loading, sessionId]);
 
   useEffect(() => {
     const unsubHr = addHeartRateListener((event) => {
@@ -362,9 +450,16 @@ export default function ActiveWorkoutScreen() {
         ? `Superset ${members.indexOf(currentExerciseIndex) + 1} of ${members.length}`
         : undefined;
 
+    const progressText = `Exercise ${currentExerciseIndex + 1} of ${exercises.length}`;
+
     if (workoutPhase.type === 'execution') {
       const set = exercise.sets[workoutPhase.setIndex];
       const nextSet = exercise.sets[workoutPhase.setIndex + 1];
+      const lastTimeText = formatPreviousPerformanceLabel(prevPerformance, {
+        mode: exercise.mode,
+        setNumber: set?.set_number,
+        useImperial: profile?.use_imperial,
+      });
       void updateWorkoutContext({
         active: true,
         sessionId,
@@ -374,6 +469,8 @@ export default function ActiveWorkoutScreen() {
         targetText: formatSetTarget(set),
         setType: set?.set_type ?? 'normal',
         phase: 'execution',
+        progressText,
+        ...(lastTimeText ? { lastTimeText } : {}),
         ...(exerciseTimerEndsAt != null ? { exerciseEndsAt: exerciseTimerEndsAt } : {}),
         nextUp: nextSet ? `Set ${workoutPhase.setIndex + 2}` : exercises[currentExerciseIndex + 1]?.name,
         supersetLabel,
@@ -387,11 +484,11 @@ export default function ActiveWorkoutScreen() {
         totalSets: exercise.sets.length,
         targetText: `${workoutPhase.elapsedDurationSec}s held`,
         phase: 'setRpe',
+        timedSetRpe: true,
+        progressText,
         supersetLabel,
       });
     } else if (workoutPhase.type === 'rest') {
-      const justCompletedSet = [...exercise.sets].reverse().find((s) => s.completed);
-      const restDuration = resolveRestSec(exercise, justCompletedSet ?? exercise.sets[0]);
       const nextExercise = exercises[workoutPhase.nextExerciseIndex] ?? exercise;
       void updateWorkoutContext({
         active: true,
@@ -401,7 +498,8 @@ export default function ActiveWorkoutScreen() {
         totalSets: nextExercise.sets.length,
         targetText: '',
         phase: 'rest',
-        restEndsAt: Date.now() / 1000 + restDuration,
+        ...(restEndsAtEpoch != null ? { restEndsAt: restEndsAtEpoch } : {}),
+        progressText,
         nextUp:
           workoutPhase.nextExerciseIndex !== currentExerciseIndex
             ? `${nextExercise.name} — Set ${workoutPhase.nextSetIndex + 1}`
@@ -419,7 +517,7 @@ export default function ActiveWorkoutScreen() {
     } else {
       void updateWorkoutContext({ active: true, sessionId, phase: 'complete' });
     }
-  }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt]);
+  }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt, restEndsAtEpoch, prevPerformance]);
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -697,7 +795,7 @@ export default function ActiveWorkoutScreen() {
     setWorkoutPhase({ type: 'timedSetRpe', setIndex, elapsedDurationSec });
   };
 
-  const handleCompleteSet = async (elapsedDurationSec?: number) => {
+  const handleCompleteSet = async (elapsedDurationSec?: number, rpeOverride?: number) => {
     const exercise = exercises[currentExerciseIndex];
 
     if (workoutPhase.type !== 'execution' && workoutPhase.type !== 'timedSetRpe') return;
@@ -729,7 +827,7 @@ export default function ActiveWorkoutScreen() {
     // Update RPE for this set (strength only)
     const updatedRPEs = [...currentSetRPEs];
     if (!isStretch) {
-      updatedRPEs[currentSetIdx] = currentSetRPEs[currentSetIdx] || 7;
+      updatedRPEs[currentSetIdx] = rpeOverride ?? (currentSetRPEs[currentSetIdx] || 7);
       setCurrentSetRPEs(updatedRPEs);
     }
 
@@ -804,7 +902,16 @@ export default function ActiveWorkoutScreen() {
       }
       setWorkoutPhase({ type: 'logging' });
     } else if (next.withRest) {
-      // Wrapped around the group (or solo exercise): rest before the next round
+      const justCompletedSet = [...updatedExercises[currentExerciseIndex].sets]
+        .reverse()
+        .find((s) => s.completed);
+      const restDuration = resolveRestSec(
+        updatedExercises[currentExerciseIndex],
+        justCompletedSet ?? updatedExercises[currentExerciseIndex].sets[0],
+      );
+      const nowSec = Date.now() / 1000;
+      setRestStartedAtEpoch(nowSec);
+      setRestEndsAtEpoch(nowSec + restDuration);
       setWorkoutPhase({
         type: 'rest',
         nextExerciseIndex: next.exerciseIndex,
@@ -1429,20 +1536,11 @@ export default function ActiveWorkoutScreen() {
                   : `${currentExercise.sets[workoutPhase.setIndex]?.reps || 0} reps${suggestedWeight ? ` @ ${suggestedWeight} ${profile?.use_imperial ? 'lbs' : 'kg'}` : ''}`}
               </Text>
               {(() => {
-                const prevSet =
-                  prevPerformance?.sets.find(
-                    (s) => s.set_number === (currentExercise.sets[workoutPhase.setIndex]?.set_number ?? -1)
-                  ) ?? prevPerformance?.sets[prevPerformance.sets.length - 1];
-                if (!prevSet) return null;
-                const unitsLabel = profile?.use_imperial ? 'lbs' : 'kg';
-                const prevLabel =
-                  currentExercise.mode === 'timed'
-                    ? prevSet.duration_sec != null
-                      ? `${prevSet.duration_sec} sec`
-                      : null
-                    : prevSet.reps != null
-                      ? `${prevSet.weight != null && prevSet.weight > 0 ? `${prevSet.weight} ${unitsLabel} × ` : ''}${prevSet.reps} reps`
-                      : null;
+                const prevLabel = formatPreviousPerformanceLabel(prevPerformance, {
+                  mode: currentExercise.mode,
+                  setNumber: currentExercise.sets[workoutPhase.setIndex]?.set_number,
+                  useImperial: profile?.use_imperial,
+                });
                 if (!prevLabel) return null;
                 return <Text style={styles.prevPerformanceText}>Last time: {prevLabel}</Text>;
               })()}
@@ -1562,23 +1660,16 @@ export default function ActiveWorkoutScreen() {
         )}
 
         {/* REST PHASE */}
-        {workoutPhase.type === 'rest' && (() => {
+        {workoutPhase.type === 'rest' && restEndsAtEpoch != null && (() => {
           const nextExercise = exercises[workoutPhase.nextExerciseIndex] ?? currentExercise;
-          // Rest follows the set that was just completed on this exercise
-          const justCompletedSet = [...currentExercise.sets].reverse().find((s) => s.completed);
-          const restDuration = resolveRestSec(currentExercise, justCompletedSet ?? currentExercise.sets[0]);
-          const advance = () => {
-            if (workoutPhase.nextExerciseIndex !== currentExerciseIndex) {
-              moveToExercise(exercises, workoutPhase.nextExerciseIndex);
-            }
-            setWorkoutPhase({ type: 'execution', setIndex: workoutPhase.nextSetIndex });
-          };
           return (
             <View style={styles.restContainer}>
               <RestTimer
-                durationSec={restDuration}
-                onComplete={advance}
-                onSkip={advance}
+                endsAtEpoch={restEndsAtEpoch}
+                startedAtEpoch={restStartedAtEpoch ?? undefined}
+                onComplete={advanceFromRest}
+                onSkip={advanceFromRest}
+                onExtend={() => extendRestBy(REST_EXTEND_SEC)}
               />
               <Text style={styles.nextSetText}>
                 {workoutPhase.nextExerciseIndex !== currentExerciseIndex
