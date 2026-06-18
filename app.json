@@ -141,7 +141,8 @@
           "project": "iron-path-app"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-video"
     ],
     "scheme": "ironpath",
     "extra": {

@@ -38,34 +38,36 @@ final class WatchHealthWorkoutManager: NSObject, ObservableObject {
         configuration.activityType = .traditionalStrengthTraining
         configuration.locationType = .indoor
 
-        do {
-            try healthStore.requestAuthorization(toShare: [heartRateType], read: [heartRateType])
+        Task { @MainActor in
+            do {
+                try await healthStore.requestAuthorization(toShare: [heartRateType], read: [heartRateType])
 
-            let workoutSession = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
-            let workoutBuilder = workoutSession.associatedWorkoutBuilder()
-            workoutBuilder.dataSource = HKLiveWorkoutDataSource(
-                healthStore: healthStore,
-                workoutConfiguration: configuration
-            )
+                let workoutSession = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
+                let workoutBuilder = workoutSession.associatedWorkoutBuilder()
+                workoutBuilder.dataSource = HKLiveWorkoutDataSource(
+                    healthStore: healthStore,
+                    workoutConfiguration: configuration
+                )
 
-            workoutSession.delegate = self
-            workoutBuilder.delegate = self
+                workoutSession.delegate = self
+                workoutBuilder.delegate = self
 
-            session = workoutSession
-            builder = workoutBuilder
-            activeSessionId = sessionId
+                session = workoutSession
+                builder = workoutBuilder
+                activeSessionId = sessionId
 
-            let startDate = Date()
-            workoutSession.startActivity(with: startDate)
-            workoutBuilder.beginCollection(withStart: startDate) { [weak self] _, error in
-                if error != nil {
-                    DispatchQueue.main.async { self?.isCollecting = false }
-                    return
+                let startDate = Date()
+                workoutSession.startActivity(with: startDate)
+                workoutBuilder.beginCollection(withStart: startDate) { [weak self] _, error in
+                    if error != nil {
+                        DispatchQueue.main.async { self?.isCollecting = false }
+                        return
+                    }
+                    DispatchQueue.main.async { self?.isCollecting = true }
                 }
-                DispatchQueue.main.async { self?.isCollecting = true }
+            } catch {
+                isCollecting = false
             }
-        } catch {
-            isCollecting = false
         }
     }
 

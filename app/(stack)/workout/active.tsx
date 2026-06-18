@@ -77,8 +77,10 @@ import {
   addSubmitRpeListener,
   addHeartRateListener,
   addWorkoutEndedListener,
+  addWatchStateChangedListener,
   getWatchState,
   startWatchApp,
+  type WatchWorkoutContext,
 } from '../../../modules/watch-connectivity';
 import { REST_EXTEND_SEC } from '../../../src/lib/workout/restConstants';
 import { formatPreviousPerformanceLabel } from '../../../src/lib/workout/formatPreviousPerformance';
@@ -379,6 +381,8 @@ export default function ActiveWorkoutScreen() {
   }, []);
 
   const watchAppOpenedRef = useRef<string | null>(null);
+  const latestWatchContextRef = useRef<WatchWorkoutContext | null>(null);
+
   useEffect(() => {
     if (loading || !sessionId) return;
     if (watchAppOpenedRef.current === sessionId) return;
@@ -389,6 +393,17 @@ export default function ActiveWorkoutScreen() {
       }
     });
   }, [loading, sessionId]);
+
+  useEffect(() => {
+    const unsub = addWatchStateChangedListener((state) => {
+      if (!state.paired || !state.installed) return;
+      const ctx = latestWatchContextRef.current;
+      if (ctx?.active) {
+        void updateWorkoutContext(ctx);
+      }
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const unsubHr = addHeartRateListener((event) => {
@@ -430,6 +445,7 @@ export default function ActiveWorkoutScreen() {
     if (loading || !sessionId) return;
     const exercise = exercises[currentExerciseIndex];
     if (!exercise) {
+      latestWatchContextRef.current = null;
       void clearWorkoutContext();
       return;
     }
@@ -452,6 +468,11 @@ export default function ActiveWorkoutScreen() {
 
     const progressText = `Exercise ${currentExerciseIndex + 1} of ${exercises.length}`;
 
+    const pushWatchContext = (ctx: WatchWorkoutContext) => {
+      latestWatchContextRef.current = ctx;
+      void updateWorkoutContext(ctx);
+    };
+
     if (workoutPhase.type === 'execution') {
       const set = exercise.sets[workoutPhase.setIndex];
       const nextSet = exercise.sets[workoutPhase.setIndex + 1];
@@ -460,7 +481,7 @@ export default function ActiveWorkoutScreen() {
         setNumber: set?.set_number,
         useImperial: profile?.use_imperial,
       });
-      void updateWorkoutContext({
+      pushWatchContext({
         active: true,
         sessionId,
         exerciseName: exercise.name,
@@ -476,7 +497,7 @@ export default function ActiveWorkoutScreen() {
         supersetLabel,
       });
     } else if (workoutPhase.type === 'timedSetRpe') {
-      void updateWorkoutContext({
+      pushWatchContext({
         active: true,
         sessionId,
         exerciseName: exercise.name,
@@ -490,7 +511,7 @@ export default function ActiveWorkoutScreen() {
       });
     } else if (workoutPhase.type === 'rest') {
       const nextExercise = exercises[workoutPhase.nextExerciseIndex] ?? exercise;
-      void updateWorkoutContext({
+      pushWatchContext({
         active: true,
         sessionId,
         exerciseName: exercise.name,
@@ -507,7 +528,7 @@ export default function ActiveWorkoutScreen() {
         supersetLabel,
       });
     } else if (workoutPhase.type === 'logging') {
-      void updateWorkoutContext({
+      pushWatchContext({
         active: true,
         sessionId,
         exerciseName: exercise.name,
@@ -515,7 +536,7 @@ export default function ActiveWorkoutScreen() {
         supersetLabel,
       });
     } else {
-      void updateWorkoutContext({ active: true, sessionId, phase: 'complete' });
+      pushWatchContext({ active: true, sessionId, phase: 'complete' });
     }
   }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt, restEndsAtEpoch, prevPerformance]);
 

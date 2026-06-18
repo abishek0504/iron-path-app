@@ -1,15 +1,6 @@
 import WidgetKit
 import SwiftUI
 
-private let complicationAppGroupId = "group.com.ironpath.app.watch"
-
-struct ComplicationSnapshot: Codable {
-    var active: Bool
-    var phase: String
-    var exerciseName: String
-    var restEndsAt: Double?
-}
-
 struct IronPathComplicationEntry: TimelineEntry {
     let date: Date
     let title: String

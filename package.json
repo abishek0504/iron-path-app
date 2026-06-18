@@ -41,6 +41,7 @@
     "expo-router": "~6.0.15",
     "expo-secure-store": "~15.0.8",
     "expo-status-bar": "~3.0.8",
+    "expo-video": "~3.0.16",
     "lucide-react-native": "^0.554.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

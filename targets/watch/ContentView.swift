@@ -243,7 +243,7 @@ struct ContentView: View {
                                 ? AnyShapeStyle(.white)
                                 : (remaining == 0 ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                         )
-                        .onChange(of: remaining) { _, newRemaining in
+                        .onChange(of: remaining) { newRemaining in
                             fireRestEndHapticIfNeeded(remaining: newRemaining, restEndsAt: restEndsAt)
                         }
                 }
@@ -282,7 +282,7 @@ struct ContentView: View {
             }
         }
         .padding()
-        .onChange(of: workout.state.restEndsAt) { _, newEndsAt in
+        .onChange(of: workout.state.restEndsAt) { newEndsAt in
             if newEndsAt != restHapticFiredForEndsAt {
                 restHapticFiredForEndsAt = nil
             }

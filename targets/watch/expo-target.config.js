@@ -6,7 +6,7 @@ module.exports = {
   name: 'IronPathWatch',
   displayName: 'IronPath',
   bundleIdentifier: '.watch',
-  deploymentTarget: '9.4',
+  deploymentTarget: '10.0',
   icon: '../../assets/icon.png',
   colors: {
     $accent: '#a3e635',

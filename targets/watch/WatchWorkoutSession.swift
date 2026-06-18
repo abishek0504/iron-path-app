@@ -3,7 +3,6 @@ import WatchConnectivity
 
 private let restExtendSec = 15
 private let completionRetrySec: TimeInterval = 15
-private let complicationAppGroupId = "group.com.ironpath.app.watch"
 
 private func intFromPayload(_ value: Any?) -> Int? {
     guard let value else { return nil }
@@ -21,13 +20,6 @@ private func intFromPayload(_ value: Any?) -> Int? {
         return rounded
     }
     return nil
-}
-
-struct ComplicationSnapshot: Codable {
-    var active: Bool
-    var phase: String
-    var exerciseName: String
-    var restEndsAt: Double?
 }
 
 enum CompletionSyncStatus: Equatable {

@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import HealthKit
 import WatchConnectivity
 
 enum WatchPayloadParsing {
@@ -42,6 +43,21 @@ enum WatchPayloadParsing {
 
   static func isUuid(_ value: String) -> Bool {
     UUID(uuidString: value) != nil
+  }
+}
+
+private func openCompanionWatchApp(sessionId: String) {
+  guard WCSession.isSupported() else { return }
+  guard WCSession.default.isWatchAppInstalled else { return }
+
+  let configuration = HKWorkoutConfiguration()
+  configuration.activityType = .traditionalStrengthTraining
+  configuration.locationType = .indoor
+
+  HKHealthStore().startWatchApp(with: configuration) { _, error in
+    if let error {
+      NSLog("IronPath startWatchApp failed for session %@: %@", sessionId, error.localizedDescription)
+    }
   }
 }
 
@@ -113,23 +129,17 @@ public class WatchConnectivityModule: Module {
     }
 
     AsyncFunction("updateWorkoutContext") { (context: [String: Any]) in
-      guard WCSession.isSupported() else { return }
-      try WCSession.default.updateApplicationContext(context)
+      try self.sessionDelegate.updateWorkoutContext(context)
     }
 
     AsyncFunction("clearWorkoutContext") { () in
-      guard WCSession.isSupported() else { return }
-      try WCSession.default.updateApplicationContext([
-        "active": false,
-        "updatedAt": Date().timeIntervalSince1970,
-      ])
+      try self.sessionDelegate.clearWorkoutContext()
     }
 
-    AsyncFunction("startWatchApp") { (sessionId: String) in
-      guard WCSession.isSupported() else { return }
-      let session = WCSession.default
-      guard session.isWatchAppInstalled else { return }
-      session.startWatchApp(withUserInfo: ["sessionId": sessionId])
+    AsyncFunction("startWatchApp") { (sessionId: String) async in
+      await MainActor.run {
+        openCompanionWatchApp(sessionId: sessionId)
+      }
     }
   }
 }
@@ -143,11 +153,64 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   var onWorkoutEnded: (([String: Any]) -> Void)?
   var onStateChanged: (([String: Any]) -> Void)?
 
+  private var pendingWorkoutContext: [String: Any]?
+
   func activate() {
     guard WCSession.isSupported() else { return }
     let session = WCSession.default
     session.delegate = self
     session.activate()
+  }
+
+  /// Queue the latest workout snapshot and push when the session is activated.
+  /// `updateApplicationContext` throws if called before activation — we buffer
+  /// until `activationDidCompleteWith` so early workout loads are not lost.
+  func updateWorkoutContext(_ context: [String: Any]) throws {
+    guard WCSession.isSupported() else { return }
+    let sanitized = Self.sanitizeContext(context)
+    pendingWorkoutContext = sanitized
+    try flushPendingWorkoutContextIfNeeded()
+  }
+
+  func clearWorkoutContext() throws {
+    try updateWorkoutContext([
+      "active": false,
+      "updatedAt": Date().timeIntervalSince1970,
+    ])
+  }
+
+  private func flushPendingWorkoutContextIfNeeded() throws {
+    guard WCSession.isSupported() else { return }
+    let session = WCSession.default
+    guard session.activationState == .activated, let context = pendingWorkoutContext else {
+      return
+    }
+    try session.updateApplicationContext(context)
+  }
+
+  private static func sanitizeContext(_ context: [String: Any]) -> [String: Any] {
+    var result: [String: Any] = [:]
+    for (key, value) in context {
+      if value is NSNull { continue }
+      switch value {
+      case let string as String:
+        result[key] = string
+      case let bool as Bool:
+        result[key] = bool
+      case let int as Int:
+        result[key] = int
+      case let double as Double where double.isFinite:
+        result[key] = double
+      case let number as NSNumber:
+        let doubleValue = number.doubleValue
+        if doubleValue.isFinite {
+          result[key] = number
+        }
+      default:
+        continue
+      }
+    }
+    return result
   }
 
   private func emitState(_ session: WCSession) {
@@ -163,7 +226,17 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     activationDidCompleteWith activationState: WCSessionActivationState,
     error: Error?
   ) {
+    if let error {
+      NSLog("IronPath WCSession activation failed: %@", error.localizedDescription)
+    }
     emitState(session)
+    if activationState == .activated {
+      do {
+        try flushPendingWorkoutContextIfNeeded()
+      } catch {
+        NSLog("IronPath flush workout context after activation failed: %@", error.localizedDescription)
+      }
+    }
   }
 
   func sessionDidBecomeInactive(_ session: WCSession) {}
@@ -174,6 +247,11 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
 
   func sessionReachabilityDidChange(_ session: WCSession) {
     emitState(session)
+    do {
+      try flushPendingWorkoutContextIfNeeded()
+    } catch {
+      NSLog("IronPath flush workout context on reachability change failed: %@", error.localizedDescription)
+    }
   }
 
   func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {

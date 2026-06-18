@@ -123,13 +123,30 @@ export async function getWatchState() {
 /** Mirror the current workout state to the watch. Latest state wins. */
 export async function updateWorkoutContext(context: WatchWorkoutContext): Promise<void> {
   if (!native) return;
+  const payload = {
+    ...context,
+    updatedAt: Date.now() / 1000,
+  };
   try {
-    await native.updateWorkoutContext({
-      ...context,
-      updatedAt: Date.now() / 1000,
-    });
-  } catch {
-    // updateApplicationContext throws when nothing is paired — safe to ignore.
+    await native.updateWorkoutContext(payload);
+    if (__DEV__) {
+      const { devLog } = require('../../src/lib/utils/logger');
+      devLog('watch-connectivity', {
+        action: 'updateWorkoutContext',
+        phase: context.phase ?? 'execution',
+        active: context.active,
+        restEndsAt: context.restEndsAt ?? null,
+      });
+    }
+  } catch (error) {
+    if (__DEV__) {
+      const { devLog } = require('../../src/lib/utils/logger');
+      devLog('watch-connectivity', {
+        action: 'updateWorkoutContext_failed',
+        phase: context.phase ?? 'execution',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 
@@ -160,6 +177,16 @@ function isFreshWatchEvent(sentAt: number): boolean {
 }
 
 /** Subscribe to set-completion taps from the watch. Returns an unsubscribe fn. */
+export function addWatchStateChangedListener(
+  listener: (event: WatchStateChangedEvent) => void,
+): () => void {
+  if (!native) return () => {};
+  const subscription = native.addListener('onWatchStateChanged', (raw: WatchStateChangedEvent) => {
+    listener(raw);
+  });
+  return () => subscription.remove();
+}
+
 export function addSetCompletedListener(
   listener: (event: WatchSetCompletedEvent) => void,
 ): () => void {
