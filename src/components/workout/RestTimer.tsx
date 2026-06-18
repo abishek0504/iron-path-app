@@ -1,10 +1,3 @@
-/**
- * Rest Timer
- *
- * Auto-starts after completing a set
- * Shows countdown with skip and optional +15s extend
- */
-
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SkipForward, Plus } from 'lucide-react-native';
@@ -20,6 +13,8 @@ interface RestTimerProps {
   onSkip: () => void;
   onExtend?: () => void;
 }
+
+const ACTION_BUTTON_MIN_HEIGHT = 44;
 
 export const RestTimer: React.FC<RestTimerProps> = ({
   endsAtEpoch,
@@ -43,14 +38,7 @@ export const RestTimer: React.FC<RestTimerProps> = ({
       borderWidth: 2,
       borderColor: colors.primary,
       marginBottom: spacing.md,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    content: {
-      flex: 1,
+      gap: spacing.md,
     },
     label: {
       fontSize: typography.sizes.sm,
@@ -61,7 +49,7 @@ export const RestTimer: React.FC<RestTimerProps> = ({
       fontSize: typography.sizes['3xl'],
       fontWeight: typography.weights.bold,
       color: colors.primary,
-      marginBottom: spacing.sm,
+      textAlign: 'center',
     },
     progressBar: {
       height: 4,
@@ -75,14 +63,16 @@ export const RestTimer: React.FC<RestTimerProps> = ({
     },
     actions: {
       flexDirection: 'row',
-      gap: spacing.xs,
-      marginLeft: spacing.sm,
+      gap: spacing.sm,
     },
     actionButton: {
+      flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: spacing.xs,
-      padding: spacing.sm,
+      minHeight: ACTION_BUTTON_MIN_HEIGHT,
+      paddingHorizontal: spacing.sm,
       backgroundColor: colors.primary + '20',
       borderRadius: borderRadius.sm,
     },
@@ -95,26 +85,24 @@ export const RestTimer: React.FC<RestTimerProps> = ({
 
   return (
     <View style={styles.container}>
-      <View style={styles.row}>
-        <View style={styles.content}>
-          <Text style={styles.label}>Rest</Text>
-          <Text style={styles.timer}>{formatCountdownTime(secondsLeft)}</Text>
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-          </View>
+      <View>
+        <Text style={styles.label}>Rest</Text>
+        <Text style={styles.timer}>{formatCountdownTime(secondsLeft)}</Text>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
         </View>
-        <View style={styles.actions}>
-          {onExtend ? (
-            <TouchableOpacity style={styles.actionButton} onPress={onExtend}>
-              <Plus size={18} color={colors.primary} />
-              <Text style={styles.actionText}>{REST_EXTEND_SEC}s</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity style={styles.actionButton} onPress={onSkip}>
-            <SkipForward size={20} color={colors.primary} />
-            <Text style={styles.actionText}>Skip</Text>
+      </View>
+      <View style={styles.actions}>
+        {onExtend ? (
+          <TouchableOpacity style={styles.actionButton} onPress={onExtend}>
+            <Plus size={18} color={colors.primary} />
+            <Text style={styles.actionText}>+{REST_EXTEND_SEC}s</Text>
           </TouchableOpacity>
-        </View>
+        ) : null}
+        <TouchableOpacity style={styles.actionButton} onPress={onSkip}>
+          <SkipForward size={20} color={colors.primary} />
+          <Text style={styles.actionText}>Skip</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );

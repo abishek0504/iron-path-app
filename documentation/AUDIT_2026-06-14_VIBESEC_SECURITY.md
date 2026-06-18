@@ -27,7 +27,7 @@ Full-stack security audit guided by the global [VibeSec skill](https://github.co
 - `v2_profiles_protect_subscription` trigger now `BEFORE INSERT OR UPDATE`
 - New `trg_v2_profiles_protect_deletion` trigger active
 - SECURITY DEFINER EXECUTE warnings for `v2_profiles_protect_subscription_fields` **resolved**
-- Legal URLs `https://ironpath.app/privacy` and `/terms` return **HTTP 200** (fixed since June 9)
+- Legal URLs `https://tryironpath.com/privacy` and `/terms` return **HTTP 200** (fixed since June 9)
 - Edge functions deployed: `delete-account`, `update-muscle-freshness`, `revenuecat-webhook`, `generate-workout` (`generate-exercise-image` removed post-audit)
 - No legacy `public.profiles` / v1 tables in live DB
 - `trigger_update_muscle_freshness` **not present** in live DB (client invokes edge function instead)
@@ -254,7 +254,7 @@ All **22** `v2_*` tables have `rowsecurity = true`. No non-`v2_*` application ta
 | **Privacy policy** | Add RevenueCat to `legal/privacy.md`; align HealthKit `READ_TYPES` with actual reads | App Store privacy questionnaire matches code |
 | **Dependency upgrades** | Evaluate Expo 56 / `npm audit fix` for `@xmldom/xmldom`, `@expo/plist` transitive highs | `npm audit` shows 0 high/critical |
 | **SecureStore (optional)** | Migrate Supabase auth storage to `expo-secure-store` on native | Tokens not in plaintext AsyncStorage |
-| **Web CSP (optional)** | Add CSP headers on web hosting for `ironpath.app` | Security headers scan passes |
+| **Web CSP (optional)** | Add CSP headers on web hosting for `tryironpath.com` | Security headers scan passes |
 
 ---
 
@@ -268,8 +268,8 @@ All **22** `v2_*` tables have `rowsecurity = true`. No non-`v2_*` application ta
 | Security advisor: `auth_leaked_password_protection` | ⚠️ Still disabled — **manual** |
 | Security advisor: GraphQL lint-0027 (22 tables) | ⚠️ Expected — RLS-protected; informational |
 | Legacy v1 tables | ✅ None in live `public` schema |
-| `https://ironpath.app/privacy` | ✅ HTTP 200 (was 404 on 2026-06-09) |
-| `https://ironpath.app/terms` | ✅ HTTP 200 (was 404 on 2026-06-09) |
+| `https://tryironpath.com/privacy` | ✅ HTTP 200 (was 404 on 2026-06-09) |
+| `https://tryironpath.com/terms` | ✅ HTTP 200 (was 404 on 2026-06-09) |
 | Edge functions deployed | ✅ 4 active (`generate-workout`, `delete-account`, `update-muscle-freshness`, `revenuecat-webhook`); `generate-exercise-image` removed |
 | `npm audit` | ⚠️ 24 vulnerabilities — deferred (Expo toolchain) |
 
@@ -304,7 +304,7 @@ Notable transitive issues:
 ## 10. Recommended follow-ups (priority order)
 
 1. Enable leaked password protection in Supabase Dashboard
-2. Add web CSP at hosting layer (`ironpath.app`)
+2. Add web CSP at hosting layer (`tryironpath.com`)
 3. Plan Expo 56 upgrade for dependency CVEs (`SEC-DEP-01`)
 4. Set real Sentry org in `app.json` and `EXPO_PUBLIC_SENTRY_DSN` in EAS
 5. Set `REVENUECAT_SECRET_API_KEY` in Supabase Edge Function secrets for GDPR subscriber purge on delete

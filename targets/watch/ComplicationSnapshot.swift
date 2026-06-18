@@ -1,6 +1,6 @@
 import Foundation
 
-let complicationAppGroupId = "group.com.ironpath.app.watch"
+let complicationAppGroupId = "group.com.alexpreo.ironpath.watch"
 
 struct ComplicationSnapshot: Codable {
     var active: Bool

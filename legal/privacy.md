@@ -2,7 +2,7 @@
 
 **Effective date:** June 9, 2026
 
-IronPath ("the App", "we", "us") is a workout planning and tracking app for iPhone and Apple Watch. This policy explains what data we collect, why, and what control you have over it. Publish at: `https://ironpath.app/privacy`.
+IronPath ("the App", "we", "us") is a workout planning and tracking app for iPhone and Apple Watch. This policy explains what data we collect, why, and what control you have over it. Publish at: `https://tryironpath.com/privacy`.
 
 ## Data we collect
 
@@ -65,4 +65,4 @@ We will update this policy as the App evolves and revise the effective date abov
 
 ## Contact
 
-Questions or requests (access, correction, deletion): **support@ironpath.app**
+Questions or requests (access, correction, deletion): **support@tryironpath.com**

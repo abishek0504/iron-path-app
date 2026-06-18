@@ -36,6 +36,11 @@ describe('resolveRestSec', () => {
     expect(resolveRestSec(ex, ex.sets[0])).toBe(45);
   });
 
+  it('treats zero rest_sec as unset and falls back to default', () => {
+    const ex = exercise({ sets: [false], restSec: 0 });
+    expect(resolveRestSec(ex, ex.sets[0])).toBe(DEFAULT_REST_SEC);
+  });
+
   it('handles undefined inputs', () => {
     expect(resolveRestSec(undefined, undefined)).toBe(DEFAULT_REST_SEC);
   });

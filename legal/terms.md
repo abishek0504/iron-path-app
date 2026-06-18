@@ -2,7 +2,7 @@
 
 **Effective date:** June 9, 2026
 
-These Terms govern your use of the IronPath app for iPhone and Apple Watch ("the App"). By creating an account or using the App you agree to these Terms. Publish at: `https://ironpath.app/terms`.
+These Terms govern your use of the IronPath app for iPhone and Apple Watch ("the App"). By creating an account or using the App you agree to these Terms. Publish at: `https://tryironpath.com/terms`.
 
 ## 1. The service
 
@@ -32,7 +32,7 @@ AI-generated workout plans are produced by a third-party model (OpenAI) from you
 
 ## 6. Apple Health
 
-If you connect Apple Health, you authorize the App to read and write the categories shown in the permission sheet. Health data handling is described in our [Privacy Policy](https://ironpath.app/privacy).
+If you connect Apple Health, you authorize the App to read and write the categories shown in the permission sheet. Health data handling is described in our [Privacy Policy](https://tryironpath.com/privacy).
 
 ## 7. Your content
 
@@ -56,4 +56,4 @@ These Terms are governed by the laws of your country of residence where mandator
 
 ## 12. Contact
 
-**support@ironpath.app**
+**support@tryironpath.com**

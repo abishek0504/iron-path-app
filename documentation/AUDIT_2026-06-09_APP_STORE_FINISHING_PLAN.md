@@ -29,7 +29,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 | `v2_ai_generations` | ⚠️ Exactly 1 `gemini` row, dated **2026-05-10** — no generation since |
 | Security advisors | ⚠️ `auth_leaked_password_protection` still disabled; remaining lint-0027 warnings are authenticated-GraphQL visibility (expected, RLS-protected) |
 | Performance advisors | INFO only: 1 unindexed FK (`v2_ai_generations.template_id`), ~30 "unused index" notices (low traffic — expected) |
-| `https://ironpath.app/privacy` / `/terms` | ❌ Both return "Page not found" |
+| `https://tryironpath.com/privacy` / `/terms` | ❌ Both return "Page not found" |
 | `npx tsc --noEmit` | ✅ Clean |
 | `npx vitest run` | ✅ 3 files, 19 tests pass |
 | `npx eslint .` | ⚠️ 3 errors (all `jsr:` Deno imports in edge functions — resolver limitation), 100 warnings |
@@ -39,7 +39,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 ## 2. Findings that contradict "completed" status
 
 1. **Gemini was not re-verified live.** The `ai-verify-polish` todo is marked completed, but `v2_ai_generations` contains exactly one `source='gemini'` row dated 2026-05-10 — nothing since. The plan required a fresh dev-build generation to confirm the key hasn't expired. — **Superseded 2026-06-10**: backend migrated Gemini → OpenAI (`generate-workout` rewritten, deployed v14; migration `20260610000000_ai_generations_openai_source`); ≥1 `source='openai'` row in live `v2_ai_generations` confirms a real generation.
-2. **Legal URLs are live-404.** `https://ironpath.app/privacy` and `https://ironpath.app/terms` both return "Page not found". Content in `legal/privacy.md` / `legal/terms.md` is complete (Supabase, Gemini, HealthKit, Sentry, account deletion), and `LegalLinks` renders on signup, settings, and help — so the app currently links users to 404s. Hard App Store blocker. — **Still open 2026-06-11** (both URLs re-verified 404).
+2. **Legal URLs are live-404.** `https://tryironpath.com/privacy` and `https://tryironpath.com/terms` both return "Page not found". Content in `legal/privacy.md` / `legal/terms.md` is complete (Supabase, Gemini, HealthKit, Sentry, account deletion), and `LegalLinks` renders on signup, settings, and help — so the app currently links users to 404s. Hard App Store blocker. — **Still open 2026-06-11** (both URLs re-verified 404).
 3. **Leaked-password protection is still disabled** (confirmed via live security advisors). The remediation migration's own comment defers it to the dashboard; it was never toggled. One-click fix: [Supabase password security](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection). — **Still open 2026-06-11** (re-verified via security advisors).
 4. **Set types missing from `app/add-exercise-edit.tsx`** — zero `set_type` UI or inserts; every set added via that screen defaults to `normal`. The plan named this file explicitly. — **Done 2026-06-11**: `set_type` is now part of the screen's set model with a warm-up toggle and persisted inserts.
 5. **`app/add-exercise.tsx` has no multi-select** — only the active-workout add flow got `multiSelect`; the full-page screen still adds one exercise at a time. — **Still open 2026-06-11**.
@@ -165,7 +165,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 | # | Item | Status | Remaining blocker |
 |---|---|---|---|
-| 1 | Legal pages | PARTIAL | Host `legal/*.md` at ironpath.app (**confirmed 404 live**; still 404 re-verified 2026-06-11) |
+| 1 | Legal pages | PARTIAL | Host `legal/*.md` at tryironpath.com (**confirmed 404 live**; still 404 re-verified 2026-06-11) |
 | 2 | Account purge job | VERIFIED (applied + cron active, confirmed live) | Consider avatar storage cleanup |
 | 3 | Security remediation | VERIFIED (applied, confirmed live) | Enable leaked-password protection (dashboard — still disabled 2026-06-11) |
 | 4 | EAS production env | PARTIAL | Real Sentry DSN; consider EAS secrets; Apple IDs (`app.json` `appleTeamId` now set 2026-06-11; `eas.json` submit `ascAppId`/`appleTeamId` still placeholders) |
@@ -226,7 +226,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 ## 11. Recommended priority order before TestFlight
 
-1. **Publish `legal/*.md` to ironpath.app** — app already links to 404s (App Store blocker) — *still open 2026-06-11 (re-verified 404)*
+1. **Publish `legal/*.md` to tryironpath.com** — app already links to 404s (App Store blocker) — *still open 2026-06-11 (re-verified 404)*
 2. **Run one real Gemini generation from a dev build** — truly close `ai-verify-polish` — *Superseded 2026-06-10: backend migrated to OpenAI (migration 20260610000000, `generate-workout` v14); live `source='openai'` generation row confirmed*
 3. **Fix the warmup PR race** — pass `set_type` at completion, or revoke/recompute PR on retag — *Done 2026-06-11 (`active.tsx` preserves `set_type` on tap/watch completion)*
 4. **Enable leaked-password protection** — Supabase dashboard, 1 minute — *still open 2026-06-11 (re-verified via security advisors)*

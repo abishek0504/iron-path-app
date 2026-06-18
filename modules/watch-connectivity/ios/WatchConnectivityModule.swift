@@ -186,6 +186,16 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
       return
     }
     try session.updateApplicationContext(context)
+    pushWorkoutContextMessageIfReachable(session: session, context: context)
+  }
+
+  private func pushWorkoutContextMessageIfReachable(session: WCSession, context: [String: Any]) {
+    guard session.isWatchAppInstalled, session.isReachable else { return }
+    var message = context
+    message["type"] = "workoutContext"
+    session.sendMessage(message, replyHandler: nil) { error in
+      NSLog("IronPath sendMessage workout context failed: %@", error.localizedDescription)
+    }
   }
 
   private static func sanitizeContext(_ context: [String: Any]) -> [String: Any] {

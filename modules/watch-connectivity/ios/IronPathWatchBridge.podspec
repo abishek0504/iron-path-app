@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
   s.summary        = 'WCSession bridge for the IronPath watchOS companion'
   s.description    = 'Pushes active workout state to the paired Apple Watch and emits set-completion events back to React Native.'
   s.author         = 'IronPath'
-  s.homepage       = 'https://ironpath.app'
+  s.homepage       = 'https://tryironpath.com'
   s.license        = { :type => 'MIT' }
   s.platforms      = { :ios => '15.1' }
   s.source         = { :git => '' }

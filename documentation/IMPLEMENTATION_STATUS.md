@@ -4,7 +4,7 @@
 
 ## Summary
 
-**Overall progress**: Feature-complete for App Store submission. Remaining items are **external/manual**: completing Apple submission IDs (`app.json` `ios.appleTeamId` is now set; `eas.json` submit `ascAppId`/`appleTeamId` are still placeholders), publishing legal pages (`legal/*.md` → ironpath.app; both URLs still 404 as of 2026-06-11), a Sentry DSN, the Supabase "leaked password protection" dashboard toggle (still disabled per security advisors 2026-06-11), and the final TestFlight pass.
+**Overall progress**: Feature-complete for App Store submission. Remaining items are **external/manual**: completing Apple submission IDs (`app.json` `ios.appleTeamId` is now set; `eas.json` submit `ascAppId`/`appleTeamId` are still placeholders), publishing legal pages (`legal/*.md` → tryironpath.com; both URLs still 404 as of 2026-06-11), a Sentry DSN, the Supabase "leaked password protection" dashboard toggle (still disabled per security advisors 2026-06-11), and the final TestFlight pass.
 
 **Core systems**:
 
@@ -263,7 +263,7 @@
 ### Blocking submission (external, not code)
 
 1. **Apple submission IDs** — `app.json` `ios.appleTeamId` is set (enrollment done); `eas.json` `submit.production.ios.appleTeamId`/`ascAppId` are still placeholders pending the ASC app record.
-2. **Legal pages** — publish `legal/privacy.md` and `legal/terms.md` at `ironpath.app/privacy` and `/terms` (URLs already referenced by `src/lib/utils/legal.ts`; both still return "Page not found" as of 2026-06-11).
+2. **Legal pages** — publish `legal/privacy.md` and `legal/terms.md` at `tryironpath.com/privacy` and `/terms` (URLs already referenced by `src/lib/utils/legal.ts`; both still return "Page not found" as of 2026-06-11).
 3. **Sentry** — create the project, set `EXPO_PUBLIC_SENTRY_DSN` in `eas.json` production env, replace `REPLACE_WITH_SENTRY_ORG` in `app.json`, and add `SENTRY_AUTH_TOKEN` as an EAS secret for dSYM upload.
 4. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix. Still disabled per security advisors check on 2026-06-11.
 

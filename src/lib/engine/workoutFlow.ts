@@ -20,11 +20,19 @@ export interface FlowExercise {
 /**
  * Rest duration resolution: per-exercise override, then per-set value, then app default.
  */
+function positiveRestSec(value: number | null | undefined): number | null {
+  return value != null && value > 0 ? value : null;
+}
+
 export function resolveRestSec(
   exercise: FlowExercise | undefined,
   set: FlowSet | undefined,
 ): number {
-  return exercise?.rest_sec ?? set?.rest_sec ?? DEFAULT_REST_SEC;
+  return (
+    positiveRestSec(exercise?.rest_sec)
+    ?? positiveRestSec(set?.rest_sec)
+    ?? DEFAULT_REST_SEC
+  );
 }
 
 /**

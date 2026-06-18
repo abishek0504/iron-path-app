@@ -7,10 +7,10 @@
  * any case.
  *
  * IMPORTANT: these URLs are placeholders. Host the actual policy + terms
- * pages on `ironpath.app` (or a chosen domain) and update both constants
+ * pages on `tryironpath.com` and update both constants
  * before submitting the build to App Store Connect. The same URLs must be
  * mirrored in the App Store Connect "App Privacy" section.
  */
 
-export const PRIVACY_POLICY_URL = 'https://ironpath.app/privacy';
-export const TERMS_OF_SERVICE_URL = 'https://ironpath.app/terms';
+export const PRIVACY_POLICY_URL = 'https://tryironpath.com/privacy';
+export const TERMS_OF_SERVICE_URL = 'https://tryironpath.com/terms';

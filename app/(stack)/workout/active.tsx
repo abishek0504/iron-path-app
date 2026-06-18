@@ -532,11 +532,22 @@ export default function ActiveWorkoutScreen() {
         active: true,
         sessionId,
         exerciseName: exercise.name,
+        setNumber: exercise.sets.length,
+        totalSets: exercise.sets.length,
         phase: 'logging',
+        progressText,
         supersetLabel,
       });
     } else {
-      pushWatchContext({ active: true, sessionId, phase: 'complete' });
+      pushWatchContext({
+        active: true,
+        sessionId,
+        exerciseName: exercise.name,
+        setNumber: exercise.sets.length,
+        totalSets: exercise.sets.length,
+        phase: 'complete',
+        progressText,
+      });
     }
   }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt, restEndsAtEpoch, prevPerformance]);
 
@@ -930,14 +941,32 @@ export default function ActiveWorkoutScreen() {
         updatedExercises[currentExerciseIndex],
         justCompletedSet ?? updatedExercises[currentExerciseIndex].sets[0],
       );
-      const nowSec = Date.now() / 1000;
-      setRestStartedAtEpoch(nowSec);
-      setRestEndsAtEpoch(nowSec + restDuration);
-      setWorkoutPhase({
-        type: 'rest',
-        nextExerciseIndex: next.exerciseIndex,
-        nextSetIndex: next.setIndex,
-      });
+      if (restDuration <= 0) {
+        if (next.exerciseIndex !== currentExerciseIndex) {
+          moveToExercise(updatedExercises, next.exerciseIndex);
+        }
+        setWorkoutPhase({ type: 'execution', setIndex: next.setIndex });
+      } else {
+        const nowSec = Date.now() / 1000;
+        const restEndsAt = nowSec + restDuration;
+        setRestStartedAtEpoch(nowSec);
+        setRestEndsAtEpoch(restEndsAt);
+        setWorkoutPhase({
+          type: 'rest',
+          nextExerciseIndex: next.exerciseIndex,
+          nextSetIndex: next.setIndex,
+        });
+        if (__DEV__) {
+          const { devLog } = require('../../../src/lib/utils/logger');
+          devLog('workout-active', {
+            action: 'enter_rest_phase',
+            restDuration,
+            restEndsAtEpoch: restEndsAt,
+            nextExerciseIndex: next.exerciseIndex,
+            nextSetIndex: next.setIndex,
+          });
+        }
+      }
     } else {
       // Superset: move straight to the partner exercise with no rest
       moveToExercise(updatedExercises, next.exerciseIndex);
@@ -1490,6 +1519,27 @@ export default function ActiveWorkoutScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        {workoutPhase.type === 'rest' && restEndsAtEpoch != null ? (
+          <View style={styles.restContainer}>
+            <Text style={styles.exerciseName}>{currentExercise.name}</Text>
+            <RestTimer
+              endsAtEpoch={restEndsAtEpoch}
+              startedAtEpoch={restStartedAtEpoch ?? undefined}
+              onComplete={advanceFromRest}
+              onSkip={advanceFromRest}
+              onExtend={() => extendRestBy(REST_EXTEND_SEC)}
+            />
+            <Text style={styles.nextSetText}>
+              {(() => {
+                const nextExercise = exercises[workoutPhase.nextExerciseIndex] ?? currentExercise;
+                return workoutPhase.nextExerciseIndex !== currentExerciseIndex
+                  ? `Next: ${nextExercise.name} — Set ${workoutPhase.nextSetIndex + 1}`
+                  : `Next: Set ${workoutPhase.nextSetIndex + 1} of ${currentExercise.sets.length}`;
+              })()}
+            </Text>
+          </View>
+        ) : (
+          <>
         {/* Progress Indicator */}
         <View style={styles.progressSection}>
           <Text style={styles.progressText}>
@@ -1680,27 +1730,6 @@ export default function ActiveWorkoutScreen() {
           </View>
         )}
 
-        {/* REST PHASE */}
-        {workoutPhase.type === 'rest' && restEndsAtEpoch != null && (() => {
-          const nextExercise = exercises[workoutPhase.nextExerciseIndex] ?? currentExercise;
-          return (
-            <View style={styles.restContainer}>
-              <RestTimer
-                endsAtEpoch={restEndsAtEpoch}
-                startedAtEpoch={restStartedAtEpoch ?? undefined}
-                onComplete={advanceFromRest}
-                onSkip={advanceFromRest}
-                onExtend={() => extendRestBy(REST_EXTEND_SEC)}
-              />
-              <Text style={styles.nextSetText}>
-                {workoutPhase.nextExerciseIndex !== currentExerciseIndex
-                  ? `Next: ${nextExercise.name} — Set ${workoutPhase.nextSetIndex + 1}`
-                  : `Next: Set ${workoutPhase.nextSetIndex + 1} of ${currentExercise.sets.length}`}
-              </Text>
-            </View>
-          );
-        })()}
-
         {/* BATCH LOGGING PHASE */}
         {workoutPhase.type === 'logging' && (
           <View style={styles.loggingContainer}>
@@ -1886,6 +1915,8 @@ export default function ActiveWorkoutScreen() {
               </TouchableOpacity>
             )}
           </View>
+        )}
+          </>
         )}
       </ScrollView>
 

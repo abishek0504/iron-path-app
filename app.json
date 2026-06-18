@@ -20,7 +20,7 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.reginafang.ironpath",
+      "bundleIdentifier": "com.alexpreo.ironpath",
       "buildNumber": "1",
       "appleTeamId": "JWUD8ZKQLN",
       "infoPlist": {
@@ -107,7 +107,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#09090b"
       },
-      "package": "com.reginafang.ironpath",
+      "package": "com.alexpreo.ironpath",
       "versionCode": 1,
       "enableEdgeToEdge": true
     },
@@ -125,6 +125,7 @@
         }
       ],
       "./plugins/withLocalNotificationsOnly.js",
+      "./plugins/withWatchTargetDeviceFamily.js",
       [
         "@kingstinct/react-native-healthkit",
         {
@@ -142,7 +143,9 @@
         }
       ],
       "expo-secure-store",
-      "expo-video"
+      "expo-video",
+      "./plugins/withIosDependencyWarnings.js",
+      "./plugins/withXcodeShellScriptPhases.js"
     ],
     "scheme": "ironpath",
     "extra": {

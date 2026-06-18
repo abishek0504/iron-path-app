@@ -13,7 +13,7 @@ module.exports = {
   },
   entitlements: {
     'com.apple.developer.healthkit': true,
-    'com.apple.security.application-groups': ['group.com.ironpath.app.watch'],
+    'com.apple.security.application-groups': ['group.com.alexpreo.ironpath.watch'],
   },
   infoPlist: {
     NSHealthShareUsageDescription:

@@ -1,8 +1,11 @@
 import Foundation
 import WatchConnectivity
+import WatchKit
 
 private let restExtendSec = 15
-private let completionRetrySec: TimeInterval = 15
+private let completionRetrySec: TimeInterval = 5
+
+private let workoutContextMessageType = "workoutContext"
 
 private func intFromPayload(_ value: Any?) -> Int? {
     guard let value else { return nil }
@@ -89,6 +92,26 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        handleIncomingMessage(message)
+    }
+
+    func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        handleIncomingMessage(message)
+        replyHandler(["ok": true])
+    }
+
+    private func handleIncomingMessage(_ message: [String: Any]) {
+        guard message["type"] as? String == workoutContextMessageType else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.apply(context: message)
+        }
+    }
+
     // MARK: - State
 
     private func apply(context: [String: Any]) {
@@ -96,30 +119,92 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         let priorSetNumber = state.setNumber
         let priorPhase = state.phase
 
-        var next = WorkoutState()
-        next.active = context["active"] as? Bool ?? false
-        next.sessionId = context["sessionId"] as? String ?? ""
-        next.exerciseName = context["exerciseName"] as? String ?? ""
+        var next = state
+
+        if context.keys.contains("active") {
+            next.active = context["active"] as? Bool ?? false
+            if !next.active {
+                next = WorkoutState()
+                next.active = false
+                if let sessionId = context["sessionId"] as? String {
+                    next.sessionId = sessionId
+                }
+                state = next
+                writeComplicationSnapshot(from: next)
+                completionSyncStatus = .idle
+                pendingCompletionKey = nil
+                isSendingCompletion = false
+                cancelCompletionRetryTimer()
+                healthManager.syncWorkoutState(active: false, sessionId: "", phase: "execution")
+                return
+            }
+        }
+        if let sessionId = context["sessionId"] as? String {
+            next.sessionId = sessionId
+        }
+        if let exerciseName = context["exerciseName"] as? String {
+            next.exerciseName = exerciseName
+        }
         if let setNumber = intFromPayload(context["setNumber"]) {
             next.setNumber = setNumber
         }
         if let totalSets = intFromPayload(context["totalSets"]) {
             next.totalSets = totalSets
         }
-        next.targetText = context["targetText"] as? String ?? ""
-        next.lastTimeText = context["lastTimeText"] as? String ?? ""
-        next.progressText = context["progressText"] as? String ?? ""
-        next.setType = context["setType"] as? String ?? "normal"
-        next.phase = context["phase"] as? String ?? "execution"
-        next.timedSetRpe = context["timedSetRpe"] as? Bool ?? false
-        next.nextUp = context["nextUp"] as? String
-        next.supersetLabel = context["supersetLabel"] as? String
-        if let restEndsAtEpoch = context["restEndsAt"] as? Double, restEndsAtEpoch > 0 {
-            next.restEndsAt = Date(timeIntervalSince1970: restEndsAtEpoch)
+        if context.keys.contains("targetText") {
+            next.targetText = context["targetText"] as? String ?? ""
         }
-        if let exerciseEndsAtEpoch = context["exerciseEndsAt"] as? Double, exerciseEndsAtEpoch > 0 {
-            next.exerciseEndsAt = Date(timeIntervalSince1970: exerciseEndsAtEpoch)
+        if context.keys.contains("lastTimeText") {
+            next.lastTimeText = context["lastTimeText"] as? String ?? ""
         }
+        if context.keys.contains("progressText") {
+            next.progressText = context["progressText"] as? String ?? ""
+        }
+        if let setType = context["setType"] as? String {
+            next.setType = setType
+        }
+        if let phase = context["phase"] as? String {
+            next.phase = phase
+        }
+        if context.keys.contains("timedSetRpe") {
+            next.timedSetRpe = context["timedSetRpe"] as? Bool ?? false
+        }
+        if context.keys.contains("nextUp") {
+            next.nextUp = context["nextUp"] as? String
+        }
+        if context.keys.contains("supersetLabel") {
+            next.supersetLabel = context["supersetLabel"] as? String
+        }
+        if context.keys.contains("exerciseEndsAt") {
+            if let exerciseEndsAtEpoch = context["exerciseEndsAt"] as? Double, exerciseEndsAtEpoch > 0 {
+                next.exerciseEndsAt = Date(timeIntervalSince1970: exerciseEndsAtEpoch)
+            } else {
+                next.exerciseEndsAt = nil
+            }
+        } else {
+            next.exerciseEndsAt = nil
+        }
+        if context.keys.contains("restEndsAt") {
+            if let restEndsAtEpoch = context["restEndsAt"] as? Double, restEndsAtEpoch > 0 {
+                next.restEndsAt = Date(timeIntervalSince1970: restEndsAtEpoch)
+            } else {
+                next.restEndsAt = nil
+            }
+        } else if next.phase != "rest" {
+            next.restEndsAt = nil
+        }
+
+        #if DEBUG
+        let updatedAt = context["updatedAt"] as? Double ?? 0
+        NSLog(
+            "IronPath watch apply phase=%@ set=%d/%d active=%@ updatedAt=%.0f",
+            next.phase,
+            next.setNumber,
+            next.totalSets,
+            next.active ? "yes" : "no",
+            updatedAt
+        )
+        #endif
 
         state = next
         writeComplicationSnapshot(from: next)
@@ -170,9 +255,9 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     var canCompleteSet: Bool {
-        state.active
-            && state.phase == "execution"
-            && (pendingCompletionKey != currentCompletionKey || completionSyncStatus == .retry)
+        guard state.active, state.phase == "execution" else { return false }
+        if pendingCompletionKey != currentCompletionKey { return true }
+        return completionSyncStatus == .retry || completionSyncStatus == .queued
     }
 
     // MARK: - Actions
@@ -211,6 +296,9 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
 
     func completeCurrentSet() {
         guard canCompleteSet else { return }
+
+        WKInterfaceDevice.current().play(.click)
+
         let payload: [String: Any] = [
             "type": "completeSet",
             "sessionId": state.sessionId,
