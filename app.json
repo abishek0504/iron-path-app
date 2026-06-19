@@ -124,7 +124,6 @@
           "iosDisplayInForeground": true
         }
       ],
-      "./plugins/withLocalNotificationsOnly.js",
       "./plugins/withWatchTargetDeviceFamily.js",
       [
         "@kingstinct/react-native-healthkit",
@@ -138,14 +137,17 @@
       [
         "@sentry/react-native/expo",
         {
-          "organization": "REPLACE_WITH_SENTRY_ORG",
-          "project": "iron-path-app"
+          "organization": "ironpath",
+          "project": "apple-ios"
         }
       ],
       "expo-secure-store",
       "expo-video",
       "./plugins/withIosDependencyWarnings.js",
-      "./plugins/withXcodeShellScriptPhases.js"
+      "./plugins/withXcodeShellScriptPhases.js",
+      "./plugins/withAutomaticCodeSigning.js",
+      "./plugins/withLocalNotificationsOnly.js",
+      "./plugins/withSentryLocalBuildSkip.js"
     ],
     "scheme": "ironpath",
     "extra": {

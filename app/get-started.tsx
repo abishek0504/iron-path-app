@@ -6,12 +6,14 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { AuthVideoBackground } from '../src/components/ui/AuthVideoBackground';
 
 export default function GetStarted() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -20,7 +22,7 @@ export default function GetStarted() {
       <AuthVideoBackground />
 
       <View style={styles.content}>
-        <View style={styles.hero}>
+        <View style={[styles.hero, { paddingTop: insets.top + spacing.xl }]}>
           <Text style={styles.title}>Welcome to IronPath</Text>
           <Text style={styles.subtitle}>
             Your personalized strength training companion
@@ -66,9 +68,7 @@ function createStyles(colors: ThemeColors) {
       zIndex: 1,
     },
     hero: {
-      flex: 1,
       alignItems: 'center',
-      justifyContent: 'center',
       gap: spacing.sm,
     },
     title: {

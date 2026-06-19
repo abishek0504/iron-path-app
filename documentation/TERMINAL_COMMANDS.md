@@ -37,14 +37,29 @@ Run these from the project root (`iron-path-app/`) unless noted otherwise.
 | `npm run ios` | Build and run native iOS dev app (`expo run:ios`) | Simulator or default device |
 | `npm run ios:simulator` | Boot iPhone 17 Pro Max simulator, then open Simulator app | Before `npm run ios` if simulator is closed |
 | `npm run ios:device` | Run on physical device named `iPhone 17 Pro Max` | Scripted device name from `package.json` |
-| `npx expo run:ios --device` | Build & install dev build on a connected iPhone | Physical device testing (pick device from list) |
-| `npx expo run:ios --device "Alex's iPhone" --configuration Release` | Release build installed on a specific device | Test performance / watch / HealthKit like production |
+| `npx expo run:ios --device` | Build & install **Debug** dev build on a connected iPhone | **Default for phone testing** — interactive picker |
+| `npx expo run:ios --device 00008120-000A40EE3E30201E` | Debug build on a specific device by UDID | Same, without the picker |
+| `npx expo run:ios --device --configuration Release` | Release build on phone | Performance / production-like testing only |
+| `xcrun xctrace list devices` | List connected physical devices (name + UDID) | Find your iPhone UDID when `--device "Name"` fails |
 | `npm run prebuild:ios` | Regenerate `ios/` from Expo config (`expo prebuild --platform ios --clean`) | After native config changes (watch target, plugins, entitlements) |
 | `npm run prebuild:android` | Regenerate `android/` (`expo prebuild --platform android --clean`) | Same, for Android |
 | `npm run prebuild:all` | Regenerate both platforms (`expo prebuild --clean`) | Big native changes affecting both platforms |
 | `cd ios && pod install && cd ..` | Install / update CocoaPods | iOS build fails with pod-related errors |
 | `xcrun simctl list devices` | List all simulators and their state | Find exact simulator name or UDID |
 | `open -a Simulator` | Open the iOS Simulator app | Manually launch simulator |
+| `open ios/IronPath.xcworkspace` | Open native project in Xcode | Fix signing / provisioning before CLI builds |
+
+### Physical iPhone tips
+
+- **Use Debug (default)** for day-to-day testing — omit `--configuration Release` unless you need prod-like perf.
+- **If Release build fails on `sentry-cli` / auth token:** local builds skip Sentry upload when `SENTRY_AUTH_TOKEN` is unset (see `ios/.xcode.env`).
+- **Prefer UDID or the interactive picker** — device names with apostrophes often use Apple’s curly `’` (U+2019), not a straight `'`, so `"Alex's iPhone"` may not match `Alex’s iPhone`.
+- **Get your UDID:** `xcrun xctrace list devices` → copy the hex id in parentheses, e.g. `00008120-000A40EE3E30201E`.
+- **Before first deploy:** unlock phone, tap Trust This Computer, enable **Developer Mode** (Settings → Privacy & Security → Developer Mode).
+- **Personal Team profiles expire every ~7 days** — if a device build suddenly fails with “No profiles…”, rebuild once: `npx expo run:ios --device` (Xcode recreates them).
+- **After `npm run prebuild:ios`:** run `npx expo run:ios --device` once to refresh signing; the `withLocalNotificationsOnly` plugin strips push entitlements so Personal Team signing works.
+- **If build fails with “No profiles for com.alexpreo.ironpath”:** open `ios/IronPath.xcworkspace` in Xcode → **IronPath** + **IronPathWatch** → Signing & Capabilities → **Automatically manage signing** → build once (⌘B), then retry CLI.
+- **If install fails with “no DDI”:** update Xcode to a version that supports your phone’s iOS version.
 
 ---
 
@@ -142,6 +157,8 @@ Profiles live in `eas.json`: `development`, `preview`, `production`, `developmen
 | `rm -rf node_modules/.cache` | Delete Metro cache folder | Persistent cache issues |
 | `rm -rf node_modules && npm install` | Full dependency reinstall | Broken or mismatched packages |
 | `npm start -- --tunnel` | Expo dev server via tunnel | Physical device can't reach your Mac on LAN |
+| `xcrun xctrace list devices` | List connected iPhones with UDIDs | `No device UDID or name matching` — use UDID instead of device name |
+| `open ios/IronPath.xcworkspace` | Open native project in Xcode | `No profiles for com.alexpreo.ironpath` — enable automatic signing, build once |
 | `npx expo export --platform web` | Static web export to `dist/` | Production web build |
 
 ---
@@ -197,8 +214,10 @@ git pull
 npm install                    # only if package.json changed
 npm run ios:simulator          # optional — boot simulator first
 npm run start:dev              # terminal 1 — Metro
-# OR for device release testing:
-npx expo run:ios --device "Alex's iPhone" --configuration Release
+# OR for device testing (Debug — default):
+npx expo run:ios --device
+# Release only when you need prod-like performance:
+# npx expo run:ios --device --configuration Release
 ```
 
 Before committing schema work:
@@ -210,4 +229,4 @@ npx supabase gen types typescript --project-id YOUR_PROJECT_ID > src/types/supab
 
 ---
 
-*Last updated: 2026-06-16 — add commands here as your workflow evolves.*
+*Last updated: 2026-06-18 — add commands here as your workflow evolves.*
