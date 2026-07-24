@@ -22,7 +22,7 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://wmraczqltegkqbststik.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtcmFjenFsdGVna3Fic3RzdGlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM2NjMzODksImV4cCI6MjA3OTIzOTM4OX0.dL6OnmNgUI4uADfT4KP0FtdYd9FadlzH04WBpeY9_Yw",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "REPLACE_WITH_REVENUECAT_IOS_PUBLIC_KEY"
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_XqyCIEJFlPaYkdHphHETipLByKM"
       }
     },
     "production": {
@@ -35,7 +35,7 @@
         "EXPO_PUBLIC_SUPABASE_URL": "https://wmraczqltegkqbststik.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtcmFjenFsdGVna3Fic3RzdGlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM2NjMzODksImV4cCI6MjA3OTIzOTM4OX0.dL6OnmNgUI4uADfT4KP0FtdYd9FadlzH04WBpeY9_Yw",
         "EXPO_PUBLIC_SENTRY_DSN": "https://f5defb2bf4e00c12a8ea39e1057448d3@o4511590662078464.ingest.us.sentry.io/4511590670204928",
-        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "REPLACE_WITH_REVENUECAT_IOS_PUBLIC_KEY"
+        "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": "appl_XqyCIEJFlPaYkdHphHETipLByKM"
       }
     },
     "development-simulator": {
@@ -50,8 +50,8 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID",
-        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID"
+        "ascAppId": "6793811855",
+        "appleTeamId": "JWUD8ZKQLN"
       },
       "android": {
         "track": "internal"

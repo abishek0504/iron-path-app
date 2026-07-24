@@ -142,8 +142,10 @@ export async function getMergedExercise(
     }
 
     // Merge: master defaults ⊕ non-null overrides
-    // Note: v2_user_exercise_overrides does not currently support `description`;
-    // master.description is the single source of truth until a description_override column exists.
+    // By design, master exercise descriptions are read-only: v2_user_exercise_overrides
+    // intentionally has no `description` column. Users who want a custom description
+    // create a custom exercise (v2_user_custom_exercises), which carries its own
+    // editable description. master.description is the single source of truth here.
     const merged: MergedExercise = {
       id: masterExercise.id,
       name: masterExercise.name,

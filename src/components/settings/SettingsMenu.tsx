@@ -25,7 +25,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { LegalLinks } from '../ui/LegalLinks';
 import { requestAccountDeletion } from '../../lib/supabase/queries/users';
 import { invalidateProfileCache } from '../../lib/cache/dashboardStatsCache';
-import { logOutRevenueCat } from '../../lib/subscriptions/revenueCat';
+import { logOutRevenueCat, presentCustomerCenter } from '../../lib/subscriptions/revenueCat';
 import { usePaywall } from '../paywall/PaywallProvider';
 
 interface SettingsMenuProps {
@@ -53,6 +53,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   };
 
   const handleManageSubscription = async () => {
+    const presented = await presentCustomerCenter();
+    if (presented) {
+      return;
+    }
     if (Platform.OS === 'ios') {
       await Linking.openURL('https://apps.apple.com/account/subscriptions');
       return;

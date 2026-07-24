@@ -36,7 +36,12 @@ export interface DayConstraints {
   intensity: 'light' | 'standard' | 'hard';
   emphasizeMuscles: string[];
   avoidMuscles: string[];
-  /** 0..5. Plumbing only until the exercise catalog gains a stretch flag. */
+  /**
+   * 0..5. Number of stretch/mobility exercises to append per session. The
+   * Edge Function loads the `is_stretch` catalog, prompts the model to add
+   * exactly this many stretches, and enforces the count with static-hold
+   * prescriptions (see supabase/functions/generate-workout).
+   */
   stretchCount: number;
 }
 

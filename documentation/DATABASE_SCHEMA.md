@@ -2,7 +2,7 @@
 
 **Purpose**: Document database structure, migrations, and RLS policies.
 
-**Last Updated**: 2026-06-11
+**Last Updated**: 2026-07-23
 
 ## Migration Order
 
@@ -62,6 +62,12 @@ Apply migrations in this exact order:
 52. **20260616120100_commit_ai_generation_rpc.sql** - `commit_ai_generation` + `purge_expired_ai_generation_jobs` RPCs
 53. **20260617120000_v2_profiles_first_name_not_null.sql** - Backfills blank `first_name` and enforces NOT NULL
 54. **20260618120000_v2_profiles_app_tour_completed_at.sql** - Adds `app_tour_completed_at` for first-run app tour completion tracking
+55. **20260618201017_create_waitlist.sql** - Creates `waitlist` table
+56. **20260618201026_waitlist_lockdown_grants.sql** - Locks down `waitlist` grants (RLS enabled, no client policy; service-role only)
+57. **20260723000000_prelaunch_security_perf_hardening.sql** - Advisor remediation: revokes EXECUTE on `commit_ai_generation` / `purge_expired_ai_generation_jobs` from client roles, re-creates `v2_user_exercise_prs` select policy with init-plan `auth.uid()`, adds 5 FK covering indexes
+58. **20260723000001_fix_v2_profiles_first_name_nullable.sql** - Drops NOT NULL on `v2_profiles.first_name` so signup trigger succeeds before onboarding collects the name
+59. **20260723010000_workout_session_origin_dedup.sql** - Adds `origin` ('auto' | 'manual') to `v2_workout_sessions` + partial unique index to dedupe auto-materialized sessions per day
+60. **20260723020000_revoke_graphql_from_client_roles.sql** - Revokes `graphql`/`graphql_public` schema usage + function execute from `anon`/`authenticated` (app uses PostgREST only; defense-in-depth against GraphQL schema discovery)
 
 ## Table Relationships
 
@@ -329,12 +335,14 @@ v2_support (Help & Support submissions)
 - `day_name`: Planned day label (metadata only - use timestamps for grouping)
 - `status`: 'active' | 'completed' | 'abandoned'
 - `started_at`, `completed_at`
+- `origin` (20260723010000): 'auto' | 'manual' (default 'manual'). 'auto' marks planner-materialized sessions; a partial unique index (`uq_v2_workout_sessions_auto_per_day`) prevents duplicate auto sessions per user/day. Backlogged/manual logs use 'manual'.
 - `hk_workout_uuid` (nullable, 20260510000000): Apple Health HKWorkout UUID after successful export; unique partial index prevents duplicate exports
 
 **RLS**: Owner CRUD (`user_id = auth.uid()`)
 
 **Indexes:**
 - `idx_v2_workout_sessions_user` on (user_id, started_at)
+- `uq_v2_workout_sessions_auto_per_day` — partial unique on (user_id, day_name, started_at::date) WHERE origin = 'auto'
 
 **Important**: `day_name` is metadata. Progress tracking must group by `completed_at` timestamp, not `day_name`.
 
@@ -572,7 +580,6 @@ Run migration `20250101000004_seed_v2_muscles.sql` to insert 28 canonical muscle
 **Required for:**
 - Exercise metadata validation
 - Heatmap display
-- Rebalance detection
 - Muscle coverage analysis
 
 ### Optional: Exercises and Prescriptions

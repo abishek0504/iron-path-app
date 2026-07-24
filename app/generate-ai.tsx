@@ -18,6 +18,7 @@ import {
   type DayConstraints,
 } from '../src/lib/ai/generateWorkoutDay';
 import { showPaywallFromOutside } from '../src/lib/subscriptions/paywallBridge';
+import { checkProEntitlement } from '../src/lib/subscriptions/revenueCat';
 import { useToast } from '../src/hooks/useToast';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
@@ -131,7 +132,7 @@ export default function GenerateAiScreen() {
           savedAt: new Date().toISOString(),
         });
 
-        const result = await executeAiDayGeneration({
+        const generationInput = {
           userId,
           templateId,
           dayId,
@@ -143,7 +144,27 @@ export default function GenerateAiScreen() {
           sessionsPerDay,
           constraints,
           profile,
-        });
+        };
+
+        let result = await executeAiDayGeneration(generationInput);
+
+        // Post-purchase entitlement sync gap: RevenueCat can grant Pro on-device
+        // before the webhook updates the server-side subscription tier the edge
+        // function checks. Retry briefly (reusing the idempotency key, so no
+        // double generation) instead of bouncing a just-subscribed user back to
+        // the paywall.
+        let hasEntitlement = false;
+        if (!cancelled && !result.ok && result.code === 'paywall_required') {
+          hasEntitlement = await checkProEntitlement();
+          if (hasEntitlement) {
+            for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              if (cancelled) return;
+              result = await executeAiDayGeneration(generationInput);
+              if (result.ok || result.code !== 'paywall_required') break;
+            }
+          }
+        }
 
         if (cancelled) return;
 
@@ -161,7 +182,11 @@ export default function GenerateAiScreen() {
 
         switch (result.code) {
           case 'paywall_required':
-            showPaywallFromOutside('generate_ai');
+            if (hasEntitlement) {
+              toast.info('Your subscription is still activating. Please try again in a moment.');
+            } else {
+              showPaywallFromOutside('generate_ai');
+            }
             break;
           case 'quota_exceeded':
             toast.error("You've reached this week's AI limit. Try again later.");

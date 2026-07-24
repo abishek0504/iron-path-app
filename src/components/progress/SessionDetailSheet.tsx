@@ -23,12 +23,13 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { useRouter } from 'expo-router';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
-import { Trash2, ChevronDown, Heart, Activity } from 'lucide-react-native';
+import { Trash2, ChevronDown, Heart, Activity, Plus } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { supabase } from '../../lib/supabase/client';
-import { invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
+import { getSessionsInRangeCached, invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
 import { invalidateAnalyticsCache } from '../../lib/cache/analyticsCache';
 import { deleteSessionWithExercises, getSessionStats, type WorkoutSession } from '../../lib/supabase/queries/workouts';
 import { getSessionHealthMetrics, type SessionHealthMetrics } from '../../lib/supabase/queries/analytics';
@@ -209,7 +210,13 @@ function formatPerformedSetLine(set: PerformedSet, unitsLabel: string): string {
 
 export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onSessionDeleted }) => {
   const colors = useTheme();
+  const router = useRouter();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const handleLogPastWorkout = useCallback(() => {
+    onClose();
+    router.push({ pathname: '/log-past-workout', params: { date: selectedDate.toISOString() } });
+  }, [onClose, router, selectedDate]);
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionWithExercises[]>([]);
   const [expandedExerciseKeys, setExpandedExerciseKeys] = useState<Set<string>>(new Set());
@@ -497,10 +504,22 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
     );
   }
 
+  const startOfSelected = new Date(selectedDate);
+  startOfSelected.setHours(0, 0, 0, 0);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const canLogForThisDay = startOfSelected.getTime() <= startOfToday.getTime();
+
   if (sessions.length === 0) {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyText}>No workouts completed on this date</Text>
+        {canLogForThisDay && (
+          <TouchableOpacity style={styles.logPastButton} onPress={handleLogPastWorkout}>
+            <Plus size={18} color={colors.primary} />
+            <Text style={styles.logPastButtonText}>Log a workout for this day</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
@@ -644,6 +663,13 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         </View>
       ))}
 
+      {canLogForThisDay && (
+        <TouchableOpacity style={styles.logPastButton} onPress={handleLogPastWorkout}>
+          <Plus size={18} color={colors.primary} />
+          <Text style={styles.logPastButtonText}>Log another workout for this day</Text>
+        </TouchableOpacity>
+      )}
+
       <Modal
         visible={!!sessionToDelete}
         transparent
@@ -707,10 +733,29 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 200,
+      gap: spacing.md,
     },
     emptyText: {
       color: colors.textMuted,
       fontSize: typography.sizes.base,
+    },
+    logPastButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      borderRadius: borderRadius.md,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.primary,
+      backgroundColor: colors.card,
+    },
+    logPastButtonText: {
+      color: colors.primary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
     },
     dateLabel: {
       color: colors.textPrimary,

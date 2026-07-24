@@ -12,15 +12,18 @@ import {
   TouchableOpacity,
   FlatList,
   TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, ChevronRight } from 'lucide-react-native';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { ArrowLeft, ChevronRight, Plus, Pencil } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
+import { useToast } from '../src/hooks/useToast';
 import { supabase } from '../src/lib/supabase/client';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
+import { deleteUserCustomExercise } from '../src/lib/supabase/queries/customExerciseMutations';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 
@@ -34,6 +37,7 @@ export default function AddExerciseScreen() {
   const params = useLocalSearchParams<{ dayId: string; templateId: string; dayName: string; sessionId?: string }>();
   const { dayId, templateId, dayName, sessionId } = params;
   const profileId = useUserStore((s) => s.profile?.id);
+  const toast = useToast();
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -79,6 +83,54 @@ export default function AddExerciseScreen() {
   useEffect(() => {
     loadExercises();
   }, [loadExercises]);
+
+  // Reload on focus so a newly created/edited custom exercise appears immediately.
+  useFocusEffect(
+    useCallback(() => {
+      loadExercises();
+    }, [loadExercises])
+  );
+
+  const openCreateCustom = useCallback(() => {
+    router.push({ pathname: '/create-custom-exercise' });
+  }, [router]);
+
+  const openEditCustom = useCallback(
+    (exercise: MergedExercise) => {
+      router.push({
+        pathname: '/create-custom-exercise',
+        params: { customExerciseId: exercise.id },
+      });
+    },
+    [router]
+  );
+
+  const confirmDeleteCustom = useCallback(
+    (exercise: MergedExercise) => {
+      Alert.alert(
+        'Delete custom exercise?',
+        `"${exercise.name}" will be removed from your library. Existing logged workouts are not affected.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              if (!userId) return;
+              const ok = await deleteUserCustomExercise(userId, exercise.id);
+              if (ok) {
+                setExercises((prev) => prev.filter((e) => e.id !== exercise.id));
+                toast.success('Exercise deleted');
+              } else {
+                toast.error('Failed to delete exercise');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [userId, toast]
+  );
 
   const filtered = search.trim()
     ? exercises.filter((e) => e.name.toLowerCase().includes(search.trim().toLowerCase()))
@@ -142,6 +194,14 @@ export default function AddExerciseScreen() {
             <ArrowLeft size={24} color={colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Add Exercise</Text>
+          <TouchableOpacity
+            onPress={openCreateCustom}
+            style={styles.createBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Plus size={18} color={colors.primary} />
+            <Text style={styles.createBtnText}>Create</Text>
+          </TouchableOpacity>
       </View>
 
       <TextInput
@@ -165,17 +225,36 @@ export default function AddExerciseScreen() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const muscles = formatMuscles(item.primary_muscles);
+            const isCustom = item.source === 'custom';
             return (
               <TouchableOpacity
                 style={styles.row}
                 onPress={() => openDetail(item)}
+                onLongPress={isCustom ? () => confirmDeleteCustom(item) : undefined}
                 activeOpacity={0.7}
               >
                 <View style={styles.rowText}>
-                  <Text style={styles.name}>{item.name}</Text>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.name}>{item.name}</Text>
+                    {isCustom ? (
+                      <View style={styles.customBadge}>
+                        <Text style={styles.customBadgeText}>Custom</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   {muscles ? <Text style={styles.subtitle}>{muscles}</Text> : null}
                 </View>
-                <ChevronRight size={20} color={colors.textSecondary} />
+                {isCustom ? (
+                  <TouchableOpacity
+                    onPress={() => openEditCustom(item)}
+                    style={styles.editBtn}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Pencil size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : (
+                  <ChevronRight size={20} color={colors.textSecondary} />
+                )}
               </TouchableOpacity>
             );
           }}
@@ -204,9 +283,46 @@ function createStyles(colors: ThemeColors) {
       marginRight: spacing.sm,
     },
     headerTitle: {
+      flex: 1,
       fontSize: typography.sizes.lg,
       fontWeight: '700',
       color: colors.textPrimary,
+    },
+    createBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    createBtnText: {
+      fontSize: typography.sizes.sm,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    nameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    customBadge: {
+      paddingVertical: 1,
+      paddingHorizontal: spacing.xs,
+      borderRadius: borderRadius.sm,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    customBadgeText: {
+      fontSize: typography.sizes.xs,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    editBtn: {
+      padding: spacing.xs,
     },
     search: {
       margin: spacing.md,

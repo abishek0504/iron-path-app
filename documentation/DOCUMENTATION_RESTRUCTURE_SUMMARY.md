@@ -58,7 +58,6 @@
 - Target selection algorithm with worked examples
 - Fatigue model (stress calculation) with formulas
 - AI week generation with biomechanical simulator
-- Rebalance detection
 - Time estimation formula
 - Edge cases and validation
 - 8 worked examples with actual numbers

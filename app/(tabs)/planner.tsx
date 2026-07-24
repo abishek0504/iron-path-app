@@ -55,7 +55,6 @@ import {
   createWorkoutSession,
   deleteSessionWithExercises,
   getSessionsForToday,
-  prefillSessionSets,
   materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
@@ -63,7 +62,6 @@ import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS } from '../../src/lib/utils/date';
-import { SmartAdjustPrompt } from '../../src/components/ui/SmartAdjustPrompt';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
 import {
@@ -83,7 +81,6 @@ import { WorkoutPresetPickerSheet } from '../../src/components/planner/WorkoutPr
 import { WorkoutPresetLoadOptionsSheet } from '../../src/components/planner/WorkoutPresetLoadOptionsSheet';
 import { WorkoutTargetPickerSheet } from '../../src/components/planner/WorkoutTargetPickerSheet';
 import { ConfirmDialog } from '../../src/components/ui/ConfirmDialog';
-import { needsRebalance, type RebalanceResult } from '../../src/lib/engine/rebalance';
 import { DEFAULT_DAY_CONSTRAINTS, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
 import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
@@ -126,8 +123,6 @@ export default function PlannerTab() {
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
   const [slotTargets, setSlotTargets] = useState<Map<string, ExerciseTarget>>(new Map());
-  const [showSmartAdjustPrompt, setShowSmartAdjustPrompt] = useState(false);
-  const [rebalanceResult, setRebalanceResult] = useState<RebalanceResult | null>(null);
   /** When selected day is Today: one entry per session with its exercises (for workout containers) */
   const [sessionsTodayWithExercises, setSessionsTodayWithExercises] = useState<
     { session: WorkoutSession; exercises: PlannerSessionExercise[] }[]
@@ -169,8 +164,6 @@ export default function PlannerTab() {
   } | null>(null);
 
   const loadTemplateInFlightRef = useRef(false);
-  /** Run the muscle-coverage rebalance check at most once per planner mount. */
-  const rebalanceCheckedRef = useRef(false);
   const loadTodaySessionInFlightRef = useRef(false);
   const loadTodaySessionsInFlightRef = useRef(false);
   const recoveryAttemptedThisFocusRef = useRef(false);
@@ -213,45 +206,6 @@ export default function PlannerTab() {
       return null;
     }
   }, []);
-
-  // Smart Adjust: once per mount, after the template loads, check whether recent
-  // sessions left muscle-coverage gaps. Only prompts when today has planned
-  // exercises and no session has been started yet, so it never interrupts an
-  // in-progress or finished day.
-  useEffect(() => {
-    if (rebalanceCheckedRef.current || !templateData) return;
-    const todayName = getTodayDayName();
-    const todayDay = templateData.days.find((d) => d.day.day_name === todayName);
-    if (!todayDay || todayDay.slots.length === 0) return;
-    rebalanceCheckedRef.current = true;
-
-    (async () => {
-      try {
-        const userId = await getCurrentUserId();
-        if (!userId) return;
-        const { startIso, endIsoExclusive } = getLocalDayBoundsIso();
-        const sessionsToday = await getSessionsForToday(userId, startIso, endIsoExclusive);
-        if (sessionsToday.length > 0) return;
-
-        const result = await needsRebalance(userId, templateData.template.id, todayName);
-        if (__DEV__) {
-          devLog('planner', {
-            action: 'rebalanceCheck',
-            needsRebalance: result.needsRebalance,
-            missedMuscleCount: result.missedMuscles.length,
-          });
-        }
-        if (result.needsRebalance) {
-          setRebalanceResult(result);
-          setShowSmartAdjustPrompt(true);
-        }
-      } catch (error) {
-        if (__DEV__) {
-          devError('planner', error, { action: 'rebalanceCheck' });
-        }
-      }
-    })();
-  }, [templateData, getCurrentUserId]);
 
   // Calculate targets for slots (scoped to selected day to reduce work)
   const calculateTargetsForSlots = useCallback(
@@ -434,6 +388,8 @@ export default function PlannerTab() {
         if (__DEV__) {
           devError('planner', error, { action: 'loadTodaySessionExercises' });
         }
+        // Use the store directly so we don't add the unstable useToast() wrapper to deps.
+        useUIStore.getState().showToast('Failed to load workout details', 'error');
       } finally {
         loadTodaySessionInFlightRef.current = false;
       }
@@ -674,15 +630,19 @@ export default function PlannerTab() {
                 });
               }
               const startedAt = dayName === getTodayDayName() ? undefined : startIso;
-              const created = await materializeWorkoutFromTemplateSlots({
+              await materializeWorkoutFromTemplateSlots({
                 userId,
                 templateId: options.templateId,
                 dayName: requestedDayName,
                 slots: options.templateSlots,
                 startedAt,
                 experience: profile?.experience_level || 'beginner',
+                origin: 'auto',
               });
-              if (created && requestedDayName === selectedDayNameRef.current) {
+              // Always re-fetch after the attempt: on a dedup race the insert is
+              // rejected (returns null), but another session now exists, so we
+              // still want the winning session in state rather than stale empty.
+              if (requestedDayName === selectedDayNameRef.current) {
                 invalidateSessionsInRangeForUser(userId);
                 sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
               }
@@ -697,6 +657,8 @@ export default function PlannerTab() {
         await applySessionsToState(sessions);
       } catch (error) {
         if (__DEV__) devError('planner', error, { action: 'loadSessionsForDay' });
+        // Use the store directly so we don't add the unstable useToast() wrapper to deps.
+        useUIStore.getState().showToast('Failed to load your workouts', 'error');
       } finally {
         loadTodaySessionsInFlightRef.current = false;
         if (requestedDayName === selectedDayNameRef.current) {
@@ -2555,267 +2517,6 @@ export default function PlannerTab() {
           supersetToggleDisabled={isSaving}
         />
       )}
-
-
-      <SmartAdjustPrompt
-        visible={showSmartAdjustPrompt}
-        reasons={rebalanceResult?.reasons || []}
-        onDismiss={() => {
-          setShowSmartAdjustPrompt(false);
-          setRebalanceResult(null);
-        }}
-        onContinue={async () => {
-          setShowSmartAdjustPrompt(false);
-          setRebalanceResult(null);
-          // Continue with workout creation
-          const missingContinue: string[] = [];
-          if (!activeTemplateId) missingContinue.push('activeTemplateId');
-          if (!selectedDay) missingContinue.push('selectedDay');
-          if (missingContinue.length > 0) {
-            if (__DEV__) devLog('planner', { action: 'SmartAdjust_continue_skipped', missing: missingContinue });
-            toast.error('No template or day selected');
-            return;
-          }
-
-          const day = selectedDay!;
-          const templateId = activeTemplateId!;
-          setIsSaving(true);
-          try {
-            const userId = await getCurrentUserId();
-            if (!userId) {
-              if (__DEV__) devLog('planner', { action: 'SmartAdjust_continue_skipped', missing: ['userId'] });
-              toast.error('Please log in');
-              return;
-            }
-
-            const session = await createWorkoutSession(
-              userId,
-              templateId,
-              day.day.day_name
-            );
-
-            if (!session) {
-              toast.error('Failed to start workout');
-              return;
-            }
-
-            // Create session exercises and prefill sets using prescription/history-based targets
-            const sessionExercises: { id: string; exercise_id?: string; custom_exercise_id?: string }[] = [];
-            const targetsMap = new Map<string, {
-              sets: number;
-              reps?: number;
-              duration_sec?: number;
-              weight?: number;
-            }>();
-
-            for (const slot of day.slots) {
-              const exerciseId = slot.exercise_id || slot.custom_exercise_id;
-              if (!exerciseId) continue;
-
-              const { data: sessionExercise, error: exerciseError } = await supabase
-                .from('v2_session_exercises')
-                .insert({
-                  session_id: session.id,
-                  exercise_id: slot.exercise_id || null,
-                  custom_exercise_id: slot.custom_exercise_id || null,
-                  sort_order: slot.sort_order,
-                  superset_group: slot.superset_group ?? null,
-                  rest_sec: slot.rest_sec ?? null,
-                })
-                .select()
-                .single();
-
-              if (exerciseError || !sessionExercise) {
-                if (__DEV__) {
-                  devError('planner', exerciseError || new Error('Failed to create session exercise'), {
-                    sessionId: session.id,
-                    slotId: slot.id,
-                  });
-                }
-                continue;
-              }
-
-              sessionExercises.push(sessionExercise);
-
-              // Always use prescription/history-based targets
-              const effectiveExperience = profile?.experience_level || 'beginner';
-              const context: TargetSelectionContext = {
-                experience: slot.experience || effectiveExperience,
-              };
-
-              const target = await selectExerciseTargets(
-                {
-                  exerciseId: slot.exercise_id || undefined,
-                  customExerciseId: slot.custom_exercise_id || undefined,
-                },
-                userId,
-                context,
-                0
-              );
-              if (target) {
-                targetsMap.set(exerciseId, {
-                  sets: target.sets,
-                  reps: target.reps,
-                  duration_sec: target.duration_sec,
-                  weight: target.weight,
-                });
-              }
-            }
-
-            if (sessionExercises.length > 0 && targetsMap.size > 0) {
-              await prefillSessionSets(session.id, sessionExercises, targetsMap);
-            }
-
-            toast.success('Workout started');
-            router.push('/workout/active');
-          } catch (error) {
-            if (__DEV__) {
-              devError('planner', error, { action: 'startWorkout_continue' });
-            }
-            toast.error('Failed to start workout');
-          } finally {
-            setIsSaving(false);
-          }
-        }}
-        onSmartAdjust={async () => {
-          setShowSmartAdjustPrompt(false);
-          setIsSaving(true);
-
-          try {
-            const userId = await getCurrentUserId();
-            if (!userId || !activeTemplateId || !selectedDay) {
-              const missing: string[] = [];
-              if (!userId) missing.push('userId');
-              if (!activeTemplateId) missing.push('activeTemplateId');
-              if (!selectedDay) missing.push('selectedDay');
-              if (__DEV__) devLog('planner', { action: 'SmartAdjust_skipped', missing });
-              toast.error('Missing required data');
-              return;
-            }
-
-            // Get rebalance exercises
-            const { getRebalanceExercises } = await import('../../src/lib/engine/rebalance');
-            const rebalanceExerciseIds = await getRebalanceExercises(
-              rebalanceResult?.missedMuscles || [],
-              userId
-            );
-
-            if (rebalanceExerciseIds.length === 0) {
-              toast.error('No suitable catch-up exercises found');
-              return;
-            }
-
-            // Create the workout session
-            const session = await createWorkoutSession(
-              userId,
-              activeTemplateId,
-              selectedDay.day.day_name
-            );
-
-            if (!session) {
-              toast.error('Failed to create workout session');
-              return;
-            }
-
-            // Get existing exercises from the template day
-            const selectedExerciseRefs = selectedDay.slots.map((slot) => ({
-              exerciseId: slot.exercise_id || undefined,
-              customExerciseId: slot.custom_exercise_id || undefined,
-              notes: slot.notes || undefined,
-            }));
-
-            // Add rebalance exercises at the START (sort_order = -1, -2, -3)
-            const rebalanceExerciseRefs = rebalanceExerciseIds.map((id, index) => ({
-              exerciseId: id,
-              customExerciseId: undefined,
-              notes: '🎯 Catch-up exercise (Smart Adjust)',
-              sortOrder: -(index + 1), // -1, -2, -3 to appear first
-            }));
-
-            // Combine: rebalance exercises first, then original exercises
-            const allExerciseRefs = [
-              ...rebalanceExerciseRefs.map(ref => ({
-                exerciseId: ref.exerciseId,
-                customExerciseId: ref.customExerciseId,
-                notes: ref.notes,
-              })),
-              ...selectedExerciseRefs,
-            ];
-
-            // Create session exercises
-            const sessionExercisePromises = allExerciseRefs.map((ref, index) => {
-              const isRebalance = index < rebalanceExerciseIds.length;
-              return supabase
-                .from('v2_session_exercises')
-                .insert({
-                  session_id: session.id,
-                  exercise_id: ref.exerciseId || null,
-                  custom_exercise_id: ref.customExerciseId || null,
-                  sort_order: isRebalance ? -(rebalanceExerciseIds.length - index) : index,
-                })
-                .select()
-                .single();
-            });
-
-            const sessionExerciseResults = await Promise.all(sessionExercisePromises);
-            const sessionExercises = sessionExerciseResults
-              .filter((r) => !r.error && r.data)
-              .map((r) => r.data!);
-
-            if (sessionExercises.length === 0) {
-              toast.error('Failed to create session exercises');
-              return;
-            }
-
-            // Prefill sets for all exercises (including rebalance exercises)
-            const { selectExerciseTargets } = await import('../../src/lib/engine/targetSelection');
-            const targets = new Map<string, any>();
-
-            for (const se of sessionExercises) {
-              const ref = {
-                exerciseId: se.exercise_id || undefined,
-                customExerciseId: se.custom_exercise_id || undefined,
-              };
-              const exerciseKey = ref.exerciseId || ref.customExerciseId;
-              if (!exerciseKey) continue;
-
-              const target = await selectExerciseTargets(ref, userId, {
-                experience: profile?.experience_level || 'beginner',
-              });
-
-              if (target) {
-                targets.set(exerciseKey, target);
-              }
-            }
-
-            const prefillSuccess = await prefillSessionSets(session.id, sessionExercises, targets);
-            if (!prefillSuccess) {
-              if (__DEV__) {
-                devLog('planner', {
-                  action: 'prefillSessionSets',
-                  success: false,
-                  message: 'Prefill failed but continuing',
-                });
-              }
-            }
-
-            toast.success(`Added ${rebalanceExerciseIds.length} catch-up exercise${rebalanceExerciseIds.length > 1 ? 's' : ''}`);
-            router.push('/(stack)/workout/active');
-          } catch (error) {
-            if (__DEV__) {
-              devError('planner', error, {
-                action: 'smartAdjust',
-                missedMuscles: rebalanceResult?.missedMuscles || [],
-              });
-            }
-            toast.error('Failed to apply smart adjust');
-          } finally {
-            setIsSaving(false);
-            setRebalanceResult(null);
-          }
-          setRebalanceResult(null);
-        }}
-      />
     </SafeAreaView>
   );
 }

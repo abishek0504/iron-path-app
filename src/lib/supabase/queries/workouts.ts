@@ -5,7 +5,7 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
-import { getDateBoundsForDayName } from '../../utils/date';
+import { getDateBoundsForDayName, WEEK_DAYS, MS_PER_DAY_MS } from '../../utils/date';
 import { formatDurationCompact } from '../../utils/formatDuration';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
@@ -95,12 +95,14 @@ export interface SessionSet {
 /**
  * Create a new workout session.
  * @param startedAt - Optional ISO timestamp; when provided (e.g. for planned days), the session is scheduled for that time. Defaults to now.
+ * @param origin - 'auto' for planner auto-materialized sessions (deduped by a partial unique index), 'manual' for user/feature-initiated sessions (unconstrained). Defaults to 'manual'.
  */
 export async function createWorkoutSession(
   userId: string,
   templateId?: string,
   dayName?: string,
-  startedAt?: string
+  startedAt?: string,
+  origin: 'auto' | 'manual' = 'manual'
 ): Promise<WorkoutSession | null> {
   if (__DEV__) {
     devLog('workout-query', {
@@ -109,6 +111,7 @@ export async function createWorkoutSession(
       templateId,
       dayName,
       startedAt: startedAt ?? 'now',
+      origin,
     });
   }
 
@@ -122,11 +125,26 @@ export async function createWorkoutSession(
         day_name: dayName,
         status: 'active',
         started_at: resolvedStartedAt,
+        origin,
       })
       .select()
       .single();
 
     if (error) {
+      // 23505 = unique_violation: an auto session for this user+day already
+      // exists (the dedup index did its job). This is expected under a race,
+      // not an error — the caller should re-fetch the winning session.
+      if (error.code === '23505') {
+        if (__DEV__) {
+          devLog('workout-query', {
+            action: 'createWorkoutSession_dedup',
+            userId,
+            dayName,
+            origin,
+          });
+        }
+        return null;
+      }
       if (__DEV__) {
         devError('workout-query', error, { userId, templateId, dayName });
       }
@@ -153,11 +171,12 @@ export async function materializeWorkoutFromTemplateSlots(input: {
   slots: TemplateSlot[];
   startedAt?: string;
   experience?: string;
+  origin?: 'auto' | 'manual';
 }): Promise<WorkoutSession | null> {
-  const { userId, templateId, dayName, slots, startedAt, experience = 'beginner' } = input;
+  const { userId, templateId, dayName, slots, startedAt, experience = 'beginner', origin = 'manual' } = input;
   if (slots.length === 0) return null;
 
-  const session = await createWorkoutSession(userId, templateId, dayName, startedAt);
+  const session = await createWorkoutSession(userId, templateId, dayName, startedAt, origin);
   if (!session) return null;
 
   const sessionExercises: { id: string; exercise_id?: string; custom_exercise_id?: string }[] = [];
@@ -645,6 +664,188 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
       devError('workout-query', error, { sessionId });
     }
     return false;
+  }
+}
+
+/**
+ * A single performed set for a backlogged (manually logged, past-dated) workout.
+ * Either `reps` (rep-based) or `duration_sec` (timed) must be provided, never both,
+ * to satisfy the v2_session_sets reps-XOR-duration CHECK constraint.
+ */
+export interface BackloggedSetInput {
+  reps?: number | null;
+  weight?: number | null;
+  duration_sec?: number | null;
+  rpe?: number | null;
+  set_type?: SetType;
+  rest_sec?: number | null;
+}
+
+/** A performed exercise (master XOR custom) with its performed sets. */
+export interface BackloggedExerciseInput {
+  exercise_id?: string;
+  custom_exercise_id?: string;
+  sets: BackloggedSetInput[];
+}
+
+export interface CreateBackloggedWorkoutInput {
+  /** ISO timestamp for the moment the workout was performed (started/completed/performed_at). */
+  performedAtIso: string;
+  exercises: BackloggedExerciseInput[];
+}
+
+/**
+ * A backlogged workout dated within this many days of now is recent enough that current
+ * muscle-recovery/freshness should be recomputed. Older backlogs are historical-only.
+ */
+const RECENT_BACKLOG_DAYS = 3;
+
+/**
+ * Create a completed, past-dated ("backlogged") workout in a single batch.
+ *
+ * Unlike the live workout flow (createWorkoutSession -> markSetComplete -> completeWorkoutSession),
+ * this writes the chosen past timestamp directly to started_at/completed_at/performed_at so the
+ * workout flows into every date-derived system: PRs (DB trigger on set insert), volume/trends,
+ * the calendar, streaks, and progressive-overload history (getExerciseHistory orders by performed_at DESC).
+ *
+ * Muscle-freshness is only recomputed when the workout is recent (within RECENT_BACKLOG_DAYS),
+ * since freshness models "now" recovery. HealthKit is intentionally not written (cannot backfill).
+ *
+ * @returns the new session id, or null on failure (any partial writes are rolled back).
+ */
+export async function createBackloggedWorkout(
+  userId: string,
+  input: CreateBackloggedWorkoutInput
+): Promise<string | null> {
+  const { performedAtIso, exercises } = input;
+
+  const performedDate = new Date(performedAtIso);
+  if (isNaN(performedDate.getTime())) {
+    if (__DEV__) devError('workout-query', new Error('Invalid performedAtIso'), { performedAtIso });
+    return null;
+  }
+  if (performedDate.getTime() > Date.now()) {
+    if (__DEV__) devError('workout-query', new Error('performedAtIso is in the future'), { performedAtIso });
+    return null;
+  }
+
+  const exercisesWithSets = exercises.filter(
+    (ex) => (ex.exercise_id || ex.custom_exercise_id) && ex.sets.length > 0
+  );
+  if (exercisesWithSets.length === 0) {
+    if (__DEV__) devError('workout-query', new Error('No exercises with sets'), { performedAtIso });
+    return null;
+  }
+
+  const dayName = WEEK_DAYS[performedDate.getDay()];
+
+  if (__DEV__) {
+    const totalSets = exercisesWithSets.reduce((sum, ex) => sum + ex.sets.length, 0);
+    devLog('workout-query', {
+      action: 'createBackloggedWorkout',
+      userId,
+      performedAtIso,
+      dayName,
+      exerciseCount: exercisesWithSets.length,
+      totalSets,
+    });
+  }
+
+  let sessionId: string | null = null;
+
+  try {
+    const { data: session, error: sessionError } = await supabase
+      .from('v2_workout_sessions')
+      .insert({
+        user_id: userId,
+        template_id: null,
+        day_name: dayName,
+        status: 'completed',
+        started_at: performedAtIso,
+        completed_at: performedAtIso,
+        origin: 'manual',
+      })
+      .select('id')
+      .single();
+
+    if (sessionError || !session) {
+      if (__DEV__) devError('workout-query', sessionError || new Error('No session returned'), { performedAtIso });
+      return null;
+    }
+    const createdSessionId: string = session.id;
+    sessionId = createdSessionId;
+
+    let sortOrder = 0;
+    for (const exercise of exercisesWithSets) {
+      const { data: sessionExercise, error: exerciseError } = await supabase
+        .from('v2_session_exercises')
+        .insert({
+          session_id: createdSessionId,
+          exercise_id: exercise.exercise_id || null,
+          custom_exercise_id: exercise.custom_exercise_id || null,
+          sort_order: sortOrder++,
+        })
+        .select('id')
+        .single();
+
+      if (exerciseError || !sessionExercise) {
+        if (__DEV__) devError('workout-query', exerciseError || new Error('No session exercise returned'), { sessionId: createdSessionId });
+        await deleteSessionWithExercises(userId, createdSessionId);
+        return null;
+      }
+
+      const setRows = exercise.sets.map((set, index) => {
+        const isTimed = set.duration_sec != null && set.duration_sec > 0;
+        return {
+          session_exercise_id: sessionExercise.id,
+          set_number: index + 1,
+          reps: isTimed ? null : set.reps ?? null,
+          weight: set.weight ?? null,
+          duration_sec: isTimed ? set.duration_sec : null,
+          rpe: set.rpe ?? null,
+          rir: null,
+          rest_sec: set.rest_sec ?? null,
+          set_type: set.set_type ?? 'normal',
+          notes: null,
+          performed_at: performedAtIso,
+        };
+      });
+
+      const { error: setsError } = await supabase.from('v2_session_sets').insert(setRows);
+      if (setsError) {
+        if (__DEV__) devError('workout-query', setsError, { sessionId: createdSessionId, sessionExerciseId: sessionExercise.id });
+        await deleteSessionWithExercises(userId, createdSessionId);
+        return null;
+      }
+    }
+
+    // Roll up analytics and refresh the analytics cache so Progress reflects the backlog.
+    // The sessions-in-range cache is invalidated by the caller (matching the app's pattern).
+    void upsertDailyWorkoutStatsForSession(userId, createdSessionId);
+    invalidateAnalyticsCache(userId);
+
+    // Only recompute current muscle freshness for recent backlogs.
+    const ageMs = Date.now() - performedDate.getTime();
+    const isRecent = ageMs <= RECENT_BACKLOG_DAYS * MS_PER_DAY_MS;
+    if (isRecent) {
+      void invokeUpdateMuscleFreshness(userId, createdSessionId);
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'createBackloggedWorkout_result',
+        sessionId: createdSessionId,
+        freshnessRecomputed: isRecent,
+      });
+    }
+
+    return createdSessionId;
+  } catch (error) {
+    if (__DEV__) devError('workout-query', error, { action: 'createBackloggedWorkout_exception', performedAtIso });
+    if (sessionId) {
+      await deleteSessionWithExercises(userId, sessionId);
+    }
+    return null;
   }
 }
 

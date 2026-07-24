@@ -120,6 +120,14 @@ export default function RootLayout() {
           name="analytics/exercise/[id]"
           options={{ gestureEnabled: true, animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="log-past-workout"
+          options={{ gestureEnabled: true, animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="create-custom-exercise"
+          options={{ gestureEnabled: true, animation: 'slide_from_right' }}
+        />
       </Stack>
 
       {/* Global UI components */}

@@ -1,10 +1,10 @@
 # Implementation Status
 
-**Last Updated**: 2026-06-17  
+**Last Updated**: 2026-07-23  
 
 ## Summary
 
-**Overall progress**: Feature-complete for App Store submission. Remaining items are **external/manual**: completing Apple submission IDs (`app.json` `ios.appleTeamId` is now set; `eas.json` submit `ascAppId`/`appleTeamId` are still placeholders), publishing legal pages (`legal/*.md` → tryironpath.com; both URLs still 404 as of 2026-06-11), a Sentry DSN, the Supabase "leaked password protection" dashboard toggle (still disabled per security advisors 2026-06-11), and the final TestFlight pass.
+**Overall progress**: Feature-complete for App Store submission. Several previously-listed blockers are now **resolved** (verified 2026-07-23): legal pages return HTTP 200 at `tryironpath.com/privacy` and `/terms`; `eas.json` submit `ascAppId` (`6793811855`) and `appleTeamId` (`JWUD8ZKQLN`) are set; Sentry DSN + org (`ironpath`/`apple-ios`) are configured in `eas.json`/`app.json`; and the iOS privacy manifest includes `CrashData`. The only remaining **external/manual** items are the Supabase "leaked password protection" dashboard toggle (still WARN per advisors), RevenueCat + App Store Connect subscription setup with a sandbox purchase test, and the final TestFlight pass.
 
 **Core systems**:
 
@@ -13,13 +13,13 @@
 - ✅ Onboarding (~5-step), edit profile
 - ✅ Planner with drag reorder, templates, superset chips, AI day generation (**OpenAI** via Edge Function, strict JSON-schema output with history-aware targets; migrated from Gemini 2026-06-10)
 - ✅ Workout tab + active workout: per-exercise rest timers, set types (warm-up/drop/failure), supersets with alternating execution + shared rest, previous-performance inline, replace/reorder/add(multi-select) mid-workout
-- ✅ Smart Adjust wired: `needsRebalance` runs on planner load, prompts before today's first session
+- ❌ Smart Adjust / Rebalance — Removed (was glitched; race with auto-materialize injected unplanned/duplicate sessions)
 - ✅ Dashboard / progress surfaces
 - ✅ Muscle heatmap via `react-native-body-highlighter` (Skia removed)
 - ✅ GitHub Actions workflow (TypeScript + Vitest on push/PR)
 - ✅ Theme tokens for heatmap / RPE zones + modal dimming across light/dark
 - ✅ Local reminders + tap deep-link to tabs
-- ✅ Sentry SDK + `@sentry/react-native/expo` plugin (dSYM upload; org/DSN placeholders pending)
+- ✅ Sentry SDK + `@sentry/react-native/expo` plugin (dSYM upload; DSN in `eas.json`, org `ironpath`/project `apple-ios` in `app.json`)
 - ✅ Apple Health: `@kingstinct/react-native-healthkit` wired — real authorization, HKWorkout on completion, body mass on weight log, HK UUID dedupe, `v2_health_sync` ledger, 30-day body-mass import
 - ✅ watchOS companion mirror: `targets/watch/` SwiftUI app via `@bacons/apple-targets`, iPhone WCSession bridge (`modules/watch-connectivity/`), set-completion round trip with offline queue
 - ✅ Privacy manifest wired via `expo.ios.privacyManifests` in app.json
@@ -72,8 +72,8 @@
 | Reorder exercises | ✅ Complete | Draggable list + `reorderTemplateSlots` |
 | Date context (Today vs Future) | ✅ Complete | useDateContext; no Edit Scope modal |
 | Target display | ✅ Complete | Shows sets/reps/duration from prescriptions |
-| Custom exercise creation | ✅ Complete | With target bands (Patch D) |
-| Custom exercise editing | ✅ Complete | Inline form |
+| Custom exercise creation | ✅ Complete | `app/create-custom-exercise.tsx` → `createUserCustomExercise`; name, mode, muscles, set/rep or duration bands, equipment |
+| Custom exercise editing / delete | ✅ Complete | Edit via same screen (`customExerciseId` param); delete via long-press in `app/add-exercise.tsx` |
 | Exercise notes | ✅ Complete | Per slot |
 | Missing prescription warning | ✅ Complete | Shows "Missing targets" |
 | Empty day state | ✅ Complete | Add first exercise prompt |
@@ -91,7 +91,7 @@
 | Zone detection | ✅ Complete | Green/yellow/red |
 | Prescription-based targets | ✅ Complete | Uses target bands |
 | Exercise distribution | ✅ Complete | 2-3 per day |
-| OpenAI Edge generate-workout | ✅ Complete | Secrets + quota table; planner calls `generateAiDay`; AI prescribes sets/reps/weight |
+| OpenAI Edge generate-workout | ✅ Complete | Planner calls `generateAiDay`; AI prescribes sets/reps/weight. Pro quota: `PRO_WEEKLY_QUOTA = 40` successful generations per rolling 7 days (server-enforced, source=openai) |
 | Generate button UI | ✅ Complete | Planner |
 | Loading state | ✅ Complete | Spinner while generating |
 | Error handling | ✅ Complete | Returns empty on error |
@@ -101,9 +101,9 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Rebalance check | ✅ Complete | Detects muscle gaps |
-| SmartAdjustPrompt | ✅ Complete | Continue vs Smart Adjust |
-| Smart Adjust apply | ✅ Complete | Adds catch-up exercises to session |
+| Rebalance check | ❌ Removed | Muscle-gap detection removed |
+| SmartAdjustPrompt | ❌ Removed | Component deleted |
+| Smart Adjust apply | ❌ Removed | Catch-up injection removed |
 | Session creation | ✅ Complete | From template or standalone |
 | Exercise prefill | ✅ Complete | Copies from template slots |
 | Target calculation | ✅ Complete | Progressive overload with suggested weights |
@@ -176,8 +176,8 @@
 | Exercise images | ⚠️ Partial | 45 bundled JPGs in `assets/exercises/` + `src/lib/exerciseImages.ts` |
 | Multi-select mode | ✅ Complete | Checkmark selection + "Add N exercises" footer |
 | Exercise metadata display | ✅ Complete | Name, muscles |
-| Custom exercise creation | ✅ Complete | Full form with targets |
-| Custom exercise editing | ✅ Complete | In picker or planner |
+| Custom exercise creation | ✅ Complete | `app/create-custom-exercise.tsx`, entry point in Add Exercise header |
+| Custom exercise editing | ✅ Complete | Edit/delete affordances on custom rows in Add Exercise |
 | Exercise overrides | ✅ Complete | User customization |
 | Merged exercise view | ✅ Complete | Override ?? master |
 | Primary muscles | ✅ Complete | From metadata |
@@ -220,7 +220,7 @@
 | DatePicker | ✅ Complete | Calendar interface |
 | PlanDayPicker | ✅ Complete | Day selection sheet |
 | EditScopePrompt | ✅ Removed | Replaced by date-context model (Today vs Future) |
-| SmartAdjustPrompt | ✅ Complete | Continue vs Smart Adjust |
+| SmartAdjustPrompt | ❌ Removed | Component deleted |
 | ConfirmDialog | ✅ Complete | Reusable confirmation |
 | TabHeader | ✅ Complete | Consistent tab headers |
 
@@ -254,18 +254,24 @@
 | Fatigue model (Banister) | ✅ Complete | Continuous decay with λ constants |
 | Weighted implicit hits | ✅ Complete | All 388 exercises carry weighted `implicit_hits` (CSV import 2026-06-11) |
 | AI week generation | ✅ Complete | Greedy selector |
-| Rebalance detection | ✅ Complete | Muscle gap analysis |
-| Rebalance apply | ✅ Complete | Adds catch-up exercises |
-| Time estimation | ⚠️ TODO | Formula defined, not implemented |
+| Rebalance detection | ❌ Removed | Muscle gap analysis removed |
+| Rebalance apply | ❌ Removed | Catch-up injection removed |
+| Time estimation | ✅ Complete | `src/lib/utils/timeEstimation.ts` implements the ALGORITHMS formula (`estimateExerciseTimeSec` / `estimateSessionTimeSec`) |
 
 ## Known Issues / Remaining Manual Steps
 
+### Resolved (verified 2026-07-23)
+
+- ✅ **Apple submission IDs** — `eas.json` `submit.production.ios.ascAppId` (`6793811855`) and `appleTeamId` (`JWUD8ZKQLN`) are set.
+- ✅ **Legal pages** — `tryironpath.com/privacy` and `/terms` return HTTP 200 (curl-verified).
+- ✅ **Sentry** — DSN set in `eas.json` production env; `app.json` Sentry plugin org `ironpath` / project `apple-ios`.
+- ✅ **iOS privacy manifest** — includes `NSPrivacyCollectedDataTypeCrashData`.
+
 ### Blocking submission (external, not code)
 
-1. **Apple submission IDs** — `app.json` `ios.appleTeamId` is set (enrollment done); `eas.json` `submit.production.ios.appleTeamId`/`ascAppId` are still placeholders pending the ASC app record.
-2. **Legal pages** — publish `legal/privacy.md` and `legal/terms.md` at `tryironpath.com/privacy` and `/terms` (URLs already referenced by `src/lib/utils/legal.ts`; both still return "Page not found" as of 2026-06-11).
-3. **Sentry** — create the project, set `EXPO_PUBLIC_SENTRY_DSN` in `eas.json` production env, replace `REPLACE_WITH_SENTRY_ORG` in `app.json`, and add `SENTRY_AUTH_TOKEN` as an EAS secret for dSYM upload.
-4. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix. Still disabled per security advisors check on 2026-06-11.
+1. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix. Still WARN per security advisors check on 2026-07-23.
+2. **RevenueCat + App Store Connect** — confirm products (`ironpath_pro_monthly`/`ironpath_pro_annual`), entitlement `ironpath_pro`, default offering, webhook secret, and run a sandbox purchase/restore on a dev/TestFlight build. See `SUBSCRIPTION_SETUP.md`.
+3. **Final TestFlight pass** — run core flows on a physical device (workout, watch mirror, HealthKit, paywall).
 
 ### Non-blocking
 
@@ -313,7 +319,7 @@
 - ✅ Seeded realistic starting weights for 45 exercises
 - ✅ Created interactive RPE slider with color zones
 - ✅ Built muscle heatmap (28 muscles; uses react-native-body-highlighter). **Platform:** Dev build/simulator = full body view. Expo Go = list fallback (muscle groups + %) so heatmap data is visible without native body highlighter. Web = "Please open on mobile to see full heatmap."
-- ✅ Implemented Smart Adjust apply logic (catch-up exercises)
+- ✅ Implemented Smart Adjust apply logic (catch-up exercises) — later removed (2026-07-23)
 - ✅ Installed @shopify/flash-list and @shopify/react-native-skia
 - ✅ Added keyboard dismiss functionality (Done/Next buttons)
 - ✅ Implemented exercise info display (muscles, tips)
@@ -370,7 +376,7 @@
 ### Phase 2: AI & Rebalance ✅ COMPLETE
 1. ✅ "Generate with AI" button in Planner (OpenAI Edge Function, structured outputs)
 2. ✅ Loading overlay + quota display for AI generation
-3. ✅ Implement rebalance apply logic (Smart Adjust wired on planner load)
+3. ❌ Rebalance apply logic (Smart Adjust) — removed 2026-07-23 (glitched; race with auto-materialize)
 4. ✅ Advanced fatigue model (Banister continuous decay)
 5. ✅ Weighted implicit hits with biomechanical accuracy
 

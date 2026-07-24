@@ -504,7 +504,7 @@ src/
   lib/
     ai/               # generateWorkoutDay (Edge Function client)
     cache/            # In-memory TTL caches (template, sessions, exercises, dashboard, freshness)
-    engine/           # Business logic (targets, rebalance, staleness, workout flow)
+    engine/           # Business logic (targets, staleness, workout flow)
     health/           # Apple Health integration
     supabase/
       client.ts       # Supabase client config

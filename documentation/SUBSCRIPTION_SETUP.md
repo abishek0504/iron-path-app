@@ -23,7 +23,7 @@ Apple allows **one introductory offer per subscription group per Apple ID** — 
 
 1. Sign up at [RevenueCat](https://www.revenuecat.com).
 2. **New project** → name it (e.g. IronPath).
-3. Add **iOS app** with bundle ID `com.reginafang.ironpath`.
+3. Add **iOS app** with bundle ID `com.alexpreo.ironpath` (must match `app.json` `expo.ios.bundleIdentifier`).
 
 ### 2. Link App Store Connect
 

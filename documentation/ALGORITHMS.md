@@ -586,155 +586,25 @@ TARGET_BOUNDS: sets 1-10, reps 1-50, weight 0-2000, duration_sec 5-3600, target_
 ```
 
 ### Algorithm
-1. Auth (user JWT), verify template ownership, enforce daily quota.
+1. Auth (user JWT), verify template ownership, enforce the Pro weekly quota (`PRO_WEEKLY_QUOTA = 40` successful generations per rolling 7 days).
 2. Build per-request context: allow-list catalog (`v2_ai_recommended_exercises`, active, limit 400, stretches excluded), profile, muscle freshness (last 48h), per-exercise history summary (last set, top set, avg RPE) from completed sessions, split-day position.
 3. **Stretch handling**: when the user requests `stretchCount` (1-5), a separate stretch catalog (`v2_exercises` where `is_stretch = true`) is sent; the LLM appends exactly that many stretches per session, in addition to strength exercises.
 4. Call OpenAI with strict JSON-schema structured output.
 5. Validate: every returned ID must be in the catalog (allow-list is the security boundary); dedupe within the day; per-session strength count must be within tolerance of the requested count (else the whole result is rejected → fallback); out-of-bounds or mode-mismatched targets are nulled (client falls back to prescription-based targets) rather than failing generation.
-6. Audit every call to `v2_ai_generations` (fallbacks still consume quota).
+6. Audit every call to `v2_ai_generations`. Only `source = 'openai'` rows count toward the weekly quota; fallback rows are logged for observability but do not consume quota.
 
 On any failure the response has `source: 'fallback'` with empty sessions; the client (`src/lib/ai/generateWorkoutDay.ts`) surfaces this as `ai_unavailable` ("try again later") — it intentionally does **not** silently substitute the local deterministic engine, because the user explicitly asked for an AI generation.
 
-## Rebalance Detection
+## Rebalance Detection / Smart Adjust (Removed)
 
-**Location**: `src/lib/engine/rebalance.ts`
+The muscle-coverage "Rebalance Detection" and its "Smart Adjust" catch-up
+injection (formerly `src/lib/engine/rebalance.ts` +
+`src/components/ui/SmartAdjustPrompt.tsx`) have been removed. In practice the
+prompt was effectively unreachable due to a race with auto-materialization, and
+when triggered it injected unplanned exercises / duplicate sessions.
 
-### Purpose
-Detect muscle coverage gaps by analyzing recent sessions. Prompt user before starting workout if gaps found.
-
-### Constants
-```
-N_SESSIONS_LOOKBACK = 6  // Analyze last 6 completed sessions
-MIN_GAP_MUSCLES = 1  // Minimum missed muscles to trigger prompt
-```
-
-### Algorithm
-
-**1. Get Recent Completed Sessions**
-```
-sessions = fetch last N_SESSIONS_LOOKBACK completed sessions
-if (no sessions): return no rebalance needed
-```
-
-**2. Get All Session Exercises**
-```
-sessionExercises = fetch all exercises from recent sessions
-  (includes both exercise_id and custom_exercise_id)
-```
-
-**3. Determine Muscles Hit**
-```
-allMusclesHit = Set()
-
-for each sessionExercise:
-  exercise = getMergedExercise({ exerciseId OR customExerciseId }, userId)
-  
-  // Add primary muscles
-  for muscle in exercise.primary_muscles:
-    allMusclesHit.add(muscle)
-  
-  // Add implicit hits
-  for muscle in Object.keys(exercise.implicit_hits):
-    allMusclesHit.add(muscle)
-```
-
-**4. Compare Against All Canonical Muscles**
-```
-allMuscles = fetch all keys from v2_muscles
-
-missedMuscles = []
-for muscle in allMuscles:
-  if (muscle not in allMusclesHit):
-    missedMuscles.push(muscle)
-```
-
-**5. Check Threshold**
-```
-if (missedMuscles.length >= MIN_GAP_MUSCLES):
-  return {
-    needsRebalance: true,
-    reasons: ["X muscles not hit in last N sessions: ..."],
-    missedMuscles
-  }
-else:
-  return { needsRebalance: false, reasons: [], missedMuscles: [] }
-```
-
-### Worked Example
-
-**Scenario**: User has done 6 sessions focused on upper body
-
-**Step 1: Muscles Hit**
-```
-From 6 sessions:
-  chest, triceps, anterior_deltoids, lats, biceps, upper_back, traps, abs
-```
-
-**Step 2: All Canonical Muscles** (29 total)
-```
-Upper Push (7): chest, upper_chest, lower_chest, anterior_deltoids, lateral_deltoids, posterior_deltoids, triceps
-Upper Pull (6): lats, upper_back, lower_back, traps, biceps, forearms
-Core (2): abs, obliques
-Lower Front (3): quads, hip_flexors, adductors
-Lower Back (4): hamstrings, glutes, calves, soleus
-Stabilizers (7): rotator_cuff, serratus_anterior, transverse_abdominis, glute_medius, glute_minimus, piriformis, tibialis_anterior
-```
-
-**Step 3: Find Gaps**
-```
-Missed muscles:
-  upper_chest, lower_chest, lateral_deltoids, posterior_deltoids,
-  lower_back, forearms, obliques,
-  quads, hip_flexors, adductors,
-  hamstrings, glutes, calves, soleus,
-  rotator_cuff, serratus_anterior, transverse_abdominis,
-  glute_medius, glute_minimus, piriformis, tibialis_anterior
-
-Total: 21 muscles missed
-```
-
-**Step 4: Result**
-```
-{
-  needsRebalance: true,
-  reasons: ["21 muscles not hit in last 6 sessions: upper_chest, lower_chest, lateral_deltoids, posterior_deltoids, lower_back..."],
-  missedMuscles: [all 21 muscles]
-}
-```
-
-**Step 5: User Action**
-```
-Show SmartAdjustPrompt with:
-  - "Continue anyway" (proceed without changes)
-  - "Smart adjust" (apply rebalance logic)
-```
-
-### 5.1 Explicit Catch-Up Logic (Smart Adjust)
-
-**Location**: `src/lib/engine/rebalance.ts` (`getRebalanceExercises`)
-
-While the fatigue model handles recovery, "Rebalance" handles neglect.
-
-**Gap Detection:** Identify muscles not hit in the last 6 sessions.
-
-**Correction Algorithm:** If `needsRebalance` is true, the generator must inject a high-priority compound exercise for the missed muscle (e.g., Squats for Legs) into the *start* of the active session, potentially displacing lower-priority accessory movements to maintain time constraints.
-
-**Selection Criteria:**
-1. Query `v2_exercises` where `primary_muscles` overlaps with `missedMuscles`
-2. Filter by:
-   - Exercise is in `v2_ai_recommended_exercises` (allow-list, active)
-   - Prefer compound movements (density_score >= 7)
-3. Score each exercise: `score = missedMusclesCovered × density_score`; greedily pick exercises that cover new muscles, stopping at 3 exercises or once ~70% of the missed muscles are covered
-4. Return exercise IDs
-
-**Application:**
-- When user selects "Smart Adjust" in SmartAdjustPrompt
-- Fetch active session ID
-- Call `getRebalanceExercises(missedMuscles, userId)`
-- Insert session exercises into `v2_session_exercises` with `sort_order = -1, -2, -3` (to appear first)
-- Prefill sets for new exercises using progressive overload targets
-- Show toast: "Added X catch-up exercises"
-- Navigate to active workout
+This does not affect progressive overload, RPE-based weight adjustment, or the
+fatigue/freshness model — those are independent and remain in place.
 
 ## Workout Flow (Set Types, Supersets, Rest)
 

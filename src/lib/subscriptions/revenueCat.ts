@@ -80,4 +80,32 @@ export async function getRevenueCatOfferings(): Promise<
   }
 }
 
+type RevenueCatUiModule = { presentCustomerCenter: () => Promise<void> };
+
+function getRevenueCatUI(): RevenueCatUiModule | null {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return null;
+  try {
+    const mod = require('react-native-purchases-ui');
+    return (mod?.default ?? mod) as RevenueCatUiModule;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Presents RevenueCat's Customer Center (manage/cancel/refund/change-plan).
+ * Returns false when the native UI module is unavailable (web / Expo Go), so
+ * the caller can fall back to store-managed subscriptions.
+ */
+export async function presentCustomerCenter(): Promise<boolean> {
+  const RevenueCatUI = getRevenueCatUI();
+  if (!RevenueCatUI) return false;
+  try {
+    await RevenueCatUI.presentCustomerCenter();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export { getPurchases, PRODUCT_ID_MONTHLY, PRODUCT_ID_ANNUAL, ENTITLEMENT_ID };

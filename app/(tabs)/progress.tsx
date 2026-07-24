@@ -7,7 +7,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, RefreshControl } from 'r
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
@@ -238,6 +238,14 @@ export default function ProgressTab() {
 
           {segment === 'calendar' ? (
             <>
+              <Pressable
+                style={styles.logPastButton}
+                onPress={() => router.push('/log-past-workout')}
+              >
+                <Plus size={18} color={colors.primary} />
+                <Text style={styles.logPastButtonText}>Log past workout</Text>
+              </Pressable>
+
               <View style={styles.controls}>
                 <TourTarget id="tour.progress.viewToggle" testID="tour-progress-view-toggle">
                 <View style={styles.viewToggle}>
@@ -392,6 +400,23 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 1,
       borderColor: colors.cardBorder,
       padding: spacing.md,
+    },
+    logPastButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      borderColor: colors.primary,
+      backgroundColor: colors.card,
+    },
+    logPastButtonText: {
+      color: colors.primary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
     },
   });
 }

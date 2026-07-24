@@ -191,11 +191,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
 ```
 1. User taps "Start" on Workout tab
    └→ app/(tabs)/index.tsx creates or reuses today's session and navigates
-   (Rebalance check lives in the Planner, not on Start: when the Planner loads
-    a template and there are no sessions yet today, needsRebalance(userId,
-    templateId, todayName) runs once; if muscle-coverage gaps are detected,
-    SmartAdjustPrompt offers to add catch-up exercises via
-    getRebalanceExercises() in src/lib/engine/rebalance.ts)
+   (The former Rebalance / Smart Adjust muscle-coverage check has been removed.)
 
 2. Create workout session
    └→ createWorkoutSession(userId, templateId, dayName)

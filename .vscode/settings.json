@@ -8,6 +8,7 @@
   "typescript.preferences.excludePackageJsonAutoImports": "off",
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.validate.enable": true,
-  "typescript.disableAutomaticTypeAcquisition": false
+  "typescript.disableAutomaticTypeAcquisition": false,
+  "java.configuration.updateBuildConfiguration": "disabled"
 }
 
