@@ -1072,6 +1072,7 @@ export type Database = {
           day_name: string | null
           hk_workout_uuid: string | null
           id: string
+          origin: string
           started_at: string | null
           status: string
           template_id: string | null
@@ -1082,6 +1083,7 @@ export type Database = {
           day_name?: string | null
           hk_workout_uuid?: string | null
           id?: string
+          origin?: string
           started_at?: string | null
           status?: string
           template_id?: string | null
@@ -1092,6 +1094,7 @@ export type Database = {
           day_name?: string | null
           hk_workout_uuid?: string | null
           id?: string
+          origin?: string
           started_at?: string | null
           status?: string
           template_id?: string | null
