@@ -2,7 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>WKApplication</key>
-    <true/>
+	<key>WKApplication</key>
+	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>IronPath reads heart rate during workouts to show live effort on your watch and sync to Apple Health.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>IronPath writes strength training workouts and heart rate to Apple Health when you complete a session.</string>
 </dict>
 </plist>
