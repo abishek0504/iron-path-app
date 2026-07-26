@@ -1,14 +1,15 @@
 /**
  * Multi-step Onboarding Flow
- * Step 1: Appearance (theme)
- * Step 2: About you (name, DOB)
- * Step 3: Body & units (weight, units, gender)
- * Step 4: Experience & training (experience, days slider + preferred days)
- * Step 5: Equipment
- * Step 6: Review
+ * Step 1: About you (name, DOB)
+ * Step 2: Body & units (weight, units, gender)
+ * Step 3: Experience
+ * Step 4: Training days (days slider + preferred days)
+ * Step 5: Preferred split
+ * Step 6: Appearance (theme)
+ * Step 7: Equipment
  */
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,13 +21,14 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
-import { spacing, borderRadius, typography, getThemeLabel, type ThemeColors } from '../src/lib/utils/theme';
+import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme, useThemeMode } from '../src/lib/utils/ThemeContext';
 import { ThemePickerGrid } from '../src/components/settings/ThemePickerGrid';
 import { useUserStore } from '../src/stores/userStore';
@@ -49,17 +51,37 @@ import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { setPendingAppTour } from '../src/lib/onboarding/tourBridge';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+  runOnJS,
+} from 'react-native-reanimated';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
-import { getSplitLabel } from '../src/lib/constants/trainingSplits';
 
-const EXPERIENCE_OPTIONS = ['beginner', 'intermediate', 'advanced'];
-const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
-const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'];
+const EXPERIENCE_OPTIONS = [
+  { value: 'beginner', label: 'Beginner' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'advanced', label: 'Advanced' },
+] as const;
+const EQUIPMENT_OPTIONS = [
+  { value: 'Full gym', label: 'Full Gym' },
+  { value: 'Dumbbells', label: 'Dumbbells' },
+  { value: 'Bands', label: 'Bands' },
+  { value: 'Bodyweight only', label: 'Bodyweight Only' },
+] as const;
+const GENDER_OPTIONS = [
+  { value: 'Male', label: 'Male' },
+  { value: 'Female', label: 'Female' },
+  { value: 'Prefer not to say', label: 'Prefer Not To Say' },
+] as const;
 const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
+const SLIDE_DURATION_MS = 280;
+const PROGRESS_DURATION_MS = 320;
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -72,14 +94,16 @@ export default function Onboarding() {
   const colors = useTheme();
   const { themeMode, setThemeMode } = useThemeMode();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const screenWidth = Dimensions.get('window').width;
 
   const [currentStep, setCurrentStep] = useState(1);
+  const [displayedStep, setDisplayedStep] = useState(1);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Form data
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
@@ -95,10 +119,21 @@ export default function Onboarding() {
   const [preferredSplit, setPreferredSplit] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<string[]>([]);
 
+  const slideX = useSharedValue(0);
+  const progressWidth = useSharedValue(1 / TOTAL_STEPS);
+  const transitioningRef = useRef(false);
+
   useEffect(() => {
     loadProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load profile once on mount
   }, []);
+
+  useEffect(() => {
+    progressWidth.value = withTiming(currentStep / TOTAL_STEPS, {
+      duration: PROGRESS_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [currentStep, progressWidth]);
 
   const loadProfile = async () => {
     setLoading(true);
@@ -163,6 +198,9 @@ export default function Onboarding() {
     } else if (n < workoutDays.length) {
       setWorkoutDays((prev) => prev.slice(0, n));
     }
+    if (n < 1) {
+      setPreferredSplit(null);
+    }
   };
 
   const toggleWorkoutDay = (day: string) => {
@@ -179,27 +217,29 @@ export default function Onboarding() {
   const validateStep = (step: number): boolean => {
     const errors: Record<string, string> = {};
 
-    if (step === 2) {
+    if (step === 1) {
       if (!firstName.trim()) errors.firstName = 'Enter your first name.';
       const dobValidation = validateDateOfBirth(dateOfBirth);
       if (!dobValidation.isValid) {
         errors.dateOfBirth = dobValidation.error || 'Enter your date of birth.';
       }
-    } else if (step === 3) {
+    } else if (step === 2) {
       if (!currentWeight || currentWeight <= 0) {
         errors.currentWeight = 'Enter your current weight.';
       }
-    } else if (step === 4) {
+    } else if (step === 3) {
       if (!experience) errors.experience = 'Select your experience level.';
+    } else if (step === 4) {
       if (daysPerWeekSlider < 1 || daysPerWeekSlider > 7) {
         errors.daysPerWeek = 'Slide to choose 1–7 training days per week.';
       } else if (workoutDays.length !== daysPerWeekSlider) {
         errors.workoutDays = `Select exactly ${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}.`;
       }
+    } else if (step === 5) {
       if (!preferredSplit?.trim()) {
         errors.preferredSplit = 'Pick a split or describe your own.';
       }
-    } else if (step === 5) {
+    } else if (step === 7) {
       if (!equipment.length) errors.equipment = 'Select at least one option.';
     }
 
@@ -207,7 +247,52 @@ export default function Onboarding() {
     return Object.keys(errors).length === 0;
   };
 
+  const completeEnter = useCallback(() => {
+    transitioningRef.current = false;
+    setTransitioning(false);
+    setFieldErrors({});
+  }, []);
+
+  const swapAndEnter = useCallback((nextStep: number, direction: 1 | -1) => {
+    setDisplayedStep(nextStep);
+    setCurrentStep(nextStep);
+    // Place incoming step off-screen, then slide in after content swaps.
+    requestAnimationFrame(() => {
+      slideX.value = direction * screenWidth;
+      slideX.value = withTiming(
+        0,
+        { duration: SLIDE_DURATION_MS, easing: Easing.out(Easing.cubic) },
+        (finished) => {
+          if (finished) {
+            runOnJS(completeEnter)();
+          } else {
+            runOnJS(completeEnter)();
+          }
+        },
+      );
+    });
+  }, [completeEnter, screenWidth, slideX]);
+
+  const animateToStep = useCallback((nextStep: number, direction: 1 | -1) => {
+    if (transitioningRef.current) return;
+    transitioningRef.current = true;
+    setTransitioning(true);
+
+    slideX.value = withTiming(
+      -direction * screenWidth,
+      { duration: SLIDE_DURATION_MS, easing: Easing.out(Easing.cubic) },
+      (finished) => {
+        if (finished) {
+          runOnJS(swapAndEnter)(nextStep, direction);
+        } else {
+          runOnJS(completeEnter)();
+        }
+      },
+    );
+  }, [completeEnter, screenWidth, slideX, swapAndEnter]);
+
   const handleNext = () => {
+    if (transitioningRef.current || submitting) return;
     if (!validateStep(currentStep)) {
       return;
     }
@@ -217,18 +302,19 @@ export default function Onboarding() {
     }
 
     if (currentStep < TOTAL_STEPS) {
-      setCurrentStep(currentStep + 1);
-      setFieldErrors({});
+      // Pre-position incoming content: after finishTransition, content swaps at 0.
+      // Exit current to the left first.
+      animateToStep(currentStep + 1, 1);
     }
   };
 
   const handleBack = () => {
+    if (transitioningRef.current || submitting) return;
     if (currentStep > 1) {
       if (__DEV__) {
         devLog('onboarding-step', { step: currentStep, action: 'back' });
       }
-      setCurrentStep(currentStep - 1);
-      setFieldErrors({});
+      animateToStep(currentStep - 1, -1);
     }
   };
 
@@ -236,10 +322,12 @@ export default function Onboarding() {
     setErrorText(null);
 
     if (
+      !validateStep(1) ||
       !validateStep(2) ||
       !validateStep(3) ||
       !validateStep(4) ||
-      !validateStep(5)
+      !validateStep(5) ||
+      !validateStep(7)
     ) {
       setErrorText('Please complete all required fields.');
       return;
@@ -341,35 +429,14 @@ export default function Onboarding() {
     }
   };
 
-  const renderStepIndicator = () => (
-      <View style={styles.stepIndicator}>
-        <Text style={styles.stepText}>
-          Step {currentStep} of {TOTAL_STEPS}
-        </Text>
-        <View style={styles.progressBar}>
-          <View
-            style={[
-              styles.progressFill,
-              { width: `${(currentStep / TOTAL_STEPS) * 100}%` },
-            ]}
-          />
-        </View>
-      </View>
-  );
+  const [progressTrackWidth, setProgressTrackWidth] = useState(0);
+  const progressStyle = useAnimatedStyle(() => ({
+    width: progressTrackWidth * progressWidth.value,
+  }));
 
-  const renderAppearance = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Choose your appearance</Text>
-      <Text style={styles.stepSubtitle}>
-        Pick a theme for the app. You can change this anytime in Settings.
-      </Text>
-
-      <View style={styles.section}>
-        <Text style={styles.label}>Theme</Text>
-        <ThemePickerGrid selectedMode={themeMode} onSelect={setThemeMode} />
-      </View>
-    </View>
-  );
+  const stepSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: slideX.value }],
+  }));
 
   const renderAboutYou = () => (
     <View style={styles.stepContent}>
@@ -481,52 +548,55 @@ export default function Onboarding() {
           style={styles.datePickerButton}
         >
           <Text style={[styles.datePickerText, !gender && styles.datePickerPlaceholder]}>
-            {gender || 'Select gender'}
+            {GENDER_OPTIONS.find((g) => g.value === gender)?.label || gender || 'Select gender'}
           </Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  const renderExperienceAndTraining = () => (
+  const renderExperience = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Experience & training</Text>
+      <Text style={styles.stepTitle}>Experience level</Text>
       <Text style={styles.stepSubtitle}>
-        Help us understand your fitness level and how often you train
+        How would you describe your training experience?
       </Text>
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Experience level *</Text>
-        <View style={styles.chipGroup}>
-          {EXPERIENCE_OPTIONS.map((option) => (
+      <View style={styles.optionList}>
+        {EXPERIENCE_OPTIONS.map((option) => {
+          const selected = experience === option.value;
+          return (
             <TouchableOpacity
-              key={option}
-              style={[
-                styles.chip,
-                experience === option && styles.chipSelected,
-              ]}
-              onPress={() => setExperience(option)}
+              key={option.value}
+              style={[styles.optionRow, selected && styles.optionRowSelected]}
+              onPress={() => setExperience(option.value)}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  experience === option && styles.chipTextSelected,
-                ]}
-              >
-                {option.charAt(0).toUpperCase() + option.slice(1)}
+              <Text style={[styles.optionRowText, selected && styles.optionRowTextSelected]}>
+                {option.label}
               </Text>
             </TouchableOpacity>
-          ))}
-        </View>
-        {fieldErrors.experience ? (
-          <Text style={styles.errorText}>{fieldErrors.experience}</Text>
-        ) : null}
+          );
+        })}
       </View>
+      {fieldErrors.experience ? (
+        <Text style={styles.errorText}>{fieldErrors.experience}</Text>
+      ) : null}
+    </View>
+  );
+
+  const renderTrainingDays = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Training days</Text>
+      <Text style={styles.stepSubtitle}>
+        How many days per week do you want to train?
+      </Text>
 
       <View style={styles.section}>
         <View style={styles.daysSliderHeader}>
           <Text style={styles.label}>Days per week *</Text>
-          <Text style={styles.daysSliderValue}>{daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'}</Text>
+          <Text style={styles.daysSliderValue}>
+            {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'}
+          </Text>
         </View>
         <Slider
           style={styles.slider}
@@ -542,67 +612,80 @@ export default function Onboarding() {
         {fieldErrors.daysPerWeek ? (
           <Text style={styles.errorText}>{fieldErrors.daysPerWeek}</Text>
         ) : null}
-
-        {daysPerWeekSlider > 0 && (
-          <View style={styles.preferredDaysSection}>
-            <Text style={styles.label}>
-              {daysPerWeekSlider === 7 ? 'All days selected' : `Select ${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}`}
-            </Text>
-            <View style={styles.chipGroupPreferredDays}>
-              {WEEKDAY_OPTIONS.map((day, index) => {
-                const selected = workoutDays.includes(day);
-                const atLimit = workoutDays.length >= daysPerWeekSlider && !selected;
-                return (
-                  <Animated.View
-                    key={day}
-                    entering={FadeIn.duration(280).delay(index * 50)}
-                  >
-                    <TouchableOpacity
-                      style={[
-                        styles.chipDay,
-                        selected && styles.chipSelected,
-                        atLimit && styles.chipDisabled,
-                      ]}
-                      onPress={() => toggleWorkoutDay(day)}
-                      disabled={atLimit}
-                    >
-                      <Text
-                        style={[
-                          styles.chipTextDay,
-                          selected && styles.chipTextSelected,
-                          atLimit && styles.chipTextDisabled,
-                        ]}
-                      >
-                        {day}
-                      </Text>
-                    </TouchableOpacity>
-                  </Animated.View>
-                );
-              })}
-            </View>
-            {fieldErrors.workoutDays ? (
-              <Text style={styles.errorText}>{fieldErrors.workoutDays}</Text>
-            ) : null}
-          </View>
-        )}
       </View>
 
-      {daysPerWeekSlider > 0 && (
+      {daysPerWeekSlider > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.label}>Preferred split *</Text>
-          <Text style={styles.splitHint}>
-            Suggested for {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'} per week — or describe your own
+          <Text style={styles.label}>
+            {daysPerWeekSlider === 7
+              ? 'All days selected'
+              : `Select ${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}`}
           </Text>
-          <SplitPicker
-            daysPerWeek={daysPerWeekSlider}
-            value={preferredSplit}
-            onChange={setPreferredSplit}
-          />
-          {fieldErrors.preferredSplit ? (
-            <Text style={styles.errorText}>{fieldErrors.preferredSplit}</Text>
+          <View style={styles.optionList}>
+            {WEEKDAY_OPTIONS.map((day) => {
+              const selected = workoutDays.includes(day);
+              const atLimit = workoutDays.length >= daysPerWeekSlider && !selected;
+              return (
+                <TouchableOpacity
+                  key={day}
+                  style={[
+                    styles.optionRow,
+                    selected && styles.optionRowSelected,
+                    atLimit && styles.optionRowDisabled,
+                  ]}
+                  onPress={() => toggleWorkoutDay(day)}
+                  disabled={atLimit}
+                >
+                  <Text
+                    style={[
+                      styles.optionRowText,
+                      selected && styles.optionRowTextSelected,
+                      atLimit && styles.optionRowTextDisabled,
+                    ]}
+                  >
+                    {day}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {fieldErrors.workoutDays ? (
+            <Text style={styles.errorText}>{fieldErrors.workoutDays}</Text>
           ) : null}
         </View>
-      )}
+      ) : null}
+    </View>
+  );
+
+  const renderPreferredSplit = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Preferred split</Text>
+      <Text style={styles.stepSubtitle}>
+        Suggested for {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'} per week — or let us pick
+      </Text>
+
+      <SplitPicker
+        daysPerWeek={Math.max(1, daysPerWeekSlider)}
+        value={preferredSplit}
+        onChange={setPreferredSplit}
+      />
+      {fieldErrors.preferredSplit ? (
+        <Text style={styles.errorText}>{fieldErrors.preferredSplit}</Text>
+      ) : null}
+    </View>
+  );
+
+  const renderAppearance = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Choose your appearance</Text>
+      <Text style={styles.stepSubtitle}>
+        Pick a theme for the app. You can change this anytime in Settings.
+      </Text>
+
+      <View style={styles.section}>
+        <Text style={styles.label}>Theme</Text>
+        <ThemePickerGrid selectedMode={themeMode} onSelect={setThemeMode} />
+      </View>
     </View>
   );
 
@@ -613,91 +696,48 @@ export default function Onboarding() {
         What equipment do you have available for your workouts?
       </Text>
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Equipment access *</Text>
-        <View style={styles.chipGroup}>
-          {EQUIPMENT_OPTIONS.map((option) => {
-            const selected = equipment.includes(option);
-            return (
-              <TouchableOpacity
-                key={option}
-                style={[styles.chip, selected && styles.chipSelected]}
-                onPress={() => toggleEquipment(option)}
-              >
-                <Text
-                  style={[styles.chipText, selected && styles.chipTextSelected]}
-                >
-                  {option}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        {fieldErrors.equipment ? (
-          <Text style={styles.errorText}>{fieldErrors.equipment}</Text>
-        ) : null}
+      <View style={styles.optionList}>
+        {EQUIPMENT_OPTIONS.map((option) => {
+          const selected = equipment.includes(option.value);
+          return (
+            <TouchableOpacity
+              key={option.value}
+              style={[styles.optionRow, selected && styles.optionRowSelected]}
+              onPress={() => toggleEquipment(option.value)}
+            >
+              <Text style={[styles.optionRowText, selected && styles.optionRowTextSelected]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
+      {fieldErrors.equipment ? (
+        <Text style={styles.errorText}>{fieldErrors.equipment}</Text>
+      ) : null}
     </View>
   );
 
-  const renderReview = () => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Review</Text>
-      <Text style={styles.stepSubtitle}>
-        Confirm your profile before we create your plan
-      </Text>
-
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Appearance</Text>
-        <Text style={styles.reviewValue}>{getThemeLabel(themeMode)}</Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Name</Text>
-        <Text style={styles.reviewValue}>
-          {firstName.trim()}
-          {lastName.trim() ? ` ${lastName.trim()}` : ''}
-        </Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Date of birth</Text>
-        <Text style={styles.reviewValue}>
-          {dateOfBirth ? formatDateOfBirth(dateOfBirth) : '—'}
-        </Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Weight</Text>
-        <Text style={styles.reviewValue}>
-          {currentWeight} {useImperial ? 'lbs' : 'kg'}
-        </Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Gender</Text>
-        <Text style={styles.reviewValue}>{gender || '—'}</Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Experience</Text>
-        <Text style={styles.reviewValue}>
-          {experience ? experience.charAt(0).toUpperCase() + experience.slice(1) : '—'}
-        </Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Training days</Text>
-        <Text style={styles.reviewValue}>
-          {daysPerWeekSlider > 0
-            ? `${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}: ${workoutDays.join(', ') || '—'}`
-            : '—'}
-        </Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Preferred split</Text>
-        <Text style={styles.reviewValue}>{getSplitLabel(preferredSplit) ?? '—'}</Text>
-      </View>
-      <View style={styles.reviewRow}>
-        <Text style={styles.reviewLabel}>Equipment</Text>
-        <Text style={styles.reviewValue}>{equipment.length ? equipment.join(', ') : '—'}</Text>
-      </View>
-    </View>
-  );
+  const renderStep = (step: number) => {
+    switch (step) {
+      case 1:
+        return renderAboutYou();
+      case 2:
+        return renderBodyAndUnits();
+      case 3:
+        return renderExperience();
+      case 4:
+        return renderTrainingDays();
+      case 5:
+        return renderPreferredSplit();
+      case 6:
+        return renderAppearance();
+      case 7:
+        return renderEquipmentStep();
+      default:
+        return null;
+    }
+  };
 
   if (loading) {
     return <LoadingScreen message="Loading..." />;
@@ -708,55 +748,66 @@ export default function Onboarding() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeAreaTop} edges={['top']}>
-        {renderStepIndicator()}
+        <View style={styles.stepIndicator}>
+          <Text style={styles.stepText}>
+            Step {currentStep} of {TOTAL_STEPS}
+          </Text>
+          <View
+            style={styles.progressBar}
+            onLayout={(event) => setProgressTrackWidth(event.nativeEvent.layout.width)}
+          >
+            <Animated.View style={[styles.progressFill, progressStyle]} />
+          </View>
+        </View>
       </SafeAreaView>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.card}>
-          {currentStep === 1 && renderAppearance()}
-          {currentStep === 2 && renderAboutYou()}
-          {currentStep === 3 && renderBodyAndUnits()}
-          {currentStep === 4 && renderExperienceAndTraining()}
-          {currentStep === 5 && renderEquipmentStep()}
-          {currentStep === 6 && renderReview()}
+
+      <View style={styles.body}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Animated.View style={[styles.stepSlide, stepSlideStyle]}>
+            {renderStep(displayedStep)}
+          </Animated.View>
 
           {errorText ? (
             <Text style={styles.errorText}>{errorText}</Text>
           ) : null}
+        </ScrollView>
+      </View>
 
-          <View style={styles.buttonRow}>
-            {currentStep > 1 && (
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={handleBack}
-                  disabled={submitting}
-                >
-                  <Text style={styles.backButtonText}>Back</Text>
-                </TouchableOpacity>
-              )}
+      <SafeAreaView style={styles.safeAreaBottom} edges={['bottom']}>
+        <View style={styles.buttonRow}>
+          {currentStep > 1 ? (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleBack}
+              disabled={submitting || transitioning}
+            >
+              <Text style={styles.backButtonText}>Back</Text>
+            </TouchableOpacity>
+          ) : null}
 
-              <TouchableOpacity
-                style={[
-                  styles.nextButton,
-                  (currentStep === 1 || isLastStep) && styles.nextButtonFullWidth,
-                  submitting && styles.buttonDisabled,
-                ]}
-                onPress={isLastStep ? handleSubmit : handleNext}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <LogoEdgeLoader size="small" variant="inverted" />
-                ) : (
-                  <Text style={styles.nextButtonText}>
-                    {isLastStep ? 'Complete setup' : 'Next'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
+          <TouchableOpacity
+            style={[
+              styles.nextButton,
+              currentStep === 1 && styles.nextButtonFullWidth,
+              (submitting || transitioning) && styles.buttonDisabled,
+            ]}
+            onPress={isLastStep ? handleSubmit : handleNext}
+            disabled={submitting || transitioning}
+          >
+            {submitting ? (
+              <LogoEdgeLoader size="small" variant="inverted" />
+            ) : (
+              <Text style={styles.nextButtonText}>
+                {isLastStep ? 'Complete setup' : 'Next'}
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
-      </ScrollView>
+      </SafeAreaView>
 
       <DatePicker
         visible={showDatePicker}
@@ -805,7 +856,7 @@ export default function Onboarding() {
           itemStyle={styles.weightPickerItem}
         >
           {GENDER_OPTIONS.map((opt) => (
-            <Picker.Item key={opt} label={opt} value={opt} />
+            <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
           ))}
         </Picker>
       </BottomSheet>
@@ -813,274 +864,227 @@ export default function Onboarding() {
   );
 }
 
-function createStyles(colors: ThemeColors) { return StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    gap: spacing.md,
-  },
-  loadingText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-  },
-  safeAreaTop: {
-    backgroundColor: colors.background,
-  },
-  stepIndicator: {
-    padding: spacing.lg,
-    paddingBottom: spacing.md,
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  stepText: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: colors.border,
-    borderRadius: borderRadius.sm,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.sm,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: spacing.lg,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 620,
-    alignSelf: 'center',
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    gap: spacing.lg,
-  },
-  stepContent: {
-    gap: spacing.lg,
-  },
-  stepTitle: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-  },
-  stepSubtitle: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-  },
-  section: {
-    gap: spacing.sm,
-  },
-  label: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.medium,
-  },
-  input: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    paddingVertical: spacing.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  datePickerButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  datePickerText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  datePickerPlaceholder: {
-    color: colors.textMuted,
-  },
-  ageDisplayText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-    marginTop: spacing.xs,
-  },
-  weightPickerButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  weightPickerButtonText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-  },
-  weightPicker: {
-    height: 200,
-    width: '100%',
-  },
-  weightPickerItem: {
-    fontSize: typography.sizes.base,
-    color: colors.textPrimary,
-  },
-  sectionRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  rowItem: {
-    flex: 1,
-  },
-  unitsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.xs,
-  },
-  unitsText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  chipGroup: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  chip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  chipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  chipText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  chipTextSelected: {
-    color: colors.background,
-    fontWeight: typography.weights.semibold,
-  },
-  chipDisabled: {
-    opacity: 0.5,
-  },
-  chipTextDisabled: {
-    color: colors.textMuted,
-  },
-  daysSliderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  daysSliderValue: {
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-    color: colors.textPrimary,
-  },
-  slider: {
-    width: '100%',
-    height: 40,
-  },
-  preferredDaysSection: {
-    marginTop: spacing.lg,
-    gap: spacing.sm,
-  },
-  splitHint: {
-    color: colors.textMuted,
-    fontSize: typography.sizes.sm,
-  },
-  chipGroupPreferredDays: {
-    flexDirection: 'column',
-    gap: spacing.sm,
-  },
-  chipDay: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-  },
-  chipTextDay: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.medium,
-  },
-  reviewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  reviewLabel: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
-    flex: 1,
-  },
-  reviewValue: {
-    fontSize: typography.sizes.sm,
-    color: colors.textPrimary,
-    flex: 1,
-    textAlign: 'right',
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  backButton: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  backButtonText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  nextButton: {
-    flex: 1,
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-  },
-  nextButtonFullWidth: {
-    flex: 1,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  nextButtonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: typography.sizes.sm,
-  },
-  }); }
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    safeAreaTop: {
+      backgroundColor: colors.background,
+    },
+    safeAreaBottom: {
+      backgroundColor: colors.background,
+      borderTopWidth: 1,
+      borderTopColor: colors.cardBorder,
+    },
+    stepIndicator: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.md,
+      backgroundColor: colors.background,
+    },
+    stepText: {
+      fontSize: typography.sizes.sm,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      marginBottom: spacing.sm,
+    },
+    progressBar: {
+      height: 4,
+      backgroundColor: colors.border,
+      borderRadius: borderRadius.sm,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: colors.primary,
+      borderRadius: borderRadius.sm,
+    },
+    body: {
+      flex: 1,
+    },
+    scrollContent: {
+      flexGrow: 1,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.xl,
+      paddingBottom: spacing.lg,
+    },
+    stepSlide: {
+      width: '100%',
+    },
+    stepContent: {
+      gap: spacing.lg,
+    },
+    stepTitle: {
+      fontSize: typography.sizes['2xl'],
+      fontWeight: typography.weights.bold,
+      color: colors.textPrimary,
+      letterSpacing: -0.3,
+    },
+    stepSubtitle: {
+      fontSize: typography.sizes.base,
+      color: colors.textSecondary,
+      lineHeight: 22,
+      marginTop: -spacing.sm,
+    },
+    section: {
+      gap: spacing.sm,
+    },
+    label: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.medium,
+    },
+    input: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+    },
+    datePickerButton: {
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+    },
+    datePickerText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+    },
+    datePickerPlaceholder: {
+      color: colors.textMuted,
+    },
+    ageDisplayText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+      marginTop: spacing.xs,
+    },
+    weightPickerButton: {
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+    },
+    weightPickerButtonText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+    },
+    weightPicker: {
+      height: 200,
+      width: '100%',
+    },
+    weightPickerItem: {
+      fontSize: typography.sizes.base,
+      color: colors.textPrimary,
+    },
+    sectionRow: {
+      flexDirection: 'row',
+      gap: spacing.md,
+    },
+    rowItem: {
+      flex: 1,
+    },
+    unitsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.xs,
+    },
+    unitsText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.sm,
+    },
+    optionList: {
+      gap: spacing.sm,
+    },
+    optionRow: {
+      width: '100%',
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      borderRadius: borderRadius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    optionRowSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySelectedBg,
+    },
+    optionRowDisabled: {
+      opacity: 0.45,
+    },
+    optionRowText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.medium,
+    },
+    optionRowTextSelected: {
+      color: colors.textPrimary,
+      fontWeight: typography.weights.semibold,
+    },
+    optionRowTextDisabled: {
+      color: colors.textMuted,
+    },
+    daysSliderHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+    },
+    daysSliderValue: {
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+      color: colors.textPrimary,
+    },
+    slider: {
+      width: '100%',
+      height: 40,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      gap: spacing.md,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    backButton: {
+      flex: 1,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    backButtonText: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    nextButton: {
+      flex: 1,
+      backgroundColor: colors.primary,
+      paddingVertical: spacing.md,
+      borderRadius: borderRadius.md,
+      alignItems: 'center',
+    },
+    nextButtonFullWidth: {
+      flex: 1,
+    },
+    buttonDisabled: {
+      opacity: 0.6,
+    },
+    nextButtonText: {
+      color: colors.onPrimaryContrast,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.semibold,
+    },
+    errorText: {
+      color: colors.error,
+      fontSize: typography.sizes.sm,
+      marginTop: spacing.sm,
+    },
+  });
+}

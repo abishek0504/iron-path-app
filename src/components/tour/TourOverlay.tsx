@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { ArrowRight } from 'lucide-react-native';
@@ -21,6 +22,7 @@ const SPOTLIGHT_RADIUS = 12;
 const TOOLTIP_MAX_WIDTH = 320;
 const TOOLTIP_MARGIN = spacing.lg;
 const ARROW_SIZE = 10;
+const DEFAULT_TOOLTIP_HEIGHT = 160;
 
 interface TourOverlayProps {
   visible: boolean;
@@ -70,22 +72,29 @@ function resolvePlacement(
   tooltipHeight: number,
   screenHeight: number,
   topInset: number,
+  bottomInset: number,
 ): 'top' | 'bottom' {
-  if (placement === 'top' || placement === 'bottom') {
-    return placement;
-  }
   if (!targetRect) {
     return 'bottom';
   }
 
-  const spaceAbove = targetRect.y - topInset;
-  const spaceBelow = screenHeight - (targetRect.y + targetRect.height);
-  if (spaceAbove >= tooltipHeight + ARROW_SIZE + TOOLTIP_MARGIN) {
-    return 'top';
-  }
-  if (spaceBelow >= tooltipHeight + ARROW_SIZE + TOOLTIP_MARGIN) {
+  const spaceAbove = targetRect.y - topInset - TOOLTIP_MARGIN;
+  const spaceBelow =
+    screenHeight - bottomInset - TOOLTIP_MARGIN - (targetRect.y + targetRect.height);
+  const needed = tooltipHeight + ARROW_SIZE + spacing.sm;
+
+  if (placement === 'top') {
+    if (spaceAbove >= needed || spaceAbove >= spaceBelow) return 'top';
     return 'bottom';
   }
+  if (placement === 'bottom') {
+    if (spaceBelow >= needed || spaceBelow >= spaceAbove) return 'bottom';
+    return 'top';
+  }
+
+  // auto
+  if (spaceBelow >= needed) return 'bottom';
+  if (spaceAbove >= needed) return 'top';
   return spaceAbove >= spaceBelow ? 'top' : 'bottom';
 }
 
@@ -103,14 +112,26 @@ export function TourOverlay({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
   const isLastStep = stepIndex >= stepCount - 1;
+  const [tooltipHeight, setTooltipHeight] = useState(DEFAULT_TOOLTIP_HEIGHT);
+
+  const handleTooltipLayout = (event: LayoutChangeEvent) => {
+    const nextHeight = event.nativeEvent.layout.height;
+    if (nextHeight > 0 && Math.abs(nextHeight - tooltipHeight) > 1) {
+      setTooltipHeight(nextHeight);
+    }
+  };
 
   const tooltipPlacement = resolvePlacement(
     step.placement,
     targetRect,
-    160,
+    tooltipHeight,
     screenHeight,
     insets.top,
+    insets.bottom,
   );
+
+  const minTop = insets.top + TOOLTIP_MARGIN;
+  const maxTop = screenHeight - insets.bottom - TOOLTIP_MARGIN - tooltipHeight;
 
   const tooltipLeft = Math.max(
     TOOLTIP_MARGIN,
@@ -122,15 +143,18 @@ export function TourOverlay({
     ),
   );
 
-  const tooltipTop =
-    tooltipPlacement === 'top' && targetRect
-      ? Math.max(insets.top + TOOLTIP_MARGIN, targetRect.y - 170)
-      : targetRect
-        ? Math.min(
-            screenHeight - insets.bottom - 180,
-            targetRect.y + targetRect.height + SPOTLIGHT_PADDING + ARROW_SIZE + spacing.sm,
-          )
-        : screenHeight / 2 - 80;
+  let tooltipTop: number;
+  if (!targetRect) {
+    tooltipTop = Math.max(minTop, Math.min(maxTop, screenHeight / 2 - tooltipHeight / 2));
+  } else if (tooltipPlacement === 'top') {
+    const preferred =
+      targetRect.y - SPOTLIGHT_PADDING - ARROW_SIZE - spacing.sm - tooltipHeight;
+    tooltipTop = Math.max(minTop, Math.min(maxTop, preferred));
+  } else {
+    const preferred =
+      targetRect.y + targetRect.height + SPOTLIGHT_PADDING + ARROW_SIZE + spacing.sm;
+    tooltipTop = Math.max(minTop, Math.min(maxTop, preferred));
+  }
 
   const arrowLeft = targetRect
     ? Math.max(
@@ -144,9 +168,18 @@ export function TourOverlay({
 
   const arrowTop =
     tooltipPlacement === 'top' && targetRect
-      ? targetRect.y - SPOTLIGHT_PADDING - ARROW_SIZE
+      ? Math.max(
+          insets.top,
+          Math.min(
+            targetRect.y - SPOTLIGHT_PADDING - ARROW_SIZE,
+            tooltipTop + tooltipHeight,
+          ),
+        )
       : targetRect
-        ? targetRect.y + targetRect.height + SPOTLIGHT_PADDING
+        ? Math.min(
+            screenHeight - insets.bottom - ARROW_SIZE,
+            Math.max(targetRect.y + targetRect.height + SPOTLIGHT_PADDING, tooltipTop - ARROW_SIZE),
+          )
         : tooltipTop;
 
   const scrimPath = buildScrimPath(screenWidth, screenHeight, targetRect);
@@ -209,6 +242,7 @@ export function TourOverlay({
               maxWidth: TOOLTIP_MAX_WIDTH,
             },
           ]}
+          onLayout={handleTooltipLayout}
           accessibilityRole="alert"
           accessibilityLabel={`${step.title}. ${step.body}`}
         >
@@ -237,7 +271,6 @@ export function TourOverlay({
             {!isLastStep ? <ArrowRight size={18} color={colors.onPrimaryContrast} /> : null}
           </Pressable>
         </View>
-
       </View>
     </Modal>
   );

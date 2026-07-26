@@ -31,6 +31,7 @@ import { supabase } from '../../src/lib/supabase/client';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { isAppleHealthConnected, syncBodyMassWithHealth } from '../../src/lib/health/healthIntegration';
 import { TourTarget } from '../../src/components/tour/TourTarget';
+import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
 const LBS_PER_KG = 2.20462;
@@ -66,6 +67,8 @@ export default function DashboardTab() {
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
   const hasLoadedOnceRef = useRef(false);
+  const tourScrollRef = useRef<ScrollView>(null);
+  const { onScroll: onTourScroll } = useRegisterTourScroll('dashboard', tourScrollRef);
 
   const FOCUS_RELOAD_THROTTLE_MS = 4000;
 
@@ -277,10 +280,13 @@ export default function DashboardTab() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Dashboard" tabId="dashboard" settingsTourTargetId="tour.dashboard.settings" />
       <ScrollView
+        ref={tourScrollRef}
         contentContainerStyle={[
           styles.content,
           { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
         ]}
+        onScroll={onTourScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}

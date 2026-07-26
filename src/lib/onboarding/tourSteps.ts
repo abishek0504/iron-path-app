@@ -19,7 +19,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'index',
     title: 'Welcome to IronPath',
     body: 'Four areas: Workout for daily training, Plan to build your program, Progress for history, and Dashboard for stats and settings.',
-    placement: 'top',
+    placement: 'auto',
   },
   {
     id: 'plan-day-selector',
@@ -27,7 +27,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'planner',
     title: 'Your weekly plan',
     body: 'Your week is organized by day — tap a day to view and edit its workouts.',
-    placement: 'bottom',
+    placement: 'auto',
   },
   {
     id: 'plan-add-workout',
@@ -35,16 +35,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'planner',
     title: 'Add workouts',
     body: 'Add one or more workouts to any day of the week.',
-    placement: 'bottom',
-  },
-  {
-    id: 'plan-add-exercise',
-    targetId: 'tour.plan.addExercise',
-    tab: 'planner',
-    title: 'Add exercises',
-    body: 'Search the library and customize sets, reps, and supersets for each workout.',
-    placement: 'bottom',
-    fallbackTargetId: 'tour.plan.generateAi',
+    placement: 'auto',
   },
   {
     id: 'plan-generate-ai',
@@ -52,23 +43,16 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'planner',
     title: 'Generate with AI',
     body: 'Build a full day instantly. IronPath Pro unlocks unlimited AI generation.',
-    placement: 'top',
-  },
-  {
-    id: 'workout-card',
-    targetId: 'tour.workout.card',
-    tab: 'index',
-    title: "Today's workout",
-    body: "See what's scheduled, which plan day you're doing, and a preview of your exercises.",
-    placement: 'bottom',
+    placement: 'auto',
   },
   {
     id: 'workout-start',
     targetId: 'tour.workout.start',
     tab: 'index',
-    title: 'Start training',
-    body: 'Tap to begin your workout — come back anytime to continue where you left off.',
-    placement: 'top',
+    title: "Today's workout",
+    body: "See what's scheduled for today, then tap Start to begin — come back anytime to continue where you left off.",
+    placement: 'auto',
+    fallbackTargetId: 'tour.workout.card',
   },
   {
     id: 'progress-toggle',
@@ -76,7 +60,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'progress',
     title: 'Training history',
     body: 'Browse your completed sessions by week or month. Tap any day for details.',
-    placement: 'bottom',
+    placement: 'auto',
   },
   {
     id: 'dashboard-heatmap',
@@ -84,7 +68,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'dashboard',
     title: 'Muscle status',
     body: "See muscle freshness and what you've trained recently on the body map.",
-    placement: 'bottom',
+    placement: 'auto',
   },
   {
     id: 'dashboard-stats',
@@ -92,7 +76,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'dashboard',
     title: 'Track your progress',
     body: 'Monitor your weekly goal and training streak to stay consistent.',
-    placement: 'bottom',
+    placement: 'auto',
   },
   {
     id: 'dashboard-settings',
@@ -100,7 +84,7 @@ export const TOUR_STEPS: TourStep[] = [
     tab: 'dashboard',
     title: 'Settings & Pro',
     body: 'Profile, reminders, Apple Health, and IronPath Pro all live here.',
-    placement: 'bottom',
+    placement: 'auto',
   },
 ];
 

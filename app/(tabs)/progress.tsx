@@ -21,6 +21,7 @@ import { AnalyticsTrendsPanel } from '../../src/components/progress/AnalyticsTre
 import { ExerciseAnalyticsList } from '../../src/components/progress/ExerciseAnalyticsList';
 import { useModal } from '../../src/hooks/useModal';
 import { TourTarget } from '../../src/components/tour/TourTarget';
+import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 
 type CalendarMode = 'week' | 'month';
 type ProgressSegment = 'calendar' | 'trends' | 'exercises';
@@ -48,6 +49,8 @@ export default function ProgressTab() {
     new Map(),
   );
   const lastFocusLoadRef = useRef(0);
+  const tourScrollRef = useRef<ScrollView>(null);
+  const { onScroll: onTourScroll } = useRegisterTourScroll('progress', tourScrollRef);
   const FOCUS_RELOAD_THROTTLE_MS = 4000;
 
   const getLocalDateKey = (date: Date): string => {
@@ -204,10 +207,13 @@ export default function ProgressTab() {
         />
       ) : (
         <ScrollView
+          ref={tourScrollRef}
           contentContainerStyle={[
             styles.content,
             { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
           ]}
+          onScroll={onTourScroll}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}

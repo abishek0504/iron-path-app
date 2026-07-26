@@ -2,8 +2,8 @@
  * SplitPicker — preferred-training-split selector shared by onboarding and
  * Edit Profile.
  *
- * Shows suggestion chips driven by the user's days-per-week, plus a
- * "Not sure — pick for me" chip. Only known split ids are stored in
+ * Shows suggestion options driven by the user's days-per-week, plus a
+ * "Not sure — pick for me" option. Only known split ids are stored in
  * `v2_profiles.preferred_training_style` so the AI generation engine can map
  * the split to predictable day-focus options. Legacy free-text values from
  * the old "Custom" input are still accepted downstream (they fall back to
@@ -54,27 +54,27 @@ export function SplitPicker({ daysPerWeek, value, onChange }: SplitPickerProps) 
 
   return (
     <View style={styles.container}>
-      <View style={styles.chipGroup}>
+      <View style={styles.optionList}>
         {suggestions.map((split) => {
           const selected = value === split.id;
           return (
             <TouchableOpacity
               key={split.id}
-              style={[styles.chip, selected && styles.chipSelected]}
+              style={[styles.optionRow, selected && styles.optionRowSelected]}
               onPress={() => onChange(split.id)}
             >
-              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+              <Text style={[styles.optionRowText, selected && styles.optionRowTextSelected]}>
                 {split.label}
               </Text>
             </TouchableOpacity>
           );
         })}
         <TouchableOpacity
-          style={[styles.chip, value === NOT_SURE_ID && styles.chipSelected]}
+          style={[styles.optionRow, value === NOT_SURE_ID && styles.optionRowSelected]}
           onPress={() => onChange(NOT_SURE_ID)}
         >
           <Text
-            style={[styles.chipText, value === NOT_SURE_ID && styles.chipTextSelected]}
+            style={[styles.optionRowText, value === NOT_SURE_ID && styles.optionRowTextSelected]}
           >
             {TRAINING_SPLITS.not_sure.label}
           </Text>
@@ -93,29 +93,29 @@ function createStyles(colors: ThemeColors) {
     container: {
       gap: spacing.sm,
     },
-    chipGroup: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
+    optionList: {
       gap: spacing.sm,
     },
-    chip: {
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.full,
+    optionRow: {
+      width: '100%',
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      borderRadius: borderRadius.md,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.background,
     },
-    chipSelected: {
-      backgroundColor: colors.primary,
+    optionRowSelected: {
       borderColor: colors.primary,
+      backgroundColor: colors.primarySelectedBg,
     },
-    chipText: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
+    optionRowText: {
+      color: colors.textPrimary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.medium,
     },
-    chipTextSelected: {
-      color: colors.background,
+    optionRowTextSelected: {
+      color: colors.textPrimary,
       fontWeight: typography.weights.semibold,
     },
     descriptionText: {

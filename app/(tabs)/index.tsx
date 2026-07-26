@@ -28,6 +28,7 @@ import { useModal } from '../../src/hooks/useModal';
 import { useUserStore } from '../../src/stores/userStore';
 import { useUIStore } from '../../src/stores/uiStore';
 import { TourTarget } from '../../src/components/tour/TourTarget';
+import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 import {
   createWorkoutSession,
   deleteSessionWithExercises,
@@ -217,6 +218,8 @@ export default function WorkoutTab() {
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
   const startInProgressRef = useRef(false);
+  const tourScrollRef = useRef<ScrollView>(null);
+  const { onScroll: onTourScroll } = useRegisterTourScroll('index', tourScrollRef);
 
   const FOCUS_RELOAD_THROTTLE_MS = 4000;
 
@@ -978,12 +981,15 @@ export default function WorkoutTab() {
       </Animated.View>
 
       <ScrollView
+        ref={tourScrollRef}
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
         ]}
         showsVerticalScrollIndicator={false}
+        onScroll={onTourScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}

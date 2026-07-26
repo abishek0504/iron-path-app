@@ -20,6 +20,7 @@ import { spacing, layout, typography, borderRadius, type ThemeColors } from '../
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
 import { TourTarget } from '../../src/components/tour/TourTarget';
+import { useRegisterTourScroll, type TourScrollable } from '../../src/components/tour/TourScroll';
 import { useToast } from '../../src/hooks/useToast';
 import { useDateContext } from '../../src/hooks/useDateContext';
 import { useUserStore } from '../../src/stores/userStore';
@@ -191,6 +192,8 @@ export default function PlannerTab() {
   const selectedDayNameRef = useRef<string>(getTodayDayName());
   /** Prevents duplicate auto-materialize when a day has template slots but no sessions yet. */
   const materializeInFlightRef = useRef<Set<string>>(new Set());
+  const tourScrollRef = useRef<TourScrollable | null>(null);
+  const { onScroll: onTourScroll } = useRegisterTourScroll('planner', tourScrollRef);
 
   // Get current user
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -1971,11 +1974,14 @@ export default function PlannerTab() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TabHeader title="Plan" tabId="plan" />
       <NestableScrollContainer
+        ref={tourScrollRef as never}
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: layout.tabBarHeight + insets.bottom + spacing.lg },
         ]}
+        onScroll={onTourScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
