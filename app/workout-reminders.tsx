@@ -15,6 +15,7 @@ import { borderRadius, spacing, typography, type ThemeColors, isLightTheme } fro
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
+import { Button } from '../src/components/ui/Button';
 import { useUIStore } from '../src/stores/uiStore';
 import {
   cancelWorkoutReminders,
@@ -203,18 +204,14 @@ export default function WorkoutRemindersScreen() {
 
       {/* Footer save button */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.saveButton, (saving || (settings.enabled && settings.days.length === 0)) && styles.saveButtonDisabled]}
+        <Button
+          label="Save"
           onPress={handleSave}
           disabled={saving || (settings.enabled && settings.days.length === 0)}
-          activeOpacity={0.85}
+          fullWidth
         >
-          {saving ? (
-            <LogoEdgeLoader size="small" variant="inverted" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save</Text>
-          )}
-        </TouchableOpacity>
+          {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
       </View>
     </SafeAreaView>
   );
@@ -331,7 +328,7 @@ function createStyles(colors: ThemeColors) {
       color: colors.textSecondary,
     },
     dayChipTextActive: {
-      color: colors.background,
+      color: colors.onPrimaryContrast,
     },
     noDaysWarning: {
       fontSize: typography.sizes.sm,
@@ -343,20 +340,6 @@ function createStyles(colors: ThemeColors) {
       padding: spacing.lg,
       borderTopWidth: 1,
       borderTopColor: colors.border,
-    },
-    saveButton: {
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    saveButtonDisabled: {
-      opacity: 0.5,
-    },
-    saveButtonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
   });
 }

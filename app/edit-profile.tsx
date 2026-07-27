@@ -5,7 +5,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   LayoutAnimation,
   Platform,
   ScrollView,
@@ -35,6 +34,8 @@ import { devLog, devError } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
+import { Button } from '../src/components/ui/Button';
+import { Chip } from '../src/components/ui/Chip';
 import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
@@ -95,7 +96,7 @@ export default function EditProfileScreen() {
         } = await supabase.auth.getUser();
         if (!user) {
           setLoading(false);
-          Alert.alert('Not signed in', 'Please log in again.');
+          showToast('Not signed in — please log in again.', 'error');
           router.replace('/login');
           return;
         }
@@ -140,7 +141,7 @@ export default function EditProfileScreen() {
         if (__DEV__) {
           devError('edit-profile', error);
         }
-        Alert.alert('Error', 'Failed to load profile.');
+        showToast('Failed to load profile.', 'error');
       } finally {
         setLoading(false);
       }
@@ -224,7 +225,7 @@ export default function EditProfileScreen() {
   const handleSave = async () => {
     if (!profile) return;
     if (!firstName.trim()) {
-      Alert.alert('Error', 'Enter your first name.');
+      showToast('Enter your first name.', 'error');
       return;
     }
     setSaving(true);
@@ -245,7 +246,7 @@ export default function EditProfileScreen() {
 
       const success = await updateUserProfile(profile.id, updates);
       if (!success) {
-        Alert.alert('Error', 'Failed to save profile.');
+        showToast('Failed to save profile.', 'error');
         return;
       }
       invalidateProfileCache(profile.id);
@@ -262,7 +263,7 @@ export default function EditProfileScreen() {
       if (__DEV__) {
         devError('edit-profile', error);
       }
-      Alert.alert('Error', 'An error occurred while saving.');
+      showToast('An error occurred while saving.', 'error');
     } finally {
       setSaving(false);
     }
@@ -405,13 +406,12 @@ export default function EditProfileScreen() {
                   const selected = workoutDays.includes(day);
                   const atLimit = workoutDays.length >= daysPerWeekSlider && !selected;
                   return (
-                    <TouchableOpacity
+                    <Chip
                       key={day}
-                      style={[
-                        styles.chip,
-                        selected && styles.chipSelected,
-                        atLimit && styles.chipDisabled,
-                      ]}
+                      label={day.slice(0, 3)}
+                      selected={selected}
+                      disabled={atLimit}
+                      accessibilityLabel={day}
                       onPress={() => {
                         if (selected) {
                           setWorkoutDays((prev) => prev.filter((d) => d !== day));
@@ -419,19 +419,7 @@ export default function EditProfileScreen() {
                           setWorkoutDays((prev) => [...prev, day]);
                         }
                       }}
-                      disabled={atLimit}
-                      activeOpacity={0.85}
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          selected && styles.chipTextSelected,
-                          atLimit && styles.chipTextDisabled,
-                        ]}
-                      >
-                        {day.slice(0, 3)}
-                      </Text>
-                    </TouchableOpacity>
+                    />
                   );
                 })}
               </View>
@@ -480,18 +468,16 @@ export default function EditProfileScreen() {
             {EQUIPMENT_OPTIONS.map((option) => {
               const selected = equipment.includes(option);
               return (
-                <TouchableOpacity
+                <Chip
                   key={option}
-                  style={[styles.chip, selected && styles.chipSelected]}
+                  label={option}
+                  selected={selected}
                   onPress={() =>
                     setEquipment((prev) =>
                       prev.includes(option) ? prev.filter((v) => v !== option) : [...prev, option]
                     )
                   }
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{option}</Text>
-                </TouchableOpacity>
+                />
               );
             })}
           </View>
@@ -499,22 +485,15 @@ export default function EditProfileScreen() {
       </ScrollView>
 
       {/* Floating Save button */}
-      <TouchableOpacity
-        style={[
-          styles.floatingSaveButton,
-          { bottom: insets.bottom },
-          saving && styles.saveButtonDisabled,
-        ]}
+      <Button
+        label="Save"
         onPress={handleSave}
         disabled={saving}
-        activeOpacity={0.85}
+        fullWidth
+        style={[styles.floatingSaveButton, { bottom: insets.bottom }]}
       >
-        {saving ? (
-          <LogoEdgeLoader size="small" variant="inverted" />
-        ) : (
-          <Text style={styles.saveButtonText}>Save</Text>
-        )}
-      </TouchableOpacity>
+        {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+      </Button>
 
       {/* Date Picker Bottom Sheet */}
       <DatePicker
@@ -600,11 +579,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     position: 'absolute',
     left: spacing.lg,
     right: spacing.lg,
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
     shadowColor: colors.shadowColor,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -677,32 +651,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  chip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  chipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  chipText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-  },
-  chipTextSelected: {
-    color: colors.background,
-    fontWeight: typography.weights.semibold,
-  },
-  chipDisabled: {
-    opacity: 0.5,
-  },
-  chipTextDisabled: {
-    color: colors.textMuted,
-  },
   daysSliderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -743,21 +691,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.textPrimary,
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.medium,
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonText: {
-    color: colors.background,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.bold,
   },
   }); }
 

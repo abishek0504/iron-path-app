@@ -7,6 +7,9 @@ final class WatchHealthWorkoutManager: NSObject, ObservableObject {
     @Published var heartRateBpm: Int?
     @Published var isCollecting = false
 
+    /// Invoked on the main queue when a watch HK workout finishes (for standalone outbox).
+    var onWorkoutEnded: ((String, String) -> Void)?
+
     private let healthStore = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
@@ -120,9 +123,10 @@ final class WatchHealthWorkoutManager: NSObject, ObservableObject {
 
     private func sendWorkoutEnded(uuid: String) {
         guard !activeSessionId.isEmpty else { return }
+        let sessionId = activeSessionId
         let payload: [String: Any] = [
             "type": "workoutEnded",
-            "sessionId": activeSessionId,
+            "sessionId": sessionId,
             "hkWorkoutUuid": uuid,
             "timestamp": Date().timeIntervalSince1970,
         ]
@@ -132,6 +136,10 @@ final class WatchHealthWorkoutManager: NSObject, ObservableObject {
             wcSession.sendMessage(payload, replyHandler: nil, errorHandler: nil)
         } else {
             wcSession.transferUserInfo(payload)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onWorkoutEnded?(sessionId, uuid)
         }
     }
 }

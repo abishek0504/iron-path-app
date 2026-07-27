@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TextInput } from 'react-native';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
+import { Button } from '../../src/components/ui/Button';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
@@ -117,9 +118,7 @@ export default function AuthCallbackScreen() {
         {status === 'pending' ? (
           <LogoEdgeLoader size="large" />
         ) : cbType === 'email_change' || status === 'done' ? (
-          <TouchableOpacity style={styles.button} onPress={handleContinue} activeOpacity={0.85}>
-            <Text style={styles.buttonText}>Continue</Text>
-          </TouchableOpacity>
+          <Button label="Continue" onPress={handleContinue} fullWidth style={styles.button} />
         ) : (
           <>
             <View style={styles.fieldGroup}>
@@ -147,18 +146,15 @@ export default function AuthCallbackScreen() {
               />
             </View>
 
-            <TouchableOpacity
-              style={[styles.button, saving && styles.buttonDisabled]}
+            <Button
+              label="Update password"
               onPress={handleSetPassword}
               disabled={saving}
-              activeOpacity={0.85}
+              fullWidth
+              style={styles.button}
             >
-              {saving ? (
-                <LogoEdgeLoader size="small" variant="inverted" />
-              ) : (
-                <Text style={styles.buttonText}>Update password</Text>
-              )}
-            </TouchableOpacity>
+              {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+            </Button>
           </>
         )}
       </View>
@@ -216,18 +212,6 @@ function createStyles(colors: ThemeColors) {
     },
     button: {
       marginTop: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    buttonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
   });
 }

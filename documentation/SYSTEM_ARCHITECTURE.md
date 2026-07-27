@@ -306,14 +306,15 @@ type WorkoutPhase =
 
 **Native config:** the `@kingstinct/react-native-healthkit` Expo plugin adds the HealthKit entitlement and usage strings at prebuild (`app.json`); versions are pinned (`react-native-nitro-modules@0.32.0`, healthkit `13.1.4`) for Expo SDK 54 compatibility.
 
-### watchOS companion (architecture)
+### watchOS (architecture)
 
-Native SwiftUI mirror app managed by `@bacons/apple-targets` (sources in `targets/watch/`). **`WatchHealthWorkoutManager`** runs `HKWorkoutSession` for live heart rate; sends `heartRate` and `workoutEnded` (with `hkWorkoutUuid`) to the phone. iPhone module (`modules/watch-connectivity/`) wraps `WCSession`:
+Native SwiftUI app managed by `@bacons/apple-targets` (sources in `targets/watch/`). Sessions are exclusively owned via `v2_workout_sessions.control_device` (`phone` | `watch`); at most one active session per user.
 
-- Phone → watch: [`active.tsx`](../app/(stack)/workout/active.tsx) pushes workout state via `updateApplicationContext`.
-- Watch → phone: set completion, HR snapshots, workout UUID. **Phone remains canonical Supabase writer.**
+- **Phone-owned:** [`active.tsx`](../app/(stack)/workout/active.tsx) pushes mirror context over WCSession; watch taps route back to phone `markSetComplete`. Phone is the Supabase writer.
+- **Watch-owned:** Watch creates/resumes the session, runs a local phase engine + durable outbox, and writes Supabase over REST using App Group auth (`syncAuthToWatch`). Phone shows spectator UI and does not drive the session.
+- **`WatchHealthWorkoutManager`:** live HR + `HKWorkoutSession`; UUID links to the session (phone skips duplicate Health samples when UUID is present).
 
-See [`native/watch/README.md`](../native/watch/README.md) for build steps.
+See [`native/watch/README.md`](../native/watch/README.md) for build steps and logging UX.
 
 ### Workout analytics (architecture)
 

@@ -5,6 +5,7 @@
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, RefreshControl } from 'react-native';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
+import { Chip } from '../../src/components/ui/Chip';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react-native';
@@ -225,20 +226,13 @@ export default function ProgressTab() {
         >
           <View style={styles.segmentRow}>
             {SEGMENTS.map((s) => (
-              <Pressable
+              <Chip
                 key={s.key}
-                style={[styles.segmentChip, segment === s.key && styles.segmentChipActive]}
+                label={s.label}
+                selected={segment === s.key}
                 onPress={() => setSegment(s.key)}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    segment === s.key && styles.segmentTextActive,
-                  ]}
-                >
-                  {s.label}
-                </Text>
-              </Pressable>
+                style={styles.segmentChip}
+              />
             ))}
           </View>
 
@@ -255,32 +249,16 @@ export default function ProgressTab() {
               <View style={styles.controls}>
                 <TourTarget id="tour.progress.viewToggle" testID="tour-progress-view-toggle">
                 <View style={styles.viewToggle}>
-                  <Pressable
-                    style={[styles.toggleChip, viewMode === 'week' && styles.toggleChipActive]}
+                  <Chip
+                    label="Week"
+                    selected={viewMode === 'week'}
                     onPress={() => setViewMode('week')}
-                  >
-                    <Text
-                      style={[
-                        styles.toggleChipText,
-                        viewMode === 'week' && styles.toggleChipTextActive,
-                      ]}
-                    >
-                      Week
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.toggleChip, viewMode === 'month' && styles.toggleChipActive]}
+                  />
+                  <Chip
+                    label="Month"
+                    selected={viewMode === 'month'}
                     onPress={() => setViewMode('month')}
-                  >
-                    <Text
-                      style={[
-                        styles.toggleChipText,
-                        viewMode === 'month' && styles.toggleChipTextActive,
-                      ]}
-                    >
-                      Month
-                    </Text>
-                  </Pressable>
+                  />
                 </View>
                 </TourTarget>
 
@@ -336,25 +314,8 @@ function createStyles(colors: ThemeColors) {
     },
     segmentChip: {
       flex: 1,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.full,
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      backgroundColor: colors.card,
       alignItems: 'center',
-    },
-    segmentChipActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySelectedBg,
-    },
-    segmentText: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.medium,
-    },
-    segmentTextActive: {
-      color: colors.primary,
-      fontWeight: typography.weights.semibold,
+      paddingVertical: spacing.sm,
     },
     controls: {
       flexDirection: 'row',
@@ -364,27 +325,6 @@ function createStyles(colors: ThemeColors) {
     viewToggle: {
       flexDirection: 'row',
       gap: spacing.sm,
-    },
-    toggleChip: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.full,
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      backgroundColor: colors.card,
-    },
-    toggleChipActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySelectedBg,
-    },
-    toggleChipText: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.medium,
-    },
-    toggleChipTextActive: {
-      color: colors.primary,
-      fontWeight: typography.weights.semibold,
     },
     navigation: {
       flexDirection: 'row',

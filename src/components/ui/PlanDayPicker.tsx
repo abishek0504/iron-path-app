@@ -2,6 +2,10 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
+import { Button } from './Button';
+
+/** Circular workout indicator: half of 8×8 dot. */
+const WORKOUT_DOT_RADIUS = 4;
 
 type DayItem = {
   dayName: string;
@@ -37,15 +41,15 @@ export const PlanDayPicker: React.FC<Props> = ({
       paddingVertical: spacing.sm,
       borderRadius: borderRadius.full,
       borderWidth: 1,
-      borderColor: colors.cardBorder,
-      backgroundColor: colors.card,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.xs,
     },
     chipSelected: {
       borderColor: colors.primary,
-      backgroundColor: `${colors.primary}26`,
+      backgroundColor: colors.primarySelectedBg,
     },
     chipToday: {
       borderColor: colors.borderLight,
@@ -54,7 +58,7 @@ export const PlanDayPicker: React.FC<Props> = ({
       opacity: 0.7,
     },
     chipText: {
-      color: colors.textPrimary,
+      color: colors.textSecondary,
       fontSize: typography.sizes.sm,
       fontWeight: typography.weights.medium,
     },
@@ -68,35 +72,11 @@ export const PlanDayPicker: React.FC<Props> = ({
     dot: {
       width: 8,
       height: 8,
-      borderRadius: 4,
+      borderRadius: WORKOUT_DOT_RADIUS,
       backgroundColor: colors.primary,
     },
     actions: {
       gap: spacing.sm,
-    },
-    primaryButton: {
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    primaryButtonText: {
-      color: colors.onPrimaryContrast,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
-    },
-    secondaryButton: {
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-      backgroundColor: colors.card,
-    },
-    secondaryButtonText: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.medium,
     },
   }), [colors]);
 
@@ -137,12 +117,19 @@ export const PlanDayPicker: React.FC<Props> = ({
       </ScrollView>
 
       <View style={styles.actions}>
-        <Pressable style={styles.primaryButton} onPress={() => onSelect(selectedDayName)}>
-          <Text style={styles.primaryButtonText}>Use this day</Text>
-        </Pressable>
-        <Pressable style={styles.secondaryButton} onPress={onResetToToday}>
-          <Text style={styles.secondaryButtonText}>Reset to today</Text>
-        </Pressable>
+        <Button
+          label="Use this day"
+          onPress={() => onSelect(selectedDayName)}
+          fullWidth
+          size="sm"
+        />
+        <Button
+          label="Reset to today"
+          variant="secondary"
+          onPress={onResetToToday}
+          fullWidth
+          size="sm"
+        />
       </View>
     </View>
   );

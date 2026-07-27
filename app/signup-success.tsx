@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
+import { Button } from '../src/components/ui/Button';
 
 export default function SignupSuccess() {
   const router = useRouter();
@@ -16,12 +17,12 @@ export default function SignupSuccess() {
         <Text style={styles.subtitle}>
           We just sent a confirmation link. After confirming, log in to continue onboarding.
         </Text>
-        <TouchableOpacity
-          style={styles.button}
+        <Button
+          label="Back to login"
           onPress={() => router.replace('/login')}
-        >
-          <Text style={styles.buttonText}>Back to login</Text>
-        </TouchableOpacity>
+          fullWidth
+          style={styles.button}
+        />
       </View>
     </View>
   );
@@ -57,15 +58,6 @@ function createStyles(colors: ThemeColors) {
     },
     button: {
       marginTop: spacing.md,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    buttonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
   });
 }

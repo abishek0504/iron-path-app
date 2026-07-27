@@ -4,12 +4,13 @@
  */
 
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { AuthVideoBackground } from '../src/components/ui/AuthVideoBackground';
+import { Button } from '../src/components/ui/Button';
 
 export default function GetStarted() {
   const router = useRouter();
@@ -30,21 +31,21 @@ export default function GetStarted() {
         </View>
 
         <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.primaryButton}
+          <Button
+            label="Get Started"
             onPress={() => router.push('/signup')}
-          >
-            <Text style={styles.primaryButtonText}>Get Started</Text>
-          </TouchableOpacity>
+            fullWidth
+            style={styles.primaryButton}
+          />
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
+          <Button
+            label="Already have an account? Log in"
+            variant="ghost"
             onPress={() => router.push('/login')}
-          >
-            <Text style={styles.secondaryButtonText}>
-              Already have an account? Log in
-            </Text>
-          </TouchableOpacity>
+            fullWidth
+            style={styles.secondaryButton}
+            textStyle={styles.secondaryButtonText}
+          />
         </View>
       </View>
     </View>
@@ -99,25 +100,12 @@ function createStyles(colors: ThemeColors) {
     },
     primaryButton: {
       marginTop: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    primaryButtonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     secondaryButton: {
       marginTop: spacing.xs,
-      paddingVertical: spacing.sm,
-      alignItems: 'center',
     },
     secondaryButtonText: {
-      color: colors.textSecondary,
       fontSize: typography.sizes.sm,
-      textAlign: 'center',
     },
   });
 }

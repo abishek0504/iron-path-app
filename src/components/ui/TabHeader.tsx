@@ -6,7 +6,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Settings } from 'lucide-react-native';
-import { spacing, typography } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { useModal } from '../../hooks/useModal';
 import { devLog } from '../../lib/utils/logger';
@@ -59,7 +59,7 @@ export const TabHeader: React.FC<TabHeaderProps> = ({
     },
     iconButton: {
       padding: spacing.sm,
-      borderRadius: 999,
+      borderRadius: borderRadius.full,
     },
   }), [colors]);
 

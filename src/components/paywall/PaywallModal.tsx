@@ -28,6 +28,7 @@ import { borderRadius, spacing, typography, type ThemeColors } from '../../lib/u
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { IronPathLogo } from '../ui/IronPathLogo';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
+import { Button } from '../ui/Button';
 
 const BULLETS = [
   'AI plans your week',
@@ -181,23 +182,26 @@ export function PaywallModal({
 
         <View style={styles.footer}>
           <Animated.View style={canDismiss ? ctaAnimatedStyle : undefined}>
-            <TouchableOpacity
-              style={[styles.cta, (!selectedPackage || isPurchasing) && styles.ctaDisabled]}
-              disabled={!selectedPackage || isPurchasing}
+            <Button
+              label="Start 7-day free trial"
               onPress={handlePurchasePress}
-              accessibilityRole="button"
+              disabled={!selectedPackage || isPurchasing}
+              fullWidth
+              style={styles.cta}
+              textStyle={styles.ctaText}
             >
-              {isPurchasing ? (
-                <LogoEdgeLoader size="small" variant="inverted" />
-              ) : (
-                <Text style={styles.ctaText}>Start 7-day free trial</Text>
-              )}
-            </TouchableOpacity>
+              {isPurchasing ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+            </Button>
           </Animated.View>
 
           <Text style={styles.disclosure}>{disclosure}</Text>
 
-          <TouchableOpacity onPress={onRestore} disabled={isPurchasing} style={styles.restore}>
+          <TouchableOpacity
+            onPress={onRestore}
+            disabled={isPurchasing}
+            style={styles.restore}
+            activeOpacity={0.85}
+          >
             <Text style={styles.restoreText}>Have a subscription?</Text>
           </TouchableOpacity>
 
@@ -393,18 +397,9 @@ function createStyles(colors: ThemeColors) {
     paddingBottom: spacing.sm,
   },
   cta: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
     minHeight: 52,
-    justifyContent: 'center',
-  },
-  ctaDisabled: {
-    opacity: 0.5,
   },
   ctaText: {
-    color: colors.onPrimaryContrast,
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
   },

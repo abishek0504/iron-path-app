@@ -10,12 +10,12 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Modal,
   Pressable,
   type LayoutChangeEvent,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import Animated, {
   Easing,
   interpolate,
@@ -670,40 +670,21 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         </TouchableOpacity>
       )}
 
-      <Modal
+      <ConfirmDialog
         visible={!!sessionToDelete}
-        transparent
-        animationType="fade"
-        onRequestClose={closeDeleteConfirm}
-      >
-        <Pressable style={styles.deleteModalOverlay} onPress={closeDeleteConfirm}>
-          <Pressable style={styles.deleteModalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.deleteModalTitle}>Delete Workout</Text>
-            <Text style={styles.deleteModalMessage}>
-              {sessionToDelete
-                ? `Are you sure you want to delete this workout (${sessionToDelete.name})? This action cannot be undone.`
-                : ''}
-            </Text>
-            <View style={styles.deleteModalButtons}>
-              <Pressable
-                style={[styles.deleteModalButton, styles.deleteModalButtonCancel]}
-                onPress={closeDeleteConfirm}
-              >
-                <Text style={styles.deleteModalButtonTextCancel}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.deleteModalButton, styles.deleteModalButtonDestructive]}
-                onPress={confirmDeleteSession}
-                disabled={!!deletingSessionId}
-              >
-                <Text style={styles.deleteModalButtonTextDestructive}>
-                  {deletingSessionId ? 'Deleting...' : 'Delete'}
-                </Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        title="Delete Workout"
+        message={
+          sessionToDelete
+            ? `Are you sure you want to delete this workout (${sessionToDelete.name})? This action cannot be undone.`
+            : ''
+        }
+        confirmLabel={deletingSessionId ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        confirmDestructive
+        confirmDisabled={!!deletingSessionId}
+        onConfirm={confirmDeleteSession}
+        onCancel={closeDeleteConfirm}
+      />
     </ScrollView>
   );
 };
@@ -909,62 +890,6 @@ function createStyles(colors: ThemeColors) {
     setTypeBadgeText: {
       color: colors.textSecondary,
       fontSize: typography.sizes.xs,
-    },
-    deleteModalOverlay: {
-      flex: 1,
-      backgroundColor: colors.modalBackdropTint,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: spacing.lg,
-    },
-    deleteModalCard: {
-      backgroundColor: colors.card,
-      borderRadius: borderRadius.lg,
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      padding: spacing.xl,
-      minWidth: 280,
-      maxWidth: 360,
-    },
-    deleteModalTitle: {
-      fontSize: typography.sizes.lg,
-      fontWeight: typography.weights.semibold,
-      color: colors.textPrimary,
-      marginBottom: spacing.sm,
-    },
-    deleteModalMessage: {
-      fontSize: typography.sizes.base,
-      color: colors.textSecondary,
-      lineHeight: 22,
-      marginBottom: spacing.lg,
-    },
-    deleteModalButtons: {
-      flexDirection: 'row',
-      gap: spacing.sm,
-      justifyContent: 'flex-end',
-    },
-    deleteModalButton: {
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.md,
-    },
-    deleteModalButtonCancel: {
-      backgroundColor: 'transparent',
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-    },
-    deleteModalButtonTextCancel: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.semibold,
-    },
-    deleteModalButtonDestructive: {
-      backgroundColor: colors.error,
-    },
-    deleteModalButtonTextDestructive: {
-      color: colors.textPrimary,
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.semibold,
     },
   });
 }

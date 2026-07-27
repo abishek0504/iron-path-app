@@ -18,6 +18,7 @@ import { hasPendingAppTour, takePendingAppTour } from "../../src/lib/onboarding/
 import { useTourStore } from "../../src/stores/tourStore";
 import { useUserStore } from "../../src/stores/userStore";
 import { TourTarget } from "../../src/components/tour/TourTarget";
+import { syncSessionAuthToWatch } from "../../src/lib/watch/syncWatchAuth";
 
 const CustomTabBar = (props: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
@@ -173,6 +174,7 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       if (!session) {
         router.replace('/get-started');
         setAuthenticated(false);
+        void syncSessionAuthToWatch(null);
       } else {
         const profile = await getUserProfile(session.user.id);
         if (cancelled) return;
@@ -180,8 +182,10 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
           await supabase.auth.signOut();
           router.replace('/login');
           setAuthenticated(false);
+          void syncSessionAuthToWatch(null);
         } else {
           setAuthenticated(true);
+          void syncSessionAuthToWatch(session);
         }
       }
       setReady(true);
@@ -191,9 +195,13 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       if (cancelled) return;
       if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
         setAuthenticated(false);
+        void syncSessionAuthToWatch(null);
         router.replace('/get-started');
       } else if (event === 'SIGNED_IN' && session) {
         setAuthenticated(true);
+        void syncSessionAuthToWatch(session);
+      } else if (event === 'TOKEN_REFRESHED' && session) {
+        void syncSessionAuthToWatch(session);
       }
     });
 

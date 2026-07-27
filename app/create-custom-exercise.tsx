@@ -29,6 +29,8 @@ import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { useToast } from '../src/hooks/useToast';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { Button } from '../src/components/ui/Button';
+import { Chip } from '../src/components/ui/Chip';
 import { supabase } from '../src/lib/supabase/client';
 import { devError } from '../src/lib/utils/logger';
 import { MUSCLE_KEY_TO_DISPLAY_NAME } from '../src/lib/constants/muscleHeatmapSlugs';
@@ -328,15 +330,12 @@ export default function CreateCustomExerciseScreen() {
           <Text style={[styles.label, styles.spacer]}>Type</Text>
           <View style={styles.chipRow}>
             {(['reps', 'timed'] as Mode[]).map((m) => (
-              <TouchableOpacity
+              <Chip
                 key={m}
-                style={[styles.chip, form.mode === m && styles.chipActive]}
+                label={m === 'reps' ? 'Reps & weight' : 'Timed'}
+                selected={form.mode === m}
                 onPress={() => update('mode', m)}
-              >
-                <Text style={[styles.chipText, form.mode === m && styles.chipTextActive]}>
-                  {m === 'reps' ? 'Reps & weight' : 'Timed'}
-                </Text>
-              </TouchableOpacity>
+              />
             ))}
           </View>
 
@@ -439,34 +438,26 @@ export default function CreateCustomExerciseScreen() {
           <Text style={[styles.label, styles.spacer]}>Primary muscles</Text>
           <Text style={styles.hint}>Tap the muscles this exercise mainly targets.</Text>
           <View style={styles.muscleGrid}>
-            {MUSCLE_OPTIONS.map(({ key, label }) => {
-              const selected = form.primaryMuscles.includes(key);
-              return (
-                <TouchableOpacity
-                  key={`p-${key}`}
-                  style={[styles.muscleChip, selected && styles.chipActive]}
-                  onPress={() => toggleMuscle('primaryMuscles', key)}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextActive]}>{label}</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {MUSCLE_OPTIONS.map(({ key, label }) => (
+              <Chip
+                key={`p-${key}`}
+                label={label}
+                selected={form.primaryMuscles.includes(key)}
+                onPress={() => toggleMuscle('primaryMuscles', key)}
+              />
+            ))}
           </View>
 
           <Text style={[styles.label, styles.spacer]}>Secondary muscles (optional)</Text>
           <View style={styles.muscleGrid}>
-            {MUSCLE_OPTIONS.map(({ key, label }) => {
-              const selected = form.secondaryMuscles.includes(key);
-              return (
-                <TouchableOpacity
-                  key={`s-${key}`}
-                  style={[styles.muscleChip, selected && styles.chipActiveSecondary]}
-                  onPress={() => toggleMuscle('secondaryMuscles', key)}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextActive]}>{label}</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {MUSCLE_OPTIONS.map(({ key, label }) => (
+              <Chip
+                key={`s-${key}`}
+                label={label}
+                selected={form.secondaryMuscles.includes(key)}
+                onPress={() => toggleMuscle('secondaryMuscles', key)}
+              />
+            ))}
           </View>
 
           <Text style={[styles.label, styles.spacer]}>Equipment (optional)</Text>
@@ -479,17 +470,15 @@ export default function CreateCustomExerciseScreen() {
           />
           <Text style={styles.hint}>Separate multiple items with commas.</Text>
 
-          <TouchableOpacity
-            style={[styles.primaryBtn, saving && styles.btnDisabled]}
+          <Button
+            label={isEditing ? 'Save changes' : 'Create exercise'}
             onPress={handleSave}
             disabled={saving}
+            fullWidth
+            style={styles.primaryBtn}
           >
-            {saving ? (
-              <LogoEdgeLoader size="small" variant="inverted" />
-            ) : (
-              <Text style={styles.primaryBtnText}>{isEditing ? 'Save changes' : 'Create exercise'}</Text>
-            )}
-          </TouchableOpacity>
+            {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+          </Button>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -578,30 +567,6 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       gap: spacing.sm,
     },
-    chip: {
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.lg,
-      borderRadius: borderRadius.full,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-    },
-    chipActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    chipActiveSecondary: {
-      backgroundColor: colors.textSecondary,
-      borderColor: colors.textSecondary,
-    },
-    chipText: {
-      fontSize: typography.sizes.sm,
-      fontWeight: '600',
-      color: colors.textSecondary,
-    },
-    chipTextActive: {
-      color: colors.background,
-    },
     switchRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -616,30 +581,9 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
       gap: spacing.sm,
     },
-    muscleChip: {
-      paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.full,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-    },
     primaryBtn: {
-      backgroundColor: colors.primary,
-      borderRadius: borderRadius.md,
-      paddingVertical: spacing.md,
-      alignItems: 'center',
-      justifyContent: 'center',
       minHeight: 52,
       marginTop: spacing.xl,
-    },
-    primaryBtnText: {
-      fontSize: typography.sizes.base,
-      fontWeight: '700',
-      color: colors.background,
-    },
-    btnDisabled: {
-      opacity: 0.5,
     },
   });
 }

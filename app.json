@@ -23,6 +23,11 @@
       "bundleIdentifier": "com.alexpreo.ironpath",
       "buildNumber": "1",
       "appleTeamId": "JWUD8ZKQLN",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.alexpreo.ironpath.shared"
+        ]
+      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSUserNotificationsUsageDescription": "IronPath sends reminders to help you stay consistent with your workouts.",
@@ -228,7 +233,7 @@
                   "entitlements": {
                     "com.apple.developer.healthkit": true,
                     "com.apple.security.application-groups": [
-                      "group.com.alexpreo.ironpath.watch"
+                      "group.com.alexpreo.ironpath.shared"
                     ]
                   }
                 }

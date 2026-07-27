@@ -1,7 +1,7 @@
 /**
- * Exercise detail screen: hero image, muscle chips, description, per-set editor
- * (weight/reps/duration/rest + warmup toggle), and explicit scope actions:
- * "Add to routine" (template slot + session sync) vs "Add to this day only".
+ * Exercise detail screen: hero image, muscle/equipment metadata, description,
+ * per-set editor (weight/reps/duration/rest + warmup toggle), and explicit scope
+ * actions: "Add to routine" (template slot + session sync) vs "Add to this day only".
  * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–600.
  */
 
@@ -703,22 +703,28 @@ export default function AddExerciseEditScreen() {
           <Text style={styles.exerciseTitle}>{exerciseName}</Text>
 
           {(primaryMuscles.length > 0 || secondaryMuscles.length > 0 || equipment.length > 0) && (
-            <View style={styles.chipsRow}>
-              {primaryMuscles.map((m) => (
-                <View key={`p-${m}`} style={[styles.chip, styles.chipPrimary]}>
-                  <Text style={styles.chipPrimaryText}>{m}</Text>
+            <View style={styles.metaBlock}>
+              {primaryMuscles.length > 0 && (
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaLabel}>Targets</Text>
+                  <Text style={styles.metaValuePrimary}>{primaryMuscles.join(' · ')}</Text>
                 </View>
-              ))}
-              {secondaryMuscles.map((m) => (
-                <View key={`s-${m}`} style={styles.chip}>
-                  <Text style={styles.chipText}>{m}</Text>
+              )}
+              {secondaryMuscles.length > 0 && (
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaLabel}>Also hits</Text>
+                  <Text style={styles.metaValueSecondary}>{secondaryMuscles.join(' · ')}</Text>
                 </View>
-              ))}
-              {equipment.map((e) => (
-                <View key={`e-${e}`} style={styles.chip}>
-                  <Text style={styles.chipText}>{e}</Text>
+              )}
+              {equipment.length > 0 && (
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaLabel}>Equipment</Text>
+                  <View style={styles.metaEquipmentValue}>
+                    <Dumbbell size={14} color={colors.textSecondary} />
+                    <Text style={styles.metaValueSecondary}>{equipment.join(' · ')}</Text>
+                  </View>
                 </View>
-              ))}
+              )}
             </View>
           )}
 
@@ -744,7 +750,7 @@ export default function AddExerciseEditScreen() {
                         onPress={() => toggleWarmup(set.id)}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                       >
-                        <Flame size={12} color={isWarmup ? colors.background : colors.textSecondary} />
+                        <Flame size={12} color={isWarmup ? colors.onPrimaryContrast : colors.textSecondary} />
                         <Text style={[styles.warmupChipText, isWarmup && styles.warmupChipTextActive]}>
                           Warmup
                         </Text>
@@ -937,33 +943,40 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
-  chipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  metaBlock: {
     gap: spacing.xs,
     marginBottom: spacing.md,
   },
-  chip: {
-    paddingVertical: 4,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
   },
-  chipText: {
+  metaLabel: {
+    width: 72,
     fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.semibold,
+    color: colors.textMuted,
+    paddingTop: 2,
+  },
+  metaValuePrimary: {
+    flex: 1,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.textPrimary,
+    lineHeight: 20,
+  },
+  metaValueSecondary: {
+    flex: 1,
+    fontSize: typography.sizes.sm,
     color: colors.textSecondary,
-    fontWeight: '500',
+    lineHeight: 20,
   },
-  chipPrimary: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  chipPrimaryText: {
-    fontSize: typography.sizes.xs,
-    color: colors.background,
-    fontWeight: '600',
+  metaEquipmentValue: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   descriptionCard: {
     backgroundColor: colors.card,
@@ -1042,7 +1055,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.textSecondary,
   },
   warmupChipTextActive: {
-    color: colors.background,
+    color: colors.onPrimaryContrast,
   },
   removeSetText: {
     fontSize: typography.sizes.sm,
@@ -1134,7 +1147,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     opacity: 0.7,
   },
   primaryBtnText: {
-    color: colors.background,
+    color: colors.onPrimaryContrast,
     fontSize: typography.sizes.base,
     fontWeight: '600',
   },

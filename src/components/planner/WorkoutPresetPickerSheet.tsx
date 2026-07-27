@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { BottomSheet } from '../ui/BottomSheet';
+import { Button } from '../ui/Button';
 import { spacing, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import type { WorkoutPreset } from '../../lib/supabase/queries/presets';
@@ -99,20 +100,7 @@ export const WorkoutPresetPickerSheet: React.FC<Props> = ({
           gap: spacing.xs,
         },
         loadRowButton: {
-          backgroundColor: colors.primary,
-          borderRadius: 6,
-          paddingHorizontal: spacing.sm,
-          paddingVertical: spacing.xs,
           minWidth: 52,
-          alignItems: 'center',
-        },
-        loadRowButtonDisabled: {
-          opacity: 0.5,
-        },
-        loadRowButtonText: {
-          color: colors.background,
-          fontSize: typography.sizes.sm,
-          fontWeight: typography.weights.semibold,
         },
         iconButton: {
           padding: spacing.xs,
@@ -162,14 +150,14 @@ export const WorkoutPresetPickerSheet: React.FC<Props> = ({
                   </Text>
                 </TouchableOpacity>
                 <View style={styles.rowActions}>
-                  <TouchableOpacity
-                    style={[styles.loadRowButton, applying && styles.loadRowButtonDisabled]}
+                  <Button
+                    label="Load"
+                    size="sm"
                     onPress={() => onLoadPreset(item)}
                     disabled={applying}
                     accessibilityLabel={`Load ${item.name}`}
-                  >
-                    <Text style={styles.loadRowButtonText}>Load</Text>
-                  </TouchableOpacity>
+                    style={styles.loadRowButton}
+                  />
                   <TouchableOpacity
                     style={styles.iconButton}
                     onPress={() => onDelete(item)}

@@ -10,9 +10,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
-import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
+import { spacing, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { Button } from '../src/components/ui/Button';
 import { useUIStore } from '../src/stores/uiStore';
 import { supabase } from '../src/lib/supabase/client';
 import {
@@ -85,19 +86,16 @@ export default function HealthConnectScreen() {
           <Text style={styles.warn}>Apple Health is only available on iOS.</Text>
         ) : null}
 
-        <TouchableOpacity
-          style={[styles.primaryBtn, busy && styles.primaryBtnDisabled]}
+        <Button
+          label="Continue with Apple Health"
           onPress={onConnect}
           disabled={busy}
-          accessibilityRole="button"
+          fullWidth
+          style={styles.primaryBtn}
           accessibilityLabel="Request Apple Health permission"
         >
-          {busy ? (
-            <LogoEdgeLoader size="small" variant="inverted" />
-          ) : (
-            <Text style={styles.primaryBtnText}>Continue with Apple Health</Text>
-          )}
-        </TouchableOpacity>
+          {busy ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
       </ScrollView>
     </SafeAreaView>
   );
@@ -138,16 +136,6 @@ function createStyles(colors: ThemeColors) {
     warn: { color: colors.warningText, fontSize: typography.sizes.sm },
     primaryBtn: {
       marginTop: spacing.lg,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    primaryBtnDisabled: { opacity: 0.6 },
-    primaryBtnText: {
-      color: colors.onPrimaryContrast,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
   });
 }

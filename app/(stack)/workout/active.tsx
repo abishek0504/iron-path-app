@@ -67,6 +67,7 @@ import {
 } from '../../../src/lib/supabase/queries/workouts_helpers';
 import { SmartRefreshConfirmationSheet } from '../../../src/components/ui/SmartRefreshConfirmationSheet';
 import { ConfirmDialog } from '../../../src/components/ui/ConfirmDialog';
+import { Button } from '../../../src/components/ui/Button';
 import { useModal } from '../../../src/hooks/useModal';
 import {
   updateWorkoutContext,
@@ -158,6 +159,8 @@ export default function ActiveWorkoutScreen() {
   const [sessionId, setSessionId] = useState<string | null>(params.sessionId ?? null);
   const [sessionTemplateId, setSessionTemplateId] = useState<string | null>(null);
   const [sessionDayName, setSessionDayName] = useState<string | null>(null);
+  const [controlDevice, setControlDevice] = useState<'phone' | 'watch'>('phone');
+  const controlDeviceRef = useRef<'phone' | 'watch'>('phone');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [workoutPhase, setWorkoutPhase] = useState<WorkoutPhase>({ type: 'execution', setIndex: 0 });
@@ -297,6 +300,8 @@ export default function ActiveWorkoutScreen() {
 
   useEffect(() => {
     const unsubscribe = addSetCompletedListener((event) => {
+      // Watch events only drive phone-owned sessions (mirror mode).
+      if (controlDeviceRef.current !== 'phone') return;
       if (workoutPhaseRef.current.type !== 'execution') return;
 
       const activeSessionId = sessionIdRef.current;
@@ -338,14 +343,16 @@ export default function ActiveWorkoutScreen() {
 
       handleCompleteSetRef.current();
     });
+    // Do not clear watch context on unmount — only on complete/abandon so mirror
+    // mode survives navigating away from the active screen briefly.
     return () => {
       unsubscribe();
-      void clearWorkoutContext();
     };
   }, []);
 
   useEffect(() => {
     const unsubSkip = addSkipRestListener((event) => {
+      if (controlDeviceRef.current !== 'phone') return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
       if (workoutPhaseRef.current.type !== 'rest') return;
@@ -353,6 +360,7 @@ export default function ActiveWorkoutScreen() {
     });
 
     const unsubExtend = addExtendRestListener((event) => {
+      if (controlDeviceRef.current !== 'phone') return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
       if (workoutPhaseRef.current.type !== 'rest') return;
@@ -360,6 +368,7 @@ export default function ActiveWorkoutScreen() {
     });
 
     const unsubRpe = addSubmitRpeListener((event) => {
+      if (controlDeviceRef.current !== 'phone') return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
       const phase = workoutPhaseRef.current;
@@ -384,7 +393,7 @@ export default function ActiveWorkoutScreen() {
   const latestWatchContextRef = useRef<WatchWorkoutContext | null>(null);
 
   useEffect(() => {
-    if (loading || !sessionId) return;
+    if (loading || !sessionId || controlDevice !== 'phone') return;
     if (watchAppOpenedRef.current === sessionId) return;
     watchAppOpenedRef.current = sessionId;
     void getWatchState().then((state) => {
@@ -392,7 +401,7 @@ export default function ActiveWorkoutScreen() {
         void startWatchApp(sessionId);
       }
     });
-  }, [loading, sessionId]);
+  }, [loading, sessionId, controlDevice]);
 
   useEffect(() => {
     const unsub = addWatchStateChangedListener((state) => {
@@ -443,10 +452,14 @@ export default function ActiveWorkoutScreen() {
 
   useEffect(() => {
     if (loading || !sessionId) return;
+    // Phone only pushes mirror context when it owns the session.
+    if (controlDevice !== 'phone') {
+      latestWatchContextRef.current = null;
+      return;
+    }
     const exercise = exercises[currentExerciseIndex];
     if (!exercise) {
       latestWatchContextRef.current = null;
-      void clearWorkoutContext();
       return;
     }
 
@@ -484,6 +497,7 @@ export default function ActiveWorkoutScreen() {
       pushWatchContext({
         active: true,
         sessionId,
+        controlDevice: 'phone',
         exerciseName: exercise.name,
         setNumber: workoutPhase.setIndex + 1,
         totalSets: exercise.sets.length,
@@ -500,6 +514,7 @@ export default function ActiveWorkoutScreen() {
       pushWatchContext({
         active: true,
         sessionId,
+        controlDevice: 'phone',
         exerciseName: exercise.name,
         setNumber: workoutPhase.setIndex + 1,
         totalSets: exercise.sets.length,
@@ -514,6 +529,7 @@ export default function ActiveWorkoutScreen() {
       pushWatchContext({
         active: true,
         sessionId,
+        controlDevice: 'phone',
         exerciseName: exercise.name,
         setNumber: workoutPhase.nextSetIndex + 1,
         totalSets: nextExercise.sets.length,
@@ -531,6 +547,7 @@ export default function ActiveWorkoutScreen() {
       pushWatchContext({
         active: true,
         sessionId,
+        controlDevice: 'phone',
         exerciseName: exercise.name,
         setNumber: exercise.sets.length,
         totalSets: exercise.sets.length,
@@ -542,6 +559,7 @@ export default function ActiveWorkoutScreen() {
       pushWatchContext({
         active: true,
         sessionId,
+        controlDevice: 'phone',
         exerciseName: exercise.name,
         setNumber: exercise.sets.length,
         totalSets: exercise.sets.length,
@@ -549,7 +567,7 @@ export default function ActiveWorkoutScreen() {
         progressText,
       });
     }
-  }, [loading, sessionId, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt, restEndsAtEpoch, prevPerformance]);
+  }, [loading, sessionId, controlDevice, exercises, currentExerciseIndex, workoutPhase, profile?.use_imperial, exerciseTimerEndsAt, restEndsAtEpoch, prevPerformance]);
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -577,9 +595,25 @@ export default function ActiveWorkoutScreen() {
         return;
       }
 
+      const device = session.control_device === 'watch' ? 'watch' : 'phone';
+      if (device === 'watch') {
+        if (__DEV__) {
+          const { devLog } = require('../../../src/lib/utils/logger');
+          devLog('workout-active', {
+            action: 'loadActiveSession_blocked_watch_owned',
+            sessionId: session.id,
+          });
+        }
+        toast.error('This workout is active on Apple Watch');
+        goBack();
+        return;
+      }
+
       setSessionId(session.id);
       setSessionTemplateId(session.template_id ?? null);
       setSessionDayName(session.day_name ?? null);
+      setControlDevice(device);
+      controlDeviceRef.current = device;
 
       const sessionData = await getSessionWithSets(session.id);
       if (!sessionData) {
@@ -1433,9 +1467,7 @@ export default function ActiveWorkoutScreen() {
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No exercises in this workout</Text>
-          <TouchableOpacity style={styles.backButton} onPress={goBack}>
-            <Text style={styles.backButtonText}>Go Back</Text>
-          </TouchableOpacity>
+          <Button label="Go Back" onPress={goBack} />
         </View>
       </SafeAreaView>
     );
@@ -1521,7 +1553,7 @@ export default function ActiveWorkoutScreen() {
       >
         {workoutPhase.type === 'rest' && restEndsAtEpoch != null ? (
           <View style={styles.restContainer}>
-            <Text style={styles.exerciseName}>{currentExercise.name}</Text>
+            <Text style={[styles.exerciseName, styles.restExerciseName]}>{currentExercise.name}</Text>
             <RestTimer
               endsAtEpoch={restEndsAtEpoch}
               startedAtEpoch={restStartedAtEpoch ?? undefined}
@@ -1690,7 +1722,7 @@ export default function ActiveWorkoutScreen() {
               />
             ) : (
               <TouchableOpacity style={styles.completeSetButton} onPress={() => void handleCompleteSet()}>
-                <CheckCircle size={20} color={colors.background} />
+                <CheckCircle size={20} color={colors.onPrimaryContrast} />
                 <Text style={styles.completeSetText}>Complete Set</Text>
               </TouchableOpacity>
             )}
@@ -1724,7 +1756,7 @@ export default function ActiveWorkoutScreen() {
               style={styles.completeSetButton}
               onPress={() => void handleCompleteSet()}
             >
-              <CheckCircle size={20} color={colors.background} />
+              <CheckCircle size={20} color={colors.onPrimaryContrast} />
               <Text style={styles.completeSetText}>Continue</Text>
             </TouchableOpacity>
           </View>
@@ -1889,7 +1921,7 @@ export default function ActiveWorkoutScreen() {
               ) : (
                 <>
                   <Text style={styles.saveButtonText}>Save & Continue</Text>
-                  <ChevronRight size={20} color={colors.background} />
+                  <ChevronRight size={20} color={colors.onPrimaryContrast} />
                 </>
               )}
             </TouchableOpacity>
@@ -1910,7 +1942,7 @@ export default function ActiveWorkoutScreen() {
               </View>
             ) : (
               <TouchableOpacity style={styles.finishButton} onPress={handleCompleteWorkout} disabled={isCompleting}>
-                <CheckCircle size={24} color={colors.background} />
+                <CheckCircle size={24} color={colors.onPrimaryContrast} />
                 <Text style={styles.finishText}>Finish Workout</Text>
               </TouchableOpacity>
             )}
@@ -2085,20 +2117,19 @@ export default function ActiveWorkoutScreen() {
               ))}
             </ScrollView>
             <View style={styles.reorderFooter}>
-              <TouchableOpacity
-                style={styles.reorderCancelButton}
+              <Button
+                label="Cancel"
+                variant="ghost"
+                size="sm"
                 onPress={() => setShowReorderModal(false)}
                 disabled={isSavingReorder}
-              >
-                <Text style={styles.reorderCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.reorderSaveButton, isSavingReorder && styles.overflowItemDisabled]}
+              />
+              <Button
+                label={isSavingReorder ? 'Saving…' : 'Save order'}
+                size="sm"
                 onPress={handleSaveReorder}
                 disabled={isSavingReorder}
-              >
-                <Text style={styles.reorderSaveText}>{isSavingReorder ? 'Saving…' : 'Save order'}</Text>
-              </TouchableOpacity>
+              />
             </View>
           </Pressable>
         </Pressable>
@@ -2110,8 +2141,12 @@ export default function ActiveWorkoutScreen() {
         message={`"${exercises[currentExerciseIndex]?.name ?? 'Exercise'}" will be removed from this workout. Completed sets are protected — if any sets have been logged, removal will be blocked.`}
         confirmLabel={isMutatingExercises ? 'Removing…' : 'Remove'}
         cancelLabel="Cancel"
+        confirmDestructive
+        confirmDisabled={isMutatingExercises}
         onConfirm={handleRemoveCurrentExercise}
-        onCancel={() => setShowRemoveExerciseConfirm(false)}
+        onCancel={() => {
+          if (!isMutatingExercises) setShowRemoveExerciseConfirm(false);
+        }}
       />
 
       <ConfirmDialog
@@ -2120,8 +2155,12 @@ export default function ActiveWorkoutScreen() {
         message="Your logged sets will be saved but the session will be marked abandoned. You won't be able to resume it later."
         confirmLabel={isAbandoning ? 'Abandoning…' : 'Abandon workout'}
         cancelLabel="Cancel"
+        confirmDestructive
+        confirmDisabled={isAbandoning}
         onConfirm={handleAbandonWorkout}
-        onCancel={() => setShowAbandonConfirm(false)}
+        onCancel={() => {
+          if (!isAbandoning) setShowAbandonConfirm(false);
+        }}
       />
     </SafeAreaView>
   );
@@ -2382,15 +2421,23 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   completeSetText: {
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.semibold,
-    color: colors.background,
+    color: colors.onPrimaryContrast,
   },
   restContainer: {
-    alignItems: 'center',
+    width: '100%',
+    alignSelf: 'stretch',
+    alignItems: 'stretch',
     gap: spacing.md,
+    paddingVertical: spacing.lg,
+  },
+  restExerciseName: {
+    textAlign: 'center',
+    width: '100%',
   },
   nextSetText: {
     fontSize: typography.sizes.lg,
     color: colors.textSecondary,
+    textAlign: 'center',
   },
   loggingContainer: {
     gap: spacing.md,
@@ -2501,26 +2548,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.md,
   },
-  reorderCancelButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  reorderCancelText: {
-    fontSize: typography.sizes.base,
-    color: colors.textSecondary,
-    fontWeight: typography.weights.medium,
-  },
-  reorderSaveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
-  reorderSaveText: {
-    fontSize: typography.sizes.base,
-    color: colors.background,
-    fontWeight: typography.weights.semibold,
-  },
   logInputRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -2592,7 +2619,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   saveButtonText: {
     fontSize: typography.sizes.lg,
     fontWeight: typography.weights.bold,
-    color: colors.background,
+    color: colors.onPrimaryContrast,
   },
   completeContainer: {
     alignItems: 'center',
@@ -2622,17 +2649,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   finishText: {
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
-    color: colors.background,
-  },
-  backButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  backButtonText: {
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-    color: colors.background,
+    color: colors.onPrimaryContrast,
   },
   }); }

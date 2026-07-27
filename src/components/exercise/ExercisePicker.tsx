@@ -19,8 +19,10 @@ import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/uiStore';
 import { spacing, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
+import { Button } from '../ui/Button';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { devLog, devError } from '../../lib/utils/logger';
+import { searchExercisesByName } from '../../lib/exercises/searchExercises';
 import type { Exercise } from '../../types/exercisePicker';
 
 const EXERCISE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -118,23 +120,15 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
   };
 
   const filterExercises = () => {
-    if (!searchQuery.trim()) {
-      setFilteredExercises(exercises);
-      return;
-    }
-
-    const query = searchQuery.toLowerCase().trim();
-    const filtered = exercises.filter((ex) =>
-      ex.name.toLowerCase().includes(query)
-    );
-
+    const filtered = searchExercisesByName(exercises, searchQuery);
     setFilteredExercises(filtered);
 
     if (__DEV__) {
-      devLog('exercise-picker', { 
-        action: 'filterExercises', 
+      const query = searchQuery.toLowerCase().trim();
+      devLog('exercise-picker', {
+        action: 'filterExercises',
         queryLength: query.length,
-        resultCount: filtered.length 
+        resultCount: filtered.length,
       });
     }
   };
@@ -253,17 +247,17 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
       )}
 
       {multiSelect && (
-        <TouchableOpacity
-          style={[styles.confirmButton, selectedIds.size === 0 && styles.confirmButtonDisabled]}
+        <Button
+          label={
+            selectedIds.size === 0
+              ? 'Select exercises'
+              : `Add ${selectedIds.size} exercise${selectedIds.size === 1 ? '' : 's'}`
+          }
           onPress={handleConfirmMultiple}
           disabled={selectedIds.size === 0}
-        >
-          <Text style={styles.confirmButtonText}>
-            {selectedIds.size === 0
-              ? 'Select exercises'
-              : `Add ${selectedIds.size} exercise${selectedIds.size === 1 ? '' : 's'}`}
-          </Text>
-        </TouchableOpacity>
+          fullWidth
+          style={styles.confirmButton}
+        />
       )}
     </View>
   );
@@ -321,19 +315,7 @@ function createStyles(colors: ThemeColors) {
     gap: spacing.xs,
   },
   confirmButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    alignItems: 'center',
     marginTop: spacing.sm,
-  },
-  confirmButtonDisabled: {
-    opacity: 0.5,
-  },
-  confirmButtonText: {
-    color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
   },
   exerciseName: {
     fontSize: 16,

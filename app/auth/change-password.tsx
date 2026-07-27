@@ -17,6 +17,7 @@ import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { mapAuthError } from '../../src/lib/auth/authErrors';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
+import { Button } from '../../src/components/ui/Button';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -179,20 +180,17 @@ export default function ChangePasswordScreen() {
 
           {info ? <Text style={styles.infoText}>{info}</Text> : null}
 
-          <TouchableOpacity
-            style={[styles.button, submitting && styles.buttonDisabled]}
+          <Button
+            label="Update password"
             onPress={handleSubmit}
             disabled={submitting}
-            activeOpacity={0.85}
+            fullWidth
+            style={styles.button}
           >
-            {submitting ? (
-              <LogoEdgeLoader size="small" variant="inverted" />
-            ) : (
-              <Text style={styles.buttonText}>Update password</Text>
-            )}
-          </TouchableOpacity>
+            {submitting ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+          </Button>
 
-          <TouchableOpacity onPress={() => router.back()} style={styles.linkWrap}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.linkWrap} activeOpacity={0.85}>
             <Text style={styles.linkText}>Back</Text>
           </TouchableOpacity>
         </View>
@@ -254,18 +252,6 @@ function createStyles(colors: ThemeColors) {
     },
     button: {
       marginTop: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    buttonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     linkWrap: {
       alignItems: 'center',

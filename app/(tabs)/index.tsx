@@ -4,8 +4,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
+import { ConfirmDialog } from '../../src/components/ui/ConfirmDialog';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Animated, {
@@ -610,6 +611,10 @@ export default function WorkoutTab() {
     if (selectedSession?.status === 'completed' || isWorkoutCompleted) {
       return;
     }
+    if (selectedSession?.status === 'active' && selectedSession.control_device === 'watch') {
+      toast.info('Workout is running on Apple Watch. Finish or abandon it there first.');
+      return;
+    }
     hapticMedium();
     startInProgressRef.current = true;
     setIsStartingWorkout(true);
@@ -618,12 +623,20 @@ export default function WorkoutTab() {
 
       // If there is already an active session with save point (Continue flow), open that workout
       if (hasActiveWorkout && selectedSession?.id) {
+        if (selectedSession.control_device === 'watch') {
+          toast.info('Workout is running on Apple Watch.');
+          return;
+        }
         router.push({ pathname: '/workout/active', params: { sessionId: selectedSession.id } });
         return;
       }
 
       // If we're viewing an active session (no save point yet), just open it — don't delete and create new
       if (selectedSession?.status === 'active' && selectedSession?.id) {
+        if (selectedSession.control_device === 'watch') {
+          toast.info('Workout is running on Apple Watch.');
+          return;
+        }
         router.push({ pathname: '/workout/active', params: { sessionId: selectedSession.id } });
         return;
       }
@@ -1063,6 +1076,12 @@ export default function WorkoutTab() {
                     {selectedDayExercises.length !== 1 ? 's' : ''} scheduled
                   </Text>
 
+                  {selectedSession?.status === 'active' && selectedSession.control_device === 'watch' && (
+                    <Text style={styles.helperText}>
+                      Active on Apple Watch — finish or abandon there. Phone controls stay locked for this session.
+                    </Text>
+                  )}
+
                   {isBorrowingPlanDay && (
                     <Text style={styles.helperText}>
                       Doing {selectedPlanDayName}&apos;s workout today
@@ -1121,8 +1140,20 @@ export default function WorkoutTab() {
               ) : (
                 <CircularButton
                   onPress={handleStartWorkout}
-                  disabled={isRestDay || isStartingWorkout}
-                  text={hasActiveWorkout ? 'Continue' : isStartingWorkout ? 'Starting...' : 'Start'}
+                  disabled={
+                    isRestDay
+                    || isStartingWorkout
+                    || (selectedSession?.status === 'active' && selectedSession.control_device === 'watch')
+                  }
+                  text={
+                    selectedSession?.status === 'active' && selectedSession.control_device === 'watch'
+                      ? 'On Watch'
+                      : hasActiveWorkout
+                        ? 'Continue'
+                        : isStartingWorkout
+                          ? 'Starting...'
+                          : 'Start'
+                  }
                   isCompleted={false}
                 />
               )}
@@ -1155,47 +1186,19 @@ export default function WorkoutTab() {
         )}
       </ScrollView>
 
-      {/* Reset Workout Confirmation Modal */}
-      <Modal
+      <ConfirmDialog
         visible={showResetModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowResetModal(false)}
-      >
-        {/* Backdrop tap to dismiss matches sheet behavior; tap on the dialog body itself
-            does not propagate to the dismiss handler. */}
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => {
-            if (!isResetting) setShowResetModal(false);
-          }}
-        >
-          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Reset Workout?</Text>
-            <Text style={styles.modalMessage}>
-              This will delete your current workout progress and allow you to start from the beginning.
-              This action cannot be undone.
-            </Text>
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={styles.modalCancelButton}
-                onPress={() => setShowResetModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalResetButton, isResetting && styles.modalResetButtonDisabled]}
-                onPress={handleResetWorkout}
-                disabled={isResetting}
-              >
-                <Text style={styles.modalResetText}>
-                  {isResetting ? 'Resetting...' : 'Reset Workout'}
-                </Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        title="Reset Workout?"
+        message="This will delete your current workout progress and allow you to start from the beginning. This action cannot be undone."
+        confirmLabel={isResetting ? 'Resetting...' : 'Reset Workout'}
+        cancelLabel="Cancel"
+        confirmDestructive
+        confirmDisabled={isResetting}
+        onConfirm={handleResetWorkout}
+        onCancel={() => {
+          if (!isResetting) setShowResetModal(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1580,71 +1583,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   circularButtonTextDisabled: {
     color: colors.workoutDisabledText,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: colors.modalBackdropTint,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  modalContent: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    width: '100%',
-    maxWidth: 400,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  modalTitle: {
-    fontSize: typography.sizes.xl,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
-  modalMessage: {
-    fontSize: typography.sizes.base,
-    color: colors.textSecondary,
-    lineHeight: 24,
-    marginBottom: spacing.xl,
-    textAlign: 'center',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  modalCancelButton: {
-    flex: 1,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.workoutControlSurface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalCancelText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.base,
-    fontWeight: '700',
-  },
-  modalResetButton: {
-    flex: 1,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.error,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalResetButtonDisabled: {
-    opacity: 0.6,
-  },
-  modalResetText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: '700',
   },
   chooseWorkoutButton: {
     marginTop: spacing.md,

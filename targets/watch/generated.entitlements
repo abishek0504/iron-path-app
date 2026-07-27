@@ -6,7 +6,7 @@
     <true/>
     <key>com.apple.security.application-groups</key>
     <array>
-      <string>group.com.alexpreo.ironpath.watch</string>
+      <string>group.com.alexpreo.ironpath.shared</string>
     </array>
   </dict>
 </plist>

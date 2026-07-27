@@ -141,6 +141,47 @@ public class WatchConnectivityModule: Module {
         openCompanionWatchApp(sessionId: sessionId)
       }
     }
+
+    AsyncFunction("syncAuthToWatch") { (payload: [String: Any]) in
+      WatchSharedAuthStore.save(payload)
+    }
+
+    AsyncFunction("clearAuthFromWatch") { () in
+      WatchSharedAuthStore.clear()
+    }
+  }
+}
+
+/// App Group bridge so the watch can run standalone Supabase-backed workouts.
+enum WatchSharedAuthStore {
+  static let appGroupId = "group.com.alexpreo.ironpath.shared"
+  static let authKey = "ironpath.watch.auth"
+
+  static func save(_ payload: [String: Any]) {
+    guard let defaults = UserDefaults(suiteName: appGroupId) else { return }
+    let accessToken = payload["accessToken"] as? String ?? ""
+    let refreshToken = payload["refreshToken"] as? String ?? ""
+    let userId = payload["userId"] as? String ?? ""
+    let supabaseUrl = payload["supabaseUrl"] as? String ?? ""
+    let supabaseAnonKey = payload["supabaseAnonKey"] as? String ?? ""
+    guard !accessToken.isEmpty, !refreshToken.isEmpty, !userId.isEmpty,
+          !supabaseUrl.isEmpty, !supabaseAnonKey.isEmpty else {
+      return
+    }
+    let record: [String: Any] = [
+      "accessToken": accessToken,
+      "refreshToken": refreshToken,
+      "expiresAt": payload["expiresAt"] as? Double ?? 0,
+      "userId": userId,
+      "supabaseUrl": supabaseUrl,
+      "supabaseAnonKey": supabaseAnonKey,
+      "updatedAt": Date().timeIntervalSince1970,
+    ]
+    defaults.set(record, forKey: authKey)
+  }
+
+  static func clear() {
+    UserDefaults(suiteName: appGroupId)?.removeObject(forKey: authKey)
   }
 }
 

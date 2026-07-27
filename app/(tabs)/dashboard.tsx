@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
+import { Button } from '../../src/components/ui/Button';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, RotateCcw, Activity, Calendar, CalendarCheck, BarChart2, Flame, Trophy, Clock, Heart, CheckCircle2 } from 'lucide-react-native';
@@ -35,6 +36,8 @@ import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
 const LBS_PER_KG = 2.20462;
+/** Circular control: half of 44×44 hit target. */
+const BODY_SWITCHER_RADIUS = 22;
 
 type SessionSummary = {
   id: string;
@@ -475,13 +478,12 @@ export default function DashboardTab() {
               <Text style={styles.connectedBadgeText}>Connected</Text>
             </View>
           ) : (
-            <TouchableOpacity
-              style={styles.actionButton}
+            <Button
+              label="Connect"
+              variant="secondary"
               onPress={() => router.push('/health-connect')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.actionButtonText}>Connect</Text>
-            </TouchableOpacity>
+              fullWidth
+            />
           )}
         </View>
       </ScrollView>
@@ -551,7 +553,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   bodySwitcherButton: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: BODY_SWITCHER_RADIUS,
     backgroundColor: colors.mapControlSurface,
     borderWidth: 1,
     borderColor: colors.mapControlBorder,
@@ -592,7 +594,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   progressBarTrack: {
     height: 8,
-    borderRadius: 999,
+    borderRadius: borderRadius.full,
     backgroundColor: colors.cardBorder,
     overflow: 'hidden',
   },
@@ -617,18 +619,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   emptyText: {
     color: colors.textMuted,
     fontSize: typography.sizes.sm,
-  },
-  actionButton: {
-    backgroundColor: colors.cardBorder,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
   },
   connectedBadge: {
     flexDirection: 'row',

@@ -30,6 +30,8 @@ interface UIState {
   isBottomSheetOpen: boolean;
   pendingBottomSheet: BottomSheetId | null;
   pendingBottomSheetProps: Record<string, any>;
+  /** Runs after the current sheet fully unmounts (exit animation done). */
+  pendingAfterClose: (() => void) | null;
   
   // Toasts
   toasts: Toast[];
@@ -44,6 +46,8 @@ interface UIState {
   openBottomSheet: (id: BottomSheetId, props?: Record<string, any>) => void;
   closeBottomSheet: () => void;
   onBottomSheetClosed: () => void;
+  /** Queue work to run after the open sheet finishes closing (avoids nested RN Modals). */
+  runAfterBottomSheetClosed: (action: () => void) => void;
   
   showToast: (message: string, type?: Toast['type'], duration?: number) => void;
   removeToast: (id: string) => void;
@@ -57,6 +61,7 @@ export const useUIStore = create<UIState>((set) => ({
   isBottomSheetOpen: false,
   pendingBottomSheet: null,
   pendingBottomSheetProps: {},
+  pendingAfterClose: null,
   toasts: [],
   plannerNeedsRefetch: false,
   workoutNeedsRefetch: false,
@@ -109,16 +114,27 @@ export const useUIStore = create<UIState>((set) => ({
     // Set isBottomSheetOpen to false but keep activeBottomSheet until animation completes
     set({ isBottomSheetOpen: false });
   },
+
+  runAfterBottomSheetClosed: (action) => {
+    if (__DEV__) {
+      devLog('ui-store', { action: 'runAfterBottomSheetClosed' });
+    }
+    set({ pendingAfterClose: action });
+  },
   
   onBottomSheetClosed: () => {
     if (__DEV__) {
       devLog('ui-store', { action: 'onBottomSheetClosed' });
     }
+    let afterClose: (() => void) | null = null;
+    let openedPendingSheet = false;
     set((state) => {
+      afterClose = state.pendingAfterClose;
       const pending = state.pendingBottomSheet;
       const pendingProps = state.pendingBottomSheetProps;
       // Clear activeBottomSheet and bottomSheetProps
       if (pending) {
+        openedPendingSheet = true;
         // If there's a pending sheet, open it immediately
         return {
           activeBottomSheet: pending,
@@ -126,6 +142,7 @@ export const useUIStore = create<UIState>((set) => ({
           isBottomSheetOpen: true,
           pendingBottomSheet: null,
           pendingBottomSheetProps: {},
+          pendingAfterClose: null,
         };
       } else {
         // No pending sheet, just clear everything
@@ -134,9 +151,14 @@ export const useUIStore = create<UIState>((set) => ({
           bottomSheetProps: {},
           pendingBottomSheet: null,
           pendingBottomSheetProps: {},
+          pendingAfterClose: null,
         };
       }
     });
+    // Avoid stacking another overlay on a newly opened sheet
+    if (!openedPendingSheet) {
+      afterClose?.();
+    }
   },
   
   showToast: (message, type = 'success', duration = 2000) => {

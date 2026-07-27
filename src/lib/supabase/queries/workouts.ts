@@ -55,6 +55,8 @@ async function isSessionSetOwnedByUser(setId: string, userId: string): Promise<b
   return isSessionExerciseOwnedByUser(setRow.session_exercise_id, userId);
 }
 
+export type SessionControlDevice = 'phone' | 'watch';
+
 export interface WorkoutSession {
   id: string;
   user_id: string;
@@ -63,6 +65,9 @@ export interface WorkoutSession {
   status: 'active' | 'completed' | 'abandoned';
   started_at: string;
   completed_at?: string;
+  /** Which device owns progression + writes for this session. */
+  control_device?: SessionControlDevice;
+  origin?: 'auto' | 'manual';
 }
 
 export interface SessionExercise {
@@ -96,13 +101,15 @@ export interface SessionSet {
  * Create a new workout session.
  * @param startedAt - Optional ISO timestamp; when provided (e.g. for planned days), the session is scheduled for that time. Defaults to now.
  * @param origin - 'auto' for planner auto-materialized sessions (deduped by a partial unique index), 'manual' for user/feature-initiated sessions (unconstrained). Defaults to 'manual'.
+ * @param controlDevice - Which device owns progression/writes. Defaults to 'phone'.
  */
 export async function createWorkoutSession(
   userId: string,
   templateId?: string,
   dayName?: string,
   startedAt?: string,
-  origin: 'auto' | 'manual' = 'manual'
+  origin: 'auto' | 'manual' = 'manual',
+  controlDevice: SessionControlDevice = 'phone',
 ): Promise<WorkoutSession | null> {
   if (__DEV__) {
     devLog('workout-query', {
@@ -112,6 +119,7 @@ export async function createWorkoutSession(
       dayName,
       startedAt: startedAt ?? 'now',
       origin,
+      controlDevice,
     });
   }
 
@@ -126,14 +134,14 @@ export async function createWorkoutSession(
         status: 'active',
         started_at: resolvedStartedAt,
         origin,
+        control_device: controlDevice,
       })
       .select()
       .single();
 
     if (error) {
-      // 23505 = unique_violation: an auto session for this user+day already
-      // exists (the dedup index did its job). This is expected under a race,
-      // not an error — the caller should re-fetch the winning session.
+      // 23505 = unique_violation: auto-per-day dedup OR one-active-per-user.
+      // Caller should re-fetch / abandon the winning session.
       if (error.code === '23505') {
         if (__DEV__) {
           devLog('workout-query', {
@@ -141,6 +149,7 @@ export async function createWorkoutSession(
             userId,
             dayName,
             origin,
+            controlDevice,
           });
         }
         return null;

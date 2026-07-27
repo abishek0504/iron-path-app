@@ -16,7 +16,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
@@ -26,6 +25,8 @@ import {
   DEFAULT_DAY_CONSTRAINTS,
   type DayConstraints,
 } from '../../lib/ai/generateWorkoutDay';
+import { Chip } from '../ui/Chip';
+import { Button } from '../ui/Button';
 
 const MUSCLE_GROUPS = [
   'Chest',
@@ -152,7 +153,6 @@ export function GenerateDayForm({
                 label="Let AI decide"
                 selected={dayFocus === null}
                 onPress={() => setDayFocus(null)}
-                styles={styles}
               />
               {focusOptions.map((option) => (
                 <Chip
@@ -160,7 +160,6 @@ export function GenerateDayForm({
                   label={option}
                   selected={dayFocus === option}
                   onPress={() => setDayFocus(option)}
-                  styles={styles}
                 />
               ))}
             </View>
@@ -171,7 +170,6 @@ export function GenerateDayForm({
                 label="Auto"
                 selected={exercisesPerSession === null}
                 onPress={() => setExercisesPerSession(null)}
-                styles={styles}
               />
               {EXERCISE_COUNT_OPTIONS.map((count) => (
                 <Chip
@@ -179,7 +177,6 @@ export function GenerateDayForm({
                   label={String(count)}
                   selected={exercisesPerSession === count}
                   onPress={() => setExercisesPerSession(count)}
-                  styles={styles}
                 />
               ))}
             </View>
@@ -192,7 +189,6 @@ export function GenerateDayForm({
                   label={option.label}
                   selected={intensity === option.id}
                   onPress={() => setIntensity(option.id)}
-                  styles={styles}
                 />
               ))}
             </View>
@@ -206,7 +202,6 @@ export function GenerateDayForm({
                   label={muscle}
                   selected={emphasizeMuscles.includes(muscle)}
                   onPress={() => toggleEmphasize(muscle)}
-                  styles={styles}
                 />
               ))}
             </View>
@@ -220,7 +215,6 @@ export function GenerateDayForm({
                   label={muscle}
                   selected={avoidMuscles.includes(muscle)}
                   onPress={() => toggleAvoid(muscle)}
-                  styles={styles}
                 />
               ))}
             </View>
@@ -236,21 +230,13 @@ export function GenerateDayForm({
                   label={String(count)}
                   selected={stretchCount === count}
                   onPress={() => setStretchCount(count)}
-                  styles={styles}
                 />
               ))}
             </View>
 
             <View style={styles.buttons}>
-              <TouchableOpacity
-                style={[styles.button, styles.buttonSecondary]}
-                onPress={onCancel}
-              >
-                <Text style={styles.buttonTextSecondary}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.button} onPress={handleGenerate}>
-                <Text style={styles.buttonText}>Generate</Text>
-              </TouchableOpacity>
+              <Button label="Cancel" variant="secondary" size="sm" onPress={onCancel} />
+              <Button label="Generate" size="sm" onPress={handleGenerate} />
             </View>
           </ScrollView>
         </Pressable>
@@ -259,32 +245,11 @@ export function GenerateDayForm({
   );
 }
 
-function Chip({
-  label,
-  selected,
-  onPress,
-  styles,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  styles: ReturnType<typeof createStyles>;
-}) {
-  return (
-    <TouchableOpacity
-      style={[styles.chip, selected && styles.chipSelected]}
-      onPress={onPress}
-    >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: colors.modalBackdropTint,
+      backgroundColor: colors.dialogBackdropTint,
       justifyContent: 'center',
       alignItems: 'center',
       padding: spacing.lg,
@@ -294,14 +259,15 @@ function createStyles(colors: ThemeColors) {
       borderRadius: borderRadius.lg,
       borderWidth: 1,
       borderColor: colors.cardBorder,
-      padding: spacing.xl,
+      padding: spacing.lg,
       width: '100%',
       maxWidth: 400,
       maxHeight: '85%',
+      gap: spacing.md,
     },
     title: {
       fontSize: typography.sizes.lg,
-      fontWeight: typography.weights.semibold,
+      fontWeight: typography.weights.bold,
       color: colors.textPrimary,
       marginBottom: spacing.xs,
     },
@@ -334,51 +300,11 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
       gap: spacing.sm,
     },
-    chip: {
-      paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.full,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.background,
-    },
-    chipSelected: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    chipText: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
-    },
-    chipTextSelected: {
-      color: colors.background,
-      fontWeight: typography.weights.semibold,
-    },
     buttons: {
       flexDirection: 'row',
       gap: spacing.sm,
       justifyContent: 'flex-end',
       marginTop: spacing.lg,
-    },
-    button: {
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.md,
-      backgroundColor: colors.primary,
-    },
-    buttonSecondary: {
-      backgroundColor: 'transparent',
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-    },
-    buttonText: {
-      color: colors.onPrimaryContrast,
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.semibold,
-    },
-    buttonTextSecondary: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
     },
   });
 }

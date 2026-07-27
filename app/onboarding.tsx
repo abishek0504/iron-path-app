@@ -52,6 +52,7 @@ import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { setPendingAppTour } from '../src/lib/onboarding/tourBridge';
 import { validateDateOfBirth, calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import Animated, {
+  FadeIn,
   useSharedValue,
   useAnimatedStyle,
   withTiming,
@@ -61,6 +62,7 @@ import Animated, {
 import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
+import { Button } from '../src/components/ui/Button';
 
 const EXPERIENCE_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
@@ -149,8 +151,17 @@ export default function Onboarding() {
       }
 
       const userId = session.user.id;
+      // Confirm the auth user still exists (Keychain can outlive a deleted account).
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        await supabase.auth.signOut().catch(() => undefined);
+        router.replace('/get-started');
+        return;
+      }
+
       const profile = await getUserProfileCached(userId);
 
+      // No profile yet is normal right after signup — leave the form empty.
       if (profile) {
         setFirstName(profile.first_name || '');
         setLastName(profile.last_name || '');
@@ -621,31 +632,35 @@ export default function Onboarding() {
               ? 'All days selected'
               : `Select ${daysPerWeekSlider} day${daysPerWeekSlider === 1 ? '' : 's'}`}
           </Text>
-          <View style={styles.optionList}>
-            {WEEKDAY_OPTIONS.map((day) => {
+          <View style={styles.optionList} key={`weekdays-${daysPerWeekSlider}`}>
+            {WEEKDAY_OPTIONS.map((day, index) => {
               const selected = workoutDays.includes(day);
               const atLimit = workoutDays.length >= daysPerWeekSlider && !selected;
               return (
-                <TouchableOpacity
+                <Animated.View
                   key={day}
-                  style={[
-                    styles.optionRow,
-                    selected && styles.optionRowSelected,
-                    atLimit && styles.optionRowDisabled,
-                  ]}
-                  onPress={() => toggleWorkoutDay(day)}
-                  disabled={atLimit}
+                  entering={FadeIn.duration(280).delay(index * 50)}
                 >
-                  <Text
+                  <TouchableOpacity
                     style={[
-                      styles.optionRowText,
-                      selected && styles.optionRowTextSelected,
-                      atLimit && styles.optionRowTextDisabled,
+                      styles.optionRow,
+                      selected && styles.optionRowSelected,
+                      atLimit && styles.optionRowDisabled,
                     ]}
+                    onPress={() => toggleWorkoutDay(day)}
+                    disabled={atLimit}
                   >
-                    {day}
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.optionRowText,
+                        selected && styles.optionRowTextSelected,
+                        atLimit && styles.optionRowTextDisabled,
+                      ]}
+                    >
+                      {day}
+                    </Text>
+                  </TouchableOpacity>
+                </Animated.View>
               );
             })}
           </View>
@@ -749,9 +764,22 @@ export default function Onboarding() {
     <View style={styles.container}>
       <SafeAreaView style={styles.safeAreaTop} edges={['top']}>
         <View style={styles.stepIndicator}>
-          <Text style={styles.stepText}>
-            Step {currentStep} of {TOTAL_STEPS}
-          </Text>
+          <View style={styles.stepHeaderRow}>
+            <Text style={styles.stepText}>
+              Step {currentStep} of {TOTAL_STEPS}
+            </Text>
+            <TouchableOpacity
+              onPress={async () => {
+                await supabase.auth.signOut().catch(() => undefined);
+                const { syncSessionAuthToWatch } = await import('../src/lib/watch/syncWatchAuth');
+                await syncSessionAuthToWatch(null);
+                router.replace('/get-started');
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.signOutText}>Sign out</Text>
+            </TouchableOpacity>
+          </View>
           <View
             style={styles.progressBar}
             onLayout={(event) => setProgressTrackWidth(event.nativeEvent.layout.width)}
@@ -780,32 +808,23 @@ export default function Onboarding() {
       <SafeAreaView style={styles.safeAreaBottom} edges={['bottom']}>
         <View style={styles.buttonRow}>
           {currentStep > 1 ? (
-            <TouchableOpacity
-              style={styles.backButton}
+            <Button
+              label="Back"
+              variant="secondary"
               onPress={handleBack}
               disabled={submitting || transitioning}
-            >
-              <Text style={styles.backButtonText}>Back</Text>
-            </TouchableOpacity>
+              style={styles.backButton}
+            />
           ) : null}
 
-          <TouchableOpacity
-            style={[
-              styles.nextButton,
-              currentStep === 1 && styles.nextButtonFullWidth,
-              (submitting || transitioning) && styles.buttonDisabled,
-            ]}
+          <Button
+            label={isLastStep ? 'Complete setup' : 'Next'}
             onPress={isLastStep ? handleSubmit : handleNext}
             disabled={submitting || transitioning}
+            style={[styles.nextButton, currentStep === 1 && styles.nextButtonFullWidth]}
           >
-            {submitting ? (
-              <LogoEdgeLoader size="small" variant="inverted" />
-            ) : (
-              <Text style={styles.nextButtonText}>
-                {isLastStep ? 'Complete setup' : 'Next'}
-              </Text>
-            )}
-          </TouchableOpacity>
+            {submitting ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+          </Button>
         </View>
       </SafeAreaView>
 
@@ -884,11 +903,20 @@ function createStyles(colors: ThemeColors) {
       paddingBottom: spacing.md,
       backgroundColor: colors.background,
     },
+    stepHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: spacing.sm,
+    },
     stepText: {
       fontSize: typography.sizes.sm,
       color: colors.textSecondary,
-      textAlign: 'center',
-      marginBottom: spacing.sm,
+    },
+    signOutText: {
+      fontSize: typography.sizes.sm,
+      fontWeight: typography.weights.semibold,
+      color: colors.primary,
     },
     progressBar: {
       height: 4,
@@ -1051,35 +1079,12 @@ function createStyles(colors: ThemeColors) {
     },
     backButton: {
       flex: 1,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.background,
-    },
-    backButtonText: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     nextButton: {
       flex: 1,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
     },
     nextButtonFullWidth: {
       flex: 1,
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    nextButtonText: {
-      color: colors.onPrimaryContrast,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     errorText: {
       color: colors.error,

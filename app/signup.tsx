@@ -15,6 +15,7 @@ import { useTheme } from '../src/lib/utils/ThemeContext';
 import { Check, X, Eye, EyeOff } from 'lucide-react-native';
 import { LegalLinks } from '../src/components/ui/LegalLinks';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { Button } from '../src/components/ui/Button';
 import { mapAuthError } from '../src/lib/auth/authErrors';
 
 export default function Signup() {
@@ -333,19 +334,17 @@ export default function Signup() {
 
         <LegalLinks intro="By signing up you agree to our" />
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
+        <Button
+          label="Sign Up"
           onPress={handleSignup}
           disabled={loading}
+          fullWidth
+          style={styles.button}
         >
-          {loading ? (
-            <LogoEdgeLoader size="small" variant="inverted" />
-          ) : (
-            <Text style={styles.buttonText}>Sign Up</Text>
-          )}
-        </TouchableOpacity>
+          {loading ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
 
-        <TouchableOpacity onPress={() => router.replace('/login')}>
+        <TouchableOpacity onPress={() => router.replace('/login')} activeOpacity={0.85}>
           <Text style={styles.linkText}>Already have an account? Log in</Text>
         </TouchableOpacity>
       </View>
@@ -422,18 +421,6 @@ function createStyles(colors: ThemeColors) {
     },
     button: {
       marginTop: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    buttonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     errorText: {
       color: colors.error,

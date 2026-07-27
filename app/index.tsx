@@ -30,15 +30,29 @@ export default function Index() {
   const checkAuthAndRedirect = async () => {
     setErrorText(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      // Prefer getUser() over getSession(): Keychain can keep a stale JWT after the
+      // auth user was deleted. getUser() validates with the server.
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-      if (session) {
-        const userId = session.user.id;
+      if (userError || !user) {
+        await supabase.auth.signOut().catch(() => undefined);
+        const { syncSessionAuthToWatch } = await import('../src/lib/watch/syncWatchAuth');
+        await syncSessionAuthToWatch(null);
+        router.replace('/get-started');
+        return;
+      }
+
+      if (user) {
+        const userId = user.id;
         const profile = await getUserProfileCached(userId);
 
-        if (profile) {
-          setProfile(profile);
+        if (!profile) {
+          // Valid auth user with no profile yet (mid-signup) → onboarding.
+          router.replace('/onboarding');
+          return;
         }
+
+        setProfile(profile);
 
         if (isAccountPendingDeletion(profile)) {
           router.replace('/login');
@@ -46,10 +60,10 @@ export default function Index() {
         }
 
         const hasRequired =
-          !!profile?.experience_level &&
-          !!profile?.days_per_week &&
-          Array.isArray(profile?.equipment_access) &&
-          (profile?.equipment_access?.length || 0) > 0;
+          !!profile.experience_level &&
+          !!profile.days_per_week &&
+          Array.isArray(profile.equipment_access) &&
+          (profile.equipment_access?.length || 0) > 0;
 
         if (hasRequired) {
           // Auto-resume an in-progress workout that already has a save point.

@@ -97,7 +97,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       fontWeight: typography.weights.medium,
     },
     primaryText: {
-      color: colors.background,
+      color: colors.onPrimaryContrast,
       fontSize: typography.sizes.base,
       fontWeight: typography.weights.semibold,
     },

@@ -1,0 +1,138 @@
+{
+  "missing_count": 343,
+  "phases": [
+    {
+      "phase": 0,
+      "kind": "manifest",
+      "image_count": 0,
+      "range": null,
+      "cumulative_after": null
+    },
+    {
+      "phase": 1,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "45-Degree Back Extension \u2192 Bicycle Crunch",
+      "cumulative_after": 20
+    },
+    {
+      "phase": 2,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Bird Dog \u2192 Chest-Supported Row (Dumbbell)",
+      "cumulative_after": 40
+    },
+    {
+      "phase": 3,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Clean and Press \u2192 Dumbbell Shrug",
+      "cumulative_after": 60
+    },
+    {
+      "phase": 4,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Dumbbell Side Bend \u2192 Goblet Squat",
+      "cumulative_after": 80
+    },
+    {
+      "phase": 5,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Good Morning \u2192 Landmine Press",
+      "cumulative_after": 100
+    },
+    {
+      "phase": 6,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Landmine Row \u2192 Plank Shoulder Tap",
+      "cumulative_after": 120
+    },
+    {
+      "phase": 7,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Plate Pinch Hold \u2192 Scapular Pull Up",
+      "cumulative_after": 140
+    },
+    {
+      "phase": 8,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Scissor Kicks \u2192 Standing Cable Chest Press",
+      "cumulative_after": 160
+    },
+    {
+      "phase": 9,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Standing Calf Raise \u2192 TRX Row",
+      "cumulative_after": 180
+    },
+    {
+      "phase": 10,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Turkish Get-Up \u2192 Planche Lean",
+      "cumulative_after": 200
+    },
+    {
+      "phase": 11,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Planche Push-Up \u2192 Kipping Handstand Push-Up",
+      "cumulative_after": 220
+    },
+    {
+      "phase": 12,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Ring Support Hold \u2192 Skater Bound",
+      "cumulative_after": 240
+    },
+    {
+      "phase": 13,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Single-Leg Lateral Hop \u2192 Medicine Ball Overhead Throw",
+      "cumulative_after": 260
+    },
+    {
+      "phase": 14,
+      "kind": "strength",
+      "image_count": 20,
+      "range": "Burpee Broad Jump \u2192 Keg Carry",
+      "cumulative_after": 280
+    },
+    {
+      "phase": 15,
+      "kind": "strength",
+      "image_count": 15,
+      "range": "Tire Flip \u2192 Power Stairs",
+      "cumulative_after": 295
+    },
+    {
+      "phase": 16,
+      "kind": "stretch",
+      "image_count": 20,
+      "range": "90/90 Hip Switch \u2192 Foam Roller Thoracic Extension",
+      "cumulative_after": 315
+    },
+    {
+      "phase": 17,
+      "kind": "stretch",
+      "image_count": 20,
+      "range": "Frog Stretch \u2192 Standing Hamstring Stretch",
+      "cumulative_after": 335
+    },
+    {
+      "phase": 18,
+      "kind": "stretch",
+      "image_count": 8,
+      "range": "Standing Lat Stretch \u2192 Wrist Flexor Stretch",
+      "cumulative_after": 343
+    }
+  ]
+}

@@ -21,13 +21,13 @@
 - ✅ Local reminders + tap deep-link to tabs
 - ✅ Sentry SDK + `@sentry/react-native/expo` plugin (dSYM upload; DSN in `eas.json`, org `ironpath`/project `apple-ios` in `app.json`)
 - ✅ Apple Health: `@kingstinct/react-native-healthkit` wired — real authorization, HKWorkout on completion, body mass on weight log, HK UUID dedupe, `v2_health_sync` ledger, 30-day body-mass import
-- ✅ watchOS companion mirror: `targets/watch/` SwiftUI app via `@bacons/apple-targets`, iPhone WCSession bridge (`modules/watch-connectivity/`), set-completion round trip with offline queue
+- ✅ watchOS mirror + standalone: exclusive `control_device` ownership, phone mirror via WCSession, watch-owned workouts with local engine + Supabase outbox (`targets/watch/`, `modules/watch-connectivity/`)
 - ✅ Privacy manifest wired via `expo.ios.privacyManifests` in app.json
 - ✅ Supabase security advisors remediated (search_path pins, trigger fn EXECUTE revokes, avatars bucket policies, anon table grants revoked)
 - ✅ Exercise library expanded to **388 master entries** (340 strength + 48 stretches) via CSV import (`supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`, migration 20260611120000); `is_stretch` column added; `adductors` muscle key added (29 canonical muscles); rule-based prescriptions seeded for all new exercises (1,164 active); AI allow-list refreshed to 340 non-stretch exercises
 - ✅ AI generation supports a `stretchCount` constraint: `generate-workout` appends stretch/mobility work per session; planner opens `GenerateDayForm` with a 0–5 stretch picker (defaults to 0)
 - ✅ `update-muscle-freshness` excludes warm-up sets from stress (`.neq('set_type','warmup')`, deployed v13); warm-up `set_type` now preserved on tap/watch set completion, so the PR-trigger warmup race is fixed
-- 🟡 Bundled exercise images: 45 illustrations in `assets/exercises/`, mapped via `src/lib/exerciseImages.ts` (no batch generation pipeline)
+- ✅ Bundled exercise images: 388 illustrations in `assets/exercises/`, mapped via `src/lib/exerciseImages.ts` (no runtime generation pipeline)
 
 ## Feature Matrix
 
@@ -173,7 +173,7 @@
 | Search exercises | ✅ Complete | Filters by name |
 | Master exercise library | ✅ Complete | 388 entries (340 strength + 48 stretches) imported from CSV 2026-06-11 |
 | Stretch entries (`is_stretch`) | ✅ Complete | Flagged separately; timed prescriptions seeded; excluded from AI strength selection |
-| Exercise images | ⚠️ Partial | 45 bundled JPGs in `assets/exercises/` + `src/lib/exerciseImages.ts` |
+| Exercise images | ✅ Complete | 388 bundled JPGs in `assets/exercises/` + `src/lib/exerciseImages.ts` |
 | Multi-select mode | ✅ Complete | Checkmark selection + "Add N exercises" footer |
 | Exercise metadata display | ✅ Complete | Name, muscles |
 | Custom exercise creation | ✅ Complete | `app/create-custom-exercise.tsx`, entry point in Add Exercise header |
@@ -288,7 +288,7 @@
 - ✅ Seeded rule-based prescriptions for all new exercises — stretches get timed holds, strength gets experience-banded reps (20260611120003; 1,164 active prescriptions live)
 - ✅ Refreshed AI allow-list to all 340 non-stretch exercises with density-based priority (20260611120004)
 - ✅ Stretch-aware AI generation: `generate-workout` accepts `stretchCount` (0–5) and appends stretches from a dedicated stretch catalog (deployed v14); planner UI in `GenerateDayForm` defaults to 0; user can select 0–5 per generation
-- ✅ Bundled exercise images: 45 JPGs in `assets/exercises/` wired through `src/lib/exerciseImages.ts` (batch pipeline removed 2026-06-14)
+- ✅ Bundled exercise images: 388 JPGs in `assets/exercises/` wired through `src/lib/exerciseImages.ts` (full master catalog; no runtime generation)
 - ✅ `update-muscle-freshness` excludes warm-up sets from stress (deployed v13)
 - ✅ Warm-up `set_type` preserved when completing sets via tap/watch — fixes the warmup PR race
 - ✅ `getExerciseHistory` excludes warm-ups from progressive-overload/weight-suggestion history

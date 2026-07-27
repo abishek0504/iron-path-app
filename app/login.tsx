@@ -17,6 +17,7 @@ import { useUserStore } from '../src/stores/userStore';
 import { devLog } from '../src/lib/utils/logger';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { Button } from '../src/components/ui/Button';
 import { restoreAccount } from '../src/lib/supabase/queries/users';
 import { mapAuthError } from '../src/lib/auth/authErrors';
 import type { UserProfile } from '../src/stores/userStore';
@@ -39,8 +40,9 @@ export default function Login() {
   const [restoreLoading, setRestoreLoading] = useState(false);
 
   /** Continue to the appropriate post-login route once we know the profile is healthy. */
-  const continueAfterLogin = (profile: UserProfile | null) => {
+  const continueAfterLogin = async (profile: UserProfile | null) => {
     if (!profile) {
+      // Auth succeeded but no profile row yet → finish onboarding.
       router.replace('/onboarding');
       return;
     }
@@ -106,7 +108,7 @@ export default function Login() {
         }
       }
 
-      continueAfterLogin(profile ?? null);
+      await continueAfterLogin(profile ?? null);
     } catch (error: unknown) {
       setErrorText(mapAuthError(error, 'Unable to sign in right now.'));
     } finally {
@@ -178,23 +180,24 @@ export default function Login() {
 
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
+        <Button
+          label="Log In"
           onPress={handleLogin}
           disabled={loading}
+          fullWidth
+          style={styles.button}
         >
-          {loading ? (
-            <LogoEdgeLoader size="small" variant="inverted" />
-          ) : (
-            <Text style={styles.buttonText}>Log In</Text>
-          )}
-        </TouchableOpacity>
+          {loading ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
 
-        <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
+        <TouchableOpacity
+          onPress={() => router.push('/auth/forgot-password')}
+          activeOpacity={0.85}
+        >
           <Text style={styles.linkText}>Forgot password?</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => router.replace('/signup')}>
+        <TouchableOpacity onPress={() => router.replace('/signup')} activeOpacity={0.85}>
           <Text style={styles.linkText}>Need an account? Sign up</Text>
         </TouchableOpacity>
       </View>
@@ -271,18 +274,6 @@ function createStyles(colors: ThemeColors) {
     },
     button: {
       marginTop: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    buttonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     errorText: {
       color: colors.error,

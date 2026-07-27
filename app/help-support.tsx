@@ -25,6 +25,7 @@ import { supabase } from '../src/lib/supabase/client';
 import { LegalLinks } from '../src/components/ui/LegalLinks';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
+import { Button } from '../src/components/ui/Button';
 
 const SUPPORT_MESSAGE_MAX_LENGTH = 5000;
 
@@ -166,18 +167,15 @@ export default function HelpSupportScreen() {
             />
           </View>
 
-          <TouchableOpacity
-            style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+          <Button
+            label="Send"
             onPress={handleSend}
             disabled={sending}
-            activeOpacity={0.85}
+            fullWidth
+            style={styles.sendButton}
           >
-            {sending ? (
-              <LogoEdgeLoader size="small" variant="inverted" />
-            ) : (
-              <Text style={styles.sendButtonText}>Send</Text>
-            )}
-          </TouchableOpacity>
+            {sending ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+          </Button>
 
           <View style={styles.legalContainer}>
             <LegalLinks />
@@ -261,20 +259,7 @@ function createStyles(colors: ThemeColors) {
       maxHeight: 200,
     },
     sendButton: {
-      backgroundColor: colors.primary,
-      borderRadius: borderRadius.lg,
-      paddingVertical: spacing.md,
-      alignItems: 'center',
-      justifyContent: 'center',
       marginTop: spacing.sm,
-    },
-    sendButtonDisabled: {
-      opacity: 0.7,
-    },
-    sendButtonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.bold,
     },
     legalContainer: {
       marginTop: spacing.lg,

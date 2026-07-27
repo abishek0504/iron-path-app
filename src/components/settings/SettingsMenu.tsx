@@ -38,6 +38,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const { themeMode } = useThemeMode();
   const router = useRouter();
   const showToast = useUIStore((state) => state.showToast);
+  const runAfterBottomSheetClosed = useUIStore((state) => state.runAfterBottomSheetClosed);
   const profile = useUserStore((state) => state.profile);
   const clearProfile = useUserStore((state) => state.clearProfile);
   const { isPro, showPaywall, restoreSubscription } = usePaywall();
@@ -62,6 +63,20 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       return;
     }
     showToast('Manage subscriptions in your device app store settings', 'info');
+  };
+
+  /** Close settings sheet first so PaywallModal / Customer Center do not stack RN Modals. */
+  const handleUpgradeOrManage = () => {
+    if (isPro) {
+      runAfterBottomSheetClosed(() => {
+        void handleManageSubscription();
+      });
+    } else {
+      runAfterBottomSheetClosed(() => {
+        showPaywall('app_open');
+      });
+    }
+    onClose?.();
   };
 
   const handleRestoreSubscription = async () => {
@@ -153,13 +168,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       label: isPro ? 'IronPath Pro' : 'Upgrade to Pro',
       sublabel: isPro ? 'Active' : undefined,
       icon: Sparkles,
-      onPress: () => {
-        if (isPro) {
-          void handleManageSubscription();
-        } else {
-          showPaywall('app_open');
-        }
-      },
+      onPress: handleUpgradeOrManage,
     },
     {
       id: 'restore-subscription',

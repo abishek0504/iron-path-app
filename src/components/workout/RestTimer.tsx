@@ -15,6 +15,7 @@ interface RestTimerProps {
 }
 
 const ACTION_BUTTON_MIN_HEIGHT = 44;
+const REST_TIMER_FONT_SIZE = 72;
 
 export const RestTimer: React.FC<RestTimerProps> = ({
   endsAtEpoch,
@@ -32,6 +33,8 @@ export const RestTimer: React.FC<RestTimerProps> = ({
 
   const styles = useMemo(() => StyleSheet.create({
     container: {
+      width: '100%',
+      alignSelf: 'stretch',
       backgroundColor: colors.card,
       borderRadius: borderRadius.md,
       padding: spacing.md,
@@ -44,18 +47,21 @@ export const RestTimer: React.FC<RestTimerProps> = ({
       fontSize: typography.sizes.sm,
       color: colors.textSecondary,
       marginBottom: spacing.xs,
+      textAlign: 'center',
     },
     timer: {
-      fontSize: typography.sizes['3xl'],
+      fontSize: REST_TIMER_FONT_SIZE,
       fontWeight: typography.weights.bold,
       color: colors.primary,
       textAlign: 'center',
     },
     progressBar: {
       height: 4,
+      width: '100%',
       backgroundColor: colors.border,
       borderRadius: 2,
       overflow: 'hidden',
+      marginTop: spacing.sm,
     },
     progressFill: {
       height: '100%',
@@ -63,6 +69,7 @@ export const RestTimer: React.FC<RestTimerProps> = ({
     },
     actions: {
       flexDirection: 'row',
+      width: '100%',
       gap: spacing.sm,
     },
     actionButton: {

@@ -27,6 +27,7 @@ import { useUserStore } from '../src/stores/userStore';
 import { useToast } from '../src/hooks/useToast';
 import { useModal } from '../src/hooks/useModal';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
+import { Button } from '../src/components/ui/Button';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { createBackloggedWorkout, type BackloggedExerciseInput } from '../src/lib/supabase/queries/workouts';
@@ -420,7 +421,7 @@ export default function LogPastWorkoutScreen() {
                         >
                           <Flame
                             size={12}
-                            color={isWarmup ? colors.background : colors.textSecondary}
+                            color={isWarmup ? colors.onPrimaryContrast : colors.textSecondary}
                           />
                           <Text
                             style={[styles.warmupChipText, isWarmup && styles.warmupChipTextActive]}
@@ -500,9 +501,13 @@ export default function LogPastWorkoutScreen() {
                 );
               })}
 
-              <TouchableOpacity style={styles.addSetButton} onPress={() => addSet(ex.key)}>
-                <Text style={styles.addSetButtonText}>Add Set</Text>
-              </TouchableOpacity>
+              <Button
+                label="Add Set"
+                variant="secondary"
+                size="sm"
+                onPress={() => addSet(ex.key)}
+                fullWidth
+              />
             </View>
           ))
         )}
@@ -512,17 +517,15 @@ export default function LogPastWorkoutScreen() {
           <Text style={styles.addExerciseButtonText}>Add exercise</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.primaryBtn, (saving || !isValid) && styles.btnDisabled]}
+        <Button
+          label="Save workout"
           onPress={handleSave}
           disabled={saving || !isValid}
+          fullWidth
+          style={styles.primaryBtn}
         >
-          {saving ? (
-            <LogoEdgeLoader size="small" variant="inverted" />
-          ) : (
-            <Text style={styles.primaryBtnText}>Save workout</Text>
-          )}
-        </TouchableOpacity>
+          {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
 
         <Text style={styles.hint}>
           Logged workouts count toward your metrics, PRs, streaks, and progressive overload.
@@ -679,7 +682,7 @@ function createStyles(colors: ThemeColors) {
       color: colors.textSecondary,
     },
     warmupChipTextActive: {
-      color: colors.background,
+      color: colors.onPrimaryContrast,
     },
     removeSetText: {
       fontSize: typography.sizes.sm,
@@ -719,19 +722,6 @@ function createStyles(colors: ThemeColors) {
       color: colors.error,
       marginTop: spacing.xs,
     },
-    addSetButton: {
-      alignItems: 'center',
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.md,
-      borderWidth: 1,
-      borderColor: colors.borderLight,
-      backgroundColor: colors.background,
-    },
-    addSetButtonText: {
-      fontSize: typography.sizes.sm,
-      fontWeight: '600',
-      color: colors.textPrimary,
-    },
     addExerciseButton: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -750,20 +740,7 @@ function createStyles(colors: ThemeColors) {
       color: colors.primary,
     },
     primaryBtn: {
-      backgroundColor: colors.primary,
-      borderRadius: borderRadius.md,
-      paddingVertical: spacing.md,
-      alignItems: 'center',
-      justifyContent: 'center',
       minHeight: 52,
-    },
-    primaryBtnText: {
-      fontSize: typography.sizes.base,
-      fontWeight: '700',
-      color: colors.background,
-    },
-    btnDisabled: {
-      opacity: 0.5,
     },
     hint: {
       fontSize: typography.sizes.xs,

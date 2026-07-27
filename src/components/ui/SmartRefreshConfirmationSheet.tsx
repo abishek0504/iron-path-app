@@ -4,19 +4,13 @@
  */
 
 import React, { useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Modal,
-  ScrollView,
-} from 'react-native';
-import { X } from 'lucide-react-native';
-import { spacing, typography, borderRadius } from '../../lib/utils/theme';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { spacing, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import type { SmartRefreshPlan } from '../../lib/supabase/queries/workouts_helpers';
 import { LogoEdgeLoader } from './LogoEdgeLoader';
+import { BottomSheet } from './BottomSheet';
+import { Button } from './Button';
 
 interface SmartRefreshConfirmationSheetProps {
   visible: boolean;
@@ -34,145 +28,96 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
   applying,
 }) => {
   const colors = useTheme();
-  const styles = useMemo(() => StyleSheet.create({
-    overlay: {
-      flex: 1,
-      backgroundColor: colors.modalBackdropTint,
-      justifyContent: 'flex-end',
-      alignItems: 'stretch',
-    },
-    container: {
-      backgroundColor: colors.background,
-      borderTopLeftRadius: borderRadius.lg,
-      borderTopRightRadius: borderRadius.lg,
-      padding: spacing.lg,
-      maxHeight: '70%',
-    },
-    header: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: spacing.md,
-    },
-    title: {
-      fontSize: typography.sizes.lg,
-      fontWeight: '700',
-      color: colors.textPrimary,
-    },
-    closeBtn: {
-      padding: spacing.xs,
-    },
-    scroll: {
-      maxHeight: 280,
-    },
-    scrollContent: {
-      paddingBottom: spacing.md,
-    },
-    section: {
-      marginBottom: spacing.md,
-    },
-    sectionTitle: {
-      fontSize: typography.sizes.sm,
-      fontWeight: '600',
-      color: colors.textSecondary,
-      marginBottom: spacing.xs,
-    },
-    bullet: {
-      fontSize: typography.sizes.sm,
-      color: colors.textPrimary,
-      marginLeft: spacing.sm,
-    },
-    noChanges: {
-      fontSize: typography.sizes.sm,
-      color: colors.textSecondary,
-      fontStyle: 'italic',
-    },
-    applyButton: {
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-      marginTop: spacing.sm,
-    },
-    applyButtonDisabled: {
-      opacity: 0.7,
-    },
-    applyButtonText: {
-      color: colors.background,
-      fontSize: typography.sizes.md,
-      fontWeight: '600',
-    },
-  }), [colors]);
-
-  if (!visible) return null;
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        body: {
+          flex: 1,
+          gap: spacing.md,
+          paddingBottom: spacing.md,
+        },
+        scroll: {
+          flexGrow: 0,
+          maxHeight: 280,
+        },
+        scrollContent: {
+          paddingBottom: spacing.sm,
+        },
+        section: {
+          marginBottom: spacing.md,
+        },
+        sectionTitle: {
+          fontSize: typography.sizes.sm,
+          fontWeight: typography.weights.semibold,
+          color: colors.textSecondary,
+          marginBottom: spacing.xs,
+        },
+        bullet: {
+          fontSize: typography.sizes.sm,
+          color: colors.textPrimary,
+          marginLeft: spacing.sm,
+        },
+        noChanges: {
+          fontSize: typography.sizes.sm,
+          color: colors.textSecondary,
+          fontStyle: 'italic',
+        },
+      }),
+    [colors]
+  );
 
   const hasChanges =
     plan &&
     (plan.additions.length > 0 || plan.removals.length > 0 || plan.hasAdjustments);
 
   return (
-    <Modal
+    <BottomSheet
       visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
+      onClose={onClose}
+      title="Plan Update Available"
+      height="70%"
     >
-      <View style={styles.overlay}>
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Plan Update Available</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeBtn}>
-              <X size={24} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-            {plan?.additions && plan.additions.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Adding</Text>
-                {plan.additions.map((a, i) => (
-                  <Text key={i} style={styles.bullet}>
-                    • {a.name}
-                  </Text>
-                ))}
-              </View>
-            )}
-            {plan?.removals && plan.removals.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Removing</Text>
-                {plan.removals.map((r, i) => (
-                  <Text key={i} style={styles.bullet}>
-                    • {r.name}
-                  </Text>
-                ))}
-              </View>
-            )}
-            {plan?.hasAdjustments && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Adjustments</Text>
-                <Text style={styles.bullet}>
-                  • Recalculating targets from latest history
+      <View style={styles.body}>
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+          {plan?.additions && plan.additions.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Adding</Text>
+              {plan.additions.map((a, i) => (
+                <Text key={i} style={styles.bullet}>
+                  • {a.name}
                 </Text>
-              </View>
-            )}
-            {!hasChanges && (
-              <Text style={styles.noChanges}>No structural changes; only target recalculation.</Text>
-            )}
-          </ScrollView>
+              ))}
+            </View>
+          )}
+          {plan?.removals && plan.removals.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Removing</Text>
+              {plan.removals.map((r, i) => (
+                <Text key={i} style={styles.bullet}>
+                  • {r.name}
+                </Text>
+              ))}
+            </View>
+          )}
+          {plan?.hasAdjustments && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Adjustments</Text>
+              <Text style={styles.bullet}>• Recalculating targets from latest history</Text>
+            </View>
+          )}
+          {!hasChanges && (
+            <Text style={styles.noChanges}>No structural changes; only target recalculation.</Text>
+          )}
+        </ScrollView>
 
-          <TouchableOpacity
-            style={[styles.applyButton, applying && styles.applyButtonDisabled]}
-            onPress={onApply}
-            disabled={applying}
-          >
-            {applying ? (
-              <LogoEdgeLoader size="small" variant="inverted" />
-            ) : (
-              <Text style={styles.applyButtonText}>Apply Updates</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        {applying ? (
+          <View style={{ alignItems: 'center', paddingVertical: spacing.md }}>
+            <LogoEdgeLoader size="small" variant="inverted" />
+          </View>
+        ) : (
+          <Button label="Apply Updates" onPress={onApply} fullWidth />
+        )}
       </View>
-    </Modal>
+    </BottomSheet>
   );
 };

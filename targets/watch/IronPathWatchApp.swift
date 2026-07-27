@@ -8,6 +8,7 @@ struct IronPathWatchApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(workoutSession)
+                .environmentObject(workoutSession.standalone)
         }
     }
 }

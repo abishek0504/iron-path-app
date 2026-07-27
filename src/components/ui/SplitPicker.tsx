@@ -115,7 +115,7 @@ function createStyles(colors: ThemeColors) {
       fontWeight: typography.weights.medium,
     },
     optionRowTextSelected: {
-      color: colors.textPrimary,
+      color: colors.primary,
       fontWeight: typography.weights.semibold,
     },
     descriptionText: {

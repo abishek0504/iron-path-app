@@ -33,12 +33,12 @@ enum CompletionSyncStatus: Equatable {
     case retry
 }
 
-/// Snapshot of the phone's active workout, mirrored over WCSession
-/// `applicationContext`. The phone is the single source of truth; the watch
-/// only renders this state and reports set-completion taps.
+/// Phone-mirrored snapshot OR projection from the local standalone engine.
 struct WorkoutState: Equatable {
     var active = false
     var sessionId = ""
+    /// phone = mirror remote-control; watch = local engine owns progression.
+    var controlDevice = "phone"
     var exerciseName = ""
     var setNumber = 0
     var totalSets = 0
@@ -54,78 +54,102 @@ struct WorkoutState: Equatable {
     var supersetLabel: String?
 }
 
-final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
+@MainActor
+final class WatchWorkoutSession: NSObject, ObservableObject {
     @Published var state = WorkoutState()
     @Published var isSendingCompletion = false
     @Published var pendingCompletionKey: String?
     @Published var completionSyncStatus: CompletionSyncStatus = .idle
 
     let healthManager = WatchHealthWorkoutManager()
+    let standalone = WatchStandaloneEngine()
 
     private var completionRetryTimer: Timer?
     private var previousSetNumber = 0
     private var previousPhase = "execution"
+    private let sessionBridge = WatchSessionBridge()
+
+    var isStandaloneActive: Bool {
+        standalone.isActive
+    }
 
     override init() {
         super.init()
-        guard WCSession.isSupported() else { return }
-        let session = WCSession.default
-        session.delegate = self
-        session.activate()
-    }
-
-    // MARK: - WCSessionDelegate
-
-    func session(
-        _ session: WCSession,
-        activationDidCompleteWith activationState: WCSessionActivationState,
-        error: Error?
-    ) {
-        DispatchQueue.main.async { [weak self] in
-            self?.apply(context: session.receivedApplicationContext)
+        healthManager.onWorkoutEnded = { [weak self] sessionId, uuid in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.standalone.snapshot?.sessionId == sessionId {
+                    self.standalone.enqueueHkUuid(uuid)
+                }
+            }
         }
-    }
+        publishStandaloneIfNeeded()
 
-    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        DispatchQueue.main.async { [weak self] in
-            self?.apply(context: applicationContext)
+        sessionBridge.onContext = { [weak self] context in
+            Task { @MainActor in
+                self?.apply(context: context)
+            }
         }
+        sessionBridge.activate()
     }
 
-    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        handleIncomingMessage(message)
+    func publishStandaloneIfNeededPublic() {
+        publishStandaloneIfNeeded()
     }
 
-    func session(
-        _ session: WCSession,
-        didReceiveMessage message: [String: Any],
-        replyHandler: @escaping ([String: Any]) -> Void
-    ) {
-        handleIncomingMessage(message)
-        replyHandler(["ok": true])
+    func resetToIdle() {
+        state = WorkoutState()
+        completionSyncStatus = .idle
+        pendingCompletionKey = nil
+        isSendingCompletion = false
+        cancelCompletionRetryTimer()
+        writeComplicationSnapshot(from: state)
+        healthManager.syncWorkoutState(active: false, sessionId: "", phase: "execution")
     }
 
-    private func handleIncomingMessage(_ message: [String: Any]) {
-        guard message["type"] as? String == workoutContextMessageType else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.apply(context: message)
-        }
+    private func publishStandaloneIfNeeded() {
+        guard standalone.isActive || standalone.snapshot?.phase == .complete else { return }
+        let next = standalone.mirroredWorkoutState()
+        state = next
+        writeComplicationSnapshot(from: next)
+        let hkActive = next.phase != "complete" && next.active
+        healthManager.syncWorkoutState(
+            active: hkActive,
+            sessionId: next.sessionId,
+            phase: next.phase
+        )
     }
+
+    // MARK: - WCSession bridge helpers
 
     // MARK: - State
 
     private func apply(context: [String: Any]) {
+        let controlDevice = context["controlDevice"] as? String ?? "phone"
+        // Ignore phone mirror pushes while a watch-owned workout is running.
+        if standalone.isActive || standalone.snapshot?.phase == .complete {
+            if controlDevice != "watch" {
+                return
+            }
+        }
+        // Never let phone context drive a watch-owned remote session id mismatch.
+        if controlDevice == "watch" {
+            return
+        }
+
         let priorPendingKey = pendingCompletionKey
         let priorSetNumber = state.setNumber
         let priorPhase = state.phase
 
         var next = state
+        next.controlDevice = controlDevice
 
         if context.keys.contains("active") {
             next.active = context["active"] as? Bool ?? false
             if !next.active {
                 next = WorkoutState()
                 next.active = false
+                next.controlDevice = controlDevice
                 if let sessionId = context["sessionId"] as? String {
                     next.sessionId = sessionId
                 }
@@ -255,6 +279,9 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     var canCompleteSet: Bool {
+        if standalone.isActive {
+            return state.phase == "execution"
+        }
         guard state.active, state.phase == "execution" else { return false }
         if pendingCompletionKey != currentCompletionKey { return true }
         return completionSyncStatus == .retry || completionSyncStatus == .queued
@@ -263,6 +290,11 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     // MARK: - Actions
 
     func skipRest() {
+        if standalone.isActive {
+            standalone.skipRest()
+            publishStandaloneIfNeeded()
+            return
+        }
         guard state.active, state.phase == "rest", !state.sessionId.isEmpty else { return }
         sendEvent([
             "type": "skipRest",
@@ -272,6 +304,11 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func extendRest(seconds: Int = restExtendSec) {
+        if standalone.isActive {
+            standalone.extendRest(seconds: seconds)
+            publishStandaloneIfNeeded()
+            return
+        }
         guard state.active, state.phase == "rest", !state.sessionId.isEmpty else { return }
         sendEvent([
             "type": "extendRest",
@@ -282,6 +319,11 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func submitRpe(_ rpe: Int) {
+        if standalone.isActive || standalone.snapshot?.phase == .setRpe {
+            standalone.submitRpe(rpe)
+            publishStandaloneIfNeeded()
+            return
+        }
         guard state.active, state.phase == "setRpe", state.timedSetRpe, !state.sessionId.isEmpty else {
             return
         }
@@ -295,6 +337,12 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func completeCurrentSet() {
+        if standalone.isActive {
+            standalone.completeCurrentSet()
+            publishStandaloneIfNeeded()
+            completionSyncStatus = standalone.pendingOutboxCount > 0 ? .queued : .sent
+            return
+        }
         guard canCompleteSet else { return }
 
         WKInterfaceDevice.current().play(.click)
@@ -314,7 +362,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         let session = WCSession.default
         if session.isReachable {
             session.sendMessage(payload, replyHandler: { [weak self] reply in
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     guard let self else { return }
                     self.isSendingCompletion = false
                     if let ok = reply["ok"] as? Bool, ok {
@@ -325,7 +373,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }, errorHandler: { [weak self] _ in
                 session.transferUserInfo(payload)
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self?.isSendingCompletion = false
                     self?.completionSyncStatus = .queued
                 }
@@ -335,6 +383,17 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
             isSendingCompletion = false
             completionSyncStatus = .queued
         }
+    }
+
+    func startStandaloneWorkout() {
+        Task {
+            await standalone.startTodaysWorkout()
+            publishStandaloneIfNeeded()
+        }
+    }
+
+    func beginAdjustTargets() {
+        standalone.beginAdjust()
     }
 
     private func sendEvent(_ payload: [String: Any]) {
@@ -352,7 +411,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
         cancelCompletionRetryTimer()
         completionRetryTimer = Timer.scheduledTimer(withTimeInterval: completionRetrySec, repeats: false) {
             [weak self] _ in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 guard let self, self.pendingCompletionKey != nil else { return }
                 self.completionSyncStatus = .retry
                 self.isSendingCompletion = false
@@ -363,5 +422,45 @@ final class WatchWorkoutSession: NSObject, ObservableObject, WCSessionDelegate {
     private func cancelCompletionRetryTimer() {
         completionRetryTimer?.invalidate()
         completionRetryTimer = nil
+    }
+}
+
+/// Nonisolated WCSession delegate that forwards context onto the main actor.
+private final class WatchSessionBridge: NSObject, WCSessionDelegate {
+    var onContext: (([String: Any]) -> Void)?
+
+    func activate() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        session.delegate = self
+        session.activate()
+    }
+
+    func session(
+        _ session: WCSession,
+        activationDidCompleteWith activationState: WCSessionActivationState,
+        error: Error?
+    ) {
+        onContext?(session.receivedApplicationContext)
+    }
+
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        onContext?(applicationContext)
+    }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        guard message["type"] as? String == workoutContextMessageType else { return }
+        onContext?(message)
+    }
+
+    func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        if message["type"] as? String == workoutContextMessageType {
+            onContext?(message)
+        }
+        replyHandler(["ok": true])
     }
 }

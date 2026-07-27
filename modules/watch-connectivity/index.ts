@@ -9,9 +9,13 @@
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule, type NativeModule } from 'expo-modules-core';
 
+export type WatchControlDevice = 'phone' | 'watch';
+
 export interface WatchWorkoutContext {
   active: boolean;
   sessionId?: string;
+  /** Which device owns progression. Mirror mode only when phone. */
+  controlDevice?: WatchControlDevice;
   exerciseName?: string;
   setNumber?: number;
   totalSets?: number;
@@ -32,6 +36,15 @@ export interface WatchWorkoutContext {
   /** True during timed-set RPE step (watch shows quick picker). */
   timedSetRpe?: boolean;
   updatedAt?: number;
+}
+
+export interface WatchAuthPayload {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt?: number;
+  userId: string;
+  supabaseUrl: string;
+  supabaseAnonKey: string;
 }
 
 export interface WatchSetCompletedEvent {
@@ -102,6 +115,8 @@ declare class WatchConnectivityNativeModule extends NativeModule<WatchConnectivi
   updateWorkoutContext(context: Record<string, unknown>): Promise<void>;
   clearWorkoutContext(): Promise<void>;
   startWatchApp(sessionId: string): Promise<void>;
+  syncAuthToWatch(payload: Record<string, unknown>): Promise<void>;
+  clearAuthFromWatch(): Promise<void>;
 }
 
 const native =
@@ -167,6 +182,33 @@ export async function startWatchApp(sessionId: string): Promise<void> {
     await native.startWatchApp(sessionId);
   } catch {
     // No paired watch or OS declined — safe to ignore.
+  }
+}
+
+/** Share auth + Supabase config with the watch via App Group (standalone workouts). */
+export async function syncAuthToWatch(payload: WatchAuthPayload): Promise<void> {
+  if (!native?.syncAuthToWatch) return;
+  try {
+    await native.syncAuthToWatch({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+      expiresAt: payload.expiresAt ?? 0,
+      userId: payload.userId,
+      supabaseUrl: payload.supabaseUrl,
+      supabaseAnonKey: payload.supabaseAnonKey,
+    });
+  } catch {
+    // Watch / App Group unavailable — phone workouts still work.
+  }
+}
+
+/** Clear shared auth when the user signs out on phone. */
+export async function clearAuthFromWatch(): Promise<void> {
+  if (!native?.clearAuthFromWatch) return;
+  try {
+    await native.clearAuthFromWatch();
+  } catch {
+    // Safe to ignore.
   }
 }
 

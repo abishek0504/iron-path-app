@@ -4,10 +4,10 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import { BottomSheet, type BottomSheetHandle } from '../ui/BottomSheet';
+import { Button } from '../ui/Button';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { PRESET_NAME_MAX_LENGTH } from '../../lib/supabase/queries/presets';
@@ -51,8 +51,8 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
     () =>
       StyleSheet.create({
         content: {
-          padding: spacing.lg,
           gap: spacing.md,
+          paddingBottom: spacing.md,
         },
         label: {
           color: colors.textSecondary,
@@ -80,32 +80,8 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
           gap: spacing.sm,
           marginTop: spacing.sm,
         },
-        button: {
-          paddingVertical: spacing.sm,
-          paddingHorizontal: spacing.lg,
-          borderRadius: borderRadius.md,
+        actionButton: {
           minWidth: 88,
-          alignItems: 'center',
-        },
-        cancelButton: {
-          borderWidth: 1,
-          borderColor: colors.cardBorder,
-        },
-        saveButton: {
-          backgroundColor: colors.primary,
-        },
-        saveButtonDisabled: {
-          opacity: 0.5,
-        },
-        cancelText: {
-          color: colors.textPrimary,
-          fontSize: typography.sizes.base,
-          fontWeight: typography.weights.medium,
-        },
-        saveText: {
-          color: colors.background,
-          fontSize: typography.sizes.base,
-          fontWeight: typography.weights.semibold,
         },
       }),
     [colors]
@@ -136,24 +112,25 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
           {trimmed.length}/{PRESET_NAME_MAX_LENGTH}
         </Text>
         <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.button, styles.cancelButton]}
+          <Button
+            label="Cancel"
+            variant="secondary"
+            size="sm"
             onPress={requestClose}
             disabled={saving}
-          >
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.saveButton, !canSave && styles.saveButtonDisabled]}
+            style={styles.actionButton}
+          />
+          <Button
+            label={mode === 'create' ? 'Save' : 'Rename'}
+            size="sm"
             onPress={() => canSave && onSave(trimmed)}
             disabled={!canSave}
+            style={styles.actionButton}
           >
             {saving ? (
-              <ActivityIndicator color={colors.background} size="small" />
-            ) : (
-              <Text style={styles.saveText}>{mode === 'create' ? 'Save' : 'Rename'}</Text>
-            )}
-          </TouchableOpacity>
+              <ActivityIndicator color={colors.onPrimaryContrast} size="small" />
+            ) : undefined}
+          </Button>
         </View>
       </View>
     </BottomSheet>

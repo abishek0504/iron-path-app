@@ -19,6 +19,8 @@ import { Plus, Trash2, CheckCircle, Bookmark } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
+import { Button } from '../../src/components/ui/Button';
+import { Chip } from '../../src/components/ui/Chip';
 import { TourTarget } from '../../src/components/tour/TourTarget';
 import { useRegisterTourScroll, type TourScrollable } from '../../src/components/tour/TourScroll';
 import { useToast } from '../../src/hooks/useToast';
@@ -1994,16 +1996,17 @@ export default function PlannerTab() {
         {/* Day selector - always show all 7 days in fixed order */}
         <TourTarget id="tour.plan.daySelector" testID="tour-plan-day-selector">
         <View style={styles.daySelector}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {WEEK_DAYS.map((weekday, index) => {
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daySelectorRow}>
+            {WEEK_DAYS.map((weekday) => {
               // Find corresponding template_day record (should always exist after ensureTemplateHasWeekDays)
               const dayData = templateData.days.find((d) => d.day.day_name === weekday);
               const isSelected = selectedDay?.day.day_name === weekday;
 
               return (
-                <TouchableOpacity
+                <Chip
                   key={dayData?.day.id || weekday}
-                  style={[styles.dayButton, isSelected && styles.dayButtonSelected]}
+                  label={weekday}
+                  selected={isSelected}
                   onPress={() => {
                     // Find index of this day in templateData.days array
                     const dayIndex = templateData.days.findIndex((d) => d.day.day_name === weekday);
@@ -2011,16 +2014,7 @@ export default function PlannerTab() {
                       setSelectedDayIndex(dayIndex);
                     }
                   }}
-                >
-                  <Text
-                    style={[
-                      styles.dayButtonText,
-                      isSelected && styles.dayButtonTextSelected,
-                    ]}
-                  >
-                    {weekday}
-                  </Text>
-                </TouchableOpacity>
+                />
               );
             })}
           </ScrollView>
@@ -2033,14 +2027,18 @@ export default function PlannerTab() {
             <View style={styles.dayHeader}>
               <Text style={styles.dayTitle}>{selectedDay.day.day_name}</Text>
               <TourTarget id="tour.plan.addWorkout" testID="tour-plan-add-workout">
-              <TouchableOpacity
-                style={styles.addButton}
+              <Button
+                label="Add Workout"
+                variant="secondary"
+                size="sm"
                 onPress={handleAddWorkout}
                 disabled={isSaving}
               >
-                <Plus size={20} color={colors.primary} />
-                <Text style={styles.addButtonText}>Add Workout</Text>
-              </TouchableOpacity>
+                <View style={styles.addButtonContent}>
+                  <Plus size={20} color={colors.primary} />
+                  <Text style={styles.addButtonText}>Add Workout</Text>
+                </View>
+              </Button>
               </TourTarget>
             </View>
 
@@ -2294,8 +2292,10 @@ export default function PlannerTab() {
                           }}
                         />
                         <TourTarget id="tour.plan.addExercise" testID="tour-plan-add-exercise">
-                        <TouchableOpacity
-                          style={[styles.addButton, styles.addExerciseInContent]}
+                        <Button
+                          label="Add Exercise"
+                          variant="secondary"
+                          size="sm"
                           onPress={() => {
                             if (!activeTemplateId || !selectedDay) return;
                             router.push({
@@ -2309,10 +2309,13 @@ export default function PlannerTab() {
                             });
                           }}
                           disabled={isSaving}
+                          style={styles.addExerciseInContent}
                         >
-                          <Plus size={20} color={colors.primary} />
-                          <Text style={styles.addExerciseButtonText}>Add Exercise</Text>
-                        </TouchableOpacity>
+                          <View style={styles.addButtonContent}>
+                            <Plus size={20} color={colors.primary} />
+                            <Text style={styles.addExerciseButtonText}>Add Exercise</Text>
+                          </View>
+                        </Button>
                         </TourTarget>
                       </View>
                     </View>
@@ -2321,8 +2324,9 @@ export default function PlannerTab() {
               )}
             </>
 
-            <TouchableOpacity
-              style={[styles.loadPresetButton, isApplyingPreset && styles.loadPresetButtonDisabled]}
+            <Button
+              label="Load from preset"
+              variant="secondary"
               onPress={() => {
                 if (!activeTemplateId) {
                   if (__DEV__) devLog('planner', { action: 'loadPreset_skipped', missing: ['activeTemplateId'] });
@@ -2332,14 +2336,15 @@ export default function PlannerTab() {
                 void handleOpenLoadPreset();
               }}
               disabled={isApplyingPreset}
-            >
-              <Text style={styles.loadPresetButtonText}>Load from preset</Text>
-            </TouchableOpacity>
+              fullWidth
+              style={styles.loadPresetButton}
+            />
 
             {/* Generate with AI button */}
             <TourTarget id="tour.plan.generateAi" testID="tour-plan-generate-ai">
-            <TouchableOpacity
-              style={styles.generateButton}
+            <Button
+              label="Generate with AI"
+              variant="secondary"
               onPress={() => {
                 const missing: string[] = [];
                 if (!templateData) missing.push('templateData');
@@ -2351,9 +2356,9 @@ export default function PlannerTab() {
                 }
                 requestGenerateAi(() => setShowGenerateDayForm(true));
               }}
-            >
-              <Text style={styles.generateButtonText}>Generate with AI</Text>
-            </TouchableOpacity>
+              fullWidth
+              style={styles.generateButton}
+            />
             </TourTarget>
 
           </View>
@@ -2552,27 +2557,9 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   daySelector: {
     marginBottom: spacing.sm,
   },
-  dayButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginRight: spacing.sm,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  dayButtonSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  dayButtonText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.medium,
-  },
-  dayButtonTextSelected: {
-    color: colors.background,
-    fontWeight: typography.weights.semibold,
+  daySelectorRow: {
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   dayContent: {
     gap: spacing.md,
@@ -2588,35 +2575,12 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.textPrimary,
   },
   loadPresetButton: {
-    width: '100%',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginTop: spacing.sm,
   },
-  loadPresetButtonDisabled: {
-    opacity: 0.5,
-  },
-  loadPresetButtonText: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.medium,
-  },
-  addButton: {
+  addButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
   },
   addExerciseInContent: {
     marginTop: spacing.sm,
@@ -2816,18 +2780,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontStyle: 'italic',
   },
   generateButton: {
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
     marginTop: spacing.sm,
-  },
-  generateButtonText: {
-    color: colors.primary,
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
   },
   slotSupersetChip: {
     fontSize: typography.sizes.xs,

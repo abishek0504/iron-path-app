@@ -142,7 +142,7 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
         startText: {
           fontSize: typography.sizes.lg,
           fontWeight: typography.weights.semibold,
-          color: colors.background,
+          color: colors.onPrimaryContrast,
         },
         runningRow: {
           flexDirection: 'row',
@@ -193,7 +193,7 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
           <Text style={styles.label}>Hold for</Text>
           <Text style={styles.targetDuration}>{durationSec} sec</Text>
           <TouchableOpacity style={styles.startButton} onPress={handleStart}>
-            <Play size={20} color={colors.background} />
+            <Play size={20} color={colors.onPrimaryContrast} />
             <Text style={styles.startText}>Start</Text>
           </TouchableOpacity>
         </View>

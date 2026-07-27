@@ -12,7 +12,6 @@ import {
   TouchableOpacity,
   FlatList,
   TextInput,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -24,8 +23,10 @@ import { useToast } from '../src/hooks/useToast';
 import { supabase } from '../src/lib/supabase/client';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
 import { deleteUserCustomExercise } from '../src/lib/supabase/queries/customExerciseMutations';
+import { searchExercisesByName } from '../src/lib/exercises/searchExercises';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
+import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 
 function formatMuscles(muscles: string[] | undefined): string {
   if (!muscles?.length) return '';
@@ -45,6 +46,8 @@ export default function AddExerciseScreen() {
   const [exercises, setExercises] = useState<MergedExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [exerciseToDelete, setExerciseToDelete] = useState<MergedExercise | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Resolve userId from store or auth session so we don't wait on profile
   useEffect(() => {
@@ -105,36 +108,28 @@ export default function AddExerciseScreen() {
     [router]
   );
 
-  const confirmDeleteCustom = useCallback(
-    (exercise: MergedExercise) => {
-      Alert.alert(
-        'Delete custom exercise?',
-        `"${exercise.name}" will be removed from your library. Existing logged workouts are not affected.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: async () => {
-              if (!userId) return;
-              const ok = await deleteUserCustomExercise(userId, exercise.id);
-              if (ok) {
-                setExercises((prev) => prev.filter((e) => e.id !== exercise.id));
-                toast.success('Exercise deleted');
-              } else {
-                toast.error('Failed to delete exercise');
-              }
-            },
-          },
-        ]
-      );
-    },
-    [userId, toast]
-  );
+  const confirmDeleteCustom = useCallback((exercise: MergedExercise) => {
+    setExerciseToDelete(exercise);
+  }, []);
 
-  const filtered = search.trim()
-    ? exercises.filter((e) => e.name.toLowerCase().includes(search.trim().toLowerCase()))
-    : exercises;
+  const handleConfirmDelete = useCallback(async () => {
+    if (!userId || !exerciseToDelete) return;
+    setDeleting(true);
+    try {
+      const ok = await deleteUserCustomExercise(userId, exerciseToDelete.id);
+      if (ok) {
+        setExercises((prev) => prev.filter((e) => e.id !== exerciseToDelete.id));
+        toast.success('Exercise deleted');
+        setExerciseToDelete(null);
+      } else {
+        toast.error('Failed to delete exercise');
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }, [userId, exerciseToDelete, toast]);
+
+  const filtered = searchExercisesByName(exercises, search);
 
   const openDetail = (exercise: MergedExercise) => {
     if (!dayId || !templateId || !dayName) return;
@@ -260,6 +255,24 @@ export default function AddExerciseScreen() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        visible={!!exerciseToDelete}
+        title="Delete custom exercise?"
+        message={
+          exerciseToDelete
+            ? `"${exerciseToDelete.name}" will be removed from your library. Existing logged workouts are not affected.`
+            : ''
+        }
+        confirmLabel={deleting ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        confirmDestructive
+        confirmDisabled={deleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!deleting) setExerciseToDelete(null);
+        }}
+      />
     </SafeAreaView>
   );
 }

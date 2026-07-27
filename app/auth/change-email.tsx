@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
+import { Button } from '../../src/components/ui/Button';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
@@ -97,20 +98,17 @@ export default function ChangeEmailScreen() {
 
         {info ? <Text style={styles.infoText}>{info}</Text> : null}
 
-        <TouchableOpacity
-          style={[styles.button, sending && styles.buttonDisabled]}
+        <Button
+          label="Send confirmation link"
           onPress={handleSend}
           disabled={sending}
-          activeOpacity={0.85}
+          fullWidth
+          style={styles.button}
         >
-          {sending ? (
-            <LogoEdgeLoader size="small" variant="inverted" />
-          ) : (
-            <Text style={styles.buttonText}>Send confirmation link</Text>
-          )}
-        </TouchableOpacity>
+          {sending ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
 
-        <TouchableOpacity onPress={() => router.back()} style={styles.linkWrap}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.linkWrap} activeOpacity={0.85}>
           <Text style={styles.linkText}>Back</Text>
         </TouchableOpacity>
       </View>
@@ -173,18 +171,6 @@ function createStyles(colors: ThemeColors) {
     },
     button: {
       marginTop: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    buttonDisabled: {
-      opacity: 0.6,
-    },
-    buttonText: {
-      color: colors.background,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
     },
     linkWrap: {
       alignItems: 'center',

@@ -8,7 +8,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { spacing, typography, type ThemeColors } from '../../lib/utils/theme';
+import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 
 interface RPESliderProps {
@@ -64,7 +64,7 @@ export const RPESlider: React.FC<RPESliderProps> = ({
     valueBox: {
       minWidth: 40,
       height: 32,
-      borderRadius: 8,
+      borderRadius: borderRadius.sm,
       justifyContent: 'center',
       alignItems: 'center',
       paddingHorizontal: spacing.sm,
@@ -72,7 +72,7 @@ export const RPESlider: React.FC<RPESliderProps> = ({
     valueText: {
       fontSize: typography.sizes.lg,
       fontWeight: typography.weights.bold,
-      color: colors.background,
+      color: colors.onPrimaryContrast,
     },
     slider: {
       width: '100%',

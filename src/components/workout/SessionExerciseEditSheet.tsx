@@ -12,6 +12,7 @@ import { Link2, X } from 'lucide-react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { BottomSheet, type BottomSheetHandle } from '../ui/BottomSheet';
+import { Button } from '../ui/Button';
 import { supabase } from '../../lib/supabase/client';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { SetType } from '../../lib/supabase/queries/workouts';
@@ -477,26 +478,23 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
 
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           {onDelete && (
-            <TouchableOpacity
-              style={styles.deleteButton}
+            <Button
+              label="Delete Exercise"
+              variant="destructive"
               onPress={() => {
                 onDelete();
                 requestClose();
               }}
               disabled={saving || loading}
-            >
-              <Text style={styles.deleteButtonText}>Delete Exercise</Text>
-            </TouchableOpacity>
+              fullWidth
+            />
           )}
-          <TouchableOpacity
-            style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+          <Button
+            label={saving ? 'Saving...' : 'Save Defaults'}
             onPress={handleSave}
             disabled={saving || loading}
-          >
-            <Text style={styles.saveButtonText}>
-              {saving ? 'Saving...' : 'Save Defaults'}
-            </Text>
-          </TouchableOpacity>
+            fullWidth
+          />
         </View>
       </View>
     </BottomSheet>
@@ -603,20 +601,6 @@ function createStyles(colors: ThemeColors) {
     borderTopColor: colors.border,
     gap: spacing.sm,
   },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.5,
-  },
-  saveButtonText: {
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-    color: colors.background,
-  },
   setHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -721,19 +705,6 @@ function createStyles(colors: ThemeColors) {
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.semibold,
     color: colors.primary,
-  },
-  deleteButton: {
-    backgroundColor: colors.error + '20',
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.error,
-    padding: spacing.md,
-    alignItems: 'center',
-  },
-  deleteButtonText: {
-    fontSize: typography.sizes.base,
-    fontWeight: typography.weights.semibold,
-    color: colors.error,
   },
   });
 }

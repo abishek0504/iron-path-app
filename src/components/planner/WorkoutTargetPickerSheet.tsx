@@ -30,8 +30,8 @@ export const WorkoutTargetPickerSheet: React.FC<Props> = ({
     () =>
       StyleSheet.create({
         content: {
-          padding: spacing.lg,
           gap: spacing.sm,
+          paddingBottom: spacing.md,
         },
         subtitle: {
           color: colors.textSecondary,

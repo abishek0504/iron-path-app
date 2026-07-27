@@ -232,6 +232,7 @@ export async function writeCompletedWorkoutToHealth(
     if (error || !session) return;
 
     const watchUuid = payload?.watchHkWorkoutUuid;
+    // Prefer an existing linked workout or the watch HK session — never double-save.
     if (session.hk_workout_uuid && !watchUuid) return;
 
     const start = new Date(session.started_at);
@@ -243,6 +244,7 @@ export async function writeCompletedWorkoutToHealth(
 
     let hkWorkoutUuid = session.hk_workout_uuid ?? watchUuid ?? null;
 
+    // Watch already created the Health workout — only link the UUID, skip phone sample.
     if (!hkWorkoutUuid) {
       const quantities = buildHealthKitQuantities(
         payload?.heartRateSamples ?? [],
