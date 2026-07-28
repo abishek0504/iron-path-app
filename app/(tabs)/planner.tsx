@@ -65,6 +65,11 @@ import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS } from '../../src/lib/utils/date';
+import {
+  computeRoutineSessionExerciseIds as computeRoutineIdsFromSlots,
+  dayOnlyBadgeLabel,
+  logRoutineClassificationDiagnostics,
+} from '../../src/lib/planner/routineClassification';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
 import {
@@ -910,30 +915,25 @@ export default function PlannerTab() {
     [sessionsTodayWithExercises],
   );
 
-  const computeRoutineSessionExerciseIds = useCallback((): Set<string> => {
-    const templateCountByExercise = new Map<string, number>();
-    if (selectedDay) {
-      for (const s of selectedDay.slots) {
-        const key = s.exercise_id || s.custom_exercise_id;
-        if (key) templateCountByExercise.set(key, (templateCountByExercise.get(key) ?? 0) + 1);
-      }
-    }
-    const usedCountByExercise = new Map<string, number>();
-    const routineSessionExerciseIds = new Set<string>();
-    for (const { exercises: sessExs } of sessionsTodayWithExercises) {
-      for (const se of sessExs) {
-        const key = se.exercise_id || se.custom_exercise_id;
-        if (!key) continue;
-        const templateCount = templateCountByExercise.get(key) ?? 0;
-        const used = usedCountByExercise.get(key) ?? 0;
-        if (used < templateCount) {
-          routineSessionExerciseIds.add(se.id);
-          usedCountByExercise.set(key, used + 1);
-        }
-      }
-    }
-    return routineSessionExerciseIds;
+  const routineSessionExerciseIds = useMemo(() => {
+    const slots = selectedDay?.slots ?? [];
+    return computeRoutineIdsFromSlots(slots, sessionsTodayWithExercises);
   }, [selectedDay, sessionsTodayWithExercises]);
+
+  useEffect(() => {
+    if (!selectedDay) return;
+    logRoutineClassificationDiagnostics({
+      module: 'planner',
+      dayName: selectedDay.day.day_name,
+      templateSlots: selectedDay.slots,
+      sessionsWithExercises: sessionsTodayWithExercises,
+      routineIds: routineSessionExerciseIds,
+    });
+  }, [selectedDay, sessionsTodayWithExercises, routineSessionExerciseIds]);
+
+  const computeRoutineSessionExerciseIds = useCallback((): Set<string> => {
+    return routineSessionExerciseIds;
+  }, [routineSessionExerciseIds]);
 
   const computeReorderedTemplateSlotIds = useCallback(
     (
@@ -2084,24 +2084,10 @@ export default function PlannerTab() {
                           <TouchableOpacity
                             onPress={async () => {
                               const userId = await getCurrentUserId();
-                              if (!userId) return;
+                              if (!userId || !selectedDay) return;
                               const sessionIdToRemove = session.id;
-                              const slotIdsToRemove: string[] = [];
-                              if (selectedDay && activeTemplateId) {
-                                const availableSlots = [...selectedDay.slots];
-                                for (const se of exercises) {
-                                  const key = se.exercise_id || se.custom_exercise_id;
-                                  if (!key) continue;
-                                  const matchIdx = availableSlots.findIndex(
-                                    (s) => (s.exercise_id || s.custom_exercise_id) === key,
-                                  );
-                                  if (matchIdx !== -1) {
-                                    slotIdsToRemove.push(availableSlots[matchIdx].id);
-                                    availableSlots.splice(matchIdx, 1);
-                                  }
-                                }
-                              }
 
+                              // Delete this calendar instance only — do not wipe weekly template slots.
                               setSessionsTodayWithExercises((prev) =>
                                 prev.filter(({ session: s }) => s.id !== sessionIdToRemove),
                               );
@@ -2114,20 +2100,6 @@ export default function PlannerTab() {
                                 } else {
                                   toast.success('Workout removed');
                                   invalidateSessionsInRangeForUser(userId);
-                                  if (activeTemplateId && slotIdsToRemove.length > 0) {
-                                    let templateChanged = false;
-                                    for (const sId of slotIdsToRemove) {
-                                      const success = await applyStructureEditToTemplate(activeTemplateId, {
-                                        type: 'removeSlot',
-                                        slotId: sId,
-                                      });
-                                      if (success) templateChanged = true;
-                                    }
-                                    if (templateChanged) {
-                                      invalidateTemplate(activeTemplateId);
-                                      await loadTemplate(activeTemplateId);
-                                    }
-                                  }
                                 }
                                 await loadSessionsForDay(userId, {
                                   forceRefresh: true,
@@ -2235,7 +2207,9 @@ export default function PlannerTab() {
                                       {targetContent}
                                       {isTodayOnly && (
                                         <View style={styles.todayOnlyTag}>
-                                          <Text style={styles.todayOnlyTagText}>Today Only</Text>
+                                          <Text style={styles.todayOnlyTagText}>
+                                            {dayOnlyBadgeLabel(dateContext.isToday)}
+                                          </Text>
                                         </View>
                                       )}
                                     </View>

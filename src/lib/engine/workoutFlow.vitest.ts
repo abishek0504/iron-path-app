@@ -12,11 +12,16 @@ function exercise(opts: {
   restSec?: number | null;
   sets: boolean[]; // completed flags
   setRestSec?: number | null;
+  setTypes?: Array<'normal' | 'warmup' | 'drop' | 'failure' | null | undefined>;
 }): FlowExercise {
   return {
     superset_group: opts.group ?? null,
     rest_sec: opts.restSec ?? null,
-    sets: opts.sets.map((completed) => ({ completed, rest_sec: opts.setRestSec ?? null })),
+    sets: opts.sets.map((completed, i) => ({
+      completed,
+      rest_sec: opts.setRestSec ?? null,
+      set_type: opts.setTypes?.[i] ?? 'normal',
+    })),
   };
 }
 
@@ -80,6 +85,36 @@ describe('findNextStep — solo exercise', () => {
       kind: 'execute',
       exerciseIndex: 0,
       setIndex: 1,
+      withRest: true,
+    });
+  });
+
+  it('skips rest when the next set is a drop set', () => {
+    const exercises = [
+      exercise({
+        sets: [true, false, false],
+        setTypes: ['normal', 'drop', 'normal'],
+      }),
+    ];
+    expect(findNextStep(exercises, 0)).toEqual({
+      kind: 'execute',
+      exerciseIndex: 0,
+      setIndex: 1,
+      withRest: false,
+    });
+  });
+
+  it('rests after a drop before the following normal set', () => {
+    const exercises = [
+      exercise({
+        sets: [true, true, false],
+        setTypes: ['normal', 'drop', 'normal'],
+      }),
+    ];
+    expect(findNextStep(exercises, 0)).toEqual({
+      kind: 'execute',
+      exerciseIndex: 0,
+      setIndex: 2,
       withRest: true,
     });
   });

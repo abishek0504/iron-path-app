@@ -1,7 +1,8 @@
 /**
  * Exercise detail screen: hero image, muscle/equipment metadata, description,
- * per-set editor (weight/reps/duration/rest + warmup toggle), and explicit scope
- * actions: "Add to routine" (template slot + session sync) vs "Add to this day only".
+ * per-set editor (weight/reps/duration/rest + set-type cycle), optional
+ * "superset with previous", and explicit scope actions: "Add to routine"
+ * (template slot + session sync) vs "Add to this day only".
  * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–600.
  */
 
@@ -18,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Dumbbell, Flame } from 'lucide-react-native';
+import { ArrowLeft, Dumbbell, Link2 } from 'lucide-react-native';
 import { spacing, typography, borderRadius, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
@@ -32,6 +33,7 @@ import { selectExerciseTargets } from '../src/lib/engine/targetSelection';
 import {
   getOrCreateActiveSessionForToday,
   createSessionExercise,
+  setSessionSupersetGroup,
 } from '../src/lib/supabase/queries/workouts_helpers';
 import {
   getSessionsForToday,
@@ -41,6 +43,7 @@ import {
 import {
   applyStructureEditToTemplate,
   getTemplateSlotsForDay,
+  setTemplateSlotSupersetGroup,
 } from '../src/lib/supabase/queries/templates';
 import { invalidateTemplate } from '../src/lib/cache/templateCache';
 import {
@@ -52,6 +55,19 @@ import { getExerciseImage } from '../src/lib/exerciseImages';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { getDateBoundsForDayName, WEEK_DAYS } from '../src/lib/utils/date';
+import {
+  SET_TYPE_LABELS,
+  cycleSetType,
+  suggestDropWeight,
+} from '../src/lib/workout/setTypes';
+
+interface PreviousExerciseForSuperset {
+  name: string;
+  templateSlotId: string | null;
+  templateSupersetGroup: number | null;
+  sessionExerciseId: string | null;
+  sessionSupersetGroup: number | null;
+}
 
 const DEFAULT_REST_SEC = 90;
 const DEEP_LINK_PARAM_MAX_LENGTH = 200;
@@ -190,6 +206,8 @@ export default function AddExerciseEditScreen() {
   const [exerciseInfo, setExerciseInfo] = useState<MergedExercise | null>(null);
   // Sessions already materialized for the selected day; drives the "this day only" action.
   const [daySessionCount, setDaySessionCount] = useState<number | null>(null);
+  const [previousExercise, setPreviousExercise] = useState<PreviousExerciseForSuperset | null>(null);
+  const [linkWithPrevious, setLinkWithPrevious] = useState(false);
 
   const exerciseIdVal = exerciseId || undefined;
   const customExerciseIdVal = customExerciseId || undefined;
@@ -255,6 +273,98 @@ export default function AddExerciseEditScreen() {
       });
     return () => { cancelled = true; };
   }, [userId, dayName, isEditSlot]);
+
+  // Load the last exercise on this day so we can offer "Superset with previous".
+  useEffect(() => {
+    if (!userId || !templateId || !dayName || isEditSlot) {
+      setPreviousExercise(null);
+      setLinkWithPrevious(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const slots = await getTemplateSlotsForDay(templateId, dayName);
+        const sortedSlots = [...slots].sort((a, b) => a.sort_order - b.sort_order);
+        const lastSlot = sortedSlots[sortedSlots.length - 1] ?? null;
+
+        let sessionExerciseId: string | null = null;
+        let sessionSupersetGroup: number | null = null;
+        const targetSessionId = sessionId ?? null;
+        if (targetSessionId) {
+          const { data: sessionExercises } = await supabase
+            .from('v2_session_exercises')
+            .select('id, sort_order, superset_group, exercise_id, custom_exercise_id')
+            .eq('session_id', targetSessionId)
+            .order('sort_order', { ascending: true });
+          const lastSe = sessionExercises?.[sessionExercises.length - 1];
+          if (lastSe) {
+            sessionExerciseId = lastSe.id;
+            sessionSupersetGroup = lastSe.superset_group ?? null;
+          }
+        } else {
+          const { startIso, endIsoExclusive } = getDateBoundsForDayName(dayName);
+          const sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
+          const firstSessionId = sessions[0]?.id;
+          if (firstSessionId) {
+            const { data: sessionExercises } = await supabase
+              .from('v2_session_exercises')
+              .select('id, sort_order, superset_group')
+              .eq('session_id', firstSessionId)
+              .order('sort_order', { ascending: true });
+            const lastSe = sessionExercises?.[sessionExercises.length - 1];
+            if (lastSe) {
+              sessionExerciseId = lastSe.id;
+              sessionSupersetGroup = lastSe.superset_group ?? null;
+            }
+          }
+        }
+
+        if (!lastSlot && !sessionExerciseId) {
+          if (!cancelled) {
+            setPreviousExercise(null);
+            setLinkWithPrevious(false);
+          }
+          return;
+        }
+
+        const nameId =
+          lastSlot?.exercise_id ||
+          lastSlot?.custom_exercise_id ||
+          null;
+        let name = 'previous exercise';
+        if (nameId) {
+          const merged = await listMergedExercisesCached(userId, [nameId]);
+          name = merged[0]?.name ?? name;
+        }
+
+        if (!cancelled) {
+          setPreviousExercise({
+            name,
+            templateSlotId: lastSlot?.id ?? null,
+            templateSupersetGroup: lastSlot?.superset_group ?? null,
+            sessionExerciseId,
+            sessionSupersetGroup,
+          });
+          if (__DEV__) {
+            devLog('add-exercise-edit', {
+              action: 'load_previous_for_superset',
+              name,
+              hasSlot: !!lastSlot,
+              hasSessionExercise: !!sessionExerciseId,
+            });
+          }
+        }
+      } catch (e) {
+        if (__DEV__) devError('add-exercise-edit', e, { action: 'load_previous_for_superset' });
+        if (!cancelled) {
+          setPreviousExercise(null);
+          setLinkWithPrevious(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, templateId, dayName, sessionId, isEditSlot]);
 
   const loadPrefill = useCallback(async () => {
     const missing: string[] = [];
@@ -359,12 +469,39 @@ export default function AddExerciseEditScreen() {
     );
   };
 
-  const toggleWarmup = (id: string) => {
-    setSets((prev) =>
-      prev.map((s) =>
-        s.id === id ? { ...s, set_type: s.set_type === 'warmup' ? 'normal' : 'warmup' } : s
-      )
-    );
+  const cycleSetTypeForSet = (id: string) => {
+    setSets((prev) => {
+      const idx = prev.findIndex((s) => s.id === id);
+      if (idx < 0) return prev;
+      const current = prev[idx];
+      const nextType = cycleSetType(current.set_type);
+      return prev.map((s, i) => {
+        if (i !== idx) {
+          // When this set becomes a drop, zero rest on the prior set (inbound rest).
+          if (nextType === 'drop' && i === idx - 1) {
+            return { ...s, rest_sec: '0' };
+          }
+          return s;
+        }
+        let weight = s.weight;
+        if (nextType === 'drop' && !isTimedMode) {
+          const prevSet = prev[idx - 1];
+          const prevWeight = prevSet?.weight.trim() !== '' ? parseFloat(prevSet.weight) : null;
+          const currentWeight = s.weight.trim() !== '' ? parseFloat(s.weight) : null;
+          const suggested = suggestDropWeight(prevWeight);
+          if (
+            suggested != null &&
+            (s.weight.trim() === '' ||
+              (currentWeight != null &&
+                prevWeight != null &&
+                Math.abs(currentWeight - prevWeight) < 0.001))
+          ) {
+            weight = String(suggested);
+          }
+        }
+        return { ...s, set_type: nextType, weight };
+      });
+    });
   };
 
   const addSet = () => {
@@ -482,7 +619,9 @@ export default function AddExerciseEditScreen() {
     };
   };
 
-  const insertExerciseWithSetsIntoSession = async (targetSessionId: string): Promise<boolean> => {
+  const insertExerciseWithSetsIntoSession = async (
+    targetSessionId: string
+  ): Promise<string | null> => {
     const { data: existing } = await supabase
       .from('v2_session_exercises')
       .select('sort_order')
@@ -496,7 +635,7 @@ export default function AddExerciseEditScreen() {
       customExerciseId: customExerciseIdVal,
       sortOrder,
     });
-    if (!created) return false;
+    if (!created) return null;
     const rows = toExplicitSetRows(sets, isTimedMode).map((s) => ({
       session_exercise_id: created.id,
       ...s,
@@ -507,9 +646,54 @@ export default function AddExerciseEditScreen() {
     const { error } = await supabase.from('v2_session_sets').insert(rows);
     if (error) {
       if (__DEV__) devError('add-exercise-edit', error, { action: 'insertSets', sessionId: targetSessionId });
-      return false;
+      return null;
     }
-    return true;
+    return created.id;
+  };
+
+  const linkNewSessionExerciseAsSuperset = async (
+    newSessionExerciseId: string,
+    previous: PreviousExerciseForSuperset
+  ): Promise<void> => {
+    if (!previous.sessionExerciseId) return;
+    if (previous.sessionSupersetGroup != null) {
+      await setSessionSupersetGroup([newSessionExerciseId], previous.sessionSupersetGroup);
+      return;
+    }
+    const { data: prevRow } = await supabase
+      .from('v2_session_exercises')
+      .select('session_id')
+      .eq('id', previous.sessionExerciseId)
+      .maybeSingle();
+    let nextGroup = 1;
+    if (prevRow?.session_id) {
+      const { data: mates } = await supabase
+        .from('v2_session_exercises')
+        .select('superset_group')
+        .eq('session_id', prevRow.session_id);
+      nextGroup = Math.max(0, ...(mates ?? []).map((m) => m.superset_group ?? 0)) + 1;
+    }
+    await setSessionSupersetGroup(
+      [previous.sessionExerciseId, newSessionExerciseId],
+      nextGroup
+    );
+  };
+
+  const linkNewTemplateSlotAsSuperset = async (
+    newSlotId: string,
+    previous: PreviousExerciseForSuperset,
+    daySlots: { id: string; superset_group?: number | null }[]
+  ): Promise<void> => {
+    if (!previous.templateSlotId) return;
+    if (previous.templateSupersetGroup != null) {
+      await setTemplateSlotSupersetGroup([newSlotId], previous.templateSupersetGroup);
+      return;
+    }
+    const maxGroup = Math.max(0, ...daySlots.map((s) => s.superset_group ?? 0));
+    await setTemplateSlotSupersetGroup(
+      [previous.templateSlotId, newSlotId],
+      maxGroup + 1
+    );
   };
 
   /** Add to routine: template slot + sync to the day's existing session(s). */
@@ -534,12 +718,25 @@ export default function AddExerciseEditScreen() {
       }
       invalidateTemplate(validatedTemplateId);
 
+      if (linkWithPrevious && previousExercise?.templateSlotId) {
+        const refreshedSlots = await getTemplateSlotsForDay(validatedTemplateId, validatedDayName);
+        const sorted = [...refreshedSlots].sort((a, b) => a.sort_order - b.sort_order);
+        const newSlot = sorted[sorted.length - 1];
+        if (newSlot && newSlot.id !== previousExercise.templateSlotId) {
+          await linkNewTemplateSlotAsSuperset(newSlot.id, previousExercise, sorted);
+          invalidateTemplate(validatedTemplateId);
+        }
+      }
+
       let syncedSessions = 0;
       if (sessionId) {
-        const ok = await insertExerciseWithSetsIntoSession(sessionId);
-        if (!ok) {
+        const createdId = await insertExerciseWithSetsIntoSession(sessionId);
+        if (!createdId) {
           toast.error('Added to routine, but failed to update workout');
           return;
+        }
+        if (linkWithPrevious && previousExercise) {
+          await linkNewSessionExerciseAsSuperset(createdId, previousExercise);
         }
         syncedSessions = 1;
       } else {
@@ -549,6 +746,27 @@ export default function AddExerciseEditScreen() {
           experience,
           explicitSets: toExplicitSetRows(sets, isTimedMode),
         });
+        if (linkWithPrevious && previousExercise && syncedSessions > 0) {
+          // Link the newly inserted session exercise(s) with the previous one when we know it.
+          if (previousExercise.sessionExerciseId) {
+            const { data: prevRow } = await supabase
+              .from('v2_session_exercises')
+              .select('session_id')
+              .eq('id', previousExercise.sessionExerciseId)
+              .maybeSingle();
+            if (prevRow?.session_id) {
+              const { data: sessionExercises } = await supabase
+                .from('v2_session_exercises')
+                .select('id, sort_order')
+                .eq('session_id', prevRow.session_id)
+                .order('sort_order', { ascending: true });
+              const last = sessionExercises?.[sessionExercises.length - 1];
+              if (last && last.id !== previousExercise.sessionExerciseId) {
+                await linkNewSessionExerciseAsSuperset(last.id, previousExercise);
+              }
+            }
+          }
+        }
       }
 
       if (__DEV__) {
@@ -560,6 +778,9 @@ export default function AddExerciseEditScreen() {
           syncedSessions,
           setCount: sets.length,
           warmupCount: sets.filter((s) => s.set_type === 'warmup').length,
+          dropCount: sets.filter((s) => s.set_type === 'drop').length,
+          failureCount: sets.filter((s) => s.set_type === 'failure').length,
+          linkWithPrevious,
         });
       }
       useUIStore.getState().setPlannerNeedsRefetch(true);
@@ -612,10 +833,31 @@ export default function AddExerciseEditScreen() {
         }
       }
 
-      const ok = await insertExerciseWithSetsIntoSession(targetSessionId);
-      if (!ok) {
+      const createdId = await insertExerciseWithSetsIntoSession(targetSessionId);
+      if (!createdId) {
         toast.error('Failed to add to workout');
         return;
+      }
+      if (linkWithPrevious && previousExercise) {
+        // Refresh previous session exercise if we only knew the template slot.
+        let previous = previousExercise;
+        if (!previous.sessionExerciseId) {
+          const { data: sessionExercises } = await supabase
+            .from('v2_session_exercises')
+            .select('id, sort_order, superset_group')
+            .eq('session_id', targetSessionId)
+            .order('sort_order', { ascending: true });
+          const prior = sessionExercises?.filter((e) => e.id !== createdId);
+          const lastPrior = prior?.[prior.length - 1];
+          if (lastPrior) {
+            previous = {
+              ...previous,
+              sessionExerciseId: lastPrior.id,
+              sessionSupersetGroup: lastPrior.superset_group ?? null,
+            };
+          }
+        }
+        await linkNewSessionExerciseAsSuperset(createdId, previous);
       }
 
       if (__DEV__) {
@@ -626,6 +868,9 @@ export default function AddExerciseEditScreen() {
           targetSessionId,
           setCount: sets.length,
           warmupCount: sets.filter((s) => s.set_type === 'warmup').length,
+          dropCount: sets.filter((s) => s.set_type === 'drop').length,
+          failureCount: sets.filter((s) => s.set_type === 'failure').length,
+          linkWithPrevious,
         });
       }
       useUIStore.getState().setPlannerNeedsRefetch(true);
@@ -736,23 +981,57 @@ export default function AddExerciseEditScreen() {
           ) : null}
 
           <Text style={styles.sectionTitle}>Sets</Text>
+          {!isEditSlot && previousExercise ? (
+            <TouchableOpacity
+              style={[styles.supersetToggle, linkWithPrevious && styles.supersetToggleActive]}
+              onPress={() => setLinkWithPrevious((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                linkWithPrevious
+                  ? `Remove superset with ${previousExercise.name}`
+                  : `Superset with ${previousExercise.name}`
+              }
+            >
+              <Link2
+                size={14}
+                color={linkWithPrevious ? colors.primary : colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.supersetToggleText,
+                  linkWithPrevious && styles.supersetToggleTextActive,
+                ]}
+              >
+                {linkWithPrevious
+                  ? `Superset with ${previousExercise.name}`
+                  : `Link as superset with ${previousExercise.name}`}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           {sets.map((set, index) => {
             const err = validateSet(set, isTimedMode);
-            const isWarmup = set.set_type === 'warmup';
+            const setType = set.set_type ?? 'normal';
+            const isNonNormal = setType !== 'normal';
             return (
               <View key={set.id}>
-                <View style={[styles.setCard, isWarmup && styles.setCardWarmup]}>
+                <View style={[styles.setCard, isNonNormal && styles.setCardTyped]}>
                   <View style={styles.setHeaderRow}>
                     <View style={styles.setHeaderLeft}>
                       <Text style={styles.setNumber}>Set {set.set_number}</Text>
                       <TouchableOpacity
-                        style={[styles.warmupChip, isWarmup && styles.warmupChipActive]}
-                        onPress={() => toggleWarmup(set.id)}
+                        style={[styles.setTypeChip, isNonNormal && styles.setTypeChipActive]}
+                        onPress={() => cycleSetTypeForSet(set.id)}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Set type: ${SET_TYPE_LABELS[setType]}. Tap to change.`}
                       >
-                        <Flame size={12} color={isWarmup ? colors.onPrimaryContrast : colors.textSecondary} />
-                        <Text style={[styles.warmupChipText, isWarmup && styles.warmupChipTextActive]}>
-                          Warmup
+                        <Text
+                          style={[
+                            styles.setTypeChipText,
+                            isNonNormal && styles.setTypeChipTextActive,
+                          ]}
+                        >
+                          {SET_TYPE_LABELS[setType]}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -1014,7 +1293,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     borderColor: colors.border,
     marginBottom: spacing.sm,
   },
-  setCardWarmup: {
+  setCardTyped: {
     borderColor: colors.primary,
     borderStyle: 'dashed',
   },
@@ -1034,28 +1313,48 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontWeight: '600',
     color: colors.textPrimary,
   },
-  warmupChip: {
+  setTypeChip: {
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  setTypeChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + '15',
+  },
+  setTypeChipText: {
+    fontSize: typography.sizes.sm,
+    color: colors.textSecondary,
+    fontWeight: typography.weights.medium,
+  },
+  setTypeChipTextActive: {
+    color: colors.primary,
+  },
+  supersetToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 3,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.full,
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
-    borderColor: colors.borderLight,
-    backgroundColor: colors.background,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.md,
   },
-  warmupChipActive: {
-    backgroundColor: colors.primary,
+  supersetToggleActive: {
     borderColor: colors.primary,
+    backgroundColor: colors.primary + '15',
   },
-  warmupChipText: {
-    fontSize: typography.sizes.xs,
-    fontWeight: '600',
-    color: colors.textSecondary,
+  supersetToggleText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.textMuted,
   },
-  warmupChipTextActive: {
-    color: colors.onPrimaryContrast,
+  supersetToggleTextActive: {
+    color: colors.primary,
   },
   removeSetText: {
     fontSize: typography.sizes.sm,

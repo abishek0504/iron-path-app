@@ -50,6 +50,11 @@ import { hapticMedium, hapticWarning } from '../../src/lib/utils/haptics';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
 import { selectExerciseTargets, type TargetSelectionContext } from '../../src/lib/engine/targetSelection';
 import { WEEK_DAYS, getLocalDayKey, getLocalDayBoundsIso } from '../../src/lib/utils/date';
+import {
+  computeRoutineSessionExerciseIds,
+  dayOnlyBadgeLabel,
+  logRoutineClassificationDiagnostics,
+} from '../../src/lib/planner/routineClassification';
 
 const DAY_ORDER: Record<string, number> = {
   Sunday: 0,
@@ -219,6 +224,7 @@ export default function WorkoutTab() {
   const loadInFlightRef = useRef(false);
   const lastFocusLoadRef = useRef(0);
   const startInProgressRef = useRef(false);
+  const lastSeenLocalDayKeyRef = useRef<string>(getLocalDayKey(new Date()));
   const tourScrollRef = useRef<ScrollView>(null);
   const { onScroll: onTourScroll } = useRegisterTourScroll('index', tourScrollRef);
 
@@ -241,9 +247,31 @@ export default function WorkoutTab() {
     }
   }, []);
 
+  /** Reset sticky plan day when the local calendar day rolls over (overnight / week boundary).
+   *  Returns the plan day name that should be used for this load (avoids stale closure after setState). */
+  const syncPlanDayToLocalCalendar = useCallback((): string => {
+    const todayKey = getLocalDayKey(new Date());
+    const todayName = getTodayDayName();
+    if (lastSeenLocalDayKeyRef.current !== todayKey) {
+      lastSeenLocalDayKeyRef.current = todayKey;
+      setSelectedPlanDayName(todayName);
+      if (__DEV__) {
+        devLog('workout-tab', {
+          action: 'calendarDayRollover_resetPlanDay',
+          todayKey,
+          todayName,
+        });
+      }
+      setCurrentDay(todayName);
+      return todayName;
+    }
+    setCurrentDay(todayName);
+    return selectedPlanDayName;
+  }, [selectedPlanDayName]);
+
   useEffect(() => {
-    setCurrentDay(getTodayDayName());
-  }, []);
+    syncPlanDayToLocalCalendar();
+  }, [syncPlanDayToLocalCalendar]);
 
   // Load workout data (template + sessions) and populate selected workout
   // preserveWorkoutIndex: when user picks a workout via Change, keep that selection
@@ -252,6 +280,7 @@ export default function WorkoutTab() {
     async (preserveWorkoutIndex?: number, options?: { selectLast?: boolean }) => {
       if (loadInFlightRef.current) return;
       loadInFlightRef.current = true;
+      const syncedPlanDayName = syncPlanDayToLocalCalendar();
       if (!hasInitiallyLoaded) {
         setIsLoading(true);
       }
@@ -326,8 +355,8 @@ export default function WorkoutTab() {
       );
       setTemplateDays(sortedDays);
 
-      // Default selected plan day to today on first load
-      const planDayName = hasInitiallyLoaded ? selectedPlanDayName : getTodayDayName();
+      // Default selected plan day to today on first load; after rollover use synced name
+      const planDayName = hasInitiallyLoaded ? syncedPlanDayName : getTodayDayName();
       if (!hasInitiallyLoaded) {
         setSelectedPlanDayName(planDayName);
       }
@@ -356,15 +385,21 @@ export default function WorkoutTab() {
       setHasActiveWorkout(hasSavePoint);
 
       // Match plan day case-insensitively (DB may store "Monday" or "monday")
-      const matchPlanDay = (d: { day: { day_name?: string } }) =>
-        (d.day.day_name ?? '').toLowerCase() === (planDayName ?? '').toLowerCase();
+      const matchDayName = (dayName: string) => (d: { day: { day_name?: string } }) =>
+        (d.day.day_name ?? '').toLowerCase() === (dayName ?? '').toLowerCase();
 
       // When viewing a specific session: always show only that session's exercises (no template mix).
       // When no session exists for today: show template for selected day so user can Start and create a session.
-      let exercisesToShow: { id: string; name: string }[] = [];
-      const selectedDay = sortedDays.find(matchPlanDay);
+      let exercisesToShow: { id: string; name: string; isTodayOnly?: boolean }[] = [];
+      const previewDay = sortedDays.find(matchDayName(planDayName));
 
       if (viewingSession) {
+        // Classify against the session's plan day (not sticky selectedPlanDayName) so
+        // overnight/borrowed-day mismatches don't mark routine exercises as Today Only.
+        const classificationDayName =
+          viewingSession.day_name || getTodayDayName();
+        const classificationDay = sortedDays.find(matchDayName(classificationDayName));
+
         // Only the selected session: load exercises for viewingSession.id only (never combine sessions or template)
         const { data: sessionExercises, error: sessionExercisesError } = await supabase
           .from('v2_session_exercises')
@@ -394,22 +429,28 @@ export default function WorkoutTab() {
             const key = se.exercise_id || se.custom_exercise_id;
             if (key) namesMap.set(se.id, nameByExerciseId.get(key) ?? 'Unknown Exercise');
           }
-          const templateCountByExercise = new Map<string, number>();
-          if (selectedDay) {
-            for (const s of selectedDay.slots) {
-              const key = s.exercise_id || s.custom_exercise_id;
-              if (key) templateCountByExercise.set(key, (templateCountByExercise.get(key) ?? 0) + 1);
-            }
-          }
-          const routineSessionExerciseIds = new Set<string>();
-          if (sessionsForToday.length > 0 && selectedDay) {
+
+          const templateSlots = classificationDay?.slots ?? [];
+          let sessionsWithExercises: {
+            exercises: {
+              id: string;
+              exercise_id: string | null;
+              custom_exercise_id: string | null;
+              sort_order: number;
+            }[];
+          }[] = [];
+
+          if (sessionsForToday.length > 0) {
             const allSessionIds = sessionsForToday.map((s) => s.id);
             const { data: allSessionExercises } = await supabase
               .from('v2_session_exercises')
               .select('id, session_id, exercise_id, custom_exercise_id, sort_order')
               .in('session_id', allSessionIds)
               .order('sort_order', { ascending: true });
-            const bySession = new Map<string, { id: string; exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }[]>();
+            const bySession = new Map<
+              string,
+              { id: string; exercise_id: string | null; custom_exercise_id: string | null; sort_order: number }[]
+            >();
             for (const se of allSessionExercises || []) {
               const sid = se.session_id as string;
               if (!bySession.has(sid)) bySession.set(sid, []);
@@ -420,21 +461,25 @@ export default function WorkoutTab() {
                 sort_order: se.sort_order ?? 0,
               });
             }
-            const usedCountByExercise = new Map<string, number>();
-            for (const session of sessionsForToday) {
-              const sessExs = (bySession.get(session.id) ?? []).slice().sort((a, b) => a.sort_order - b.sort_order);
-              for (const se of sessExs) {
-                const key = se.exercise_id || se.custom_exercise_id;
-                if (!key) continue;
-                const templateCount = templateCountByExercise.get(key) ?? 0;
-                const used = usedCountByExercise.get(key) ?? 0;
-                if (used < templateCount) {
-                  routineSessionExerciseIds.add(se.id);
-                  usedCountByExercise.set(key, used + 1);
-                }
-              }
-            }
+            sessionsWithExercises = sessionsForToday.map((session) => ({
+              exercises: (bySession.get(session.id) ?? [])
+                .slice()
+                .sort((a, b) => a.sort_order - b.sort_order),
+            }));
           }
+
+          const routineSessionExerciseIds = computeRoutineSessionExerciseIds(
+            templateSlots,
+            sessionsWithExercises,
+          );
+          logRoutineClassificationDiagnostics({
+            module: 'workout-tab',
+            dayName: classificationDayName,
+            templateSlots,
+            sessionsWithExercises,
+            routineIds: routineSessionExerciseIds,
+          });
+
           exercisesToShow = exercisesForSelectedSessionOnly.map((se) => ({
             id: se.id,
             name: namesMap.get(se.id) ?? 'Unknown Exercise',
@@ -447,16 +492,17 @@ export default function WorkoutTab() {
               sessionId: viewingSession.id,
               selectedWorkoutIndex: indexToUse,
               sessionExerciseCount: exercisesForSelectedSessionOnly.length,
+              classificationDayName,
             });
           }
         } else {
           exercisesToShow = [];
         }
-      } else if (selectedDay) {
+      } else if (previewDay) {
         // No sessions for today: show template for selected day so user can Start and create a session
         const slotIds = [
           ...new Set(
-            selectedDay.slots.flatMap((s) =>
+            previewDay.slots.flatMap((s) =>
               [s.exercise_id, s.custom_exercise_id].filter(Boolean) as string[]
             )
           ),
@@ -464,20 +510,20 @@ export default function WorkoutTab() {
         const mergedSlots = slotIds.length > 0 ? await listMergedExercisesCached(userId, slotIds) : [];
         const nameByExerciseId = new Map(mergedSlots.map((e) => [e.id, e.name]));
         const namesMap = new Map<string, string>();
-        for (const slot of selectedDay.slots) {
+        for (const slot of previewDay.slots) {
           const key = slot.exercise_id || slot.custom_exercise_id;
           if (key) namesMap.set(slot.id, nameByExerciseId.get(key) ?? 'Unknown Exercise');
         }
-        exercisesToShow = selectedDay.slots.map((slot) => ({
+        exercisesToShow = previewDay.slots.map((slot) => ({
           id: slot.id,
           name: namesMap.get(slot.id) ?? 'Unknown Exercise',
           isTodayOnly: false,
         }));
-        if (__DEV__ && selectedDay.slots.length > 0) {
+        if (__DEV__ && previewDay.slots.length > 0) {
           devLog('workout-tab', {
             action: 'loadTodayWorkout_template_loaded',
             planDayName,
-            templateCount: selectedDay.slots.length,
+            templateCount: previewDay.slots.length,
           });
         }
       }
@@ -509,7 +555,7 @@ export default function WorkoutTab() {
       setHasInitiallyLoaded(true);
       loadInFlightRef.current = false;
     }
-  }, [getCurrentUserId, toast, selectedPlanDayName, hasInitiallyLoaded]);
+  }, [getCurrentUserId, toast, selectedPlanDayName, hasInitiallyLoaded, syncPlanDayToLocalCalendar]);
 
   useEffect(() => {
     loadTodayWorkout();
@@ -529,6 +575,8 @@ export default function WorkoutTab() {
     useCallback(() => {
       if (!hasInitiallyLoaded) return;
 
+      syncPlanDayToLocalCalendar();
+
       const forceRefresh = useUIStore.getState().workoutNeedsRefetch;
       if (forceRefresh) {
         setWorkoutNeedsRefetch(false);
@@ -547,7 +595,7 @@ export default function WorkoutTab() {
       }
       loadTodayWorkout();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hasInitiallyLoaded, setWorkoutNeedsRefetch])
+    }, [hasInitiallyLoaded, setWorkoutNeedsRefetch, syncPlanDayToLocalCalendar])
   );
 
   /**
@@ -1103,7 +1151,9 @@ export default function WorkoutTab() {
                             <Text style={styles.exerciseName}>{exercise.name}</Text>
                             {exercise.isTodayOnly && (
                               <View style={styles.todayOnlyTag}>
-                                <Text style={styles.todayOnlyTagText}>Today Only</Text>
+                                <Text style={styles.todayOnlyTagText}>
+                                  {dayOnlyBadgeLabel(true)}
+                                </Text>
                               </View>
                             )}
                           </View>

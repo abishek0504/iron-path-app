@@ -9,9 +9,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-/** Effort signal 0–1 from RPE or RIR (matches fatigue model). */
+/** Effort signal 0–1 from RPE or RIR (matches fatigue model). Failure sets are max effort. */
 export function setStimulus(set: AnalyticsSetRow): number {
   if (!isWorkingSet(set)) return 0;
+
+  if (set.set_type === 'failure') return 1;
 
   if (set.rpe != null) {
     return clamp((set.rpe - RPE_THRESHOLD) / 5, 0, 1);

@@ -95,6 +95,12 @@ import {
   getSupersetMembers,
   findNextStep,
 } from '../../../src/lib/engine/workoutFlow';
+import {
+  SET_TYPE_LABELS,
+  FAILURE_DEFAULT_RPE,
+  cycleSetType,
+  restAfterSet,
+} from '../../../src/lib/workout/setTypes';
 
 interface Exercise {
   id: string; // session_exercise_id
@@ -136,15 +142,6 @@ type WorkoutPhase =
   | { type: 'rest'; nextExerciseIndex: number; nextSetIndex: number } // Resting between sets
   | { type: 'logging' } // Batch logging after all sets
   | { type: 'complete' }; // All exercises complete
-
-const SET_TYPE_CYCLE: SetType[] = ['normal', 'warmup', 'drop', 'failure'];
-
-const SET_TYPE_LABELS: Record<SetType, string> = {
-  normal: 'Normal',
-  warmup: 'Warm-up',
-  drop: 'Drop set',
-  failure: 'Failure',
-};
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
@@ -764,7 +761,14 @@ export default function ActiveWorkoutScreen() {
       duration_sec: set.duration_sec !== undefined && set.duration_sec !== null
         ? set.duration_sec.toString()
         : (suggestion.duration_sec !== undefined ? suggestion.duration_sec.toString() : ''),
-      ...(exercise.is_stretch ? {} : { rpe: currentSetRPEs[idx] || set.rpe || 7 }),
+      ...(exercise.is_stretch
+        ? {}
+        : {
+            rpe:
+              currentSetRPEs[idx] ||
+              set.rpe ||
+              (set.set_type === 'failure' ? FAILURE_DEFAULT_RPE : 7),
+          }),
       setType: set.set_type ?? 'normal',
     }));
     setSetLogs(logs);
@@ -892,10 +896,12 @@ export default function ActiveWorkoutScreen() {
       timedDurationSec = resolveTimedHoldElapsed(currentSetIdx);
     }
 
-    // Update RPE for this set (strength only)
+    // Update RPE for this set (strength only). Failure sets default to max effort.
     const updatedRPEs = [...currentSetRPEs];
     if (!isStretch) {
-      updatedRPEs[currentSetIdx] = rpeOverride ?? (currentSetRPEs[currentSetIdx] || 7);
+      const setType = exercise.sets[currentSetIdx]?.set_type ?? 'normal';
+      const defaultRpe = setType === 'failure' ? FAILURE_DEFAULT_RPE : 7;
+      updatedRPEs[currentSetIdx] = rpeOverride ?? (currentSetRPEs[currentSetIdx] || defaultRpe);
       setCurrentSetRPEs(updatedRPEs);
     }
 
@@ -973,10 +979,17 @@ export default function ActiveWorkoutScreen() {
       const justCompletedSet = [...updatedExercises[currentExerciseIndex].sets]
         .reverse()
         .find((s) => s.completed);
-      const restDuration = resolveRestSec(
+      const nextExercise = updatedExercises[next.exerciseIndex];
+      const nextSet = nextExercise?.sets[next.setIndex];
+      const baseRest = resolveRestSec(
         updatedExercises[currentExerciseIndex],
         justCompletedSet ?? updatedExercises[currentExerciseIndex].sets[0],
       );
+      const restDuration = restAfterSet({
+        completedType: justCompletedSet?.set_type,
+        nextType: nextSet?.set_type,
+        baseRestSec: baseRest,
+      });
       if (restDuration <= 0) {
         if (next.exerciseIndex !== currentExerciseIndex) {
           moveToExercise(updatedExercises, next.exerciseIndex);
@@ -1000,11 +1013,13 @@ export default function ActiveWorkoutScreen() {
             restEndsAtEpoch: restEndsAt,
             nextExerciseIndex: next.exerciseIndex,
             nextSetIndex: next.setIndex,
+            completedSetType: justCompletedSet?.set_type ?? 'normal',
+            nextSetType: nextSet?.set_type ?? 'normal',
           });
         }
       }
     } else {
-      // Superset: move straight to the partner exercise with no rest
+      // Superset mid-round or drop set: move straight on with no rest
       moveToExercise(updatedExercises, next.exerciseIndex);
       setWorkoutPhase({ type: 'execution', setIndex: next.setIndex });
     }
@@ -1688,7 +1703,12 @@ export default function ActiveWorkoutScreen() {
             <View style={styles.rpeSection}>
               <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
               <RPESlider
-                value={currentSetRPEs[workoutPhase.setIndex] || 7}
+                value={
+                  currentSetRPEs[workoutPhase.setIndex] ||
+                  (currentExercise.sets[workoutPhase.setIndex]?.set_type === 'failure'
+                    ? FAILURE_DEFAULT_RPE
+                    : 7)
+                }
                 onChange={(value) => {
                   const updated = [...currentSetRPEs];
                   updated[workoutPhase.setIndex] = value;
@@ -1746,7 +1766,12 @@ export default function ActiveWorkoutScreen() {
             <View style={styles.rpeSection}>
               <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
               <RPESlider
-                value={currentSetRPEs[workoutPhase.setIndex] || 7}
+                value={
+                  currentSetRPEs[workoutPhase.setIndex] ||
+                  (currentExercise.sets[workoutPhase.setIndex]?.set_type === 'failure'
+                    ? FAILURE_DEFAULT_RPE
+                    : 7)
+                }
                 onChange={(value) => {
                   const updated = [...currentSetRPEs];
                   updated[workoutPhase.setIndex] = value;
@@ -1785,8 +1810,10 @@ export default function ActiveWorkoutScreen() {
                     ]}
                     onPress={() => {
                       const updated = [...setLogs];
-                      const cycleIdx = SET_TYPE_CYCLE.indexOf(updated[idx].setType);
-                      updated[idx].setType = SET_TYPE_CYCLE[(cycleIdx + 1) % SET_TYPE_CYCLE.length];
+                      updated[idx] = {
+                        ...updated[idx],
+                        setType: cycleSetType(updated[idx].setType),
+                      };
                       setSetLogs(updated);
                     }}
                     accessibilityRole="button"

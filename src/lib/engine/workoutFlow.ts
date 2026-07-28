@@ -4,11 +4,14 @@
  * app/(stack)/workout/active.tsx so it can be unit tested.
  */
 
+import type { SetType } from '../supabase/queries/workouts';
+
 export const DEFAULT_REST_SEC = 90;
 
 export interface FlowSet {
   rest_sec?: number | null;
   completed: boolean;
+  set_type?: SetType | null;
 }
 
 export interface FlowExercise {
@@ -55,8 +58,9 @@ export type NextStep =
 /**
  * Decide what happens after completing a set. Within a superset round we move
  * to the next member with no rest; wrapping back to the start of the group (or
- * the next set of a solo exercise) triggers the rest timer. When every set in
- * the group is complete we enter the logging phase.
+ * the next set of a solo exercise) triggers the rest timer — unless the upcoming
+ * set is a drop set, which also skips rest. When every set in the group is
+ * complete we enter the logging phase.
  */
 export function findNextStep(exercises: FlowExercise[], exerciseIndex: number): NextStep {
   const members = getSupersetMembers(exercises, exerciseIndex);
@@ -67,7 +71,9 @@ export function findNextStep(exercises: FlowExercise[], exerciseIndex: number): 
     const setIndex = exercises[memberIdx].sets.findIndex((s) => !s.completed);
     if (setIndex >= 0) {
       const wrapped = pos + offset >= members.length;
-      return { kind: 'execute', exerciseIndex: memberIdx, setIndex, withRest: wrapped };
+      const nextSet = exercises[memberIdx].sets[setIndex];
+      const withRest = wrapped && nextSet.set_type !== 'drop';
+      return { kind: 'execute', exerciseIndex: memberIdx, setIndex, withRest };
     }
   }
 

@@ -16,15 +16,11 @@ import { Button } from '../ui/Button';
 import { supabase } from '../../lib/supabase/client';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { SetType } from '../../lib/supabase/queries/workouts';
-
-const SET_TYPE_CYCLE: SetType[] = ['normal', 'warmup', 'drop', 'failure'];
-
-const SET_TYPE_LABELS: Record<SetType, string> = {
-  normal: 'Normal',
-  warmup: 'Warm-up',
-  drop: 'Drop set',
-  failure: 'Failure',
-};
+import {
+  SET_TYPE_LABELS,
+  cycleSetType,
+  suggestDropWeight,
+} from '../../lib/workout/setTypes';
 
 interface SessionSet {
   id: string;
@@ -371,13 +367,27 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                         (set.set_type ?? 'normal') !== 'normal' && styles.setTypeChipActive,
                       ]}
                       onPress={() => {
-                        setSets((prev) =>
-                          prev.map((s) => {
-                            if (s.id !== set.id) return s;
-                            const cycleIdx = SET_TYPE_CYCLE.indexOf(s.set_type ?? 'normal');
-                            return { ...s, set_type: SET_TYPE_CYCLE[(cycleIdx + 1) % SET_TYPE_CYCLE.length] };
-                          })
-                        );
+                        setSets((prev) => {
+                          const idx = prev.findIndex((s) => s.id === set.id);
+                          if (idx < 0) return prev;
+                          const nextType = cycleSetType(prev[idx].set_type);
+                          return prev.map((s, i) => {
+                            if (i !== idx) return s;
+                            let weight = s.weight;
+                            if (nextType === 'drop' && mode === 'reps') {
+                              const prevSet = prev[idx - 1];
+                              const suggested = suggestDropWeight(prevSet?.weight);
+                              if (
+                                suggested != null &&
+                                (s.weight == null ||
+                                  (prevSet?.weight != null && s.weight === prevSet.weight))
+                              ) {
+                                weight = suggested;
+                              }
+                            }
+                            return { ...s, set_type: nextType, weight };
+                          });
+                        });
                       }}
                     >
                       <Text
