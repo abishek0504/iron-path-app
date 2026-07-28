@@ -1145,6 +1145,7 @@ export type Database = {
       adjust_bw_exercises: { Args: { pd: Json }; Returns: Json }
       adjust_plan_data: { Args: { pd: Json }; Returns: Json }
       commit_ai_generation: { Args: { p_job_id: string }; Returns: Json }
+      convert_user_stored_weights: { Args: { p_to_imperial: boolean }; Returns: Json }
       migrate_rep_range: { Args: { value: Json }; Returns: Json }
       purge_expired_ai_generation_jobs: { Args: never; Returns: number }
       purge_soft_deleted_accounts: { Args: never; Returns: number }

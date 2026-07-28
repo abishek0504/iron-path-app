@@ -9,11 +9,13 @@ import { getMergedExercise, type MergedExercise } from '../supabase/queries/exer
 import { getExerciseHistory } from '../supabase/queries/exerciseHistory';
 import { getUserProfile } from '../supabase/queries/users';
 import { devLog, devError } from '../utils/logger';
-
-/** Fallback bodyweight (lbs) when profile has no current_weight. */
-const DEFAULT_BW_LBS = 150;
-/** Fallback bodyweight (kg) when profile has no current_weight. */
-const DEFAULT_BW_KG = 70;
+import {
+  DEFAULT_BW_KG,
+  DEFAULT_BW_LBS,
+  LBS_PER_KG,
+  minWeightIncrement,
+  roundLiftWeight,
+} from '../utils/units';
 
 export interface ExerciseTarget {
   exercise_id: string;
@@ -183,6 +185,19 @@ export async function selectExerciseTargets(
   const history = await getExerciseHistory(exerciseKey, userId, 5);
   const hasHistory = history && history.sets.length > 0;
 
+  let useImperial = context.use_imperial;
+  let resolvedProfileWeight = context.current_weight;
+  if (useImperial === undefined || !(resolvedProfileWeight && resolvedProfileWeight > 0)) {
+    const profile = await getUserProfile(userId);
+    if (useImperial === undefined) {
+      useImperial = profile?.use_imperial ?? true;
+    }
+    if (!(resolvedProfileWeight && resolvedProfileWeight > 0)) {
+      resolvedProfileWeight = profile?.current_weight;
+    }
+  }
+  const isImperial = useImperial !== false;
+
   // Select targets within prescription band with progressive overload
   let sets: number;
   let reps: number | undefined;
@@ -214,9 +229,11 @@ export async function selectExerciseTargets(
 
         // If hit top of rep band with acceptable effort (RPE <= 7), increase weight
         if (lastReps >= prescription.reps_max * 0.9 && (!avgRPE || avgRPE <= 7)) {
-          // Increase weight by small step (2.5-5% or 2.5-5 lbs)
-          const weightIncrease = Math.max(lastWeight * 0.025, 2.5);
-          weight = lastWeight + weightIncrease;
+          const weightIncrease = Math.max(
+            lastWeight * 0.025,
+            minWeightIncrement(isImperial)
+          );
+          weight = roundLiftWeight(lastWeight + weightIncrease, isImperial);
           // Reset reps to lower end of band
           reps = prescription.reps_min;
         } else {
@@ -237,18 +254,35 @@ export async function selectExerciseTargets(
         // Always calculate suggested weight from bodyweight multiplier (no NULLs)
         if ('suggested_weight_multiplier_bw' in prescription && typeof prescription.suggested_weight_multiplier_bw === 'number') {
           const multiplier = prescription.suggested_weight_multiplier_bw;
-          let bw: number = context.current_weight ?? 0;
-          if (bw <= 0) {
-            const profile = await getUserProfile(userId);
-            bw = profile?.current_weight ?? (context.use_imperial === false ? DEFAULT_BW_KG : DEFAULT_BW_LBS);
+          const bw =
+            resolvedProfileWeight && resolvedProfileWeight > 0
+              ? resolvedProfileWeight
+              : isImperial
+                ? DEFAULT_BW_LBS
+                : DEFAULT_BW_KG;
+          weight = roundLiftWeight(bw * multiplier, isImperial);
+        } else if (
+          'suggested_weight_lbs' in prescription ||
+          'suggested_weight_kg' in prescription
+        ) {
+          const lbs =
+            'suggested_weight_lbs' in prescription
+              ? prescription.suggested_weight_lbs
+              : null;
+          const kg =
+            'suggested_weight_kg' in prescription
+              ? prescription.suggested_weight_kg
+              : null;
+          if (isImperial) {
+            weight = lbs ?? (kg != null ? kg * LBS_PER_KG : 0);
+          } else {
+            weight = kg ?? (lbs != null ? lbs / LBS_PER_KG : 0);
           }
-          const raw = bw * multiplier;
-          weight = Math.round(raw * 2) / 2; // nearest 0.5
+          if (weight) {
+            weight = roundLiftWeight(weight, isImperial);
+          }
         } else {
-          // Custom exercise or legacy: use suggested_weight_lbs if present, else 0
-          weight = ('suggested_weight_lbs' in prescription && prescription.suggested_weight_lbs != null)
-            ? prescription.suggested_weight_lbs
-            : 0;
+          weight = 0;
         }
       }
     }

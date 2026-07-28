@@ -12,9 +12,13 @@ import { getUserProfileCached } from '../cache/dashboardStatsCache';
 import { supabase } from '../supabase/client';
 import { devLog } from './logger';
 import { formatDurationDisplay } from './formatDuration';
-
-const DEFAULT_BW_LBS = 150;
-const DEFAULT_BW_KG = 70;
+import {
+  DEFAULT_BW_KG,
+  DEFAULT_BW_LBS,
+  plateWeightIncrement,
+  roundLiftWeight,
+  weightUnitLabel,
+} from './units';
 
 interface WeightSuggestion {
   weight?: number;
@@ -73,19 +77,11 @@ export async function calculateWeightSuggestion(
     const recentSet = history.sets.find(h => h.set_number === setNumber) || history.sets[0];
 
     if (mode === 'reps') {
-      // Progressive overload: if last time hit target reps cleanly, suggest 2.5-5% increase
+      // Progressive overload: if last time hit target reps cleanly, suggest plate step up
       if (recentSet.reps && targetReps && recentSet.reps >= targetReps && recentSet.weight) {
-        const increment =
-          useImperial
-            ? recentSet.weight >= 100
-              ? 5
-              : 2.5
-            : recentSet.weight >= 45
-              ? 2.5
-              : 1.25;
-        const precision = useImperial ? 2 : 4;
+        const increment = plateWeightIncrement(recentSet.weight, useImperial);
         return {
-          weight: Math.round((recentSet.weight + increment) * precision) / precision,
+          weight: roundLiftWeight(recentSet.weight + increment, useImperial),
           reps: targetReps,
           source: 'history',
           confidence: 'high',
@@ -129,9 +125,7 @@ export async function calculateWeightSuggestion(
       const multiplier = prescription.suggested_weight_multiplier_bw;
       const profile = await getUserProfileCached(userId);
       const bw = profile?.current_weight ?? (useImperial ? DEFAULT_BW_LBS : DEFAULT_BW_KG);
-      const raw = bw * multiplier;
-      const precision = useImperial ? 2 : 4;
-      const weight = Math.round(raw * precision) / precision;
+      const weight = roundLiftWeight(bw * multiplier, useImperial);
 
       if (__DEV__) {
         devLog('weight-suggestion', {
@@ -176,8 +170,7 @@ export function formatWeightSuggestion(
   useImperial: boolean
 ): string {
   if (typeof suggestion.weight === 'number') {
-    const unit = useImperial ? 'lbs' : 'kg';
-    return `${suggestion.weight} ${unit}`;
+    return `${suggestion.weight} ${weightUnitLabel(useImperial)}`;
   }
 
   if (suggestion.duration_sec != null) {

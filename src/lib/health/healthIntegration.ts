@@ -371,11 +371,17 @@ async function computeSessionHealthMetrics(
     .eq('id', userId)
     .maybeSingle();
 
-  const weightKg = profile?.use_imperial
+  const useImperial = profile?.use_imperial !== false;
+  const weightKg = useImperial
     ? (profile?.current_weight ?? 70) * LB_TO_KG_HEALTH
     : (profile?.current_weight ?? 70);
 
   const activeEnergyKcal = estimateActiveEnergyKcal(weightKg, activeDurationSec);
+
+  // `volumeLbs` is display-unit volume (lbs or kg depending on preference).
+  const totalVolumeKg = useImperial
+    ? volumeLbs * LB_TO_KG_HEALTH
+    : volumeLbs;
 
   return {
     activeEnergyKcal,
@@ -383,7 +389,7 @@ async function computeSessionHealthMetrics(
     avgHeartRateBpm: avg,
     maxHeartRateBpm: max,
     activeDurationSec,
-    totalVolumeKg: Math.round(volumeLbs * LB_TO_KG_HEALTH * 10) / 10,
+    totalVolumeKg: Math.round(totalVolumeKg * 10) / 10,
     totalSets: workingSets,
     heartRateSampleCount: hrSamples.length,
   };

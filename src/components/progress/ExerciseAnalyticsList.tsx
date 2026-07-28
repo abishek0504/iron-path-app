@@ -16,8 +16,6 @@ import { getExerciseRankingsCached } from '../../lib/cache/analyticsCache';
 import type { ExerciseRankEntry } from '../../lib/supabase/queries/analytics';
 import { useUserStore } from '../../stores/userStore';
 
-const LBS_PER_KG = 2.20462;
-
 export function ExerciseAnalyticsList() {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -56,10 +54,10 @@ export function ExerciseAnalyticsList() {
     return entries.filter((e) => e.name.toLowerCase().includes(q));
   }, [entries, search]);
 
-  const formatVolume = (lbs: number) => {
-    const v = useImperial ? lbs : lbs / LBS_PER_KG;
+  const formatVolume = (volume: number) => {
+    // Stored volume is already in the user's display unit.
     const unit = useImperial ? 'lb' : 'kg';
-    return `${Math.round(v).toLocaleString()} ${unit}`;
+    return `${Math.round(volume).toLocaleString()} ${unit}`;
   };
 
   const handlePress = (item: ExerciseRankEntry) => {

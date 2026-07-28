@@ -25,6 +25,12 @@ export const GENERIC_DAY_FOCUS_OPTIONS = [
   'Upper',
   'Lower',
   'Full Body',
+  'Torso',
+  'Limbs',
+  'Chest',
+  'Back',
+  'Shoulders',
+  'Arms',
 ];
 
 export const TRAINING_SPLITS: Record<string, TrainingSplit> = {
@@ -40,10 +46,22 @@ export const TRAINING_SPLITS: Record<string, TrainingSplit> = {
     description: 'Alternate upper-body and lower-body days',
     dayFocusOptions: ['Upper', 'Lower'],
   },
+  push_pull: {
+    id: 'push_pull',
+    label: 'Push / Pull',
+    description: 'Alternate pushing and pulling days (legs mixed into both)',
+    dayFocusOptions: ['Push', 'Pull'],
+  },
   push_pull_legs: {
     id: 'push_pull_legs',
     label: 'Push / Pull / Legs',
     description: 'Rotate pushing, pulling, and leg days',
+    dayFocusOptions: ['Push', 'Pull', 'Legs'],
+  },
+  ppl_x2: {
+    id: 'ppl_x2',
+    label: 'Push / Pull / Legs x2',
+    description: 'Run the PPL rotation twice per week',
     dayFocusOptions: ['Push', 'Pull', 'Legs'],
   },
   ppl_upper_lower: {
@@ -52,23 +70,87 @@ export const TRAINING_SPLITS: Record<string, TrainingSplit> = {
     description: 'Push, pull, legs, then upper and lower days',
     dayFocusOptions: ['Push', 'Pull', 'Legs', 'Upper', 'Lower'],
   },
+  ppl_shoulders_arms: {
+    id: 'ppl_shoulders_arms',
+    label: 'PPL + Shoulders & Arms',
+    description: 'Push, pull, legs, plus a dedicated shoulders and arms day',
+    dayFocusOptions: ['Push', 'Pull', 'Legs', 'Shoulders + Arms'],
+  },
+  upper_lower_x3: {
+    id: 'upper_lower_x3',
+    label: 'Upper / Lower x3',
+    description: 'Upper and lower each three times per week',
+    dayFocusOptions: ['Upper', 'Lower'],
+  },
+  torso_limbs: {
+    id: 'torso_limbs',
+    label: 'Torso / Limbs',
+    description: 'Alternate torso (chest/back) and limbs (arms/legs) days',
+    dayFocusOptions: ['Torso', 'Limbs'],
+  },
   bro_split: {
     id: 'bro_split',
     label: 'Bro Split',
     description: 'One muscle group per day (chest, back, legs, shoulders, arms)',
     dayFocusOptions: ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms'],
   },
-  ppl_x2: {
-    id: 'ppl_x2',
-    label: 'Push / Pull / Legs x2',
-    description: 'Run the PPL rotation twice per week',
-    dayFocusOptions: ['Push', 'Pull', 'Legs'],
+  body_part_4day: {
+    id: 'body_part_4day',
+    label: '4-Day Body Part',
+    description: 'Chest, back, legs, and shoulders + arms across four days',
+    dayFocusOptions: ['Chest', 'Back', 'Legs', 'Shoulders + Arms'],
+  },
+  bro_split_6day: {
+    id: 'bro_split_6day',
+    label: '6-Day Body Part',
+    description: 'Chest, back, shoulders, arms, quads, and posterior chain',
+    dayFocusOptions: ['Chest', 'Back', 'Shoulders', 'Arms', 'Quads', 'Hamstrings + Glutes'],
   },
   arnold: {
     id: 'arnold',
     label: 'Arnold Split',
     description: 'Chest+back, shoulders+arms, legs — run twice per week',
     dayFocusOptions: ['Chest + Back', 'Shoulders + Arms', 'Legs'],
+  },
+  phul: {
+    id: 'phul',
+    label: 'PHUL',
+    description: 'Power Hypertrophy Upper Lower — strength and size days',
+    dayFocusOptions: [
+      'Upper Power',
+      'Lower Power',
+      'Upper Hypertrophy',
+      'Lower Hypertrophy',
+    ],
+  },
+  phat: {
+    id: 'phat',
+    label: 'PHAT',
+    description: 'Power Hypertrophy Adaptive Training across five focused days',
+    dayFocusOptions: [
+      'Upper Power',
+      'Lower Power',
+      'Back Hypertrophy',
+      'Lower Hypertrophy',
+      'Chest/Arms Hypertrophy',
+    ],
+  },
+  powerlifting: {
+    id: 'powerlifting',
+    label: 'Powerlifting (SBD)',
+    description: 'Squat, bench, and deadlift focused days with accessories',
+    dayFocusOptions: ['Squat', 'Bench', 'Deadlift', 'Accessories'],
+  },
+  olympic: {
+    id: 'olympic',
+    label: 'Olympic / Strength',
+    description: 'Snatch, clean & jerk, strength, and accessory emphasis days',
+    dayFocusOptions: [
+      'Snatch Focus',
+      'Clean & Jerk Focus',
+      'Strength',
+      'Accessories',
+    ],
   },
   not_sure: {
     id: 'not_sure',
@@ -78,20 +160,41 @@ export const TRAINING_SPLITS: Record<string, TrainingSplit> = {
   },
 };
 
+/** Known split ids excluding the "not sure" helper option. */
+export const NAMED_SPLIT_IDS = Object.keys(TRAINING_SPLITS).filter(
+  (id) => id !== 'not_sure'
+);
+
 /** Suggested split ids per training frequency (days per week). */
 const SUGGESTIONS_BY_DAYS: Record<number, string[]> = {
   1: ['full_body'],
-  2: ['full_body', 'upper_lower'],
+  2: ['full_body', 'upper_lower', 'push_pull'],
   3: ['full_body', 'push_pull_legs', 'upper_lower'],
-  4: ['upper_lower', 'full_body', 'push_pull_legs'],
-  5: ['ppl_upper_lower', 'bro_split', 'upper_lower'],
-  6: ['ppl_x2', 'arnold', 'bro_split'],
-  7: ['ppl_x2', 'bro_split', 'full_body'],
+  4: ['upper_lower', 'phul', 'torso_limbs', 'body_part_4day', 'push_pull_legs'],
+  5: ['ppl_upper_lower', 'phat', 'ppl_shoulders_arms', 'bro_split', 'upper_lower'],
+  6: ['ppl_x2', 'arnold', 'upper_lower_x3', 'bro_split_6day', 'powerlifting'],
+  7: ['ppl_x2', 'bro_split_6day', 'olympic', 'full_body'],
 };
 
 export function getSuggestedSplits(daysPerWeek: number): TrainingSplit[] {
   const ids = SUGGESTIONS_BY_DAYS[daysPerWeek] ?? SUGGESTIONS_BY_DAYS[3];
-  return ids.map((id) => TRAINING_SPLITS[id]);
+  return ids.map((id) => TRAINING_SPLITS[id]).filter(Boolean);
+}
+
+/**
+ * All named splits for the picker: suggestions first, then the rest (stable label order).
+ */
+export function getAllSplitsOrdered(daysPerWeek: number): {
+  suggested: TrainingSplit[];
+  more: TrainingSplit[];
+} {
+  const suggested = getSuggestedSplits(Math.max(1, daysPerWeek));
+  const suggestedIds = new Set(suggested.map((s) => s.id));
+  const more = NAMED_SPLIT_IDS
+    .filter((id) => !suggestedIds.has(id))
+    .map((id) => TRAINING_SPLITS[id])
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return { suggested, more };
 }
 
 /**

@@ -63,6 +63,7 @@ import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
 import { Button } from '../src/components/ui/Button';
+import { convertBodyWeight } from '../src/lib/utils/units';
 
 const EXPERIENCE_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
@@ -80,6 +81,9 @@ const GENDER_OPTIONS = [
   { value: 'Female', label: 'Female' },
   { value: 'Prefer not to say', label: 'Prefer Not To Say' },
 ] as const;
+/** Sentinel for scroller placeholders — never persisted to the DB. */
+const GENDER_PLACEHOLDER = '__select__';
+const WEIGHT_PLACEHOLDER = -1;
 const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const TOTAL_STEPS = 7;
 const SLIDE_DURATION_MS = 280;
@@ -113,7 +117,7 @@ export default function Onboarding() {
   const [showWeightPicker, setShowWeightPicker] = useState(false);
   const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [useImperial, setUseImperial] = useState(true);
-  const [currentWeight, setCurrentWeight] = useState<number>(70);
+  const [currentWeight, setCurrentWeight] = useState<number | null>(null);
   const [gender, setGender] = useState<string>('');
   const [experience, setExperience] = useState<string>('');
   const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
@@ -169,7 +173,11 @@ export default function Onboarding() {
           setDateOfBirth(new Date(profile.date_of_birth));
         }
         setUseImperial(profile.use_imperial ?? true);
-        setCurrentWeight(profile.current_weight != null ? profile.current_weight : 70);
+        setCurrentWeight(
+          profile.current_weight != null && profile.current_weight > 0
+            ? profile.current_weight
+            : null
+        );
         setGender(profile.gender || '');
         setExperience(profile.experience_level || '');
         setDaysPerWeekSlider(profile.days_per_week ?? 0);
@@ -366,9 +374,10 @@ export default function Onboarding() {
         first_name: firstName.trim(),
         last_name: lastName.trim() || undefined,
         date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
-        current_weight: currentWeight,
+        current_weight: currentWeight != null && currentWeight > 0 ? currentWeight : undefined,
         use_imperial: useImperial,
-        gender: gender || undefined,
+        gender:
+          gender && gender !== GENDER_PLACEHOLDER ? gender : undefined,
         id: userId,
       };
 
@@ -522,12 +531,15 @@ export default function Onboarding() {
           <Switch
             value={useImperial}
             onValueChange={(value) => {
-              setUseImperial(value);
-              if (value) {
-                setCurrentWeight(Math.round(currentWeight * 2.20462));
-              } else {
-                setCurrentWeight(Math.round(currentWeight / 2.20462));
+              if (currentWeight != null && currentWeight > 0) {
+                setCurrentWeight(
+                  convertBodyWeight(currentWeight, {
+                    fromImperial: useImperial,
+                    toImperial: value,
+                  })
+                );
               }
+              setUseImperial(value);
             }}
             thumbColor={useImperial ? colors.primary : colors.borderLight}
             trackColor={{ true: colors.primaryDark, false: colors.border }}
@@ -543,8 +555,15 @@ export default function Onboarding() {
           onPress={() => setShowWeightPicker(true)}
           style={styles.weightPickerButton}
         >
-          <Text style={styles.weightPickerButtonText}>
-            {currentWeight} {useImperial ? 'lbs' : 'kg'}
+          <Text
+            style={[
+              styles.weightPickerButtonText,
+              currentWeight == null && styles.datePickerPlaceholder,
+            ]}
+          >
+            {currentWeight != null
+              ? `${currentWeight} ${useImperial ? 'lbs' : 'kg'}`
+              : '(Select)'}
           </Text>
         </TouchableOpacity>
         {fieldErrors.currentWeight ? (
@@ -844,11 +863,16 @@ export default function Onboarding() {
         height={300}
       >
         <Picker
-          selectedValue={currentWeight}
-          onValueChange={(itemValue) => setCurrentWeight(itemValue)}
+          selectedValue={currentWeight ?? WEIGHT_PLACEHOLDER}
+          onValueChange={(itemValue) => {
+            // Placeholder cannot be chosen once a real weight is set (or as a saveable value).
+            if (itemValue === WEIGHT_PLACEHOLDER) return;
+            setCurrentWeight(itemValue);
+          }}
           style={styles.weightPicker}
           itemStyle={styles.weightPickerItem}
         >
+          <Picker.Item label="(Select)" value={WEIGHT_PLACEHOLDER} />
           {Array.from({ length: useImperial ? 601 : 301 }, (_, i) => {
             const value = i;
             return (
@@ -869,11 +893,16 @@ export default function Onboarding() {
         height={280}
       >
         <Picker
-          selectedValue={gender}
-          onValueChange={(itemValue) => setGender(itemValue)}
+          selectedValue={gender || GENDER_PLACEHOLDER}
+          onValueChange={(itemValue) => {
+            // Placeholder cannot be chosen — forces a real scroll onto a gender.
+            if (itemValue === GENDER_PLACEHOLDER) return;
+            setGender(itemValue);
+          }}
           style={styles.weightPicker}
           itemStyle={styles.weightPickerItem}
         >
+          <Picker.Item label="(Select)" value={GENDER_PLACEHOLDER} />
           {GENDER_OPTIONS.map((opt) => (
             <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
           ))}

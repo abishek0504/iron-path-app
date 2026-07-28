@@ -23,8 +23,6 @@ import { useUserStore } from '../../../src/stores/userStore';
 import { supabase } from '../../../src/lib/supabase/client';
 import type { TrendPoint } from '../../../src/lib/analytics/types';
 
-const LBS_PER_KG = 2.20462;
-
 export default function ExerciseAnalyticsScreen() {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -67,11 +65,11 @@ export default function ExerciseAnalyticsScreen() {
     void load();
   }, [load]);
 
-  const formatWeight = (lbs: number | null) => {
-    if (lbs == null) return '—';
-    const v = useImperial ? lbs : lbs / LBS_PER_KG;
+  // Stored weights/volume are already in the user's display unit.
+  const formatWeight = (weight: number | null) => {
+    if (weight == null) return '—';
     const unit = useImperial ? 'lb' : 'kg';
-    return `${Math.round(v * 10) / 10} ${unit}`;
+    return `${Math.round(weight * 10) / 10} ${unit}`;
   };
 
   const volumeTrend: TrendPoint[] = trend.map((p) => ({
@@ -80,7 +78,7 @@ export default function ExerciseAnalyticsScreen() {
       month: 'short',
       day: 'numeric',
     }),
-    value: useImperial ? p.volumeLbs : p.volumeLbs / LBS_PER_KG,
+    value: p.volumeLbs,
   }));
 
   const e1rmTrend: TrendPoint[] = trend
@@ -91,9 +89,7 @@ export default function ExerciseAnalyticsScreen() {
         month: 'short',
         day: 'numeric',
       }),
-      value: useImperial
-        ? (p.estimated1RmLbs ?? 0)
-        : (p.estimated1RmLbs ?? 0) / LBS_PER_KG,
+      value: p.estimated1RmLbs ?? 0,
     }));
 
   const weightTrend: TrendPoint[] = trend
@@ -104,9 +100,7 @@ export default function ExerciseAnalyticsScreen() {
         month: 'short',
         day: 'numeric',
       }),
-      value: useImperial
-        ? (p.bestWeightLbs ?? 0)
-        : (p.bestWeightLbs ?? 0) / LBS_PER_KG,
+      value: p.bestWeightLbs ?? 0,
     }));
 
   return (
@@ -136,7 +130,7 @@ export default function ExerciseAnalyticsScreen() {
               <ChartSection title="Est. 1RM" styles={styles}>
                 <TrendLineChart
                   data={e1rmTrend}
-                  formatValue={(v) => formatWeight(useImperial ? v : v * LBS_PER_KG)}
+                  formatValue={(v) => formatWeight(v)}
                 />
               </ChartSection>
             ) : null}
@@ -145,7 +139,7 @@ export default function ExerciseAnalyticsScreen() {
               <ChartSection title="Best set weight" styles={styles}>
                 <TrendLineChart
                   data={weightTrend}
-                  formatValue={(v) => formatWeight(useImperial ? v : v * LBS_PER_KG)}
+                  formatValue={(v) => formatWeight(v)}
                 />
               </ChartSection>
             ) : null}

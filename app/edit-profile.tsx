@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
   ScrollView,
@@ -25,7 +26,14 @@ import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
 import { updateUserProfile } from '../src/lib/supabase/queries/users';
-import { getUserProfileCached, invalidateProfileCache } from '../src/lib/cache/dashboardStatsCache';
+import { convertUserStoredWeights } from '../src/lib/supabase/queries/weight';
+import {
+  getUserProfileCached,
+  invalidateProfileCache,
+  invalidateWeightCache,
+  invalidateWorkoutStatsCache,
+} from '../src/lib/cache/dashboardStatsCache';
+import { invalidateAnalyticsCache } from '../src/lib/cache/analyticsCache';
 import { useUserStore, type UserProfile } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
@@ -44,13 +52,13 @@ import { SplitPicker } from '../src/components/ui/SplitPicker';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
 const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'];
+/** Sentinel for scroller placeholder — never persisted to the DB. */
+const GENDER_PLACEHOLDER = '__select__';
 const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-
-const FLOATING_SAVE_BAR_HEIGHT = 56;
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -230,12 +238,39 @@ export default function EditProfileScreen() {
     }
     setSaving(true);
     try {
+      const previousImperial = profile.use_imperial ?? true;
+      const unitsChanged = previousImperial !== useImperial;
+
+      if (unitsChanged) {
+        if (__DEV__) {
+          devLog('edit-profile', {
+            action: 'unitsConvert:start',
+            fromImperial: previousImperial,
+            toImperial: useImperial,
+          });
+        }
+        const { success: convertOk, result } = await convertUserStoredWeights(useImperial);
+        if (!convertOk) {
+          showToast('Failed to convert weights for the new unit.', 'error');
+          return;
+        }
+        if (__DEV__) {
+          devLog('edit-profile', {
+            action: 'unitsConvert:done',
+            converted: result?.converted,
+            sessionSetRows: result?.session_set_rows,
+            weightLogRows: result?.weight_log_rows,
+            prRows: result?.pr_rows,
+          });
+        }
+      }
+
       const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
       const updates: Partial<UserProfile> = {
         first_name: firstName.trim(),
         last_name: lastName.trim() || undefined,
         date_of_birth: dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : undefined,
-        gender: gender || undefined,
+        gender: gender && gender !== GENDER_PLACEHOLDER ? gender : undefined,
         experience_level: experienceLevel.trim() || undefined,
         days_per_week: daysNum,
         workout_days: daysNum && workoutDays.length === daysNum ? workoutDays : undefined,
@@ -249,12 +284,28 @@ export default function EditProfileScreen() {
         showToast('Failed to save profile.', 'error');
         return;
       }
-      invalidateProfileCache(profile.id);
 
-      setProfile({ ...profile, ...updates });
-      setLocalProfile((prev) => (prev ? { ...prev, ...updates } : prev));
+      invalidateProfileCache(profile.id);
+      invalidateWeightCache(profile.id);
+      invalidateWorkoutStatsCache(profile.id);
+      invalidateAnalyticsCache(profile.id);
+
+      let nextProfile: UserProfile = { ...profile, ...updates };
+      if (unitsChanged) {
+        const refreshed = await getUserProfileCached(profile.id);
+        if (refreshed) {
+          nextProfile = { ...refreshed, ...updates };
+        }
+      }
+
+      setProfile(nextProfile);
+      setLocalProfile(nextProfile);
       if (__DEV__) {
-        devLog('edit-profile', { action: 'save', updateKeys: Object.keys(updates) });
+        devLog('edit-profile', {
+          action: 'save',
+          updateKeys: Object.keys(updates),
+          unitsChanged,
+        });
       }
       await rescheduleRemindersAfterProfileWorkoutDays(updates.workout_days);
       showToast('Profile saved', 'success');
@@ -279,6 +330,10 @@ export default function EditProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Edit Profile</Text>
@@ -289,10 +344,8 @@ export default function EditProfileScreen() {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: FLOATING_SAVE_BAR_HEIGHT + insets.bottom + spacing.lg },
-        ]}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Account */}
         <View style={styles.card}>
@@ -484,16 +537,17 @@ export default function EditProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* Floating Save button */}
-      <Button
-        label="Save"
-        onPress={handleSave}
-        disabled={saving}
-        fullWidth
-        style={[styles.floatingSaveButton, { bottom: insets.bottom }]}
-      >
-        {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
-      </Button>
+      <View style={[styles.saveFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        <Button
+          label="Save"
+          onPress={handleSave}
+          disabled={saving}
+          fullWidth
+        >
+          {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
+        </Button>
+      </View>
+      </KeyboardAvoidingView>
 
       {/* Date Picker Bottom Sheet */}
       <DatePicker
@@ -513,11 +567,15 @@ export default function EditProfileScreen() {
         height={280}
       >
         <Picker
-          selectedValue={gender}
-          onValueChange={(itemValue) => setGender(itemValue)}
+          selectedValue={gender || GENDER_PLACEHOLDER}
+          onValueChange={(itemValue) => {
+            if (itemValue === GENDER_PLACEHOLDER) return;
+            setGender(itemValue);
+          }}
           style={styles.weightPicker}
           itemStyle={styles.weightPickerItem}
         >
+          <Picker.Item label="(Select)" value={GENDER_PLACEHOLDER} />
           {GENDER_OPTIONS.map((opt) => (
             <Picker.Item key={opt} label={opt} value={opt} />
           ))}
@@ -542,6 +600,9 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -574,16 +635,14 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   content: {
     padding: spacing.lg,
     gap: spacing.md,
+    paddingBottom: spacing.lg,
   },
-  floatingSaveButton: {
-    position: 'absolute',
-    left: spacing.lg,
-    right: spacing.lg,
-    shadowColor: colors.shadowColor,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+  saveFooter: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.cardBorder,
+    backgroundColor: colors.background,
   },
   card: {
     backgroundColor: colors.card,

@@ -12,8 +12,6 @@ import { devLog } from '../../lib/utils/logger';
 
 type RangePreset = '4w' | '12w' | '6mo' | 'ytd';
 
-const LBS_PER_KG = 2.20462;
-
 const RANGE_OPTIONS: { key: RangePreset; label: string }[] = [
   { key: '4w', label: '4W' },
   { key: '12w', label: '12W' },
@@ -66,11 +64,11 @@ export function AnalyticsTrendsPanel({ granularity = 'week' }: Props) {
   }, [load]);
 
   const formatVolume = useCallback(
-    (lbs: number) => {
-      const v = useImperial ? lbs : lbs / LBS_PER_KG;
+    (volume: number) => {
+      // Stored volume is already in the user's display unit.
       const unit = useImperial ? 'lb' : 'kg';
-      if (v >= 1000) return `${Math.round(v / 100) / 10}k ${unit}`;
-      return `${Math.round(v)} ${unit}`;
+      if (volume >= 1000) return `${Math.round(volume / 100) / 10}k ${unit}`;
+      return `${Math.round(volume)} ${unit}`;
     },
     [useImperial],
   );

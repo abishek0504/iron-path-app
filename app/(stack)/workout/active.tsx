@@ -738,7 +738,9 @@ export default function ActiveWorkoutScreen() {
       firstSet.set_number,
       exercise.mode,
       firstSet.reps,
-      firstSet.duration_sec
+      firstSet.duration_sec,
+      profile?.experience_level,
+      profile?.use_imperial ?? true
     );
 
     // Set suggested weight for display (use existing set weight or suggestion)

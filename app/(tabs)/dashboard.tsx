@@ -35,7 +35,6 @@ import { TourTarget } from '../../src/components/tour/TourTarget';
 import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
-const LBS_PER_KG = 2.20462;
 /** Circular control: half of 44×44 hit target. */
 const BODY_SWITCHER_RADIUS = 22;
 
@@ -105,11 +104,8 @@ export default function DashboardTab() {
 
   const today = useMemo(() => new Date(), []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
-  const displayVolume = useMemo(() => {
-    const useImperial = profile?.use_imperial ?? true;
-    const raw = yearTotalVolume;
-    return useImperial ? raw : raw / LBS_PER_KG;
-  }, [profile?.use_imperial, yearTotalVolume]);
+  // Stored volume is already in the user's display unit.
+  const displayVolume = yearTotalVolume;
 
   const load = useCallback(async () => {
     if (loadInFlightRef.current) return;

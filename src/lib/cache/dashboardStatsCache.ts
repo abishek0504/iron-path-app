@@ -71,3 +71,17 @@ export function invalidateWeightCache(userId: string): void {
     if (key.startsWith(prefix)) cache.delete(key);
   }
 }
+
+/** Call after unit conversion so dashboard volume/PRs refetch in the new unit. */
+export function invalidateWorkoutStatsCache(userId: string): void {
+  cache.delete(`yearStats:${userId}`);
+  cache.delete(`streak:${userId}`);
+  for (const key of cache.keys()) {
+    if (
+      key.startsWith(`topPrs:${userId}:`) ||
+      key.startsWith(`recentSessions:${userId}:`)
+    ) {
+      cache.delete(key);
+    }
+  }
+}

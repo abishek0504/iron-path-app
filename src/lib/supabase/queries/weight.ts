@@ -184,6 +184,67 @@ export async function deleteWeightLog(
   }
 }
 
+export type ConvertUserStoredWeightsResult = {
+  converted: boolean;
+  reason?: string;
+  from_imperial?: boolean;
+  to_imperial?: boolean;
+  factor?: number;
+  profile_rows?: number;
+  weight_log_rows?: number;
+  session_set_rows?: number;
+  pr_rows?: number;
+  override_rows?: number;
+  daily_stats_rows?: number;
+  health_metrics_rows?: number;
+};
+
+/**
+ * Convert all stored display-unit weights for the signed-in user.
+ * Does not flip `use_imperial` — caller updates that after success.
+ */
+export async function convertUserStoredWeights(
+  toImperial: boolean
+): Promise<{ success: boolean; result?: ConvertUserStoredWeightsResult }> {
+  if (__DEV__) {
+    devLog('weight-query', {
+      action: 'convertUserStoredWeights',
+      toImperial,
+      toUnit: toImperial ? 'imperial' : 'metric',
+    });
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('convert_user_stored_weights', {
+      p_to_imperial: toImperial,
+    });
+
+    if (error) {
+      if (__DEV__) devError('weight-query', error, { action: 'convertUserStoredWeights' });
+      return { success: false };
+    }
+
+    const result = data as ConvertUserStoredWeightsResult;
+    if (__DEV__) {
+      devLog('weight-query', {
+        action: 'convertUserStoredWeights:done',
+        converted: result?.converted,
+        fromImperial: result?.from_imperial,
+        toImperial: result?.to_imperial,
+        sessionSetRows: result?.session_set_rows,
+        weightLogRows: result?.weight_log_rows,
+        prRows: result?.pr_rows,
+        dailyStatsRows: result?.daily_stats_rows,
+      });
+    }
+
+    return { success: true, result };
+  } catch (error) {
+    if (__DEV__) devError('weight-query', error, { action: 'convertUserStoredWeights' });
+    return { success: false };
+  }
+}
+
 /**
  * Get weight history for a user, ordered by recorded_at desc
  */

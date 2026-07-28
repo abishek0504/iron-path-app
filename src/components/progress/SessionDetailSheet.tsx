@@ -557,12 +557,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
               </View>
               <View style={styles.statPill}>
                 <Text style={styles.statPillValue}>
-                  {Math.round(
-                    (profile?.use_imperial !== false
-                      ? session.stats.volumeLbs
-                      : session.stats.volumeLbs / 2.20462),
-                  )}{' '}
-                  {unitsLabel}
+                  {Math.round(session.stats.volumeLbs)} {unitsLabel}
                 </Text>
                 <Text style={styles.statPillLabel}>volume</Text>
               </View>
