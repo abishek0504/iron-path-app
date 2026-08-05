@@ -71,6 +71,14 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
   const [isPurchasing, setIsPurchasing] = useState(false);
   const onSubscribedRef = useRef<(() => void) | null>(null);
 
+  // If Pro resolves after the modal opened (RC/profile race), do not leave it stuck.
+  useEffect(() => {
+    if (isPro && visible) {
+      setVisible(false);
+      onSubscribedRef.current = null;
+    }
+  }, [isPro, visible]);
+
   const openPaywall = useCallback(
     (nextTrigger: PaywallTrigger, onSubscribed?: () => void) => {
       setTrigger(nextTrigger);

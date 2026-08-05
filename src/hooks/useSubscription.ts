@@ -59,6 +59,10 @@ export function useSubscription(userId: string | null) {
       if (__DEV__) {
         devLog('subscription', { action: 'refresh', isPro: pro, userId });
       }
+    } catch (e) {
+      if (__DEV__) {
+        devLog('subscription', { action: 'refresh_failed', error: String(e), userId });
+      }
     } finally {
       setIsLoading(false);
     }

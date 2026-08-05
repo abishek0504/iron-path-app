@@ -117,7 +117,7 @@ const HISTORY_LOOKBACK_DAYS = 60;
 const HISTORY_MAX_SETS = 300;
 
 /** Default OpenAI model. Overridable via `OPENAI_MODEL` env. */
-const DEFAULT_MODEL = 'gpt-5-nano';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
 
 /** Hard timeout for the OpenAI call so a slow upstream can't hold the function open. */
 const OPENAI_TIMEOUT_MS = 30_000;
@@ -239,6 +239,26 @@ function isUuid(value: unknown): value is string {
     typeof value === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
   );
+}
+
+/**
+ * Normalize an idempotency key to a UUID for `v2_ai_generation_jobs.id`.
+ * Mobile clients sometimes send `${Date.now()}-…` when `crypto.randomUUID`
+ * is unavailable; hash those deterministically so retries stay idempotent.
+ */
+async function normalizeJobId(value: unknown): Promise<string | null> {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (isUuid(trimmed)) return trimmed;
+
+  const data = new TextEncoder().encode(`ironpath-ai-job:${trimmed}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(digest.slice(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
 /**
@@ -1153,18 +1173,27 @@ Deno.serve(async (req) => {
 
     const templateId = body.templateId;
     if (!isUuid(templateId)) {
+      console.error('generate-workout validation failed: templateId must be a uuid');
       return jsonResponse({ error: 'templateId must be a uuid' }, 400);
     }
     auditTemplateId = templateId;
 
-    const idempotencyKey = body.idempotencyKey;
-    if (!isUuid(idempotencyKey)) {
-      return jsonResponse({ error: 'idempotencyKey must be a uuid' }, 400);
+    const idempotencyKey = await normalizeJobId(body.idempotencyKey);
+    if (!idempotencyKey) {
+      console.error('generate-workout validation failed: idempotencyKey missing');
+      return jsonResponse({ error: 'idempotencyKey is required' }, 400);
+    }
+    if (!isUuid(body.idempotencyKey)) {
+      console.warn(
+        'generate-workout: normalized non-uuid idempotencyKey to',
+        idempotencyKey.slice(0, 8),
+      );
     }
     auditJobId = idempotencyKey;
 
     const dayId = body.dayId;
     if (!isUuid(dayId)) {
+      console.error('generate-workout validation failed: dayId must be a uuid');
       return jsonResponse({ error: 'dayId must be a uuid' }, 400);
     }
 
@@ -1173,11 +1202,13 @@ Deno.serve(async (req) => {
       ? body.sessionEndIsoExclusive
       : null;
     if (!sessionStartIso || !sessionEndIsoExclusive) {
+      console.error('generate-workout validation failed: session ISO bounds required');
       return jsonResponse({ error: 'sessionStartIso and sessionEndIsoExclusive are required' }, 400);
     }
 
     const sessionsPerDay = asPositiveInt(body.sessionsPerDay, MAX_SESSIONS_PER_DAY);
     if (sessionsPerDay === null) {
+      console.error('generate-workout validation failed: sessionsPerDay out of range');
       return jsonResponse(
         { error: `sessionsPerDay must be 1..${MAX_SESSIONS_PER_DAY}` },
         400,

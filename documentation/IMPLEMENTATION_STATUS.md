@@ -1,10 +1,10 @@
 # Implementation Status
 
-**Last Updated**: 2026-07-23  
+**Last Updated**: 2026-08-02  
 
 ## Summary
 
-**Overall progress**: Feature-complete for App Store submission. Several previously-listed blockers are now **resolved** (verified 2026-07-23): legal pages return HTTP 200 at `tryironpath.com/privacy` and `/terms`; `eas.json` submit `ascAppId` (`6793811855`) and `appleTeamId` (`JWUD8ZKQLN`) are set; Sentry DSN + org (`ironpath`/`apple-ios`) are configured in `eas.json`/`app.json`; and the iOS privacy manifest includes `CrashData`. The only remaining **external/manual** items are the Supabase "leaked password protection" dashboard toggle (still WARN per advisors), RevenueCat + App Store Connect subscription setup with a sandbox purchase test, and the final TestFlight pass.
+**Overall progress**: Feature-complete for App Store submission. Several previously-listed blockers are now **resolved** (verified 2026-07-23): legal pages return HTTP 200 at `tryironpath.com/privacy` and `/terms`; `eas.json` submit `ascAppId` (`6793811855`) and `appleTeamId` (`JWUD8ZKQLN`) are set; Sentry DSN + org (`ironpath`/`apple-ios`) are configured in `eas.json`/`app.json`; and the iOS privacy manifest includes `CrashData`. RevenueCat + App Store Connect products, entitlement, offering, webhook, and API keys are set up (2026-08-02). The only remaining **external/manual** items are verifying offerings load and completing a sandbox purchase/restore on TestFlight, then the final TestFlight pass.
 
 **Core systems**:
 
@@ -267,15 +267,19 @@
 - ✅ **Sentry** — DSN set in `eas.json` production env; `app.json` Sentry plugin org `ironpath` / project `apple-ios`.
 - ✅ **iOS privacy manifest** — includes `NSPrivacyCollectedDataTypeCrashData`.
 
+### Resolved (verified 2026-08-02)
+
+- ✅ **RevenueCat + App Store Connect setup** — products (`ironpath_pro_monthly`/`ironpath_pro_annual`), entitlement `ironpath_pro`, default offering, webhook, and API keys configured (`eas.json` / env). See `SUBSCRIPTION_SETUP.md`.
+- ⛔ **Supabase leaked-password protection** — advisor WARN accepted as **permanently out of scope** (dashboard toggle unavailable / cannot enable). Do not treat as open work.
+
 ### Blocking submission (external, not code)
 
-1. **Supabase dashboard** — enable "Leaked password protection" (Auth → Providers → Email); the only advisor item without a SQL fix. Still WARN per security advisors check on 2026-07-23.
-2. **RevenueCat + App Store Connect** — confirm products (`ironpath_pro_monthly`/`ironpath_pro_annual`), entitlement `ironpath_pro`, default offering, webhook secret, and run a sandbox purchase/restore on a dev/TestFlight build. See `SUBSCRIPTION_SETUP.md`.
-3. **Final TestFlight pass** — run core flows on a physical device (workout, watch mirror, HealthKit, paywall).
+1. **Sandbox purchase verify** — ensure App Store Connect Paid Apps agreement is **Active** (tax + banking, including Canada GST/HST Form 506 when required); confirm TestFlight paywall loads store packages (trial CTA enabled); complete sandbox purchase/restore. See `SUBSCRIPTION_SETUP.md`.
+2. **Final TestFlight pass** — run core flows on a physical device (workout, watch mirror, HealthKit, paywall).
 
 ### Non-blocking
 
-5. **Partial Derived Cache Implementation**
+3. **Partial Derived Cache Implementation**
    - **Impact**: v2_muscle_freshness updated via Edge Function; v2_daily_muscle_stress still computed on-demand
    - **Future**: Add daily stress cache rebuild job if needed
 

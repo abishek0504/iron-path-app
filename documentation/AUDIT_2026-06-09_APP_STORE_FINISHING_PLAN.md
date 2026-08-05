@@ -27,7 +27,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 | Function hardening | ✅ `search_path = public, pg_temp` pinned on all 6 public functions; anon/authenticated EXECUTE revoked on `handle_new_user`, `trigger_upsert_exercise_pr`, `purge_soft_deleted_accounts` |
 | Edge functions | ✅ 3 ACTIVE: `generate-workout` v5, `delete-account` v5, `update-muscle-freshness` v7 |
 | `v2_ai_generations` | ⚠️ Exactly 1 `gemini` row, dated **2026-05-10** — no generation since |
-| Security advisors | ⚠️ `auth_leaked_password_protection` still disabled; remaining lint-0027 warnings are authenticated-GraphQL visibility (expected, RLS-protected) |
+| Security advisors | ⛔ `auth_leaked_password_protection` out of scope (cannot enable); remaining lint-0027 warnings are authenticated-GraphQL visibility (expected, RLS-protected) |
 | Performance advisors | INFO only: 1 unindexed FK (`v2_ai_generations.template_id`), ~30 "unused index" notices (low traffic — expected) |
 | `https://tryironpath.com/privacy` / `/terms` | ❌ Both return "Page not found" |
 | `npx tsc --noEmit` | ✅ Clean |
@@ -40,7 +40,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 1. **Gemini was not re-verified live.** The `ai-verify-polish` todo is marked completed, but `v2_ai_generations` contains exactly one `source='gemini'` row dated 2026-05-10 — nothing since. The plan required a fresh dev-build generation to confirm the key hasn't expired. — **Superseded 2026-06-10**: backend migrated Gemini → OpenAI (`generate-workout` rewritten, deployed v14; migration `20260610000000_ai_generations_openai_source`); ≥1 `source='openai'` row in live `v2_ai_generations` confirms a real generation.
 2. **Legal URLs are live-404.** `https://tryironpath.com/privacy` and `https://tryironpath.com/terms` both return "Page not found". Content in `legal/privacy.md` / `legal/terms.md` is complete (Supabase, Gemini, HealthKit, Sentry, account deletion), and `LegalLinks` renders on signup, settings, and help — so the app currently links users to 404s. Hard App Store blocker. — **Still open 2026-06-11** (both URLs re-verified 404).
-3. **Leaked-password protection is still disabled** (confirmed via live security advisors). The remediation migration's own comment defers it to the dashboard; it was never toggled. One-click fix: [Supabase password security](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection). — **Still open 2026-06-11** (re-verified via security advisors).
+3. **Leaked-password protection** — previously open; **permanently out of scope** as of 2026-08-02 (dashboard toggle unavailable / cannot enable). Do not treat as remaining work.
 4. **Set types missing from `app/add-exercise-edit.tsx`** — zero `set_type` UI or inserts; every set added via that screen defaults to `normal`. The plan named this file explicitly. — **Done 2026-06-11**: `set_type` is now part of the screen's set model with a warm-up toggle and persisted inserts.
 5. **`app/add-exercise.tsx` has no multi-select** — only the active-workout add flow got `multiSelect`; the full-page screen still adds one exercise at a time. — **Still open 2026-06-11**.
 6. **`update-muscle-freshness` edge function does not exclude warmups** — client-side stress queries filter `.neq('set_type','warmup')`, but the deployed freshness function counts all sets (index.ts lines 182–265), so warm-ups still inflate muscle stress. — **Done 2026-06-11**: function now filters `.neq('set_type','warmup')` (index.ts:187) and is deployed (v13).
@@ -167,7 +167,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 |---|---|---|---|
 | 1 | Legal pages | PARTIAL | Host `legal/*.md` at tryironpath.com (**confirmed 404 live**; still 404 re-verified 2026-06-11) |
 | 2 | Account purge job | VERIFIED (applied + cron active, confirmed live) | Consider avatar storage cleanup |
-| 3 | Security remediation | VERIFIED (applied, confirmed live) | Enable leaked-password protection (dashboard — still disabled 2026-06-11) |
+| 3 | Security remediation | VERIFIED (applied, confirmed live) | Leaked-password protection out of scope (cannot enable) |
 | 4 | EAS production env | PARTIAL | Real Sentry DSN; consider EAS secrets; Apple IDs (`app.json` `appleTeamId` now set 2026-06-11; `eas.json` submit `ascAppId`/`appleTeamId` still placeholders) |
 | 5 | Sentry | PARTIAL | DSN, org, `SENTRY_AUTH_TOKEN`; optional `enabled: !__DEV__` |
 | 6 | Privacy manifest | PARTIAL | Sync root file with `app.json`; ASC questionnaire alignment |
@@ -177,7 +177,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 
 - **Legal** — content complete in `legal/privacy.md` / `legal/terms.md` (Supabase, Gemini, HealthKit, Sentry, 30-day deletion). URLs in `src/lib/utils/legal.ts:15-16`; `LegalLinks` rendered on signup (`signup.tsx:354`), settings (`SettingsMenu.tsx:197-198`), help (`help-support.tsx:175-176`). **Both URLs 404 as of this audit.**
 - **Purge job** — `purge_soft_deleted_accounts()`: SECURITY DEFINER, pinned search_path, batch cap 50, deletes `auth.users` (cascades to all `v2_*` via ON DELETE CASCADE), revoked from public/anon/authenticated; cron `0 3 * * *` confirmed active in live DB. Consistent with `delete-account` edge function (30-day grace), UI copy, and restore flow (`login.tsx:98-99`, `users.ts:164-177`). Gap: avatars in storage have no FK — orphaned after purge.
-- **Advisor remediation** — `20260609000003`: search_path pinned on `adjust_bw_exercises`/`adjust_plan_data` (others already pinned); anon+public EXECUTE revoked on `handle_new_user`/`trigger_upsert_exercise_pr`; broad avatars listing policies dropped (owner-scoped remain; public bucket URLs unchanged); `revoke all ... from anon` across `v2_*` + default privileges. All confirmed in live DB. Leaked-password protection explicitly deferred to dashboard — **still off**.
+- **Advisor remediation** — `20260609000003`: search_path pinned on `adjust_bw_exercises`/`adjust_plan_data` (others already pinned); anon+public EXECUTE revoked on `handle_new_user`/`trigger_upsert_exercise_pr`; broad avatars listing policies dropped (owner-scoped remain; public bucket URLs unchanged); `revoke all ... from anon` across `v2_*` + default privileges. All confirmed in live DB. Leaked-password protection — **out of scope** (cannot enable).
 - **EAS env** — production/preview profiles carry `EXPO_PUBLIC_SUPABASE_URL` + anon key (hardcoded JWT in git — public by design, EAS secrets preferred) and `EXPO_PUBLIC_SENTRY_DSN: REPLACE_WITH_SENTRY_DSN`. Submit profile `ascAppId`/`appleTeamId` placeholders (expected — Apple enrollment is the one legitimately pending plan todo). No service-role/Gemini/Sentry tokens committed.
 - **Sentry** — `@sentry/react-native` installed; expo plugin in `app.json:118-124` with `organization: REPLACE_WITH_SENTRY_ORG`; `initSentry.ts` no-ops on web/missing DSN, `tracesSampleRate: __DEV__ ? 0 : 0.15`, strips email from breadcrumbs; called from `_layout.tsx:24`. Gaps: no real DSN/org, `SENTRY_AUTH_TOKEN` EAS secret needed for dSYM upload, no `enabled: !__DEV__`.
 - **CI** — `.github/workflows/ci.yml`: Node 22, `npm ci`, `npm run lint` (= `tsc --noEmit`), `npm test` (vitest). ESLint not run in CI (`lint:eslint` script exists). Current ESLint errors: 3 × `jsr:` import resolution in Deno edge functions.
@@ -229,7 +229,7 @@ Double-check audit of all work marked completed in the "App Store Finishing Plan
 1. **Publish `legal/*.md` to tryironpath.com** — app already links to 404s (App Store blocker) — *still open 2026-06-11 (re-verified 404)*
 2. **Run one real Gemini generation from a dev build** — truly close `ai-verify-polish` — *Superseded 2026-06-10: backend migrated to OpenAI (migration 20260610000000, `generate-workout` v14); live `source='openai'` generation row confirmed*
 3. **Fix the warmup PR race** — pass `set_type` at completion, or revoke/recompute PR on retag — *Done 2026-06-11 (`active.tsx` preserves `set_type` on tap/watch completion)*
-4. **Enable leaked-password protection** — Supabase dashboard, 1 minute — *still open 2026-06-11 (re-verified via security advisors)*
+4. ~~**Enable leaked-password protection**~~ — **cancelled / out of scope** (cannot enable)
 5. **Add warmup exclusion to `update-muscle-freshness`** and redeploy — *Done 2026-06-11 (`.neq('set_type','warmup')`, deployed v13)*
 6. **Harden watch events** — validate `sessionId`/`setNumber`; use `NSNumber`-safe parsing — *still open 2026-06-11*
 7. **Sync `PrivacyInfo.xcprivacy` with `app.json`** (CrashData entry); sweep stale docs (`SYSTEM_ARCHITECTURE.md`, `DEVELOPMENT_BUILD.md`); drop the 3 dead `planner.tsx` imports — *partial 2026-06-11: PrivacyInfo CrashData still missing; dead imports still present; status docs (IMPLEMENTATION_STATUS/00_INDEX) refreshed*

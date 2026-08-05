@@ -121,7 +121,7 @@ SELECT COUNT(*) FROM v2_muscles;
 ### 6. Deploy Edge Functions
 
 The app calls Supabase Edge Functions in `supabase/functions/`:
-- `generate-workout` — AI workout generation (requires `OPENAI_API_KEY` secret; optional `OPENAI_MODEL`)
+- `generate-workout` — AI workout generation (requires `OPENAI_API_KEY` secret; optional `OPENAI_MODEL`, defaults to `gpt-5.6-luna`)
 - `update-muscle-freshness` — recomputes muscle freshness/stress caches
 - `delete-account` — account soft-delete flow
 - `revenuecat-webhook` — syncs subscription tier from RevenueCat (requires `REVENUECAT_WEBHOOK_SECRET`)
@@ -129,6 +129,7 @@ The app calls Supabase Edge Functions in `supabase/functions/`:
 ```bash
 # Set secrets once
 npx supabase secrets set OPENAI_API_KEY=sk-...
+npx supabase secrets set OPENAI_MODEL=gpt-5.6-luna
 npx supabase secrets set REVENUECAT_WEBHOOK_SECRET=your-webhook-secret
 
 # Deploy all functions

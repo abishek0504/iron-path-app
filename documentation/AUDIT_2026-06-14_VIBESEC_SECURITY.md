@@ -113,7 +113,7 @@ Status: **Fixed** | **Manual** | **Deferred** | **Accepted** | **N/A (mitigated)
 | SEC-EF-15 | Low | HTTP method | `update-muscle-freshness` | No POST-only guard | **Fixed** |
 | SEC-EF-16–18 | Low | Webhook | `revenuecat-webhook` | Timing compare, UUID validation, early cancellation | **Fixed** |
 | SEC-DB-12 | Low | DoS | `v2_support` | No message length limit | **Fixed** — CHECK 1–5000 chars |
-| SEC-DB-14 | Low | Password security | Supabase Auth | Leaked password protection disabled | **Manual** |
+| SEC-DB-14 | Low | Password security | Supabase Auth | Leaked password protection disabled | **Out of scope** |
 | SEC-MB-08–12 | Low | Mobile / privacy | Watch, Sentry, RevenueCat purge | Disclosure and lifecycle gaps | **Partial** — Watch + RC purge fixed; Sentry org placeholder remains **Manual** |
 
 ### Informational
@@ -247,7 +247,7 @@ All **22** `v2_*` tables have `rowsecurity = true`. No non-`v2_*` application ta
 
 | Item | Steps | Verification |
 |------|-------|--------------|
-| **Leaked password protection** | Supabase Dashboard → Authentication → Providers → Email → enable [Leaked password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection) | `get_advisors` security: `auth_leaked_password_protection` absent |
+| **Leaked password protection** | **Out of scope** — do not enable / do not track (dashboard toggle unavailable) | n/a |
 | **`IMAGE_BATCH_SECRET`** | N/A — batch pipeline removed | — |
 | **EAS secrets (optional)** | Move `EXPO_PUBLIC_SUPABASE_*` from `eas.json` to `eas secret:create` | Keys not in git |
 | **Avatar policy alignment** | If uploads use flat `{uuid}-{ts}.blob` keys, update storage policy to `filename LIKE auth.uid()::text \|\| '-%'` | Owner can upload/update/delete own avatar only |
@@ -265,7 +265,7 @@ All **22** `v2_*` tables have `rowsecurity = true`. No non-`v2_*` application ta
 | Migration `vibesec_security_hardening` | ✅ Applied |
 | Triggers `trg_v2_profiles_protect_subscription`, `trg_v2_profiles_protect_deletion` | ✅ Active on `v2_profiles` |
 | Security advisor: `anon_security_definer_function_executable` for subscription trigger | ✅ **Resolved** (was WARN pre-fix) |
-| Security advisor: `auth_leaked_password_protection` | ⚠️ Still disabled — **manual** |
+| Security advisor: `auth_leaked_password_protection` | ⛔ Out of scope (cannot enable) |
 | Security advisor: GraphQL lint-0027 (22 tables) | ⚠️ Expected — RLS-protected; informational |
 | Legacy v1 tables | ✅ None in live `public` schema |
 | `https://tryironpath.com/privacy` | ✅ HTTP 200 (was 404 on 2026-06-09) |
@@ -280,7 +280,7 @@ All **22** `v2_*` tables have `rowsecurity = true`. No non-`v2_*` application ta
 | June 9 item | This audit |
 |-------------|------------|
 | Legal URLs 404 | **Resolved** — live 200 as of 2026-06-14 |
-| Leaked password protection | **Still open** — manual dashboard step |
+| Leaked password protection | **Out of scope** — dashboard toggle unavailable; do not treat as open work |
 | `generate-exercise-image` unauthenticated | **Removed** — function and batch scripts deleted |
 | Watch stale `transferUserInfo` | **Fixed** — session/set validation |
 | Security advisor remediation | **Extended** — subscription INSERT, deletion fields, EXECUTE revokes |
@@ -303,7 +303,7 @@ Notable transitive issues:
 
 ## 10. Recommended follow-ups (priority order)
 
-1. Enable leaked password protection in Supabase Dashboard
+1. ~~Enable leaked password protection in Supabase Dashboard~~ — **cancelled / out of scope** (cannot enable)
 2. Add web CSP at hosting layer (`tryironpath.com`)
 3. Plan Expo 56 upgrade for dependency CVEs (`SEC-DEP-01`)
 4. Set real Sentry org in `app.json` and `EXPO_PUBLIC_SENTRY_DSN` in EAS

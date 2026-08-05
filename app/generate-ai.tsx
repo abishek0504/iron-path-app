@@ -23,19 +23,9 @@ import { useToast } from '../src/hooks/useToast';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
 import { getDateBoundsForDayName } from '../src/lib/utils/date';
+import { createUuid, isUuid } from '../src/lib/utils/uuid';
 import { devError } from '../src/lib/utils/logger';
 import { useTheme } from '../src/lib/utils/ThemeContext';
-
-function createGenerationId(): string {
-  if (typeof globalThis.crypto?.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const rand = (Math.random() * 16) | 0;
-    const value = char === 'x' ? rand : (rand & 0x3) | 0x8;
-    return value.toString(16);
-  });
-}
 
 function parseConstraints(raw: string | string[] | undefined): DayConstraints {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -113,9 +103,13 @@ export default function GenerateAiScreen() {
           constraintsRaw,
         };
 
-        let idempotencyKey = routeGenerationId || createGenerationId();
+        let idempotencyKey = isUuid(routeGenerationId) ? routeGenerationId : createUuid();
         const pending = await loadPendingAiGeneration();
-        if (pending && matchesPendingGeneration(pending, paramSnapshot)) {
+        if (
+          pending &&
+          matchesPendingGeneration(pending, paramSnapshot) &&
+          isUuid(pending.generationId)
+        ) {
           idempotencyKey = pending.generationId;
         }
 

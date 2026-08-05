@@ -581,7 +581,7 @@ EXERCISE_COUNT_TOLERANCE = 1     // around user-requested count
 MAX_STRETCH_COUNT = 5
 FRESHNESS_LOOKBACK_HOURS = 48
 HISTORY_LOOKBACK_DAYS = 60       // warmups excluded; cap HISTORY_MAX_SETS = 300
-DEFAULT_MODEL = 'gpt-5-nano'     // overridable via OPENAI_MODEL
+DEFAULT_MODEL = 'gpt-5.6-luna'   // overridable via OPENAI_MODEL
 TARGET_BOUNDS: sets 1-10, reps 1-50, weight 0-2000, duration_sec 5-3600, target_rpe 5-10
 ```
 

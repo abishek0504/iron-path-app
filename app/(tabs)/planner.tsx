@@ -65,11 +65,16 @@ import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS } from '../../src/lib/utils/date';
+import { createUuid } from '../../src/lib/utils/uuid';
 import {
   computeRoutineSessionExerciseIds as computeRoutineIdsFromSlots,
   dayOnlyBadgeLabel,
   logRoutineClassificationDiagnostics,
 } from '../../src/lib/planner/routineClassification';
+import {
+  ensureSessionsForPlanDay,
+  getTodayDayName,
+} from '../../src/lib/planner/ensureSessionsForPlanDay';
 import { SessionExerciseEditSheet } from '../../src/components/workout/SessionExerciseEditSheet';
 import { applyStructureEditToTemplate, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
 import {
@@ -94,14 +99,6 @@ import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { usePaywall } from '../../src/components/paywall/PaywallProvider';
-
-/**
- * Get today's day name using Date.getDay() (0=Sunday, 6=Saturday)
- */
-function getTodayDayName(): string {
-  const dayIndex = new Date().getDay();
-  return WEEK_DAYS[dayIndex];
-}
 
 type PlannerSessionExercise = {
   id: string;
@@ -197,8 +194,6 @@ export default function PlannerTab() {
   const loadTemplateDidTodayLoadRef = useRef(false);
   /** Current selected day name; used to ignore stale loadSessionsForDay results when user switches days quickly. */
   const selectedDayNameRef = useRef<string>(getTodayDayName());
-  /** Prevents duplicate auto-materialize when a day has template slots but no sessions yet. */
-  const materializeInFlightRef = useRef<Set<string>>(new Set());
   const tourScrollRef = useRef<TourScrollable | null>(null);
   const { onScroll: onTourScroll } = useRegisterTourScroll('planner', tourScrollRef);
 
@@ -424,21 +419,12 @@ export default function PlannerTab() {
       setIsLoadingSessionsForDay(true);
       const dayName = options?.dayName ?? getTodayDayName();
       const requestedDayName = dayName;
-      const { startIso, endIsoExclusive } = dayName === getTodayDayName() ? getLocalDayBoundsIso() : getDateBoundsForDayName(dayName);
-      if (__DEV__) {
-        devLog('planner', {
-          action: 'loadSessionsForDay',
-          userId,
-          dayName,
-          forceRefresh: options?.forceRefresh,
-          startIso,
-          endIsoExclusive,
-          startLocal: new Date(startIso).toString(),
-          endLocalExclusive: new Date(endIsoExclusive).toString(),
-        });
-      }
 
-      const applySessionsToState = async (sessions: WorkoutSession[]): Promise<void> => {
+      const applySessionsToState = async (
+        sessions: WorkoutSession[],
+        startIso: string,
+        endIsoExclusive: string,
+      ): Promise<void> => {
         if (sessions.length === 0) {
           if (__DEV__) {
             devLog('planner', {
@@ -610,61 +596,35 @@ export default function PlannerTab() {
       };
 
       try {
-        let sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
+        const ensured = await ensureSessionsForPlanDay({
+          userId,
+          dayName: requestedDayName,
+          templateId: options?.templateId,
+          slots: options?.templateSlots,
+          skipMaterialize: options?.skipMaterialize,
+          experience: profile?.experience_level || 'beginner',
+        });
         if (__DEV__) {
           devLog('planner', {
-            action: 'loadTodaySessions_fetched',
-            sessionIds: sessions.map((s) => s.id),
-            count: sessions.length,
-            startIso,
-            endIsoExclusive,
+            action: 'loadSessionsForDay',
+            userId,
+            dayName: requestedDayName,
+            forceRefresh: options?.forceRefresh,
+            startIso: ensured.startIso,
+            endIsoExclusive: ensured.endIsoExclusive,
+            startLocal: new Date(ensured.startIso).toString(),
+            endLocalExclusive: new Date(ensured.endIsoExclusive).toString(),
+            sessionCount: ensured.sessions.length,
+            slotCount: options?.templateSlots?.length ?? 0,
+            materialized: ensured.materialized,
           });
         }
-
-        if (
-          sessions.length === 0 &&
-          !options?.skipMaterialize &&
-          options?.templateId &&
-          options?.templateSlots &&
-          options.templateSlots.length > 0
-        ) {
-          const materializeKey = `${requestedDayName}:${startIso}`;
-          if (!materializeInFlightRef.current.has(materializeKey)) {
-            materializeInFlightRef.current.add(materializeKey);
-            try {
-              if (__DEV__) {
-                devLog('planner', {
-                  action: 'autoMaterializeWorkout',
-                  dayName: requestedDayName,
-                  slotCount: options.templateSlots.length,
-                });
-              }
-              const startedAt = dayName === getTodayDayName() ? undefined : startIso;
-              await materializeWorkoutFromTemplateSlots({
-                userId,
-                templateId: options.templateId,
-                dayName: requestedDayName,
-                slots: options.templateSlots,
-                startedAt,
-                experience: profile?.experience_level || 'beginner',
-                origin: 'auto',
-              });
-              // Always re-fetch after the attempt: on a dedup race the insert is
-              // rejected (returns null), but another session now exists, so we
-              // still want the winning session in state rather than stale empty.
-              if (requestedDayName === selectedDayNameRef.current) {
-                invalidateSessionsInRangeForUser(userId);
-                sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
-              }
-            } catch (materializeError) {
-              if (__DEV__) devError('planner', materializeError, { action: 'autoMaterializeWorkout' });
-            } finally {
-              materializeInFlightRef.current.delete(materializeKey);
-            }
-          }
-        }
-
-        await applySessionsToState(sessions);
+        if (requestedDayName !== selectedDayNameRef.current) return;
+        await applySessionsToState(
+          ensured.sessions,
+          ensured.startIso,
+          ensured.endIsoExclusive,
+        );
       } catch (error) {
         if (__DEV__) devError('planner', error, { action: 'loadSessionsForDay' });
         // Use the store directly so we don't add the unstable useToast() wrapper to deps.
@@ -1916,10 +1876,7 @@ export default function PlannerTab() {
             dayIndex: String(dayIndex),
             sessionsPerDay: String(sessionsPerDay),
             constraints: JSON.stringify(constraints ?? DEFAULT_DAY_CONSTRAINTS),
-            generationId:
-              typeof globalThis.crypto?.randomUUID === 'function'
-                ? globalThis.crypto.randomUUID()
-                : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            generationId: createUuid(),
           },
         });
       } catch (error) {
@@ -2055,6 +2012,15 @@ export default function PlannerTab() {
                     {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
                   </Text>
                   <Text style={styles.emptySlotsSubtext}>Add a workout or generate with AI to get started</Text>
+                </View>
+              ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length > 0 ? (
+                <View style={styles.emptySlotsContainer}>
+                  <Text style={styles.emptySlotsText}>
+                    {dateContext.isToday
+                      ? "Couldn't load today's workout"
+                      : `Couldn't load workout for ${selectedDay.day.day_name}`}
+                  </Text>
+                  <Text style={styles.emptySlotsSubtext}>Pull to refresh or tap Add Workout to retry</Text>
                 </View>
               ) : (
                 sessionsTodayWithExercises.map(({ session, exercises }, idx) => {

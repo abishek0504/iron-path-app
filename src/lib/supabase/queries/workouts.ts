@@ -5,7 +5,12 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
-import { getDateBoundsForDayName, WEEK_DAYS, MS_PER_DAY_MS } from '../../utils/date';
+import {
+  getDateBoundsForDayName,
+  getLocalDayKey,
+  WEEK_DAYS,
+  MS_PER_DAY_MS,
+} from '../../utils/date';
 import { formatDurationCompact } from '../../utils/formatDuration';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
@@ -24,6 +29,88 @@ const MAX_YTD_SESSION_EXERCISES = 20000;
 const MAX_YTD_SETS = 100000;
 const MAX_SESSIONS_IN_RANGE = 1000;
 const MAX_UNIQUE_COMBO_SETS = 5000;
+
+/**
+ * Abandon unstarted active sessions from earlier local days so leftovers do not
+ * confuse getActiveSession / watch handoff. Same-day actives are kept (multi-workout).
+ * Mirrors watch standalone's abandon-before-create, scoped to stale rows only.
+ */
+async function abandonStaleUnstartedActiveSessions(
+  userId: string,
+  keepLocalDayKey: string,
+): Promise<void> {
+  const { data: actives, error } = await supabase
+    .from('v2_workout_sessions')
+    .select('id, started_at')
+    .eq('user_id', userId)
+    .eq('status', 'active');
+
+  if (error || !actives?.length) {
+    if (error && __DEV__) {
+      devError('workout-query', error, { action: 'abandonStaleUnstarted_list', userId });
+    }
+    return;
+  }
+
+  const staleIds = actives
+    .filter((s) => getLocalDayKey(new Date(s.started_at)) !== keepLocalDayKey)
+    .map((s) => s.id);
+  if (staleIds.length === 0) return;
+
+  const { data: exercises } = await supabase
+    .from('v2_session_exercises')
+    .select('id, session_id')
+    .in('session_id', staleIds);
+
+  const exerciseIds = (exercises || []).map((e) => e.id);
+  const sessionsWithPerformed = new Set<string>();
+  if (exerciseIds.length > 0) {
+    const { data: performed } = await supabase
+      .from('v2_session_sets')
+      .select('session_exercise_id')
+      .in('session_exercise_id', exerciseIds)
+      .not('performed_at', 'is', null);
+    const exerciseToSession = new Map(
+      (exercises || []).map((e) => [e.id, e.session_id] as const),
+    );
+    for (const row of performed || []) {
+      const sessionId = exerciseToSession.get(row.session_exercise_id);
+      if (sessionId) sessionsWithPerformed.add(sessionId);
+    }
+  }
+
+  const abandonIds = staleIds.filter((id) => !sessionsWithPerformed.has(id));
+  if (abandonIds.length === 0) return;
+
+  const { error: abandonError } = await supabase
+    .from('v2_workout_sessions')
+    .update({
+      status: 'abandoned',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .in('id', abandonIds);
+
+  if (abandonError) {
+    if (__DEV__) {
+      devError('workout-query', abandonError, {
+        action: 'abandonStaleUnstarted',
+        userId,
+        abandonIds,
+      });
+    }
+    return;
+  }
+
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'abandonStaleUnstarted',
+      userId,
+      abandonedCount: abandonIds.length,
+      keepLocalDayKey,
+    });
+  }
+}
 
 async function isSessionOwnedByUser(sessionId: string, userId: string): Promise<boolean> {
   const { data } = await supabase
@@ -125,6 +212,11 @@ export async function createWorkoutSession(
 
   try {
     const resolvedStartedAt = startedAt ?? new Date().toISOString();
+    await abandonStaleUnstartedActiveSessions(
+      userId,
+      getLocalDayKey(new Date(resolvedStartedAt)),
+    );
+
     const { data, error } = await supabase
       .from('v2_workout_sessions')
       .insert({
@@ -140,8 +232,8 @@ export async function createWorkoutSession(
       .single();
 
     if (error) {
-      // 23505 = unique_violation: auto-per-day dedup OR one-active-per-user.
-      // Caller should re-fetch / abandon the winning session.
+      // 23505 = unique_violation: typically auto-per-day dedup (origin='auto').
+      // Caller should re-fetch the winning session.
       if (error.code === '23505') {
         if (__DEV__) {
           devLog('workout-query', {

@@ -114,12 +114,15 @@ After changing env vars or native deps, rebuild and reinstall on the test device
 
 ## Sandbox testing
 
+**Prerequisite:** App Store Connect **Paid Apps** agreement must be **Active** (tax + banking complete — for Canada that includes GST/HST Form 506 with CRA Business Number + RT). Until then StoreKit often returns no products, RevenueCat packages stay empty, and the paywall **Start 7-day free trial** button stays disabled (UI still shows hardcoded fallback prices).
+
 1. App Store Connect → **Users and Access** → **Sandbox** → create a Sandbox Apple ID.
 2. On the test device: **Settings → App Store → Sandbox Account** (sign in with sandbox ID).
-3. Install a dev or TestFlight build (not Expo Go).
-4. Trigger paywall: cold start on tabs, **Generate with AI**, or finish a workout.
-5. Complete purchase with sandbox account.
+3. Install a dev or TestFlight build (not Expo Go) with `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` baked in.
+4. Trigger paywall: cold start on tabs, **Generate with AI**, or Settings → Upgrade to Pro.
+5. Confirm packages loaded (store prices, CTA enabled), then complete purchase with sandbox account.
 6. Verify:
+   - Settings shows **IronPath Pro** / **Active**
    - AI form opens after subscribe
    - RevenueCat dashboard shows active `ironpath_pro`
    - `v2_profiles.subscription_tier` = `pro` (via webhook; may lag a few seconds)
@@ -133,9 +136,10 @@ After changing env vars or native deps, rebuild and reinstall on the test device
 
 | Issue | Check |
 |-------|--------|
+| Trial CTA disabled / untappable | Packages null — Paid Apps **Active**? Current offering has Monthly + Annual? Native/TestFlight build (not Expo Go)? Key in that build? |
 | Paywall shows but purchase fails | Sandbox account signed in; products approved in App Store Connect; offering set as current in RevenueCat |
 | Purchase succeeds but AI still blocked | Webhook secret matches; function deployed with `--no-verify-jwt`; check Supabase function logs |
-| `No offerings` / empty plans | RevenueCat offering packages linked to products; API key matches iOS app |
+| `No offerings` / empty plans | RevenueCat offering packages linked to products; API key matches iOS app; ASC Paid Apps Active |
 | Works in RC sandbox but profile still `free` | Webhook URL and Authorization header; `app_user_id` in RC matches Supabase auth user id |
 
 ## Code map
