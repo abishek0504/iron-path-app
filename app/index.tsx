@@ -14,6 +14,7 @@ import { getUserProfileCached } from '../src/lib/cache/dashboardStatsCache';
 import { useUserStore } from '../src/stores/userStore';
 import { getActiveSession } from '../src/lib/supabase/queries/workouts';
 import { isAccountPendingDeletion } from '../src/lib/auth/accountLifecycle';
+import { warmStartupCaches } from '../src/lib/cache/warmStartupCaches';
 
 export default function Index() {
   const router = useRouter();
@@ -42,71 +43,68 @@ export default function Index() {
         return;
       }
 
-      if (user) {
-        const userId = user.id;
-        const profile = await getUserProfileCached(userId);
+      const userId = user.id;
+      // Profile + active-session resume check in parallel (resume only needs userId).
+      const [profile, activeSession] = await Promise.all([
+        getUserProfileCached(userId),
+        getActiveSession(userId),
+      ]);
 
-        if (!profile) {
-          // Valid auth user with no profile yet (mid-signup) → onboarding.
-          router.replace('/onboarding');
-          return;
+      if (!profile) {
+        // Valid auth user with no profile yet (mid-signup) → onboarding.
+        router.replace('/onboarding');
+        return;
+      }
+
+      setProfile(profile);
+
+      if (isAccountPendingDeletion(profile)) {
+        router.replace('/login');
+        return;
+      }
+
+      const hasRequired =
+        !!profile.experience_level &&
+        !!profile.days_per_week &&
+        Array.isArray(profile.equipment_access) &&
+        (profile.equipment_access?.length || 0) > 0;
+
+      if (!hasRequired) {
+        router.replace('/onboarding');
+        return;
+      }
+
+      // Warm tab data while we decide resume vs tabs (and while tabs mount).
+      warmStartupCaches(userId);
+
+      // Auto-resume an in-progress workout that already has a save point.
+      let routeToActive = false;
+      if (activeSession?.id) {
+        const { data: sessionExercises } = await supabase
+          .from('v2_session_exercises')
+          .select('id')
+          .eq('session_id', activeSession.id);
+        const exerciseIds = (sessionExercises ?? []).map((e) => e.id);
+
+        if (exerciseIds.length > 0) {
+          const { count: completedSetCount } = await supabase
+            .from('v2_session_sets')
+            .select('*', { count: 'exact', head: true })
+            .in('session_exercise_id', exerciseIds)
+            .not('performed_at', 'is', null);
+          routeToActive = (completedSetCount ?? 0) > 0;
         }
+      }
 
-        setProfile(profile);
-
-        if (isAccountPendingDeletion(profile)) {
-          router.replace('/login');
-          return;
-        }
-
-        const hasRequired =
-          !!profile.experience_level &&
-          !!profile.days_per_week &&
-          Array.isArray(profile.equipment_access) &&
-          (profile.equipment_access?.length || 0) > 0;
-
-        if (hasRequired) {
-          // Auto-resume an in-progress workout that already has a save point.
-          // "Save point" = active session with at least one completed (performed_at IS NOT NULL) set,
-          // mirroring the heuristic used by the Workout tab to decide whether to show "Continue".
-          // Without a save point we land on the tabs so the user can review the day's plan first.
-          const activeSession = await getActiveSession(userId);
-          let routeToActive = false;
-
-          if (activeSession?.id) {
-            const { data: sessionExercises } = await supabase
-              .from('v2_session_exercises')
-              .select('id')
-              .eq('session_id', activeSession.id);
-            const exerciseIds = (sessionExercises ?? []).map((e) => e.id);
-
-            if (exerciseIds.length > 0) {
-              const { count: completedSetCount } = await supabase
-                .from('v2_session_sets')
-                .select('*', { count: 'exact', head: true })
-                .in('session_exercise_id', exerciseIds)
-                .not('performed_at', 'is', null);
-              routeToActive = (completedSetCount ?? 0) > 0;
-            }
-          }
-
-          if (routeToActive && activeSession?.id) {
-            router.replace({
-              pathname: '/workout/active',
-              params: { sessionId: activeSession.id },
-            });
-          } else {
-            router.replace('/(tabs)');
-          }
-        } else {
-          router.replace('/onboarding');
-        }
+      if (routeToActive && activeSession?.id) {
+        router.replace({
+          pathname: '/workout/active',
+          params: { sessionId: activeSession.id },
+        });
       } else {
-        // User is not authenticated, redirect to get started page
-        router.replace('/get-started');
+        router.replace('/(tabs)');
       }
     } catch (error) {
-      // If there's an error (e.g., missing env vars), redirect to login
       if (__DEV__) {
         console.error('Auth check error:', error);
       }

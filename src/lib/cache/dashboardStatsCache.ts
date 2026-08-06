@@ -1,6 +1,6 @@
 /**
- * Short-TTL in-memory cache for dashboard stats and user profile.
- * Reduces refetches when switching back to the Dashboard tab.
+ * TTL + SWR cache for dashboard stats and user profile.
+ * Profile is disk-persisted for cold-start hydration.
  * Call invalidateProfileCache after updateUserProfile.
  */
 
@@ -16,72 +16,94 @@ import {
 import { getUserProfile } from '../supabase/queries/users';
 import { getWeightHistory, type WeightLog } from '../supabase/queries/weight';
 import type { UserProfile } from '../../stores/userStore';
+import { deleteCacheKey, deleteCachePrefix, getOrSetCached, peekCache, setCacheValue } from './ttlCache';
+import { readDiskCache, removeDiskCache, writeDiskCache } from './diskCache';
 
-const TTL_MS = 90 * 1000; // 90 seconds
+const TTL_MS = 90 * 1000;
+const STALE_MS = 10 * 60 * 1000;
+const PROFILE_TTL_MS = 5 * 60 * 1000;
+const PROFILE_STALE_MS = 60 * 60 * 1000;
 
-type CacheEntry<T> = { value: T; expiresAt: number };
-
-const cache = new Map<string, CacheEntry<unknown>>();
-
-function getOrSet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const now = Date.now();
-  const entry = cache.get(key) as CacheEntry<T> | undefined;
-  if (entry && entry.expiresAt > now) {
-    return Promise.resolve(entry.value);
-  }
-  return fetcher().then((value) => {
-    cache.set(key, { value, expiresAt: now + TTL_MS });
-    return value;
-  });
+function profileKey(userId: string) {
+  return `profile:${userId}`;
 }
 
 export function getYearToDateStatsCached(userId: string): Promise<YearToDateStats> {
-  return getOrSet(`yearStats:${userId}`, () => getYearToDateStats(userId));
+  return getOrSetCached(`yearStats:${userId}`, () => getYearToDateStats(userId), {
+    ttlMs: TTL_MS,
+    staleMs: STALE_MS,
+  });
 }
 
 export function getStreakCached(userId: string): Promise<number> {
-  return getOrSet(`streak:${userId}`, () => getStreak(userId));
+  return getOrSetCached(`streak:${userId}`, () => getStreak(userId), {
+    ttlMs: TTL_MS,
+    staleMs: STALE_MS,
+  });
 }
 
 export function getCachedTopPRsCached(userId: string, limit: number): Promise<TopPR[]> {
-  return getOrSet(`topPrs:${userId}:${limit}`, () => getCachedTopPRs(userId, limit));
+  return getOrSetCached(`topPrs:${userId}:${limit}`, () => getCachedTopPRs(userId, limit), {
+    ttlMs: TTL_MS,
+    staleMs: STALE_MS,
+  });
 }
 
 export function getRecentSessionsCached(userId: string, limit: number): Promise<WorkoutSession[]> {
-  return getOrSet(`recentSessions:${userId}:${limit}`, () => getRecentSessions(userId, limit));
+  return getOrSetCached(`recentSessions:${userId}:${limit}`, () => getRecentSessions(userId, limit), {
+    ttlMs: TTL_MS,
+    staleMs: STALE_MS,
+  });
 }
 
-export function getUserProfileCached(userId: string): Promise<UserProfile | null> {
-  return getOrSet(`profile:${userId}`, () => getUserProfile(userId));
+export async function getUserProfileCached(userId: string): Promise<UserProfile | null> {
+  const key = profileKey(userId);
+
+  if (peekCache<UserProfile | null>(key) === undefined) {
+    const fromDisk = await readDiskCache<UserProfile | null>(key);
+    if (fromDisk !== undefined) {
+      setCacheValue(key, fromDisk, { ttlMs: 0, staleMs: PROFILE_STALE_MS });
+    }
+  }
+
+  return getOrSetCached(
+    key,
+    async () => {
+      const value = await getUserProfile(userId);
+      void writeDiskCache(key, value);
+      return value;
+    },
+    { ttlMs: PROFILE_TTL_MS, staleMs: PROFILE_STALE_MS }
+  );
+}
+
+export function peekUserProfileCached(userId: string): UserProfile | null | undefined {
+  return peekCache(profileKey(userId));
 }
 
 /** Call after updateUserProfile so the next fetch returns fresh data. */
 export function invalidateProfileCache(userId: string): void {
-  cache.delete(`profile:${userId}`);
+  const key = profileKey(userId);
+  deleteCacheKey(key);
+  void removeDiskCache(key);
 }
 
 export function getWeightHistoryCached(userId: string, limit = 90): Promise<WeightLog[]> {
-  return getOrSet(`weightHistory:${userId}:${limit}`, () => getWeightHistory(userId, limit));
+  return getOrSetCached(`weightHistory:${userId}:${limit}`, () => getWeightHistory(userId, limit), {
+    ttlMs: TTL_MS,
+    staleMs: STALE_MS,
+  });
 }
 
 /** Call after insertWeightLog so the next fetch returns fresh data. */
 export function invalidateWeightCache(userId: string): void {
-  const prefix = `weightHistory:${userId}:`;
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
+  deleteCachePrefix(`weightHistory:${userId}:`);
 }
 
 /** Call after unit conversion so dashboard volume/PRs refetch in the new unit. */
 export function invalidateWorkoutStatsCache(userId: string): void {
-  cache.delete(`yearStats:${userId}`);
-  cache.delete(`streak:${userId}`);
-  for (const key of cache.keys()) {
-    if (
-      key.startsWith(`topPrs:${userId}:`) ||
-      key.startsWith(`recentSessions:${userId}:`)
-    ) {
-      cache.delete(key);
-    }
-  }
+  deleteCacheKey(`yearStats:${userId}`);
+  deleteCacheKey(`streak:${userId}`);
+  deleteCachePrefix(`topPrs:${userId}:`);
+  deleteCachePrefix(`recentSessions:${userId}:`);
 }

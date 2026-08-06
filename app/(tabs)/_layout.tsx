@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo } from "react";
 import { spacing, typography, type ThemeColors } from "../../src/lib/utils/theme";
 import { useTheme } from "../../src/lib/utils/ThemeContext";
 import { supabase } from "../../src/lib/supabase/client";
-import { getUserProfile } from "../../src/lib/supabase/queries/users";
+import { getUserProfileCached, peekUserProfileCached } from "../../src/lib/cache/dashboardStatsCache";
 import { isAccountPendingDeletion } from "../../src/lib/auth/accountLifecycle";
 import { hapticSelection } from "../../src/lib/utils/haptics";
 import { usePaywall } from "../../src/components/paywall/PaywallProvider";
@@ -162,31 +162,61 @@ const CustomTabBar = (props: BottomTabBarProps) => {
  */
 function useSessionGuard(): { ready: boolean; authenticated: boolean } {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [authenticated, setAuthenticated] = useState(false);
+  const setProfile = useUserStore((s) => s.setProfile);
+  // Index already validated auth + set profile before navigating here — skip the loader.
+  const bootstrappedProfile = useUserStore.getState().profile;
+  const [ready, setReady] = useState(() => !!bootstrappedProfile?.id);
+  const [authenticated, setAuthenticated] = useState(() => !!bootstrappedProfile?.id);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
+      // Fast path: profile already in Zustand from index bootstrap.
+      const storeProfile = useUserStore.getState().profile;
+      if (storeProfile?.id) {
+        if (isAccountPendingDeletion(storeProfile)) {
+          await supabase.auth.signOut();
+          if (cancelled) return;
+          router.replace('/login');
+          setAuthenticated(false);
+          setReady(true);
+          void syncSessionAuthToWatch(null);
+          return;
+        }
+        setAuthenticated(true);
+        setReady(true);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!cancelled && session) void syncSessionAuthToWatch(session);
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (cancelled) return;
       if (!session) {
         router.replace('/get-started');
         setAuthenticated(false);
         void syncSessionAuthToWatch(null);
-      } else {
-        const profile = await getUserProfile(session.user.id);
-        if (cancelled) return;
-        if (isAccountPendingDeletion(profile)) {
-          await supabase.auth.signOut();
-          router.replace('/login');
-          setAuthenticated(false);
-          void syncSessionAuthToWatch(null);
-        } else {
-          setAuthenticated(true);
-          void syncSessionAuthToWatch(session);
-        }
+        setReady(true);
+        return;
+      }
+
+      const cached = peekUserProfileCached(session.user.id);
+      const profile = cached !== undefined
+        ? cached
+        : await getUserProfileCached(session.user.id);
+      if (cancelled) return;
+
+      if (profile) setProfile(profile);
+
+      if (isAccountPendingDeletion(profile)) {
+        await supabase.auth.signOut();
+        router.replace('/login');
+        setAuthenticated(false);
+        void syncSessionAuthToWatch(null);
+      } else if (session) {
+        setAuthenticated(true);
+        void syncSessionAuthToWatch(session);
       }
       setReady(true);
     })();
@@ -209,7 +239,7 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       cancelled = true;
       subscription.subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, setProfile]);
 
   return { ready, authenticated };
 }
@@ -269,6 +299,8 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
+        lazy: true,
+        freezeOnBlur: true,
         tabBarStyle: {
           backgroundColor: 'transparent',
           height: 72,

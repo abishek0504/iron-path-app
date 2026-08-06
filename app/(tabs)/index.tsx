@@ -37,7 +37,6 @@ import {
 import {
   getTemplateWithDaysAndSlotsCached,
   getUserTemplatesCached,
-  invalidateTemplate,
 } from '../../src/lib/cache/templateCache';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
@@ -313,8 +312,7 @@ export default function WorkoutTab() {
 
       setActiveTemplate(template);
 
-      // Invalidate so we always get fresh template (e.g. after adding exercises in Plan tab)
-      invalidateTemplate(template.id);
+      // Use TTL/SWR cache; Plan-tab mutations already call invalidateTemplate.
       const fullTemplate = await getTemplateWithDaysAndSlotsCached(template.id);
       if (!fullTemplate) {
         setTemplateDays([]);

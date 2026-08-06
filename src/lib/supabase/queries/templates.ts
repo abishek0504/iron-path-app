@@ -337,7 +337,9 @@ export async function upsertTemplateDay(
  * Ensure template has all 7 weekdays (Sunday-Saturday)
  * Creates missing days with sort_order 0-6 (Sunday=0, Saturday=6)
  */
-export async function ensureTemplateHasWeekDays(templateId: string): Promise<TemplateDay[]> {
+export async function ensureTemplateHasWeekDays(
+  templateId: string
+): Promise<{ days: TemplateDay[]; createdMissing: boolean }> {
   if (__DEV__) {
     devLog('template-query', { action: 'ensureTemplateHasWeekDays', templateId });
   }
@@ -356,27 +358,35 @@ export async function ensureTemplateHasWeekDays(templateId: string): Promise<Tem
       if (__DEV__) {
         devError('template-query', fetchError, { templateId });
       }
-      return [];
+      return { days: [], createdMissing: false };
     }
 
     // Build set of existing day_name values
     const existingDayNames = new Set((existingDays || []).map((d) => d.day_name));
 
     // Create missing days
+    let createdMissing = false;
     for (let i = 0; i < WEEK_DAYS.length; i++) {
       const dayName = WEEK_DAYS[i];
       if (!existingDayNames.has(dayName)) {
         // Insert missing day with sort_order = index (0-6)
         const result = await upsertTemplateDay(templateId, dayName, i);
-        if (result && __DEV__) {
-          devLog('template-query', {
-            action: 'ensureTemplateHasWeekDays_created',
-            templateId,
-            dayName,
-            sortOrder: i,
-          });
+        if (result) {
+          createdMissing = true;
+          if (__DEV__) {
+            devLog('template-query', {
+              action: 'ensureTemplateHasWeekDays_created',
+              templateId,
+              dayName,
+              sortOrder: i,
+            });
+          }
         }
       }
+    }
+
+    if (!createdMissing) {
+      return { days: existingDays || [], createdMissing: false };
     }
 
     // Fetch all days again (including newly created ones) and return sorted
@@ -390,15 +400,15 @@ export async function ensureTemplateHasWeekDays(templateId: string): Promise<Tem
       if (__DEV__) {
         devError('template-query', finalError, { templateId });
       }
-      return existingDays || [];
+      return { days: existingDays || [], createdMissing };
     }
 
-    return allDays || [];
+    return { days: allDays || [], createdMissing };
   } catch (error) {
     if (__DEV__) {
       devError('template-query', error, { templateId });
     }
-    return [];
+    return { days: [], createdMissing: false };
   }
 }
 

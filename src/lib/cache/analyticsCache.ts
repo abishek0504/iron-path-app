@@ -1,5 +1,5 @@
 /**
- * Short-TTL cache for analytics queries.
+ * TTL + SWR cache for analytics queries.
  */
 
 import {
@@ -13,55 +13,47 @@ import {
   type ExerciseTrendPoint,
   type SessionSummary,
 } from '../supabase/queries/analytics';
-import type { TrendGranularity, TrendPoint } from '../analytics/types';
+import type { TrendGranularity } from '../analytics/types';
 import type { PRTimelineEntry } from '../analytics/progression';
+import { deleteCachePrefix, getOrSetCached } from './ttlCache';
 
 const TTL_MS = 90 * 1000;
-
-type CacheEntry<T> = { value: T; expiresAt: number };
-const cache = new Map<string, CacheEntry<unknown>>();
-
-function getOrSet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const now = Date.now();
-  const entry = cache.get(key) as CacheEntry<T> | undefined;
-  if (entry && entry.expiresAt > now) {
-    return Promise.resolve(entry.value);
-  }
-  return fetcher().then((value) => {
-    cache.set(key, { value, expiresAt: now + TTL_MS });
-    return value;
-  });
-}
+const STALE_MS = 10 * 60 * 1000;
 
 export function getAnalyticsTrendsCached(
   userId: string,
   startIso: string,
   endIso: string,
-  granularity: TrendGranularity,
+  granularity: TrendGranularity
 ): Promise<AnalyticsTrendsBundle> {
-  return getOrSet(
+  return getOrSetCached(
     `trends:${userId}:${startIso}:${endIso}:${granularity}`,
     () => getAnalyticsTrends(userId, startIso, endIso, granularity),
+    { ttlMs: TTL_MS, staleMs: STALE_MS }
   );
 }
 
 export function getSessionSummariesInRangeCached(
   userId: string,
   startIso: string,
-  endIso: string,
+  endIso: string
 ): Promise<SessionSummary[]> {
-  return getOrSet(`summaries:${userId}:${startIso}:${endIso}`, () =>
-    getSessionSummariesInRange(userId, startIso, endIso),
+  return getOrSetCached(
+    `summaries:${userId}:${startIso}:${endIso}`,
+    () => getSessionSummariesInRange(userId, startIso, endIso),
+    { ttlMs: TTL_MS, staleMs: STALE_MS }
   );
 }
 
 export function getExerciseRankingsCached(
   userId: string,
   startIso: string,
-  endIso: string,
+  endIso: string
 ): Promise<ExerciseRankEntry[]> {
-  return getOrSet(`exerciseRank:${userId}:${startIso}:${endIso}`, () =>
-    getExerciseRankings(userId, startIso, endIso),
+  return getOrSetCached(
+    `exerciseRank:${userId}:${startIso}:${endIso}`,
+    () => getExerciseRankings(userId, startIso, endIso),
+    { ttlMs: TTL_MS, staleMs: STALE_MS }
   );
 }
 
@@ -69,26 +61,31 @@ export function getExerciseTrendCached(
   userId: string,
   exerciseKey: string,
   startIso: string,
-  endIso: string,
+  endIso: string
 ): Promise<ExerciseTrendPoint[]> {
-  return getOrSet(`exTrend:${userId}:${exerciseKey}:${startIso}:${endIso}`, () =>
-    getExerciseTrend(userId, exerciseKey, startIso, endIso),
+  return getOrSetCached(
+    `exTrend:${userId}:${exerciseKey}:${startIso}:${endIso}`,
+    () => getExerciseTrend(userId, exerciseKey, startIso, endIso),
+    { ttlMs: TTL_MS, staleMs: STALE_MS }
   );
 }
 
 export function getPRTimelineCached(
   userId: string,
   exerciseKey?: string,
-  limit = 50,
+  limit = 50
 ): Promise<PRTimelineEntry[]> {
-  return getOrSet(`prTimeline:${userId}:${exerciseKey ?? 'all'}:${limit}`, () =>
-    getPRTimeline(userId, exerciseKey, limit),
+  return getOrSetCached(
+    `prTimeline:${userId}:${exerciseKey ?? 'all'}:${limit}`,
+    () => getPRTimeline(userId, exerciseKey, limit),
+    { ttlMs: TTL_MS, staleMs: STALE_MS }
   );
 }
 
 export function invalidateAnalyticsCache(userId: string): void {
-  const prefix = `:${userId}:`;
-  for (const key of cache.keys()) {
-    if (key.includes(prefix)) cache.delete(key);
-  }
+  deleteCachePrefix(`trends:${userId}:`);
+  deleteCachePrefix(`summaries:${userId}:`);
+  deleteCachePrefix(`exerciseRank:${userId}:`);
+  deleteCachePrefix(`exTrend:${userId}:`);
+  deleteCachePrefix(`prTimeline:${userId}:`);
 }

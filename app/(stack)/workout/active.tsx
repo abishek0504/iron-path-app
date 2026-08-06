@@ -911,35 +911,13 @@ export default function ActiveWorkoutScreen() {
     const currentSet = exercise.sets[currentSetIdx];
     let updatedExercises = exercises;
     if (currentSet) {
-      // Preserve set_type so a warmup completed by tap/watch isn't saved as 'normal'.
-      if (exercise.mode === 'reps') {
-        const hasValidDefaults = currentSet.weight !== null && currentSet.weight !== undefined &&
-                                 currentSet.reps !== null && currentSet.reps !== undefined;
-        await markSetComplete(currentSet.id, {
-          weight: hasValidDefaults ? currentSet.weight! : 0,
-          reps: hasValidDefaults ? currentSet.reps! : (currentSet.reps || 0),
-          ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
-          set_type: currentSet.set_type ?? 'normal',
-        });
-      } else {
-        const heldSec = timedDurationSec ?? currentSet.duration_sec ?? 0;
-        const persistedSec = clampSessionDurationSec(heldSec);
-        if (__DEV__) {
-          const { devLog } = require('../../../src/lib/utils/logger');
-          devLog('workout-active', {
-            action: 'complete_timed_set',
-            setIndex: currentSetIdx,
-            targetDurationSec: currentSet.duration_sec,
-            heldSec,
-            persistedSec,
-          });
-        }
-        await markSetComplete(currentSet.id, {
-          duration_sec: persistedSec,
-          ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
-          set_type: currentSet.set_type ?? 'normal',
-        });
-      }
+      // Optimistic UI: paint completion immediately, persist in background.
+      const heldSec =
+        exercise.mode === 'timed'
+          ? (timedDurationSec ?? currentSet.duration_sec ?? 0)
+          : undefined;
+      const persistedSec =
+        heldSec !== undefined ? clampSessionDurationSec(heldSec) : undefined;
 
       updatedExercises = exercises.map((ex, idx) =>
         idx === currentExerciseIndex
@@ -961,6 +939,59 @@ export default function ActiveWorkoutScreen() {
           : ex
       );
       setExercises(updatedExercises);
+
+      // Preserve set_type so a warmup completed by tap/watch isn't saved as 'normal'.
+      const persistPromise =
+        exercise.mode === 'reps'
+          ? (() => {
+              const hasValidDefaults =
+                currentSet.weight !== null &&
+                currentSet.weight !== undefined &&
+                currentSet.reps !== null &&
+                currentSet.reps !== undefined;
+              return markSetComplete(currentSet.id, {
+                weight: hasValidDefaults ? currentSet.weight! : 0,
+                reps: hasValidDefaults ? currentSet.reps! : (currentSet.reps || 0),
+                ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
+                set_type: currentSet.set_type ?? 'normal',
+              });
+            })()
+          : (() => {
+              if (__DEV__) {
+                const { devLog } = require('../../../src/lib/utils/logger');
+                devLog('workout-active', {
+                  action: 'complete_timed_set',
+                  setIndex: currentSetIdx,
+                  targetDurationSec: currentSet.duration_sec,
+                  heldSec,
+                  persistedSec,
+                });
+              }
+              return markSetComplete(currentSet.id, {
+                duration_sec: persistedSec ?? 0,
+                ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
+                set_type: currentSet.set_type ?? 'normal',
+              });
+            })();
+
+      void persistPromise.then((ok) => {
+        if (ok === false) {
+          // Roll back optimistic completion on failure.
+          setExercises((prev) =>
+            prev.map((ex, idx) =>
+              idx === currentExerciseIndex
+                ? {
+                    ...ex,
+                    sets: ex.sets.map((s, sIdx) =>
+                      sIdx === currentSetIdx ? { ...s, completed: false } : s
+                    ),
+                  }
+                : ex
+            )
+          );
+          toast.error('Failed to save set');
+        }
+      });
     }
 
     setExerciseTimerEnd(null);

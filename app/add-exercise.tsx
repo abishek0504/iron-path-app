@@ -70,7 +70,8 @@ export default function AddExerciseScreen() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // Only blank the list on true cold miss — cache/SWR can resolve instantly.
+    setLoading((prev) => (exercises.length === 0 ? true : prev));
     if (__DEV__) devLog('add-exercise', { action: 'loadExercises_start', userId });
     try {
       const list = await listMergedExercisesCached(userId);
@@ -81,7 +82,7 @@ export default function AddExerciseScreen() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, exercises.length]);
 
   useEffect(() => {
     loadExercises();

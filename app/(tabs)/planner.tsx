@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Trash2, CheckCircle, Bookmark } from 'lucide-react-native';
+import { Plus, Trash2, CheckCircle, Bookmark, Sparkles } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
@@ -124,6 +124,8 @@ export default function PlannerTab() {
   const [isSaving, setIsSaving] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
   const [templateData, setTemplateData] = useState<FullTemplate | null>(null);
+  const templateDataRef = useRef<FullTemplate | null>(null);
+  templateDataRef.current = templateData;
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [exerciseNames, setExerciseNames] = useState<Map<string, string>>(new Map());
@@ -648,11 +650,15 @@ export default function PlannerTab() {
         devLog('planner', { action: 'loadTemplate', templateId });
       }
 
-      setIsLoadingTemplate(true);
+      // Only blank the screen on first load; subsequent loads SWR over existing UI.
+      if (!templateDataRef.current) {
+        setIsLoadingTemplate(true);
+      }
       try {
-        // Ensure all 7 weekdays exist (invalidates cache so next fetch is fresh)
-        await ensureTemplateHasWeekDays(templateId);
-        invalidateTemplate(templateId);
+        const { createdMissing } = await ensureTemplateHasWeekDays(templateId);
+        if (createdMissing) {
+          invalidateTemplate(templateId);
+        }
 
         const fullTemplate = await getTemplateWithDaysAndSlotsCached(templateId);
         if (fullTemplate) {
@@ -1793,6 +1799,18 @@ export default function PlannerTab() {
     toast,
   ]);
 
+  const handleOpenGenerateDayForm = useCallback(() => {
+    const missing: string[] = [];
+    if (!templateData) missing.push('templateData');
+    if (!activeTemplateId) missing.push('activeTemplateId');
+    if (missing.length > 0) {
+      if (__DEV__) devLog('planner', { action: 'generateWeek_skipped', missing });
+      toast.error('No template loaded');
+      return;
+    }
+    requestGenerateAi(() => setShowGenerateDayForm(true));
+  }, [templateData, activeTemplateId, requestGenerateAi, toast]);
+
   const runGenerateWithAI = useCallback(
     async (sessionsPerDay: number, constraints?: DayConstraints) => {
       if (!templateData || !activeTemplateId || !selectedDay) {
@@ -2012,6 +2030,18 @@ export default function PlannerTab() {
                     {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
                   </Text>
                   <Text style={styles.emptySlotsSubtext}>Add a workout or generate with AI to get started</Text>
+                  <Button
+                    label="Generate with AI"
+                    variant="primary"
+                    onPress={handleOpenGenerateDayForm}
+                    fullWidth
+                    style={styles.emptyGenerateButton}
+                  >
+                    <View style={styles.generateButtonContent}>
+                      <Sparkles size={20} color={colors.onPrimaryContrast} />
+                      <Text style={styles.generateButtonText}>Generate with AI</Text>
+                    </View>
+                  </Button>
                 </View>
               ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length > 0 ? (
                 <View style={styles.emptySlotsContainer}>
@@ -2264,6 +2294,22 @@ export default function PlannerTab() {
               )}
             </>
 
+            {/* Generate with AI button */}
+            <TourTarget id="tour.plan.generateAi" testID="tour-plan-generate-ai">
+              <Button
+                label="Generate with AI"
+                variant="primary"
+                onPress={handleOpenGenerateDayForm}
+                fullWidth
+                style={styles.generateButton}
+              >
+                <View style={styles.generateButtonContent}>
+                  <Sparkles size={20} color={colors.onPrimaryContrast} />
+                  <Text style={styles.generateButtonText}>Generate with AI</Text>
+                </View>
+              </Button>
+            </TourTarget>
+
             <Button
               label="Load from preset"
               variant="secondary"
@@ -2279,27 +2325,6 @@ export default function PlannerTab() {
               fullWidth
               style={styles.loadPresetButton}
             />
-
-            {/* Generate with AI button */}
-            <TourTarget id="tour.plan.generateAi" testID="tour-plan-generate-ai">
-            <Button
-              label="Generate with AI"
-              variant="secondary"
-              onPress={() => {
-                const missing: string[] = [];
-                if (!templateData) missing.push('templateData');
-                if (!activeTemplateId) missing.push('activeTemplateId');
-                if (missing.length > 0) {
-                  if (__DEV__) devLog('planner', { action: 'generateWeek_skipped', missing });
-                  toast.error('No template loaded');
-                  return;
-                }
-                requestGenerateAi(() => setShowGenerateDayForm(true));
-              }}
-              fullWidth
-              style={styles.generateButton}
-            />
-            </TourTarget>
 
           </View>
         ) : (
@@ -2517,6 +2542,19 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   loadPresetButton: {
     marginTop: spacing.sm,
   },
+  generateButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  generateButtonText: {
+    color: colors.onPrimaryContrast,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+  },
+  emptyGenerateButton: {
+    marginTop: spacing.md,
+  },
   addButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2720,7 +2758,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontStyle: 'italic',
   },
   generateButton: {
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
   },
   slotSupersetChip: {
     fontSize: typography.sizes.xs,

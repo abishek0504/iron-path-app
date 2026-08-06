@@ -1,6 +1,6 @@
 /**
- * Short-TTL in-memory cache for template list and full template (days + slots).
- * Reduces refetches when switching between Workout and Planner tabs.
+ * TTL + SWR cache for template list and full template (days + slots).
+ * Persists hot entries to disk for cold-start hydration.
  * Call invalidateTemplates / invalidateTemplate after mutations.
  */
 
@@ -10,39 +10,68 @@ import {
   type TemplateSummary,
   type FullTemplate,
 } from '../supabase/queries/templates';
+import { deleteCacheKey, getOrSetCached, peekCache, setCacheValue } from './ttlCache';
+import { readDiskCache, removeDiskCache, writeDiskCache } from './diskCache';
 
-const TTL_MS = 90 * 1000; // 90 seconds
+const TTL_MS = 5 * 60 * 1000; // 5 minutes fresh
+const STALE_MS = 30 * 60 * 1000; // 30 minutes stale-while-revalidate
 
-type CacheEntry<T> = { value: T; expiresAt: number };
+function templatesKey(userId: string) {
+  return `templates:${userId}`;
+}
 
-const cache = new Map<string, CacheEntry<unknown>>();
+function templateKey(templateId: string) {
+  return `template:${templateId}`;
+}
 
-function getOrSet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const now = Date.now();
-  const entry = cache.get(key) as CacheEntry<T> | undefined;
-  if (entry && entry.expiresAt > now) {
-    return Promise.resolve(entry.value);
+async function getOrSetWithDisk<T>(
+  key: string,
+  fetcher: () => Promise<T>
+): Promise<T> {
+  const fresh = peekCache<T>(key);
+  if (fresh !== undefined) {
+    return getOrSetCached(key, fetcher, { ttlMs: TTL_MS, staleMs: STALE_MS });
   }
-  return fetcher().then((value) => {
-    cache.set(key, { value, expiresAt: now + TTL_MS });
+
+  const fromDisk = await readDiskCache<T>(key);
+  if (fromDisk !== undefined) {
+    // Treat disk as stale: paint immediately, refresh in background.
+    setCacheValue(key, fromDisk, { ttlMs: 0, staleMs: STALE_MS });
+  }
+
+  return getOrSetCached(key, async () => {
+    const value = await fetcher();
+    void writeDiskCache(key, value);
     return value;
-  });
+  }, { ttlMs: TTL_MS, staleMs: STALE_MS });
 }
 
 export function getUserTemplatesCached(userId: string): Promise<TemplateSummary[]> {
-  return getOrSet(`templates:${userId}`, () => getUserTemplates(userId));
+  return getOrSetWithDisk(templatesKey(userId), () => getUserTemplates(userId));
 }
 
 export function getTemplateWithDaysAndSlotsCached(
   templateId: string
 ): Promise<FullTemplate | null> {
-  return getOrSet(`template:${templateId}`, () => getTemplateWithDaysAndSlots(templateId));
+  return getOrSetWithDisk(templateKey(templateId), () => getTemplateWithDaysAndSlots(templateId));
+}
+
+export function peekUserTemplatesCached(userId: string): TemplateSummary[] | undefined {
+  return peekCache(templatesKey(userId));
+}
+
+export function peekTemplateCached(templateId: string): FullTemplate | null | undefined {
+  return peekCache(templateKey(templateId));
 }
 
 export function invalidateTemplates(userId: string): void {
-  cache.delete(`templates:${userId}`);
+  const key = templatesKey(userId);
+  deleteCacheKey(key);
+  void removeDiskCache(key);
 }
 
 export function invalidateTemplate(templateId: string): void {
-  cache.delete(`template:${templateId}`);
+  const key = templateKey(templateId);
+  deleteCacheKey(key);
+  void removeDiskCache(key);
 }

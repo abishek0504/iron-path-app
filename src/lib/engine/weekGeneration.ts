@@ -234,25 +234,31 @@ export async function generateWeekForTemplate(
   }
 
   try {
-    // 1) Load AI allow-list
-    const { data: aiExercises, error: allowError } = await supabase
-      .from('v2_ai_recommended_exercises')
-      .select('exercise_id, priority_order')
-      .eq('is_active', true)
-      .order('priority_order', { ascending: true })
-      .limit(50);
+    // 1) Load AI allow-list (bundled first; network fallback if snapshot empty)
+    const { getBundledAiRecommended } = await import('../../data/bundledCatalog');
+    let aiExercises = getBundledAiRecommended().slice(0, 50);
 
-    if (allowError) {
-      if (__DEV__) {
-        devError('week-generation', allowError, {
-          userId,
-          step: 'allow-list',
-        });
+    if (aiExercises.length === 0) {
+      const { data, error: allowError } = await supabase
+        .from('v2_ai_recommended_exercises')
+        .select('exercise_id, priority_order')
+        .eq('is_active', true)
+        .order('priority_order', { ascending: true })
+        .limit(50);
+
+      if (allowError) {
+        if (__DEV__) {
+          devError('week-generation', allowError, {
+            userId,
+            step: 'allow-list',
+          });
+        }
+        return [];
       }
-      return [];
+      aiExercises = data ?? [];
     }
 
-    if (!aiExercises || aiExercises.length === 0) {
+    if (aiExercises.length === 0) {
       if (__DEV__) {
         devLog('week-generation', { action: 'no_ai_exercises', userId });
       }

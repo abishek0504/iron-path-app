@@ -5,6 +5,11 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
+import {
+  getBundledMasterExercise,
+  getBundledMasterExercises,
+  getBundledMasterExercisesByIds,
+} from '../../../data/bundledCatalog';
 
 export interface MergedExercise {
   id: string;
@@ -116,15 +121,10 @@ export async function getMergedExercise(
       return null;
     }
 
-    const { data: masterExercise, error: masterError } = await supabase
-      .from('v2_exercises')
-      .select('*')
-      .eq('id', exerciseId)
-      .single();
-
-    if (masterError || !masterExercise) {
+    const masterExercise = getBundledMasterExercise(exerciseId);
+    if (!masterExercise) {
       if (__DEV__) {
-        devError('exercise-query', masterError || new Error('Exercise not found'), { exerciseId });
+        devError('exercise-query', new Error('Exercise not found in bundled catalog'), { exerciseId });
       }
       return null;
     }
@@ -223,34 +223,23 @@ export async function listMergedExercises(
     }
 
     const customIds = new Set(customExercises?.map(e => e.id) || []);
-    const masterIds = exerciseIds 
-      ? exerciseIds.filter(id => !customIds.has(id))
+    const masterIds = exerciseIds
+      ? exerciseIds.filter((id) => !customIds.has(id))
       : undefined;
 
-    // Get master exercises (excluding those with custom versions)
-    let masterQuery = supabase
-      .from('v2_exercises')
-      .select('*')
-      .limit(LIST_MERGED_EXERCISES_MAX_ROWS);
+    // Master catalog is bundled locally — only customs/overrides hit the network.
+    const masterExercises = masterIds
+      ? getBundledMasterExercisesByIds(masterIds)
+      : getBundledMasterExercises().slice(0, LIST_MERGED_EXERCISES_MAX_ROWS);
 
-    if (masterIds && masterIds.length > 0) {
-      masterQuery = masterQuery.in('id', masterIds);
-    }
-
-    const { data: masterExercises, error: masterError } = await masterQuery;
-
-    if (masterError && __DEV__) {
-      devError('exercise-query', masterError, { userId });
-    }
-
-    // Get all overrides for these exercises
-    const masterExerciseIds = masterExercises?.map(e => e.id) || [];
+    // Overrides are per-user and usually tiny — fetch all for the user, or filter when subsetting.
+    const masterExerciseIds = masterExercises.map((e) => e.id);
     let overrideQuery = supabase
       .from('v2_user_exercise_overrides')
       .select('*')
       .eq('user_id', userId);
 
-    if (masterExerciseIds.length > 0) {
+    if (masterIds && masterIds.length > 0) {
       overrideQuery = overrideQuery.in('exercise_id', masterExerciseIds);
     }
 

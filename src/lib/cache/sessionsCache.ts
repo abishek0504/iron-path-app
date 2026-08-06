@@ -1,27 +1,23 @@
 /**
- * Short-TTL in-memory cache for getSessionsInRange.
- * Reduces refetches when revisiting the same week/month on the Progress tab.
+ * TTL + SWR cache for session range queries and today's sessions.
  * Call invalidateSessionsInRangeForUser when a session is completed or deleted.
  */
 
-import { getSessionsInRange, type WorkoutSession } from '../supabase/queries/workouts';
+import { getSessionsInRange, getSessionsForToday, type WorkoutSession } from '../supabase/queries/workouts';
+import { deleteCachePrefix, getOrSetCached, peekCache, setCacheValue } from './ttlCache';
+import { readDiskCache, removeDiskCachePrefix, writeDiskCache } from './diskCache';
 
-const TTL_MS = 90 * 1000; // 90 seconds
+const TTL_MS = 90 * 1000;
+const STALE_MS = 10 * 60 * 1000;
+const TODAY_TTL_MS = 60 * 1000;
+const TODAY_STALE_MS = 5 * 60 * 1000;
 
-type CacheEntry<T> = { value: T; expiresAt: number };
+function rangeKey(userId: string, startIso: string, endIso: string) {
+  return `sessionsInRange:${userId}:${startIso}:${endIso}`;
+}
 
-const cache = new Map<string, CacheEntry<unknown>>();
-
-function getOrSet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const now = Date.now();
-  const entry = cache.get(key) as CacheEntry<T> | undefined;
-  if (entry && entry.expiresAt > now) {
-    return Promise.resolve(entry.value);
-  }
-  return fetcher().then((value) => {
-    cache.set(key, { value, expiresAt: now + TTL_MS });
-    return value;
-  });
+function todayKey(userId: string, dayStartIso: string, dayEndIsoExclusive: string) {
+  return `sessionsToday:${userId}:${dayStartIso}:${dayEndIsoExclusive}`;
 }
 
 export function getSessionsInRangeCached(
@@ -29,14 +25,42 @@ export function getSessionsInRangeCached(
   startIso: string,
   endIso: string
 ): Promise<WorkoutSession[]> {
-  const key = `sessionsInRange:${userId}:${startIso}:${endIso}`;
-  return getOrSet(key, () => getSessionsInRange(userId, startIso, endIso));
+  const key = rangeKey(userId, startIso, endIso);
+  return getOrSetCached(key, () => getSessionsInRange(userId, startIso, endIso), {
+    ttlMs: TTL_MS,
+    staleMs: STALE_MS,
+  });
+}
+
+export async function getSessionsForTodayCached(
+  userId: string,
+  dayStartIso: string,
+  dayEndIsoExclusive: string
+): Promise<WorkoutSession[]> {
+  const key = todayKey(userId, dayStartIso, dayEndIsoExclusive);
+
+  if (peekCache<WorkoutSession[]>(key) === undefined) {
+    const fromDisk = await readDiskCache<WorkoutSession[]>(key);
+    if (fromDisk !== undefined) {
+      setCacheValue(key, fromDisk, { ttlMs: 0, staleMs: TODAY_STALE_MS });
+    }
+  }
+
+  return getOrSetCached(
+    key,
+    async () => {
+      const value = await getSessionsForToday(userId, dayStartIso, dayEndIsoExclusive);
+      void writeDiskCache(key, value);
+      return value;
+    },
+    { ttlMs: TODAY_TTL_MS, staleMs: TODAY_STALE_MS }
+  );
 }
 
 /** Call when a session is completed or deleted for this user. */
 export function invalidateSessionsInRangeForUser(userId: string): void {
-  const prefix = `sessionsInRange:${userId}:`;
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
+  deleteCachePrefix(`sessionsInRange:${userId}:`);
+  deleteCachePrefix(`sessionsToday:${userId}:`);
+  void removeDiskCachePrefix(`sessionsInRange:${userId}:`);
+  void removeDiskCachePrefix(`sessionsToday:${userId}:`);
 }

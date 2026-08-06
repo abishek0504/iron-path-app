@@ -1,19 +1,18 @@
 /**
- * Short-TTL in-memory cache for listMergedExercises.
- * Reduces duplicate fetches when multiple screens need the same exercise names.
- * Invalidation is wired in customExerciseMutations (create/update/delete user custom exercises).
+ * TTL + SWR cache for listMergedExercises.
+ * Master catalog is largely static; customs/overrides invalidate via customExerciseMutations.
  */
 
 import { listMergedExercises } from '../supabase/queries/exercises';
 import type { MergedExercise } from '../supabase/queries/exercises';
+import { deleteCachePrefix, getOrSetCached, peekCache, setCacheValue } from './ttlCache';
+import { readDiskCache, removeDiskCachePrefix, writeDiskCache } from './diskCache';
 
 export type { MergedExercise };
 
-const TTL_MS = 90 * 1000; // 90 seconds
-
-type CacheEntry<T> = { value: T; expiresAt: number };
-
-const cache = new Map<string, CacheEntry<unknown>>();
+/** Longer fresh window — master catalog changes rarely; customs invalidate explicitly. */
+const TTL_MS = 30 * 60 * 1000;
+const STALE_MS = 24 * 60 * 60 * 1000;
 
 function cacheKey(userId: string, exerciseIds: string[] | undefined): string {
   if (!exerciseIds || exerciseIds.length === 0) {
@@ -23,30 +22,42 @@ function cacheKey(userId: string, exerciseIds: string[] | undefined): string {
   return `mergedExercises:${userId}:${sorted.join(',')}`;
 }
 
-function getOrSet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const now = Date.now();
-  const entry = cache.get(key) as CacheEntry<T> | undefined;
-  if (entry && entry.expiresAt > now) {
-    return Promise.resolve(entry.value);
-  }
-  return fetcher().then((value) => {
-    cache.set(key, { value, expiresAt: now + TTL_MS });
-    return value;
-  });
-}
-
-export function listMergedExercisesCached(
+export async function listMergedExercisesCached(
   userId: string,
   exerciseIds?: string[]
 ): Promise<MergedExercise[]> {
   const key = cacheKey(userId, exerciseIds);
-  return getOrSet(key, () => listMergedExercises(userId, exerciseIds));
+
+  if (peekCache<MergedExercise[]>(key) === undefined) {
+    const fromDisk = await readDiskCache<MergedExercise[]>(key);
+    if (fromDisk !== undefined) {
+      setCacheValue(key, fromDisk, { ttlMs: 0, staleMs: STALE_MS });
+    }
+  }
+
+  return getOrSetCached(
+    key,
+    async () => {
+      const value = await listMergedExercises(userId, exerciseIds);
+      // Only persist the full catalog (most useful for cold start / picker).
+      if (!exerciseIds || exerciseIds.length === 0) {
+        void writeDiskCache(key, value);
+      }
+      return value;
+    },
+    { ttlMs: TTL_MS, staleMs: STALE_MS }
+  );
 }
 
-/** Called by customExerciseMutations after create/update/delete. Export for use there. */
+export function peekMergedExercisesCached(
+  userId: string,
+  exerciseIds?: string[]
+): MergedExercise[] | undefined {
+  return peekCache(cacheKey(userId, exerciseIds));
+}
+
+/** Called by customExerciseMutations after create/update/delete. */
 export function invalidateMergedExercisesForUser(userId: string): void {
-  const prefix = `mergedExercises:${userId}:`;
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
+  deleteCachePrefix(`mergedExercises:${userId}:`);
+  void removeDiskCachePrefix(`mergedExercises:${userId}:`);
 }

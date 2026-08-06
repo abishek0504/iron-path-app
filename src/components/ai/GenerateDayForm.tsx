@@ -10,12 +10,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/utils/theme';
@@ -27,6 +24,7 @@ import {
 } from '../../lib/ai/generateWorkoutDay';
 import { Chip } from '../ui/Chip';
 import { Button } from '../ui/Button';
+import { BottomSheet } from '../ui/BottomSheet';
 
 const MUSCLE_GROUPS = [
   'Chest',
@@ -40,9 +38,11 @@ const MUSCLE_GROUPS = [
   'Core',
 ];
 
+const SESSION_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
 const EXERCISE_COUNT_OPTIONS = [2, 3, 4, 5, 6, 7, 8];
 const STRETCH_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5];
 const MAX_SESSIONS_PER_DAY = 6;
+const SHEET_HEIGHT_PERCENT = '85%';
 
 const INTENSITY_OPTIONS: { id: DayConstraints['intensity']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -71,7 +71,7 @@ export function GenerateDayForm({
 
   const focusOptions = useMemo(() => getDayFocusOptions(splitValue), [splitValue]);
 
-  const [sessionsInput, setSessionsInput] = useState('1');
+  const [sessionsPerDay, setSessionsPerDay] = useState(1);
   const [dayFocus, setDayFocus] = useState<string | null>(null);
   const [exercisesPerSession, setExercisesPerSession] = useState<number | null>(null);
   const [intensity, setIntensity] = useState<DayConstraints['intensity']>('standard');
@@ -82,7 +82,7 @@ export function GenerateDayForm({
   // Reset to "let AI decide" defaults each time the sheet opens.
   useEffect(() => {
     if (visible) {
-      setSessionsInput('1');
+      setSessionsPerDay(1);
       setDayFocus(DEFAULT_DAY_CONSTRAINTS.dayFocus);
       setExercisesPerSession(DEFAULT_DAY_CONSTRAINTS.exercisesPerSession);
       setIntensity(DEFAULT_DAY_CONSTRAINTS.intensity);
@@ -108,12 +108,11 @@ export function GenerateDayForm({
   };
 
   const handleGenerate = () => {
-    const parsed = parseInt(sessionsInput, 10);
-    const sessionsPerDay = Math.min(
+    const clampedSessions = Math.min(
       MAX_SESSIONS_PER_DAY,
-      Math.max(0, Number.isNaN(parsed) ? 1 : parsed),
+      Math.max(0, sessionsPerDay),
     );
-    onGenerate(sessionsPerDay, {
+    onGenerate(clampedSessions, {
       dayFocus,
       exercisesPerSession,
       intensity,
@@ -124,47 +123,42 @@ export function GenerateDayForm({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable style={styles.overlay} onPress={onCancel}>
-        <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Text style={styles.title}>Generate {dayName}</Text>
+    <BottomSheet
+      visible={visible}
+      onClose={onCancel}
+      title={`Generate ${dayName}`}
+      height={SHEET_HEIGHT_PERCENT}
+    >
+      <View style={styles.body}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.subtitle}>
+            Defaults let AI decide — tap Generate anytime, or tune options below.
+          </Text>
 
-            <Text style={styles.sectionLabel}>Sessions</Text>
-            <Text style={styles.sectionHint}>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Session</Text>
+
+            <Text style={styles.fieldLabel}>Sessions</Text>
+            <Text style={styles.fieldHint}>
               0 = rest day. 1–6 = workout sessions (e.g. morning + evening = 2).
             </Text>
-            <TextInput
-              style={styles.sessionsInput}
-              value={sessionsInput}
-              onChangeText={(t) => setSessionsInput(t.replace(/[^0-9]/g, ''))}
-              keyboardType="number-pad"
-              placeholder="1"
-              placeholderTextColor={colors.textMuted}
-              maxLength={1}
-            />
-
-            <Text style={styles.sectionLabel}>Day focus</Text>
             <View style={styles.chipGroup}>
-              <Chip
-                label="Let AI decide"
-                selected={dayFocus === null}
-                onPress={() => setDayFocus(null)}
-              />
-              {focusOptions.map((option) => (
+              {SESSION_COUNT_OPTIONS.map((count) => (
                 <Chip
-                  key={option}
-                  label={option}
-                  selected={dayFocus === option}
-                  onPress={() => setDayFocus(option)}
+                  key={count}
+                  label={String(count)}
+                  selected={sessionsPerDay === count}
+                  onPress={() => setSessionsPerDay(count)}
                 />
               ))}
             </View>
 
-            <Text style={styles.sectionLabel}>Exercises per session</Text>
+            <Text style={styles.fieldLabel}>Exercises per session</Text>
             <View style={styles.chipGroup}>
               <Chip
                 label="Auto"
@@ -181,7 +175,7 @@ export function GenerateDayForm({
               ))}
             </View>
 
-            <Text style={styles.sectionLabel}>Intensity</Text>
+            <Text style={styles.fieldLabel}>Intensity</Text>
             <View style={styles.chipGroup}>
               {INTENSITY_OPTIONS.map((option) => (
                 <Chip
@@ -192,9 +186,33 @@ export function GenerateDayForm({
                 />
               ))}
             </View>
+          </View>
 
-            <Text style={styles.sectionLabel}>Emphasize muscles</Text>
-            <Text style={styles.sectionHint}>Optional — bias exercise selection toward these.</Text>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Focus</Text>
+            <Text style={styles.fieldLabel}>Day focus</Text>
+            <View style={styles.chipGroup}>
+              <Chip
+                label="Let AI decide"
+                selected={dayFocus === null}
+                onPress={() => setDayFocus(null)}
+              />
+              {focusOptions.map((option) => (
+                <Chip
+                  key={option}
+                  label={option}
+                  selected={dayFocus === option}
+                  onPress={() => setDayFocus(option)}
+                />
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Muscles</Text>
+
+            <Text style={styles.fieldLabel}>Emphasize</Text>
+            <Text style={styles.fieldHint}>Optional — bias exercise selection toward these.</Text>
             <View style={styles.chipGroup}>
               {MUSCLE_GROUPS.map((muscle) => (
                 <Chip
@@ -206,8 +224,8 @@ export function GenerateDayForm({
               ))}
             </View>
 
-            <Text style={styles.sectionLabel}>Avoid muscles</Text>
-            <Text style={styles.sectionHint}>Optional — sore or injured areas to skip.</Text>
+            <Text style={styles.fieldLabel}>Avoid</Text>
+            <Text style={styles.fieldHint}>Optional — sore or injured areas to skip.</Text>
             <View style={styles.chipGroup}>
               {MUSCLE_GROUPS.map((muscle) => (
                 <Chip
@@ -218,9 +236,12 @@ export function GenerateDayForm({
                 />
               ))}
             </View>
+          </View>
 
-            <Text style={styles.sectionLabel}>Stretches</Text>
-            <Text style={styles.sectionHint}>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Finish</Text>
+            <Text style={styles.fieldLabel}>Stretches</Text>
+            <Text style={styles.fieldHint}>
               Appended after strength work — matched to muscles trained that session.
             </Text>
             <View style={styles.chipGroup}>
@@ -233,78 +254,69 @@ export function GenerateDayForm({
                 />
               ))}
             </View>
+          </View>
+        </ScrollView>
 
-            <View style={styles.buttons}>
-              <Button label="Cancel" variant="secondary" size="sm" onPress={onCancel} />
-              <Button label="Generate" size="sm" onPress={handleGenerate} />
-            </View>
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        <View style={styles.footer}>
+          <Button label="Generate" size="md" onPress={handleGenerate} fullWidth />
+        </View>
+      </View>
+    </BottomSheet>
   );
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    overlay: {
+    body: {
       flex: 1,
-      backgroundColor: colors.dialogBackdropTint,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: spacing.lg,
+      gap: spacing.md,
+      paddingBottom: spacing.md,
     },
-    card: {
+    scroll: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingBottom: spacing.sm,
+      gap: spacing.md,
+    },
+    subtitle: {
+      fontSize: typography.sizes.sm,
+      color: colors.textSecondary,
+      marginBottom: spacing.xs,
+    },
+    section: {
       backgroundColor: colors.card,
       borderRadius: borderRadius.lg,
       borderWidth: 1,
       borderColor: colors.cardBorder,
-      padding: spacing.lg,
-      width: '100%',
-      maxWidth: 400,
-      maxHeight: '85%',
-      gap: spacing.md,
+      padding: spacing.md,
+      gap: spacing.xs,
     },
-    title: {
-      fontSize: typography.sizes.lg,
+    sectionTitle: {
+      fontSize: typography.sizes.base,
       fontWeight: typography.weights.bold,
       color: colors.textPrimary,
       marginBottom: spacing.xs,
     },
-    sectionLabel: {
+    fieldLabel: {
       fontSize: typography.sizes.sm,
       fontWeight: typography.weights.semibold,
       color: colors.textPrimary,
-      marginTop: spacing.md,
+      marginTop: spacing.sm,
       marginBottom: spacing.xs,
     },
-    sectionHint: {
+    fieldHint: {
       fontSize: typography.sizes.xs,
       color: colors.textMuted,
       marginBottom: spacing.xs,
-    },
-    sessionsInput: {
-      borderWidth: 1,
-      borderColor: colors.cardBorder,
-      borderRadius: borderRadius.md,
-      backgroundColor: colors.background,
-      color: colors.textPrimary,
-      fontSize: typography.sizes.lg,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      minWidth: 72,
-      alignSelf: 'flex-start',
     },
     chipGroup: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: spacing.sm,
     },
-    buttons: {
-      flexDirection: 'row',
+    footer: {
       gap: spacing.sm,
-      justifyContent: 'flex-end',
-      marginTop: spacing.lg,
     },
   });
 }

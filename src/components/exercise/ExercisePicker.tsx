@@ -15,7 +15,6 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Check, Search, X } from 'lucide-react-native';
-import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/uiStore';
 import { spacing, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
@@ -23,25 +22,15 @@ import { Button } from '../ui/Button';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { devLog, devError } from '../../lib/utils/logger';
 import { searchExercisesByName } from '../../lib/exercises/searchExercises';
+import { getBundledMasterExercises } from '../../data/bundledCatalog';
 import type { Exercise } from '../../types/exercisePicker';
 
-const EXERCISE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-let exerciseCache: { value: Exercise[]; expiresAt: number } | null = null;
+let exerciseCache: Exercise[] | null = null;
 
-async function loadExercisesCached(): Promise<Exercise[]> {
-  const now = Date.now();
-  if (exerciseCache && exerciseCache.expiresAt > now) {
-    return exerciseCache.value;
-  }
+function loadExercisesCached(): Exercise[] {
+  if (exerciseCache) return exerciseCache;
 
-  const { data, error } = await supabase
-    .from('v2_exercises')
-    .select('id, name, description, density_score, primary_muscles, implicit_hits, is_unilateral, setup_buffer_sec, avg_time_per_set_sec, is_timed, equipment_needed, movement_pattern')
-    .order('name', { ascending: true });
-
-  if (error) throw error;
-
-  const mapped: Exercise[] = (data || []).map((ex) => ({
+  const mapped: Exercise[] = getBundledMasterExercises().map((ex) => ({
     id: ex.id,
     name: ex.name,
     description: ex.description,
@@ -56,7 +45,7 @@ async function loadExercisesCached(): Promise<Exercise[]> {
     movement_pattern: ex.movement_pattern,
   }));
 
-  exerciseCache = { value: mapped, expiresAt: now + EXERCISE_CACHE_TTL_MS };
+  exerciseCache = mapped;
   return mapped;
 }
 
@@ -99,7 +88,7 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
 
     setLoading(true);
     try {
-      const mappedExercises = await loadExercisesCached();
+      const mappedExercises = loadExercisesCached();
       setExercises(mappedExercises);
       setFilteredExercises(mappedExercises);
 

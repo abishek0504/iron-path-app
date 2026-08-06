@@ -14,10 +14,10 @@ import {
   Platform,
   UIManager,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Picker } from '@react-native-picker/picker';
 import { Scale } from 'lucide-react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -37,6 +37,7 @@ import { devLog } from '../../lib/utils/logger';
 import type { WeightLog } from '../../lib/supabase/queries/weight';
 
 const CHART_HEIGHT = 160;
+const MAX_WEIGHT = 1000;
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -49,6 +50,10 @@ interface WeightTrackerCardProps {
   refreshSignal?: number;
 }
 
+function defaultWeightForUnit(useImperial: boolean): number {
+  return useImperial ? 154 : 70;
+}
+
 export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTrackerCardProps) {
   const router = useRouter();
   const colors = useTheme();
@@ -59,7 +64,7 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState<WeightLog[]>([]);
   const [showWeightPicker, setShowWeightPicker] = useState(false);
-  const [selectedWeight, setSelectedWeight] = useState(70);
+  const [weightInput, setWeightInput] = useState('');
   const [saving, setSaving] = useState(false);
 
   const insets = useSafeAreaInsets();
@@ -67,8 +72,17 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
   const currentWeight = profile?.current_weight ?? null;
   const unitsLabel = useImperial ? 'lbs' : 'kg';
 
+  const seedWeightInput = useCallback(() => {
+    const seed =
+      currentWeight != null
+        ? Math.round(currentWeight)
+        : defaultWeightForUnit(useImperial);
+    setWeightInput(String(seed));
+  }, [currentWeight, useImperial]);
+
   const loadHistory = useCallback(async () => {
-    setLoading(true);
+    // Keep showing last-known history while SWR refreshes.
+    setLoading((prev) => (history.length === 0 ? true : prev));
     try {
       const logs = await getWeightHistoryCached(userId);
       setHistory(logs);
@@ -87,7 +101,7 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, history.length]);
 
   useEffect(() => {
     loadHistory();
@@ -105,25 +119,28 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
     }
   }, [refreshSignal, loadHistory]);
 
-  useEffect(() => {
-    if (currentWeight != null) {
-      setSelectedWeight(Math.round(currentWeight));
-    } else {
-      setSelectedWeight(useImperial ? 154 : 70);
-    }
-  }, [currentWeight, useImperial]);
-
   const chartLogs = useMemo(() => aggregateWeightLogsByDay(history), [history]);
   const metrics = useMemo(
     () => computeWeightMetrics(currentWeight, chartLogs),
     [currentWeight, chartLogs],
   );
 
+  const openWeightInput = () => {
+    seedWeightInput();
+    setShowWeightPicker(true);
+  };
+
   const handleUpdateWeight = async () => {
+    const parsed = Number.parseFloat(weightInput);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_WEIGHT) {
+      showToast(`Enter a weight up to ${MAX_WEIGHT} ${unitsLabel}`, 'error');
+      return;
+    }
+
+    const weightToSave = Math.round(parsed);
     setShowWeightPicker(false);
     setSaving(true);
     try {
-      const weightToSave = selectedWeight;
       const { success } = await insertWeightLog(userId, weightToSave, {
         current_weight: weightToSave,
       }, useImperial ? 'imperial' : 'metric');
@@ -145,10 +162,6 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
       setSaving(false);
     }
   };
-
-  const weightRange = useImperial
-    ? Array.from({ length: 351 }, (_, i) => i + 50)
-    : Array.from({ length: 156 }, (_, i) => i + 25);
 
   const styles = useMemo(() => StyleSheet.create({
     card: {
@@ -249,13 +262,25 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
       paddingHorizontal: spacing.md,
       gap: spacing.md,
     },
-    picker: {
-      height: 160,
-      width: '100%',
+    weightInputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.cardBorder,
+      paddingVertical: spacing.sm,
     },
-    pickerItem: {
-      fontSize: typography.sizes.base,
+    weightInput: {
+      flex: 1,
       color: colors.textPrimary,
+      fontSize: typography.sizes['2xl'],
+      fontWeight: typography.weights.semibold,
+      paddingVertical: spacing.sm,
+    },
+    weightInputUnit: {
+      color: colors.textSecondary,
+      fontSize: typography.sizes.base,
+      fontWeight: typography.weights.medium,
     },
     confirmButton: {
       backgroundColor: colors.primary,
@@ -284,7 +309,7 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
         </Pressable>
         <TouchableOpacity
           style={[styles.updateButton, saving && styles.updateButtonDisabled]}
-          onPress={() => setShowWeightPicker(true)}
+          onPress={openWeightInput}
           disabled={saving}
         >
           {saving ? (
@@ -350,8 +375,8 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
       <BottomSheet
         visible={showWeightPicker}
         onClose={() => setShowWeightPicker(false)}
-        title={`Select weight (${unitsLabel})`}
-        height={340}
+        title={`Enter weight (${unitsLabel})`}
+        height={260}
       >
         <ScrollView
           style={styles.pickerScroll}
@@ -359,22 +384,24 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
             styles.pickerContainer,
             { paddingBottom: Math.max(spacing.xl, insets.bottom) },
           ]}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Picker
-            selectedValue={selectedWeight}
-            onValueChange={(v) => setSelectedWeight(v)}
-            style={styles.picker}
-            itemStyle={styles.pickerItem}
-          >
-            {weightRange.map((v) => (
-              <Picker.Item
-                key={v}
-                label={`${v} ${unitsLabel}`}
-                value={v}
-              />
-            ))}
-          </Picker>
+          <View style={styles.weightInputRow}>
+            <TextInput
+              style={styles.weightInput}
+              value={weightInput}
+              onChangeText={setWeightInput}
+              keyboardType="decimal-pad"
+              placeholder={String(defaultWeightForUnit(useImperial))}
+              placeholderTextColor={colors.textMuted}
+              autoFocus
+              selectTextOnFocus
+              maxLength={6}
+              accessibilityLabel={`Weight in ${unitsLabel}`}
+            />
+            <Text style={styles.weightInputUnit}>{unitsLabel}</Text>
+          </View>
           <TouchableOpacity
             style={styles.confirmButton}
             onPress={handleUpdateWeight}
