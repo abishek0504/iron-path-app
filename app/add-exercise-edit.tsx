@@ -14,9 +14,9 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Image,
   useWindowDimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Dumbbell, Link2 } from 'lucide-react-native';
@@ -938,7 +938,7 @@ export default function AddExerciseEditScreen() {
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           {heroImage ? (
-            <Image source={heroImage} style={[styles.heroImage, { height: heroHeight }]} resizeMode="contain" />
+            <Image source={heroImage} style={[styles.heroImage, { height: heroHeight }]} contentFit="contain" />
           ) : (
             <View style={[styles.heroImage, { height: heroHeight }, styles.heroPlaceholder]}>
               <Dumbbell size={48} color={colors.textMuted} />

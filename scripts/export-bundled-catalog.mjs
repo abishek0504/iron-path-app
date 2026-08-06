@@ -58,18 +58,31 @@ const aiRecommended = (
   )
 ).filter((r) => r.is_active !== false);
 
+// Ship AI allow-list as packed hex (src/data/aiRecommendedPacked.ts); JSON keeps [].
+const packed = aiRecommended
+  .slice()
+  .sort((a, b) => (a.priority_order ?? 0) - (b.priority_order ?? 0))
+  .map((r) => String(r.exercise_id).replace(/-/g, ''))
+  .join('');
+const packedPath = path.join('src', 'data', 'aiRecommendedPacked.ts');
+fs.writeFileSync(
+  packedPath,
+  `/** Packed hex UUIDs (no dashes) for AI allow-list; order = priority_order. */\nexport const AI_RECOMMENDED_PACKED = ${JSON.stringify(packed)};\n`
+);
+
 const outPath = path.join('src', 'data', 'bundledCatalog.json');
 const payload = {
   generatedAt: new Date().toISOString(),
   exercises,
   prescriptions,
-  aiRecommended,
+  aiRecommended: [],
 };
 fs.writeFileSync(outPath, JSON.stringify(payload));
 console.log(
   JSON.stringify(
     {
       outPath,
+      packedPath,
       exercises: exercises.length,
       prescriptions: prescriptions.length,
       aiRecommended: aiRecommended.length,

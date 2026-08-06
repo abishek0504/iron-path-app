@@ -47,6 +47,7 @@ import {
   getTemplateWithDaysAndSlotsCached,
   invalidateTemplates,
   invalidateTemplate,
+  peekTemplateCached,
 } from '../../src/lib/cache/templateCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import {
@@ -655,9 +656,15 @@ export default function PlannerTab() {
         setIsLoadingTemplate(true);
       }
       try {
-        const { createdMissing } = await ensureTemplateHasWeekDays(templateId);
-        if (createdMissing) {
-          invalidateTemplate(templateId);
+        const WEEK_DAY_COUNT = 7;
+        const cachedTemplate = peekTemplateCached(templateId);
+        const hasFullWeekCached =
+          cachedTemplate != null && cachedTemplate.days.length === WEEK_DAY_COUNT;
+        if (!hasFullWeekCached) {
+          const { createdMissing } = await ensureTemplateHasWeekDays(templateId);
+          if (createdMissing) {
+            invalidateTemplate(templateId);
+          }
         }
 
         const fullTemplate = await getTemplateWithDaysAndSlotsCached(templateId);

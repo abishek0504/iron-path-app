@@ -1322,12 +1322,15 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontWeight: typography.weights.medium,
   },
   planDayChangeButton: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     borderColor: colors.workoutBadgePrimaryBorder,
     backgroundColor: colors.workoutBadgePrimaryBg,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   planDayChangeText: {
     color: colors.primary,

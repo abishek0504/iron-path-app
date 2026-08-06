@@ -10,7 +10,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,6 +24,7 @@ import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache
 import { deleteUserCustomExercise } from '../src/lib/supabase/queries/customExerciseMutations';
 import { searchExercisesByName } from '../src/lib/exercises/searchExercises';
 import { devLog, devError } from '../src/lib/utils/logger';
+import { FlashList } from '@shopify/flash-list';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 
@@ -215,10 +215,11 @@ export default function AddExerciseScreen() {
       ) : loading ? (
         <LoadingScreen style={styles.centered} />
       ) : (
-        <FlatList
+        <FlashList
           data={filtered}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => {
             const muscles = formatMuscles(item.primary_muscles);
             const isCustom = item.source === 'custom';
@@ -305,10 +306,12 @@ function createStyles(colors: ThemeColors) {
     createBtn: {
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: 4,
-      paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.sm,
-      borderRadius: borderRadius.full,
+      minHeight: 36,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.sm,
       borderWidth: 1,
       borderColor: colors.primary,
     },

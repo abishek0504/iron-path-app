@@ -8,6 +8,7 @@ import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Platform } from 'react-native';
 import { useEffect } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
 import { ToastProvider } from '../src/components/ui/ToastProvider';
 import { ModalManager } from '../src/components/ui/ModalManager';
 import { PaywallProvider } from '../src/components/paywall/PaywallProvider';
@@ -15,6 +16,9 @@ import { TourProvider } from '../src/components/tour/TourProvider';
 import { ThemeProvider } from '../src/lib/utils/ThemeContext';
 import { initNotifications, setupNotificationResponseRouting } from '../src/lib/utils/notifications';
 import { initSentry } from '../src/lib/monitoring/initSentry';
+
+// Keep native splash up until index finishes auth routing (see app/index.tsx).
+void SplashScreen.preventAutoHideAsync();
 
 // Import web scrollbar styles
 if (Platform.OS === 'web') {

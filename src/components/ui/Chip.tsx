@@ -1,5 +1,5 @@
 /**
- * Interactive pill selector. Do not use for display-only muscle/equipment tags.
+ * Interactive option selector (squarer tile). Do not use for display-only tags.
  */
 
 import React, { useMemo } from 'react';
@@ -13,6 +13,10 @@ import {
 } from 'react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
+
+/** Comfortable tap target for option chips (iOS HIG 44pt). */
+const CHIP_MIN_HEIGHT = 44;
+const CHIP_MIN_WIDTH = 44;
 
 export interface ChipProps {
   label: string;
@@ -62,12 +66,16 @@ export const Chip: React.FC<ChipProps> = ({
 function createStyles(colors: ReturnType<typeof useTheme>) {
   return StyleSheet.create({
     chip: {
-      paddingVertical: spacing.xs,
+      minHeight: CHIP_MIN_HEIGHT,
+      minWidth: CHIP_MIN_WIDTH,
+      paddingVertical: spacing.sm + 2,
       paddingHorizontal: spacing.md,
-      borderRadius: borderRadius.full,
+      borderRadius: borderRadius.sm,
       borderWidth: 1,
       borderColor: colors.border,
-      backgroundColor: colors.background,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     chipSelected: {
       backgroundColor: colors.primarySelectedBg,
@@ -75,7 +83,7 @@ function createStyles(colors: ReturnType<typeof useTheme>) {
     },
     text: {
       color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
+      fontSize: typography.sizes.base,
       fontWeight: typography.weights.medium,
     },
     textSelected: {

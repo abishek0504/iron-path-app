@@ -194,12 +194,15 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
     },
     presetChip: {
+      minHeight: 44,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.full,
+      paddingVertical: spacing.sm + 2,
+      borderRadius: borderRadius.sm,
       borderWidth: 1,
       borderColor: colors.cardBorder,
       backgroundColor: colors.card,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     presetChipActive: {
       borderColor: colors.primary,
@@ -207,7 +210,7 @@ function createStyles(colors: ThemeColors) {
     },
     presetText: {
       color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
+      fontSize: typography.sizes.base,
       fontWeight: typography.weights.medium,
     },
     presetTextActive: {

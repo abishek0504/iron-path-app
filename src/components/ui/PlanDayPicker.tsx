@@ -37,14 +37,16 @@ export const PlanDayPicker: React.FC<Props> = ({
       gap: spacing.sm,
     },
     chip: {
+      minHeight: 44,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadius.full,
+      paddingVertical: spacing.sm + 2,
+      borderRadius: borderRadius.sm,
       borderWidth: 1,
       borderColor: colors.border,
-      backgroundColor: colors.background,
+      backgroundColor: colors.card,
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: spacing.xs,
     },
     chipSelected: {
@@ -59,7 +61,7 @@ export const PlanDayPicker: React.FC<Props> = ({
     },
     chipText: {
       color: colors.textSecondary,
-      fontSize: typography.sizes.sm,
+      fontSize: typography.sizes.base,
       fontWeight: typography.weights.medium,
     },
     chipTextSelected: {

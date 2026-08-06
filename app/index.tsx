@@ -5,6 +5,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { useRouter } from 'expo-router';
 import { supabase } from '../src/lib/supabase/client';
@@ -15,6 +16,14 @@ import { useUserStore } from '../src/stores/userStore';
 import { getActiveSession } from '../src/lib/supabase/queries/workouts';
 import { isAccountPendingDeletion } from '../src/lib/auth/accountLifecycle';
 import { warmStartupCaches } from '../src/lib/cache/warmStartupCaches';
+
+async function hideSplash(): Promise<void> {
+  try {
+    await SplashScreen.hideAsync();
+  } catch {
+    // Splash may already be hidden (e.g. fast remount).
+  }
+}
 
 export default function Index() {
   const router = useRouter();
@@ -110,6 +119,8 @@ export default function Index() {
       }
       setErrorText('Unable to check session. Please log in again.');
       router.replace('/login');
+    } finally {
+      await hideSplash();
     }
   };
 

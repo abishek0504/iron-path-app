@@ -10,10 +10,10 @@ import {
   View,
   Text,
   TextInput,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { Check, Search, X } from 'lucide-react-native';
 import { useUIStore } from '../../stores/uiStore';
 import { spacing, borderRadius, type ThemeColors } from '../../lib/utils/theme';
@@ -222,11 +222,12 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
           <LogoEdgeLoader size="xlarge" />
         </View>
       ) : (
-        <FlatList
+        <FlashList
           data={filteredExercises}
           keyExtractor={(item) => item.id}
           renderItem={renderExercise}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>No exercises found</Text>

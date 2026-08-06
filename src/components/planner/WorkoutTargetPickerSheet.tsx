@@ -43,12 +43,14 @@ export const WorkoutTargetPickerSheet: React.FC<Props> = ({
           paddingBottom: spacing.md,
         },
         chip: {
+          minHeight: 44,
           paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm,
-          borderRadius: borderRadius.full,
+          paddingVertical: spacing.sm + 2,
+          borderRadius: borderRadius.sm,
           borderWidth: 1,
           borderColor: colors.cardBorder,
           backgroundColor: colors.card,
+          justifyContent: 'center',
         },
         chipText: {
           color: colors.textPrimary,

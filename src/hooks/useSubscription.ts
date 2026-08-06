@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { InteractionManager } from 'react-native';
 import type { PurchasesPackage } from 'react-native-purchases';
 import { ENTITLEMENT_ID } from '../lib/subscriptions/constants';
 import {
@@ -68,9 +69,17 @@ export function useSubscription(userId: string | null) {
     }
   }, [userId]);
 
+  // Defer RC configure/offerings until after first interactions so cold start paints sooner.
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!userId) {
+      void refresh();
+      return;
+    }
+    const task = InteractionManager.runAfterInteractions(() => {
+      void refresh();
+    });
+    return () => task.cancel();
+  }, [refresh, userId]);
 
   const purchasePackage = useCallback(async (pkg: PurchasesPackage): Promise<boolean> => {
     const Purchases = getPurchases();

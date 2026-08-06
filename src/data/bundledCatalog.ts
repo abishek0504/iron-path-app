@@ -4,6 +4,7 @@
  */
 
 import catalog from './bundledCatalog.json';
+import { AI_RECOMMENDED_PACKED } from './aiRecommendedPacked';
 import type { ExercisePrescription } from '../lib/supabase/queries/prescriptions';
 
 export type BundledMasterExercise = {
@@ -26,14 +27,40 @@ export type BundledMasterExercise = {
 
 type BundledPrescription = ExercisePrescription;
 
+type AiRecommendedRow = {
+  exercise_id: string;
+  priority_order: number;
+  is_active: boolean;
+};
+
 type CatalogFile = {
   generatedAt: string;
   exercises: BundledMasterExercise[];
   prescriptions: BundledPrescription[];
-  aiRecommended: { exercise_id: string; priority_order: number; is_active: boolean }[];
+  aiRecommended: AiRecommendedRow[];
 };
 
+const HEX_UUID_CHUNK = 32;
+
+function unpackAiRecommendedPacked(packed: string): AiRecommendedRow[] {
+  const out: AiRecommendedRow[] = [];
+  for (let i = 0; i + HEX_UUID_CHUNK <= packed.length; i += HEX_UUID_CHUNK) {
+    const h = packed.slice(i, i + HEX_UUID_CHUNK);
+    out.push({
+      exercise_id: `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`,
+      priority_order: i / HEX_UUID_CHUNK,
+      is_active: true,
+    });
+  }
+  return out;
+}
+
 const data = catalog as unknown as CatalogFile;
+const aiRecommendedFromJson = data.aiRecommended ?? [];
+const aiRecommended =
+  aiRecommendedFromJson.length > 0
+    ? aiRecommendedFromJson
+    : unpackAiRecommendedPacked(AI_RECOMMENDED_PACKED);
 
 const exercisesById = new Map<string, BundledMasterExercise>(
   data.exercises.map((ex) => [ex.id, ex])
@@ -97,7 +124,7 @@ export function getBundledAiRecommended(): {
   exercise_id: string;
   priority_order: number;
 }[] {
-  return (data.aiRecommended ?? [])
+  return aiRecommended
     .filter((r) => r.is_active !== false)
     .map((r) => ({ exercise_id: r.exercise_id, priority_order: r.priority_order }))
     .sort((a, b) => a.priority_order - b.priority_order);

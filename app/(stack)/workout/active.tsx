@@ -612,7 +612,14 @@ export default function ActiveWorkoutScreen() {
       setControlDevice(device);
       controlDeviceRef.current = device;
 
-      const sessionData = await getSessionWithSets(session.id);
+      const canCheckStaleness = !!(session.template_id && session.day_name && userId);
+      const [sessionData, templateSlots, lastCompletedAt] = await Promise.all([
+        getSessionWithSets(session.id),
+        canCheckStaleness
+          ? getTemplateSlotsForDay(session.template_id!, session.day_name!)
+          : Promise.resolve(null),
+        canCheckStaleness ? getLastCompletedWorkoutAt(userId) : Promise.resolve(null),
+      ]);
       if (!sessionData) {
         toast.error('Failed to load workout data');
         return;
@@ -671,13 +678,9 @@ export default function ActiveWorkoutScreen() {
         setWorkoutPhase({ type: 'complete' });
       }
 
-      // Smart Refresh: detect staleness when session has template + day
-      if (session?.template_id && session?.day_name && userId) {
+      // Smart Refresh: detect staleness when session has template + day (fetched in parallel above)
+      if (canCheckStaleness && templateSlots) {
         try {
-          const [templateSlots, lastCompletedAt] = await Promise.all([
-            getTemplateSlotsForDay(session.template_id, session.day_name),
-            getLastCompletedWorkoutAt(userId),
-          ]);
           const result = detectSessionStaleness({
             session: {
               id: session.id,
