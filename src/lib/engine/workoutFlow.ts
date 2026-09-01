@@ -30,11 +30,13 @@ function positiveRestSec(value: number | null | undefined): number | null {
 export function resolveRestSec(
   exercise: FlowExercise | undefined,
   set: FlowSet | undefined,
+  userDefaultSec: number = DEFAULT_REST_SEC,
 ): number {
+  const fallback = userDefaultSec > 0 ? userDefaultSec : DEFAULT_REST_SEC;
   return (
     positiveRestSec(exercise?.rest_sec)
     ?? positiveRestSec(set?.rest_sec)
-    ?? DEFAULT_REST_SEC
+    ?? fallback
   );
 }
 

@@ -16,7 +16,6 @@ import {
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Dumbbell, Link2 } from 'lucide-react-native';
@@ -51,7 +50,8 @@ import {
   upsertUserExerciseDefaults,
 } from '../src/lib/supabase/queries/exercises';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
-import { getExerciseImage } from '../src/lib/exerciseImages';
+import { ExerciseDemoMedia } from '../src/components/workout/ExerciseDemoMedia';
+import { buildWarmupLadder } from '../src/lib/workout/warmupGenerator';
 import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { getDateBoundsForDayName, WEEK_DAYS } from '../src/lib/utils/date';
@@ -197,6 +197,7 @@ export default function AddExerciseEditScreen() {
 
   const profileId = useUserStore((s) => s.profile?.id);
   const experience = useUserStore((s) => s.profile?.experience_level) || 'beginner';
+  const useImperial = useUserStore((s) => s.profile?.use_imperial) ?? true;
   const isTimedMode = isTimed === '1';
 
   const [userId, setUserId] = useState<string | null>(profileId ?? null);
@@ -211,7 +212,6 @@ export default function AddExerciseEditScreen() {
 
   const exerciseIdVal = exerciseId || undefined;
   const customExerciseIdVal = customExerciseId || undefined;
-  const heroImage = exerciseName ? getExerciseImage(exerciseName) : null;
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // Scale hero with the screen: 3:2 of the content width, capped to a fraction
   // of the window height so it stays compact on tall phones.
@@ -521,6 +521,41 @@ export default function AddExerciseEditScreen() {
         },
       ];
     });
+  };
+
+  const addWarmups = () => {
+    if (isTimedMode || exerciseInfo?.is_stretch) return;
+    if (sets.some((set) => set.set_type === 'warmup')) {
+      toast.error('Warmups already added');
+      return;
+    }
+    const firstWorking = sets.find((set) => set.set_type !== 'warmup');
+    const workingWeight = firstWorking?.weight.trim() ? parseFloat(firstWorking.weight) : NaN;
+    const ladder = buildWarmupLadder(workingWeight, useImperial);
+    if (ladder.length === 0) {
+      toast.error('Set a working weight first');
+      return;
+    }
+    const restStr = firstWorking?.rest_sec || String(DEFAULT_REST_SEC);
+    const warmupRows: EditSet[] = ladder.map((step, index) => ({
+      id: `warmup-${index}-${Date.now()}`,
+      set_number: index + 1,
+      weight: String(step.weight),
+      reps: String(step.reps),
+      duration_sec: '',
+      rest_sec: restStr,
+      set_type: 'warmup',
+    }));
+    if (__DEV__) {
+      devLog('add-exercise-edit', {
+        action: 'add_warmups',
+        workingWeight,
+        warmupCount: warmupRows.length,
+      });
+    }
+    setSets((prev) =>
+      [...warmupRows, ...prev].map((set, index) => ({ ...set, set_number: index + 1 })),
+    );
   };
 
   const removeSet = (id: string) => {
@@ -937,8 +972,12 @@ export default function AddExerciseEditScreen() {
         <LoadingScreen style={styles.centered} />
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {heroImage ? (
-            <Image source={heroImage} style={[styles.heroImage, { height: heroHeight }]} contentFit="contain" />
+          {exerciseName ? (
+            <ExerciseDemoMedia
+              exerciseName={exerciseName}
+              demoVideoUrl={exerciseInfo?.demo_video_url}
+              height={heroHeight}
+            />
           ) : (
             <View style={[styles.heroImage, { height: heroHeight }, styles.heroPlaceholder]}>
               <Dumbbell size={48} color={colors.textMuted} />
@@ -1103,6 +1142,16 @@ export default function AddExerciseEditScreen() {
             );
           })}
 
+          {!isTimedMode && exerciseInfo?.is_stretch !== true ? (
+            <TouchableOpacity
+              style={styles.addSetButton}
+              onPress={addWarmups}
+              accessibilityRole="button"
+              accessibilityLabel="Add warmup sets"
+            >
+              <Text style={styles.addSetButtonText}>Add warmups</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity style={styles.addSetButton} onPress={addSet}>
             <Text style={styles.addSetButtonText}>Add Set</Text>
           </TouchableOpacity>

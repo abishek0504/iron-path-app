@@ -49,6 +49,11 @@ describe('resolveRestSec', () => {
   it('handles undefined inputs', () => {
     expect(resolveRestSec(undefined, undefined)).toBe(DEFAULT_REST_SEC);
   });
+
+  it('uses the user default when no per-exercise or per-set rest is set', () => {
+    const ex = exercise({ sets: [false] });
+    expect(resolveRestSec(ex, ex.sets[0], 120)).toBe(120);
+  });
 });
 
 describe('getSupersetMembers', () => {

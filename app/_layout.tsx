@@ -113,6 +113,14 @@ export default function RootLayout() {
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
         <Stack.Screen
+          name="workout-settings"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="export-data"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
           name="appearance"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />

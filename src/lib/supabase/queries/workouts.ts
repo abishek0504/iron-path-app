@@ -12,6 +12,8 @@ import {
   MS_PER_DAY_MS,
 } from '../../utils/date';
 import { formatDurationCompact } from '../../utils/formatDuration';
+import { estimateOneRepMaxLbs } from '../../analytics/progression';
+import { buildWarmupLadder } from '../../workout/warmupGenerator';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
 import { consumeWorkoutHealthBuffer } from '../../health/workoutHealthBuffer';
@@ -1471,7 +1473,17 @@ export function formatPRDisplay(p: TopPR, unitsLabel: string): string {
   }
   if (p.weight != null) {
     const repPart = p.reps != null ? ` × ${p.reps}` : '';
-    return `${p.weight} ${unitsLabel}${repPart}`;
+    const base = `${p.weight} ${unitsLabel}${repPart}`;
+    if (
+      p.pr_type !== 'timed' &&
+      p.pr_type !== 'reps_only' &&
+      p.reps != null &&
+      p.reps > 0 &&
+      p.weight > 0
+    ) {
+      return `${base} · e1RM ${Math.round(estimateOneRepMaxLbs(p.weight, p.reps))}`;
+    }
+    return base;
   }
   if (p.reps != null) return `${p.reps} reps`;
   if (p.duration_sec != null) return formatPrDuration(p.duration_sec);
@@ -2188,7 +2200,14 @@ export async function prefillSessionSets(
  */
 export async function markSetComplete(
   setId: string,
-  values: { reps?: number; weight?: number; duration_sec?: number; rpe?: number; set_type?: SetType }
+  values: {
+    reps?: number;
+    weight?: number;
+    duration_sec?: number;
+    rpe?: number;
+    rir?: number;
+    set_type?: SetType;
+  }
 ): Promise<boolean> {
   if (__DEV__) {
     devLog('workout-query', {
@@ -2197,6 +2216,7 @@ export async function markSetComplete(
       hasReps: values.reps !== undefined,
       hasDuration: values.duration_sec !== undefined,
       hasRpe: values.rpe !== undefined,
+      hasRir: values.rir !== undefined,
     });
   }
 
@@ -2209,12 +2229,32 @@ export async function markSetComplete(
       return false;
     }
 
+    const update: {
+      reps?: number;
+      weight?: number;
+      duration_sec?: number;
+      rpe?: number | null;
+      rir?: number | null;
+      set_type?: SetType;
+      performed_at: string;
+    } = {
+      performed_at: new Date().toISOString(),
+    };
+    if (values.reps !== undefined) update.reps = values.reps;
+    if (values.weight !== undefined) update.weight = values.weight;
+    if (values.duration_sec !== undefined) update.duration_sec = values.duration_sec;
+    if (values.set_type !== undefined) update.set_type = values.set_type;
+    if (values.rir != null) {
+      update.rir = values.rir;
+      update.rpe = null;
+    } else if (values.rpe != null) {
+      update.rpe = values.rpe;
+      update.rir = null;
+    }
+
     const { error } = await supabase
       .from('v2_session_sets')
-      .update({
-        ...values,
-        performed_at: new Date().toISOString(), // CRITICAL: Mark as complete
-      })
+      .update(update)
       .eq('id', setId);
 
     if (error) {
@@ -2238,6 +2278,99 @@ export async function markSetComplete(
       devError('workout-query', error, { setId });
     }
     return false;
+  }
+}
+
+export type InsertWarmupSetsResult =
+  | { ok: true; warmupCount: number }
+  | { ok: false; reason: 'unauthorized' | 'exists' | 'no_weight' | 'error' };
+
+export async function insertWarmupSets(
+  sessionExerciseId: string,
+  workingWeight: number,
+  useImperial: boolean,
+): Promise<InsertWarmupSetsResult> {
+  const ladder = buildWarmupLadder(workingWeight, useImperial);
+  if (ladder.length === 0) {
+    return { ok: false, reason: 'no_weight' };
+  }
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id;
+    if (!userId || !(await isSessionExerciseOwnedByUser(sessionExerciseId, userId))) {
+      return { ok: false, reason: 'unauthorized' };
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('v2_session_sets')
+      .select('id, set_number, set_type')
+      .eq('session_exercise_id', sessionExerciseId)
+      .order('set_number', { ascending: true });
+
+    if (existingError) {
+      if (__DEV__) {
+        devError('workout-query', existingError, { action: 'insertWarmupSets_load', sessionExerciseId });
+      }
+      return { ok: false, reason: 'error' };
+    }
+
+    if ((existing ?? []).some((set) => set.set_type === 'warmup')) {
+      return { ok: false, reason: 'exists' };
+    }
+
+    const shift = ladder.length;
+    const toShift = [...(existing ?? [])].sort((a, b) => b.set_number - a.set_number);
+    for (const set of toShift) {
+      const { error: shiftError } = await supabase
+        .from('v2_session_sets')
+        .update({ set_number: set.set_number + shift })
+        .eq('id', set.id);
+      if (shiftError) {
+        if (__DEV__) {
+          devError('workout-query', shiftError, { action: 'insertWarmupSets_shift', sessionExerciseId });
+        }
+        return { ok: false, reason: 'error' };
+      }
+    }
+
+    const { error: insertError } = await supabase.from('v2_session_sets').insert(
+      ladder.map((step, index) => ({
+        session_exercise_id: sessionExerciseId,
+        set_number: index + 1,
+        weight: step.weight,
+        reps: step.reps,
+        set_type: 'warmup' as SetType,
+        rpe: null,
+        rir: null,
+        performed_at: null,
+      })),
+    );
+
+    if (insertError) {
+      if (__DEV__) {
+        devError('workout-query', insertError, { action: 'insertWarmupSets_insert', sessionExerciseId });
+      }
+      return { ok: false, reason: 'error' };
+    }
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'insertWarmupSets',
+        sessionExerciseId,
+        workingWeight,
+        warmupCount: ladder.length,
+      });
+    }
+
+    return { ok: true, warmupCount: ladder.length };
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { action: 'insertWarmupSets', sessionExerciseId });
+    }
+    return { ok: false, reason: 'error' };
   }
 }
 

@@ -20,6 +20,7 @@ export type BundledMasterExercise = {
   avg_time_per_set_sec: number;
   is_timed: boolean;
   is_stretch?: boolean;
+  demo_video_url?: string | null;
   equipment_needed?: string[];
   movement_pattern?: string;
   tempo_category?: string;

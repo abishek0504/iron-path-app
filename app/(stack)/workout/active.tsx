@@ -19,16 +19,29 @@ import {
   Keyboard,
   Modal,
   Pressable,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, ArrowDown, ArrowUp, CheckCircle, ChevronRight, Heart, Info, Link2, RefreshCcw, Repeat2, MoreVertical, Plus, Trash2, XCircle, ListOrdered } from 'lucide-react-native';
+import { ArrowLeft, ArrowDown, ArrowUp, CheckCircle, ChevronRight, Heart, Info, Link2, RefreshCcw, Repeat2, MoreVertical, Plus, Trash2, XCircle, ListOrdered, Layers, Share2, Flame } from 'lucide-react-native';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../../src/lib/utils/theme';
 import { useTheme } from '../../../src/lib/utils/ThemeContext';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
 import { ExerciseTimer } from '../../../src/components/workout/ExerciseTimer';
 import { computeHeldDurationSec, clampSessionDurationSec } from '../../../src/lib/utils/workoutDuration';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { RPESlider } from '../../../src/components/workout/RPESlider';
+import { RIRSlider } from '../../../src/components/workout/RIRSlider';
+import { PlateCalculatorSheet } from '../../../src/components/workout/PlateCalculatorSheet';
+import { WorkoutShareCard } from '../../../src/components/workout/WorkoutShareCard';
+import { ExerciseDemoMedia } from '../../../src/components/workout/ExerciseDemoMedia';
+import {
+  DEFAULT_WORKOUT_SETTINGS,
+  loadWorkoutSettings,
+  type WorkoutSettings,
+} from '../../../src/lib/workout/workoutSettings';
+import { estimateSessionTimeMinutes } from '../../../src/lib/utils/timeEstimation';
+import { shareWorkoutCardImage, type ShareWorkoutStats } from '../../../src/lib/workout/shareWorkout';
 import { listMergedExercisesCached } from '../../../src/lib/cache/exerciseCache';
 import {
   getActiveSession,
@@ -40,6 +53,7 @@ import {
   prefillSessionSets,
   abandonWorkoutSession,
   getPreviousExercisePerformance,
+  insertWarmupSets,
   type PreviousPerformance,
   type SetType,
 } from '../../../src/lib/supabase/queries/workouts';
@@ -102,6 +116,9 @@ import {
   restAfterSet,
 } from '../../../src/lib/workout/setTypes';
 
+const DEFAULT_RIR = 3;
+const KEEP_AWAKE_TAG = 'ironpath-workout';
+
 interface Exercise {
   id: string; // session_exercise_id
   name: string;
@@ -112,6 +129,12 @@ interface Exercise {
   notes?: string;
   superset_group?: number | null;
   rest_sec?: number | null;
+  setup_buffer_sec: number;
+  avg_time_per_set_sec: number;
+  is_unilateral: boolean;
+  primary_muscles: string[];
+  description?: string;
+  demo_video_url?: string | null;
   sets: SetData[];
 }
 
@@ -122,6 +145,7 @@ interface SetData {
   weight?: number;
   duration_sec?: number;
   rpe?: number;
+  rir?: number;
   rest_sec?: number | null;
   set_type?: SetType;
   completed: boolean;
@@ -133,6 +157,7 @@ interface SetLog {
   reps: string; // empty string for timed exercises
   duration_sec: string; // empty string for reps exercises
   rpe?: number;
+  rir?: number;
   setType: SetType;
 }
 
@@ -156,14 +181,20 @@ export default function ActiveWorkoutScreen() {
   const [sessionId, setSessionId] = useState<string | null>(params.sessionId ?? null);
   const [sessionTemplateId, setSessionTemplateId] = useState<string | null>(null);
   const [sessionDayName, setSessionDayName] = useState<string | null>(null);
+  const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
+  const [workoutSettings, setWorkoutSettings] = useState<WorkoutSettings>(DEFAULT_WORKOUT_SETTINGS);
+  const [plateTarget, setPlateTarget] = useState<number | null>(null);
+  const [showPlateCalculator, setShowPlateCalculator] = useState(false);
+  const shareCardRef = useRef<View>(null);
   const [controlDevice, setControlDevice] = useState<'phone' | 'watch'>('phone');
   const controlDeviceRef = useRef<'phone' | 'watch'>('phone');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [workoutPhase, setWorkoutPhase] = useState<WorkoutPhase>({ type: 'execution', setIndex: 0 });
 
-  // Current set RPE tracking (during execution)
+  // Current set intensity tracking (during execution)
   const [currentSetRPEs, setCurrentSetRPEs] = useState<number[]>([]);
+  const [currentSetRIRs, setCurrentSetRIRs] = useState<number[]>([]);
 
   // Batch logging state
   const [setLogs, setSetLogs] = useState<SetLog[]>([]);
@@ -211,6 +242,24 @@ export default function ActiveWorkoutScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadActiveSession is stable for session bootstrap
   }, [userId, params.sessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadWorkoutSettings().then((loaded) => {
+      if (!cancelled) setWorkoutSettings(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' || !workoutSettings.keepScreenAwake) return;
+    void activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+    return () => {
+      void deactivateKeepAwake(KEEP_AWAKE_TAG);
+    };
+  }, [workoutSettings.keepScreenAwake]);
 
   // Load weight suggestion when exercise changes
   useEffect(() => {
@@ -609,6 +658,7 @@ export default function ActiveWorkoutScreen() {
       setSessionId(session.id);
       setSessionTemplateId(session.template_id ?? null);
       setSessionDayName(session.day_name ?? null);
+      setSessionStartedAt(session.started_at ?? null);
       setControlDevice(device);
       controlDeviceRef.current = device;
 
@@ -651,6 +701,12 @@ export default function ActiveWorkoutScreen() {
             notes: ex.notes,
             superset_group: ex.superset_group ?? null,
             rest_sec: ex.rest_sec ?? null,
+            setup_buffer_sec: meta.setup_buffer_sec ?? 0,
+            avg_time_per_set_sec: meta.avg_time_per_set_sec ?? 0,
+            is_unilateral: meta.is_unilateral === true,
+            primary_muscles: meta.primary_muscles ?? [],
+            description: meta.description,
+            demo_video_url: meta.demo_video_url,
             sets: ex.sets.map((s) => ({ ...s, completed: !!s.performed_at })),
           });
         }
@@ -667,6 +723,7 @@ export default function ActiveWorkoutScreen() {
           // Initialize RPEs from existing set data or default to 7
           const rpes = exercisesWithMeta[i].sets.map(s => s.rpe || 7);
           setCurrentSetRPEs(rpes);
+          setCurrentSetRIRs(exercisesWithMeta[i].sets.map((s) => s.rir ?? DEFAULT_RIR));
           setWorkoutPhase({ type: 'execution', setIndex: firstIncompleteSetIndex });
           foundIncomplete = true;
           break;
@@ -771,6 +828,7 @@ export default function ActiveWorkoutScreen() {
               currentSetRPEs[idx] ||
               set.rpe ||
               (set.set_type === 'failure' ? FAILURE_DEFAULT_RPE : 7),
+            rir: currentSetRIRs[idx] ?? set.rir ?? DEFAULT_RIR,
           }),
       setType: set.set_type ?? 'normal',
     }));
@@ -858,11 +916,12 @@ export default function ActiveWorkoutScreen() {
     }
   };
 
-  /** Switch the active exercise, re-seeding the per-set RPE array from its sets. */
+  /** Switch the active exercise, re-seeding the per-set intensity arrays from its sets. */
   const moveToExercise = (exerciseList: Exercise[], exerciseIndex: number) => {
     setCurrentExerciseIndex(exerciseIndex);
     const rpes = exerciseList[exerciseIndex].sets.map((s) => s.rpe || 7);
     setCurrentSetRPEs(rpes);
+    setCurrentSetRIRs(exerciseList[exerciseIndex].sets.map((s) => s.rir ?? DEFAULT_RIR));
   };
 
   const goToTimedSetRpeStep = (setIndex: number, elapsedDurationSec: number) => {
@@ -934,7 +993,11 @@ export default function ActiveWorkoutScreen() {
                       ...(exercise.mode === 'timed'
                         ? { duration_sec: timedDurationSec ?? s.duration_sec }
                         : {}),
-                      ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
+                      ...(isStretch
+                        ? {}
+                        : workoutSettings.intensityMode === 'rir'
+                          ? { rir: currentSetRIRs[currentSetIdx] ?? DEFAULT_RIR }
+                          : { rpe: updatedRPEs[currentSetIdx] }),
                     }
                   : s
               ),
@@ -942,6 +1005,14 @@ export default function ActiveWorkoutScreen() {
           : ex
       );
       setExercises(updatedExercises);
+
+      const intensityWrite = isStretch
+        ? {}
+        : rpeOverride != null
+          ? { rpe: rpeOverride }
+          : workoutSettings.intensityMode === 'rir'
+            ? { rir: currentSetRIRs[currentSetIdx] ?? DEFAULT_RIR }
+            : { rpe: updatedRPEs[currentSetIdx] };
 
       // Preserve set_type so a warmup completed by tap/watch isn't saved as 'normal'.
       const persistPromise =
@@ -955,7 +1026,7 @@ export default function ActiveWorkoutScreen() {
               return markSetComplete(currentSet.id, {
                 weight: hasValidDefaults ? currentSet.weight! : 0,
                 reps: hasValidDefaults ? currentSet.reps! : (currentSet.reps || 0),
-                ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
+                ...intensityWrite,
                 set_type: currentSet.set_type ?? 'normal',
               });
             })()
@@ -972,7 +1043,7 @@ export default function ActiveWorkoutScreen() {
               }
               return markSetComplete(currentSet.id, {
                 duration_sec: persistedSec ?? 0,
-                ...(isStretch ? {} : { rpe: updatedRPEs[currentSetIdx] }),
+                ...intensityWrite,
                 set_type: currentSet.set_type ?? 'normal',
               });
             })();
@@ -1018,6 +1089,7 @@ export default function ActiveWorkoutScreen() {
       const baseRest = resolveRestSec(
         updatedExercises[currentExerciseIndex],
         justCompletedSet ?? updatedExercises[currentExerciseIndex].sets[0],
+        workoutSettings.defaultRestSec,
       );
       const restDuration = restAfterSet({
         completedType: justCompletedSet?.set_type,
@@ -1086,18 +1158,27 @@ export default function ActiveWorkoutScreen() {
     }
 
     for (const log of setLogs) {
-      const set = exercise.sets[log.setNumber - 1];
-      const includeRpe = exercise.is_stretch !== true && log.rpe != null;
+      const set = exercise.sets.find((s) => s.set_number === log.setNumber) ?? exercise.sets[log.setNumber - 1];
+      if (!set) {
+        toast.error(`Failed to save set ${log.setNumber}`);
+        return;
+      }
+      const includeIntensity = exercise.is_stretch !== true;
+      const intensityWrite = !includeIntensity
+        ? {}
+        : workoutSettings.intensityMode === 'rir'
+          ? { rir: log.rir ?? DEFAULT_RIR }
+          : { rpe: log.rpe ?? 7 };
       const payload = exercise.mode === 'reps'
         ? {
             weight: parseFloat(log.weight),
             reps: parseInt(log.reps),
-            ...(includeRpe ? { rpe: log.rpe } : {}),
+            ...intensityWrite,
             set_type: log.setType,
           }
         : {
             duration_sec: parseInt(log.duration_sec),
-            ...(includeRpe ? { rpe: log.rpe } : {}),
+            ...intensityWrite,
             set_type: log.setType,
           };
 
@@ -1120,7 +1201,11 @@ export default function ActiveWorkoutScreen() {
                   ...s,
                   weight: parseFloat(log.weight),
                   reps: parseInt(log.reps),
-                  ...(ex.is_stretch ? {} : { rpe: log.rpe }),
+                  ...(ex.is_stretch
+                    ? {}
+                    : workoutSettings.intensityMode === 'rir'
+                      ? { rir: log.rir }
+                      : { rpe: log.rpe }),
                   set_type: log.setType,
                   completed: true,
                 };
@@ -1128,7 +1213,11 @@ export default function ActiveWorkoutScreen() {
               return {
                 ...s,
                 duration_sec: parseInt(log.duration_sec),
-                ...(ex.is_stretch ? {} : { rpe: log.rpe }),
+                ...(ex.is_stretch
+                  ? {}
+                  : workoutSettings.intensityMode === 'rir'
+                    ? { rir: log.rir }
+                    : { rpe: log.rpe }),
                 set_type: log.setType,
                 completed: true,
               };
@@ -1505,6 +1594,42 @@ export default function ActiveWorkoutScreen() {
     });
   };
 
+  const handleAddWarmups = async () => {
+    const exercise = exercises[currentExerciseIndex];
+    setShowOverflowMenu(false);
+    if (!exercise || exercise.mode !== 'reps' || exercise.is_stretch) {
+      toast.error('Warmups are for weighted sets');
+      return;
+    }
+    const firstWorking = exercise.sets.find((set) => set.set_type !== 'warmup') ?? exercise.sets[0];
+    const workingWeight = firstWorking?.weight && firstWorking.weight > 0
+      ? firstWorking.weight
+      : parseFloat(setLogs.find((log) => log.setType !== 'warmup')?.weight ?? '');
+    setIsMutatingExercises(true);
+    try {
+      const result = await insertWarmupSets(exercise.id, workingWeight, profile?.use_imperial ?? true);
+      if (result.ok) {
+        toast.success(`Added ${result.warmupCount} warmup sets`);
+        await loadActiveSession();
+      } else if (result.reason === 'exists') {
+        toast.error('Warmups already added');
+      } else if (result.reason === 'no_weight') {
+        toast.error('Set a working weight first');
+      } else {
+        toast.error('Failed to add warmups');
+      }
+    } finally {
+      setIsMutatingExercises(false);
+    }
+  };
+
+  const handleShareWorkout = async () => {
+    const ok = await shareWorkoutCardImage(shareCardRef);
+    if (!ok) {
+      toast.error('Unable to share this workout');
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -1525,6 +1650,59 @@ export default function ActiveWorkoutScreen() {
   }
 
   const currentExercise = exercises[currentExerciseIndex];
+  const remainingMinutes = estimateSessionTimeMinutes(
+    exercises
+      .map((ex) => ({
+        setup_buffer_sec: ex.setup_buffer_sec,
+        avg_time_per_set_sec: ex.avg_time_per_set_sec,
+        is_unilateral: ex.is_unilateral,
+        sets: ex.sets.filter((set) => !set.completed).length,
+      }))
+      .filter((ex) => ex.sets > 0),
+  );
+  const unitsLabel = profile?.use_imperial ? 'lbs' : 'kg';
+  const shareStats: ShareWorkoutStats = (() => {
+    const workingSets = exercises.flatMap((ex) =>
+      ex.sets
+        .filter((set) => set.set_type !== 'warmup' && (set.weight ?? 0) > 0)
+        .map((set) => ({
+          name: ex.name,
+          weight: set.weight ?? 0,
+          detail: `${set.weight} ${unitsLabel}${set.reps != null ? ` × ${set.reps}` : ''}`,
+        })),
+    );
+    workingSets.sort((a, b) => b.weight - a.weight);
+    const topLifts: { name: string; detail: string }[] = [];
+    for (const lift of workingSets) {
+      if (topLifts.some((existing) => existing.name === lift.name)) continue;
+      topLifts.push({ name: lift.name, detail: lift.detail });
+      if (topLifts.length === 3) break;
+    }
+    const volume = exercises.reduce((sum, ex) => {
+      return (
+        sum +
+        ex.sets.reduce((setSum, set) => {
+          if (set.set_type === 'warmup') return setSum;
+          return setSum + (set.weight ?? 0) * (set.reps ?? 0);
+        }, 0)
+      );
+    }, 0);
+    const setCount = exercises.reduce(
+      (sum, ex) => sum + ex.sets.filter((set) => set.set_type !== 'warmup').length,
+      0,
+    );
+    const durationMin = sessionStartedAt
+      ? Math.max(1, Math.round((Date.now() - new Date(sessionStartedAt).getTime()) / 60000))
+      : remainingMinutes;
+    return {
+      title: sessionDayName || 'Workout',
+      durationMin,
+      volume,
+      unitsLabel,
+      setCount,
+      topLifts,
+    };
+  })();
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -1627,6 +1805,7 @@ export default function ActiveWorkoutScreen() {
         <View style={styles.progressSection}>
           <Text style={styles.progressText}>
             Exercise {currentExerciseIndex + 1} of {exercises.length}
+            {remainingMinutes > 0 ? ` · ~${remainingMinutes}m left` : ''}
           </Text>
           <View style={styles.progressBar}>
             <View
@@ -1713,42 +1892,56 @@ export default function ActiveWorkoutScreen() {
 
             {showExerciseInfo && (
               <View style={styles.exerciseInfoCard}>
+                <ExerciseDemoMedia
+                  exerciseName={currentExercise.name}
+                  demoVideoUrl={currentExercise.demo_video_url}
+                  height={180}
+                />
                 <Text style={styles.exerciseInfoTitle}>Target Muscles</Text>
                 <Text style={styles.exerciseInfoText}>
-                  Primary: {currentExercise.name.includes('Bicep') ? 'Biceps, Forearms' : 
-                           currentExercise.name.includes('Tricep') ? 'Triceps' :
-                           currentExercise.name.includes('Pull') ? 'Lats, Biceps, Upper Back' :
-                           currentExercise.name.includes('Squat') ? 'Quads, Glutes, Core' :
-                           currentExercise.name.includes('Press') ? 'Chest, Triceps, Front Delts' :
-                           'Multiple muscle groups'}
+                  {currentExercise.primary_muscles.length > 0
+                    ? currentExercise.primary_muscles.join(' · ')
+                    : 'Multiple muscle groups'}
                 </Text>
-                <Text style={styles.exerciseInfoTitle}>Form Tips</Text>
-                <Text style={styles.exerciseInfoText}>
-                  • Control the weight on both up and down phases{'\n'}
-                  • Maintain proper breathing (exhale on exertion){'\n'}
-                  • Focus on mind-muscle connection{'\n'}
-                  • Don&apos;t sacrifice form for more weight
-                </Text>
+                {currentExercise.description ? (
+                  <>
+                    <Text style={styles.exerciseInfoTitle}>How to do it</Text>
+                    <Text style={styles.exerciseInfoText}>{currentExercise.description}</Text>
+                  </>
+                ) : null}
               </View>
             )}
 
             {/* RPE during execution — reps only; timed sets rate effort after the hold */}
             {!currentExercise.is_stretch && currentExercise.mode === 'reps' && (
             <View style={styles.rpeSection}>
-              <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
-              <RPESlider
-                value={
-                  currentSetRPEs[workoutPhase.setIndex] ||
-                  (currentExercise.sets[workoutPhase.setIndex]?.set_type === 'failure'
-                    ? FAILURE_DEFAULT_RPE
-                    : 7)
-                }
-                onChange={(value) => {
-                  const updated = [...currentSetRPEs];
-                  updated[workoutPhase.setIndex] = value;
-                  setCurrentSetRPEs(updated);
-                }}
-              />
+              <Text style={styles.inputLabel}>
+                How hard was this set? ({workoutSettings.intensityMode === 'rir' ? 'RIR' : 'RPE'})
+              </Text>
+              {workoutSettings.intensityMode === 'rir' ? (
+                <RIRSlider
+                  value={currentSetRIRs[workoutPhase.setIndex] ?? DEFAULT_RIR}
+                  onChange={(value) => {
+                    const updated = [...currentSetRIRs];
+                    updated[workoutPhase.setIndex] = value;
+                    setCurrentSetRIRs(updated);
+                  }}
+                />
+              ) : (
+                <RPESlider
+                  value={
+                    currentSetRPEs[workoutPhase.setIndex] ||
+                    (currentExercise.sets[workoutPhase.setIndex]?.set_type === 'failure'
+                      ? FAILURE_DEFAULT_RPE
+                      : 7)
+                  }
+                  onChange={(value) => {
+                    const updated = [...currentSetRPEs];
+                    updated[workoutPhase.setIndex] = value;
+                    setCurrentSetRPEs(updated);
+                  }}
+                />
+              )}
             </View>
             )}
 
@@ -1798,20 +1991,33 @@ export default function ActiveWorkoutScreen() {
               <Text style={styles.targetValue}>{workoutPhase.elapsedDurationSec} sec</Text>
             </View>
             <View style={styles.rpeSection}>
-              <Text style={styles.inputLabel}>How hard was this set? (RPE)</Text>
-              <RPESlider
-                value={
-                  currentSetRPEs[workoutPhase.setIndex] ||
-                  (currentExercise.sets[workoutPhase.setIndex]?.set_type === 'failure'
-                    ? FAILURE_DEFAULT_RPE
-                    : 7)
-                }
-                onChange={(value) => {
-                  const updated = [...currentSetRPEs];
-                  updated[workoutPhase.setIndex] = value;
-                  setCurrentSetRPEs(updated);
-                }}
-              />
+              <Text style={styles.inputLabel}>
+                How hard was this set? ({workoutSettings.intensityMode === 'rir' ? 'RIR' : 'RPE'})
+              </Text>
+              {workoutSettings.intensityMode === 'rir' ? (
+                <RIRSlider
+                  value={currentSetRIRs[workoutPhase.setIndex] ?? DEFAULT_RIR}
+                  onChange={(value) => {
+                    const updated = [...currentSetRIRs];
+                    updated[workoutPhase.setIndex] = value;
+                    setCurrentSetRIRs(updated);
+                  }}
+                />
+              ) : (
+                <RPESlider
+                  value={
+                    currentSetRPEs[workoutPhase.setIndex] ||
+                    (currentExercise.sets[workoutPhase.setIndex]?.set_type === 'failure'
+                      ? FAILURE_DEFAULT_RPE
+                      : 7)
+                  }
+                  onChange={(value) => {
+                    const updated = [...currentSetRPEs];
+                    updated[workoutPhase.setIndex] = value;
+                    setCurrentSetRPEs(updated);
+                  }}
+                />
+              )}
             </View>
             <TouchableOpacity
               style={styles.completeSetButton}
@@ -1832,6 +2038,11 @@ export default function ActiveWorkoutScreen() {
                 ? 'Enter weight and reps for each set'
                 : 'Enter the duration you held for each set'}
             </Text>
+            {prevPerformance?.performed_at ? (
+              <Text style={styles.logPrevHeader}>
+                Last session {new Date(prevPerformance.performed_at).toLocaleDateString()}
+              </Text>
+            ) : null}
 
             {setLogs.map((log, idx) => (
               <View key={log.setNumber} style={styles.logCard}>
@@ -1865,39 +2076,68 @@ export default function ActiveWorkoutScreen() {
                 </View>
 
                 {(() => {
-                  const prevSet = prevPerformance?.sets.find((s) => s.set_number === log.setNumber);
-                  if (!prevSet) return null;
-                  const unitsLabel = profile?.use_imperial ? 'lbs' : 'kg';
-                  const prevLabel =
-                    currentExercise.mode === 'timed'
+                  const prevWorking = prevPerformance?.sets ?? [];
+                  const workingIndex = setLogs
+                    .slice(0, idx)
+                    .filter((row) => row.setType !== 'warmup').length;
+                  const prevSet =
+                    log.setType === 'warmup' ? undefined : prevWorking[workingIndex];
+                  const prevLabel = !prevSet
+                    ? '—'
+                    : currentExercise.mode === 'timed'
                       ? prevSet.duration_sec != null
                         ? `${prevSet.duration_sec} sec`
-                        : null
+                        : '—'
                       : prevSet.reps != null
                         ? `${prevSet.weight != null && prevSet.weight > 0 ? `${prevSet.weight} ${unitsLabel} × ` : ''}${prevSet.reps}`
-                        : null;
-                  if (!prevLabel) return null;
-                  return <Text style={styles.logPrevText}>Previous: {prevLabel}</Text>;
+                        : '—';
+                  return (
+                    <View style={styles.logCompareRow}>
+                      <View style={styles.logCompareCol}>
+                        <Text style={styles.logCompareLabel}>Last</Text>
+                        <Text style={styles.logPrevText}>{prevLabel}</Text>
+                      </View>
+                      <View style={styles.logCompareCol}>
+                        <Text style={styles.logCompareLabel}>Today</Text>
+                      </View>
+                    </View>
+                  );
                 })()}
 
                 <View style={styles.logInputRow}>
                   {currentExercise.mode === 'reps' ? (
                     <>
                       <View style={styles.logInputGroup}>
-                        <Text style={styles.logInputLabel}>Weight ({profile?.use_imperial ? 'lbs' : 'kg'})</Text>
-                        <TextInput
-                          style={styles.logInput}
-                          placeholder="0"
-                          placeholderTextColor={colors.textMuted}
-                          keyboardType="numeric"
-                          returnKeyType="next"
-                          value={log.weight}
-                          onChangeText={(text) => {
-                            const updated = [...setLogs];
-                            updated[idx].weight = text;
-                            setSetLogs(updated);
-                          }}
-                        />
+                        <Text style={styles.logInputLabel}>Weight ({unitsLabel})</Text>
+                        <View style={styles.weightInputRow}>
+                          <TextInput
+                            style={styles.logInput}
+                            placeholder="0"
+                            placeholderTextColor={colors.textMuted}
+                            keyboardType="numeric"
+                            returnKeyType="next"
+                            value={log.weight}
+                            onChangeText={(text) => {
+                              const updated = [...setLogs];
+                              updated[idx].weight = text;
+                              setSetLogs(updated);
+                            }}
+                          />
+                          {!currentExercise.is_stretch ? (
+                            <TouchableOpacity
+                              style={styles.plateButton}
+                              onPress={() => {
+                                const parsed = parseFloat(log.weight);
+                                setPlateTarget(Number.isFinite(parsed) ? parsed : null);
+                                setShowPlateCalculator(true);
+                              }}
+                              accessibilityRole="button"
+                              accessibilityLabel="Plate calculator"
+                            >
+                              <Layers size={16} color={colors.primary} />
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
                       </View>
 
                       <View style={styles.logInputGroup}>
@@ -1948,16 +2188,27 @@ export default function ActiveWorkoutScreen() {
 
                   {!currentExercise.is_stretch && (
                     <View style={styles.logInputGroupSmall}>
-                      <Text style={styles.logInputLabel}>RPE</Text>
+                      <Text style={styles.logInputLabel}>
+                        {workoutSettings.intensityMode === 'rir' ? 'RIR' : 'RPE'}
+                      </Text>
                       <TouchableOpacity
                         onPress={() => {
                           const updated = [...setLogs];
-                          const current = updated[idx].rpe ?? 7;
-                          updated[idx].rpe = current < 10 ? current + 1 : 5;
+                          if (workoutSettings.intensityMode === 'rir') {
+                            const current = updated[idx].rir ?? DEFAULT_RIR;
+                            updated[idx].rir = current < 5 ? current + 1 : 0;
+                          } else {
+                            const current = updated[idx].rpe ?? 7;
+                            updated[idx].rpe = current < 10 ? current + 1 : 5;
+                          }
                           setSetLogs(updated);
                         }}
                       >
-                        <Text style={styles.rpeDisplayValue}>{log.rpe ?? 7}</Text>
+                        <Text style={styles.rpeDisplayValue}>
+                          {workoutSettings.intensityMode === 'rir'
+                            ? (log.rir ?? DEFAULT_RIR)
+                            : (log.rpe ?? 7)}
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1965,14 +2216,25 @@ export default function ActiveWorkoutScreen() {
 
                 {!currentExercise.is_stretch && (
                   <View style={styles.rpeSliderContainer}>
-                    <RPESlider
-                      value={log.rpe ?? 7}
-                      onChange={(value) => {
-                        const updated = [...setLogs];
-                        updated[idx].rpe = value;
-                        setSetLogs(updated);
-                      }}
-                    />
+                    {workoutSettings.intensityMode === 'rir' ? (
+                      <RIRSlider
+                        value={log.rir ?? DEFAULT_RIR}
+                        onChange={(value) => {
+                          const updated = [...setLogs];
+                          updated[idx].rir = value;
+                          setSetLogs(updated);
+                        }}
+                      />
+                    ) : (
+                      <RPESlider
+                        value={log.rpe ?? 7}
+                        onChange={(value) => {
+                          const updated = [...setLogs];
+                          updated[idx].rpe = value;
+                          setSetLogs(updated);
+                        }}
+                      />
+                    )}
                   </View>
                 )}
               </View>
@@ -1996,7 +2258,16 @@ export default function ActiveWorkoutScreen() {
           <View style={styles.completeContainer}>
             <CheckCircle size={64} color={colors.success} />
             <Text style={styles.completeTitle}>Workout Complete!</Text>
-            <Text style={styles.completeText}>Great job today!</Text>
+            <WorkoutShareCard ref={shareCardRef} stats={shareStats} />
+            <TouchableOpacity
+              style={styles.shareButton}
+              onPress={() => void handleShareWorkout()}
+              accessibilityRole="button"
+              accessibilityLabel="Share workout"
+            >
+              <Share2 size={18} color={colors.primary} />
+              <Text style={styles.shareButtonText}>Share</Text>
+            </TouchableOpacity>
 
             {isCompleting ? (
               <View style={styles.finishButton}>
@@ -2069,6 +2340,19 @@ export default function ActiveWorkoutScreen() {
             >
               <Plus size={18} color={colors.primary} />
               <Text style={styles.overflowItemLabel}>Add exercise</Text>
+            </TouchableOpacity>
+            <View style={styles.overflowItemDivider} />
+            <TouchableOpacity
+              style={[styles.overflowItem, isMutatingExercises && styles.overflowItemDisabled]}
+              onPress={() => void handleAddWarmups()}
+              disabled={
+                isMutatingExercises ||
+                currentExercise.mode !== 'reps' ||
+                currentExercise.is_stretch === true
+              }
+            >
+              <Flame size={18} color={colors.textPrimary} />
+              <Text style={styles.overflowItemLabel}>Add warmups</Text>
             </TouchableOpacity>
             <View style={styles.overflowItemDivider} />
             <TouchableOpacity
@@ -2210,6 +2494,13 @@ export default function ActiveWorkoutScreen() {
         onCancel={() => {
           if (!isMutatingExercises) setShowRemoveExerciseConfirm(false);
         }}
+      />
+
+      <PlateCalculatorSheet
+        visible={showPlateCalculator}
+        target={plateTarget}
+        useImperial={profile?.use_imperial ?? true}
+        onClose={() => setShowPlateCalculator(false)}
       />
 
       <ConfirmDialog
@@ -2533,9 +2824,39 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  logPrevHeader: {
+    fontSize: typography.sizes.sm,
+    color: colors.textMuted,
+  },
+  logCompareRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  logCompareCol: {
+    flex: 1,
+    gap: 2,
+  },
+  logCompareLabel: {
+    fontSize: typography.sizes.xs,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   logPrevText: {
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
+  },
+  weightInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  plateButton: {
+    padding: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   setTypeChip: {
     borderRadius: borderRadius.sm,
@@ -2629,6 +2950,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     marginBottom: spacing.xs,
   },
   logInput: {
+    flex: 1,
     backgroundColor: colors.background,
     borderRadius: borderRadius.sm,
     borderWidth: 1,
@@ -2697,6 +3019,21 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   completeText: {
     fontSize: typography.sizes.lg,
     color: colors.textSecondary,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  shareButtonText: {
+    color: colors.primary,
+    fontWeight: typography.weights.semibold,
+    fontSize: typography.sizes.base,
   },
   finishButton: {
     backgroundColor: colors.success,

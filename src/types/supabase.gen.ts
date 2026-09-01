@@ -292,6 +292,7 @@ export type Database = {
           avg_time_per_set_sec: number
           created_at: string | null
           density_score: number
+          demo_video_url: string | null
           description: string | null
           equipment_needed: string[] | null
           id: string
@@ -311,6 +312,7 @@ export type Database = {
           avg_time_per_set_sec: number
           created_at?: string | null
           density_score: number
+          demo_video_url?: string | null
           description?: string | null
           equipment_needed?: string[] | null
           id?: string
@@ -330,6 +332,7 @@ export type Database = {
           avg_time_per_set_sec?: number
           created_at?: string | null
           density_score?: number
+          demo_video_url?: string | null
           description?: string | null
           equipment_needed?: string[] | null
           id?: string

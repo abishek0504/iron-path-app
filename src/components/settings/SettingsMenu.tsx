@@ -14,7 +14,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw } from 'lucide-react-native';
+import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw, Timer, Download } from 'lucide-react-native';
 import { spacing, borderRadius, typography, THEME_OPTIONS, getThemeLabel, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
@@ -156,6 +156,20 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       sublabel: undefined,
       icon: Bell,
       onPress: () => handleNavigate('/workout-reminders'),
+    },
+    {
+      id: 'workout-settings',
+      label: 'Workout Settings',
+      sublabel: undefined,
+      icon: Timer,
+      onPress: () => handleNavigate('/workout-settings'),
+    },
+    {
+      id: 'export-data',
+      label: 'Export Data',
+      sublabel: undefined,
+      icon: Download,
+      onPress: () => handleNavigate('/export-data'),
     },
     {
       id: 'apple-health',

@@ -2034,21 +2034,9 @@ export default function PlannerTab() {
               ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length === 0 ? (
                 <View style={styles.emptySlotsContainer}>
                   <Text style={styles.emptySlotsText}>
-                    {dateContext.isToday ? 'No workouts scheduled for today' : `No workouts planned for ${selectedDay.day.day_name}`}
+                    {`No workouts planned for ${dateContext.isToday ? 'today' : selectedDay.day.day_name}`}
                   </Text>
                   <Text style={styles.emptySlotsSubtext}>Add a workout or generate with AI to get started</Text>
-                  <Button
-                    label="Generate with AI"
-                    variant="primary"
-                    onPress={handleOpenGenerateDayForm}
-                    fullWidth
-                    style={styles.emptyGenerateButton}
-                  >
-                    <View style={styles.generateButtonContent}>
-                      <Sparkles size={20} color={colors.onPrimaryContrast} />
-                      <Text style={styles.generateButtonText}>Generate with AI</Text>
-                    </View>
-                  </Button>
                 </View>
               ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length > 0 ? (
                 <View style={styles.emptySlotsContainer}>
@@ -2558,9 +2546,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.onPrimaryContrast,
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.semibold,
-  },
-  emptyGenerateButton: {
-    marginTop: spacing.md,
   },
   addButtonContent: {
     flexDirection: 'row',

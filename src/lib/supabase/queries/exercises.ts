@@ -25,6 +25,7 @@ export interface MergedExercise {
   is_timed: boolean;
   /** True for mobility/stretch entries from the master catalog. */
   is_stretch?: boolean;
+  demo_video_url?: string | null;
   equipment_needed?: string[];
   movement_pattern?: string;
   tempo_category?: string;
@@ -159,11 +160,21 @@ export async function getMergedExercise(
       avg_time_per_set_sec: override?.avg_time_per_set_sec_override ?? masterExercise.avg_time_per_set_sec,
       is_timed: override?.is_timed_override ?? masterExercise.is_timed,
       is_stretch: masterExercise.is_stretch ?? false,
+      demo_video_url: masterExercise.demo_video_url,
       equipment_needed: masterExercise.equipment_needed,
       movement_pattern: masterExercise.movement_pattern,
       tempo_category: masterExercise.tempo_category,
       source: override ? 'override' : 'master',
     };
+
+    const { data: videoRow } = await supabase
+      .from('v2_exercises')
+      .select('demo_video_url')
+      .eq('id', exerciseId)
+      .maybeSingle();
+    if (videoRow?.demo_video_url) {
+      merged.demo_video_url = videoRow.demo_video_url;
+    }
 
     if (__DEV__) {
       devLog('exercise-query', { 
@@ -289,11 +300,34 @@ export async function listMergedExercises(
         avg_time_per_set_sec: override?.avg_time_per_set_sec_override ?? master.avg_time_per_set_sec,
         is_timed: override?.is_timed_override ?? master.is_timed,
         is_stretch: master.is_stretch ?? false,
+        demo_video_url: master.demo_video_url,
         equipment_needed: master.equipment_needed,
         movement_pattern: master.movement_pattern,
         tempo_category: master.tempo_category,
         source: override ? 'override' : 'master',
       });
+    }
+
+    if (masterExerciseIds.length > 0) {
+      const { data: videoRows, error: videoError } = await supabase
+        .from('v2_exercises')
+        .select('id, demo_video_url')
+        .in('id', masterExerciseIds)
+        .not('demo_video_url', 'is', null);
+      if (videoError && __DEV__) {
+        devError('exercise-query', videoError, { action: 'demo_video_overlay' });
+      }
+      if (videoRows?.length) {
+        const urlById = new Map(
+          videoRows
+            .filter((row) => row.demo_video_url)
+            .map((row) => [row.id, row.demo_video_url]),
+        );
+        for (const exercise of merged) {
+          const url = urlById.get(exercise.id);
+          if (url) exercise.demo_video_url = url;
+        }
+      }
     }
 
     if (__DEV__) {

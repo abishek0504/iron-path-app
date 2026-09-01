@@ -3,7 +3,7 @@
  * Displays session details for a selected date
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
-import { Trash2, ChevronDown, Heart, Activity, Plus } from 'lucide-react-native';
+import { Trash2, ChevronDown, Heart, Activity, Plus, Share2 } from 'lucide-react-native';
+import { WorkoutShareCard } from '../workout/WorkoutShareCard';
+import { shareWorkoutCardImage, type ShareWorkoutStats } from '../../lib/workout/shareWorkout';
+import { useUIStore } from '../../stores/uiStore';
 import { spacing, typography, borderRadius, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { supabase } from '../../lib/supabase/client';
@@ -224,6 +227,45 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
   const [sessionToDelete, setSessionToDelete] = useState<{ id: string; name: string } | null>(null);
   const profile = useUserStore((state) => state.profile);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
+  const showToast = useUIStore((state) => state.showToast);
+  const shareCardRef = useRef<View>(null);
+  const [shareStats, setShareStats] = useState<ShareWorkoutStats | null>(null);
+
+  const buildShareStats = (session: SessionWithExercises): ShareWorkoutStats => {
+    const lifts = session.exercises.flatMap((ex) =>
+      ex.sets
+        .filter((set) => set.setType !== 'warmup' && (set.weight ?? 0) > 0)
+        .map((set) => ({
+          name: ex.name,
+          weight: set.weight ?? 0,
+          detail: `${set.weight} ${unitsLabel}${set.reps != null ? ` × ${set.reps}` : ''}`,
+        })),
+    );
+    lifts.sort((a, b) => b.weight - a.weight);
+    const topLifts: { name: string; detail: string }[] = [];
+    for (const lift of lifts) {
+      if (topLifts.some((existing) => existing.name === lift.name)) continue;
+      topLifts.push({ name: lift.name, detail: lift.detail });
+      if (topLifts.length === 3) break;
+    }
+    return {
+      title: session.day_name || 'Workout',
+      durationMin: session.stats?.durationMin ?? 0,
+      volume: session.stats?.volumeLbs ?? 0,
+      unitsLabel,
+      setCount: session.stats?.totalSets ?? 0,
+      topLifts,
+    };
+  };
+
+  const handleShareSession = (session: SessionWithExercises) => {
+    setShareStats(buildShareStats(session));
+    setTimeout(() => {
+      void shareWorkoutCardImage(shareCardRef).then((ok) => {
+        if (!ok) showToast('Unable to share this workout', 'error');
+      });
+    }, 50);
+  };
 
   useEffect(() => {
     setExpandedExerciseKeys(new Set());
@@ -537,6 +579,15 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
                 <Text style={styles.sessionTime}>{formatTime(session.completed_at)}</Text>
               )}
             </View>
+            <View style={styles.sessionHeaderActions}>
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => handleShareSession(session)}
+              accessibilityRole="button"
+              accessibilityLabel="Share workout"
+            >
+              <Share2 size={20} color={colors.primary} />
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.deleteButton}
               onPress={() => openDeleteConfirm(session.id, session.day_name || 'Workout')}
@@ -547,6 +598,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
                 color={deletingSessionId === session.id ? colors.textMuted : colors.error}
               />
             </TouchableOpacity>
+            </View>
           </View>
 
           {session.stats ? (
@@ -665,6 +717,12 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
         </TouchableOpacity>
       )}
 
+      {shareStats ? (
+        <View style={styles.hiddenShareCard} pointerEvents="none">
+          <WorkoutShareCard ref={shareCardRef} stats={shareStats} />
+        </View>
+      ) : null}
+
       <ConfirmDialog
         visible={!!sessionToDelete}
         title="Delete Workout"
@@ -756,6 +814,15 @@ function createStyles(colors: ThemeColors) {
     sessionHeaderLeft: {
       flex: 1,
       gap: spacing.xs,
+    },
+    sessionHeaderActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    hiddenShareCard: {
+      position: 'absolute',
+      left: -9999,
+      top: 0,
     },
     sessionTitle: {
       color: colors.textPrimary,
