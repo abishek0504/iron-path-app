@@ -3,7 +3,8 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { X } from 'lucide-react-native';
 import { borderRadius, spacing, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
-import { calculatePlateBreakdown, formatPlateLine } from '../../lib/workout/plateCalculator';
+import { calculatePlateBreakdown } from '../../lib/workout/plateCalculator';
+import { BarbellLoadVisual } from './BarbellLoadVisual';
 
 interface PlateCalculatorSheetProps {
   visible: boolean;
@@ -20,7 +21,10 @@ export function PlateCalculatorSheet({
 }: PlateCalculatorSheetProps) {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const breakdown = target != null ? calculatePlateBreakdown(target, useImperial) : null;
+  const breakdown = useMemo(
+    () => (target != null ? calculatePlateBreakdown(target, useImperial) : null),
+    [target, useImperial],
+  );
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -39,15 +43,7 @@ export function PlateCalculatorSheet({
               <Text style={styles.target}>
                 {breakdown.target} {breakdown.unit}
               </Text>
-              <Text style={styles.body}>{formatPlateLine(breakdown)}</Text>
-              {breakdown.perSide.map((p) => (
-                <View key={p.plate} style={styles.row}>
-                  <Text style={styles.rowLabel}>
-                    {p.plate} {breakdown.unit}
-                  </Text>
-                  <Text style={styles.rowValue}>{p.count} per side</Text>
-                </View>
-              ))}
+              <BarbellLoadVisual breakdown={breakdown} />
             </>
           )}
         </Pressable>
@@ -86,23 +82,12 @@ function createStyles(colors: ThemeColors) {
       fontSize: typography.sizes.xl,
       fontWeight: typography.weights.bold,
       color: colors.primary,
+      textAlign: 'center',
     },
     body: {
       fontSize: typography.sizes.sm,
       color: colors.textSecondary,
       lineHeight: 20,
-    },
-    row: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-    },
-    rowLabel: {
-      color: colors.textPrimary,
-      fontSize: typography.sizes.base,
-    },
-    rowValue: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.base,
     },
   });
 }

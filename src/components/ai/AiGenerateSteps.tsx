@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -78,6 +79,8 @@ function useActivePulse(isActive: boolean, reduceMotion: boolean) {
 
   useEffect(() => {
     if (!isActive || reduceMotion) {
+      cancelAnimation(ringOpacity);
+      cancelAnimation(scale);
       ringOpacity.value = 1;
       scale.value = 1;
       return;
@@ -100,6 +103,11 @@ function useActivePulse(isActive: boolean, reduceMotion: boolean) {
       -1,
       false,
     );
+
+    return () => {
+      cancelAnimation(ringOpacity);
+      cancelAnimation(scale);
+    };
   }, [isActive, ringOpacity, reduceMotion, scale]);
 
   const ringStyle = useAnimatedStyle(() => ({

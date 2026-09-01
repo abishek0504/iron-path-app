@@ -28,6 +28,7 @@ import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
+import { signOutAndClearLocalState } from '../src/lib/auth/signOutAndClear';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme, useThemeMode } from '../src/lib/utils/ThemeContext';
 import { ThemePickerGrid } from '../src/components/settings/ThemePickerGrid';
@@ -58,6 +59,7 @@ import Animated, {
   withTiming,
   Easing,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { BottomSheet } from '../src/components/ui/BottomSheet';
 import { DatePicker } from '../src/components/ui/DatePicker';
@@ -127,6 +129,16 @@ export default function Onboarding() {
   const slideX = useSharedValue(0);
   const progressWidth = useSharedValue(1 / TOTAL_STEPS);
   const transitioningRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelAnimation(slideX);
+      cancelAnimation(progressWidth);
+    };
+  }, [slideX, progressWidth]);
 
   useEffect(() => {
     loadProfile();
@@ -157,7 +169,7 @@ export default function Onboarding() {
       // Confirm the auth user still exists (Keychain can outlive a deleted account).
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
-        await supabase.auth.signOut().catch(() => undefined);
+        await signOutAndClearLocalState();
         router.replace('/get-started');
         return;
       }
@@ -268,12 +280,14 @@ export default function Onboarding() {
   };
 
   const completeEnter = useCallback(() => {
+    if (!mountedRef.current) return;
     transitioningRef.current = false;
     setTransitioning(false);
     setFieldErrors({});
   }, []);
 
   const swapAndEnter = useCallback((nextStep: number, direction: 1 | -1) => {
+    if (!mountedRef.current) return;
     setDisplayedStep(nextStep);
     setCurrentStep(nextStep);
     // Place incoming step off-screen, then slide in after content swaps.
@@ -799,9 +813,7 @@ export default function Onboarding() {
             </Text>
             <TouchableOpacity
               onPress={async () => {
-                await supabase.auth.signOut().catch(() => undefined);
-                const { syncSessionAuthToWatch } = await import('../src/lib/watch/syncWatchAuth');
-                await syncSessionAuthToWatch(null);
+                await signOutAndClearLocalState();
                 router.replace('/get-started');
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

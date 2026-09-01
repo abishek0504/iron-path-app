@@ -51,3 +51,8 @@ export async function removeDiskCachePrefix(prefix: string): Promise<void> {
     // ignore
   }
 }
+
+/** Remove every disk-cache key. Used on sign-out. */
+export async function clearAllDiskCache(): Promise<void> {
+  await removeDiskCachePrefix('');
+}

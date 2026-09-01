@@ -34,6 +34,7 @@ import { useTheme } from '../../lib/utils/ThemeContext';
 import { supabase } from '../../lib/supabase/client';
 import { getSessionsInRangeCached, invalidateSessionsInRangeForUser } from '../../lib/cache/sessionsCache';
 import { invalidateAnalyticsCache } from '../../lib/cache/analyticsCache';
+import { invalidateWorkoutStatsCache } from '../../lib/cache/dashboardStatsCache';
 import { deleteSessionWithExercises, getSessionStats, type WorkoutSession } from '../../lib/supabase/queries/workouts';
 import { getSessionHealthMetrics, type SessionHealthMetrics } from '../../lib/supabase/queries/analytics';
 import { listMergedExercisesCached } from '../../lib/cache/exerciseCache';
@@ -503,6 +504,7 @@ export const SessionDetailSheet: React.FC<Props> = ({ selectedDate, onClose, onS
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       invalidateSessionsInRangeForUser(userId);
       invalidateAnalyticsCache(userId);
+      invalidateWorkoutStatsCache(userId);
       if (onSessionDeleted) {
         onSessionDeleted();
       }

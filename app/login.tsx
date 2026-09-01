@@ -20,6 +20,7 @@ import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { Button } from '../src/components/ui/Button';
 import { restoreAccount } from '../src/lib/supabase/queries/users';
 import { mapAuthError } from '../src/lib/auth/authErrors';
+import { signOutAndClearLocalState } from '../src/lib/auth/signOutAndClear';
 import type { UserProfile } from '../src/stores/userStore';
 
 export default function Login() {
@@ -136,7 +137,7 @@ export default function Login() {
 
   const handleCancelRestore = async () => {
     setPendingRestore(null);
-    await supabase.auth.signOut().catch(() => undefined);
+    await signOutAndClearLocalState();
   };
 
   return (

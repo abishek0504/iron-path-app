@@ -16,6 +16,7 @@ import { useUserStore } from '../src/stores/userStore';
 import { getActiveSession } from '../src/lib/supabase/queries/workouts';
 import { isAccountPendingDeletion } from '../src/lib/auth/accountLifecycle';
 import { warmStartupCaches } from '../src/lib/cache/warmStartupCaches';
+import { signOutAndClearLocalState } from '../src/lib/auth/signOutAndClear';
 
 async function hideSplash(): Promise<void> {
   try {
@@ -45,9 +46,7 @@ export default function Index() {
       const { data: { user }, error: userError } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        await supabase.auth.signOut().catch(() => undefined);
-        const { syncSessionAuthToWatch } = await import('../src/lib/watch/syncWatchAuth');
-        await syncSessionAuthToWatch(null);
+        await signOutAndClearLocalState();
         router.replace('/get-started');
         return;
       }
@@ -68,6 +67,7 @@ export default function Index() {
       setProfile(profile);
 
       if (isAccountPendingDeletion(profile)) {
+        await signOutAndClearLocalState();
         router.replace('/login');
         return;
       }

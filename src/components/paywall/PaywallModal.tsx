@@ -11,6 +11,7 @@ import {
 import type { PurchasesPackage } from 'react-native-purchases';
 import Animated, {
   FadeIn,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -82,6 +83,7 @@ export function PaywallModal({
   useEffect(() => {
     if (!visible) {
       setCanDismiss(false);
+      cancelAnimation(ctaScale);
       ctaScale.value = 1;
       return;
     }
@@ -94,7 +96,10 @@ export function PaywallModal({
         false,
       );
     }, SOFT_DISMISS_DELAY_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      cancelAnimation(ctaScale);
+    };
   }, [visible, ctaScale]);
 
   const ctaAnimatedStyle = useAnimatedStyle(() => ({

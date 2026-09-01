@@ -35,7 +35,10 @@ export function AnalyticsTrendsPanel({ granularity = 'week' }: Props) {
 
   const load = useCallback(async () => {
     const userId = profile?.id;
-    if (!userId) return;
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { start, end } = getRangeForPreset(preset);

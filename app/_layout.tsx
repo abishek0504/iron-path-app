@@ -9,13 +9,17 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Platform } from 'react-native';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Sentry from '@sentry/react-native';
 import { ToastProvider } from '../src/components/ui/ToastProvider';
 import { ModalManager } from '../src/components/ui/ModalManager';
 import { PaywallProvider } from '../src/components/paywall/PaywallProvider';
 import { TourProvider } from '../src/components/tour/TourProvider';
 import { ThemeProvider } from '../src/lib/utils/ThemeContext';
+import { RootErrorBoundary } from '../src/components/ui/RootErrorBoundary';
 import { initNotifications, setupNotificationResponseRouting } from '../src/lib/utils/notifications';
 import { initSentry } from '../src/lib/monitoring/initSentry';
+
+initSentry();
 
 // Keep native splash up until index finishes auth routing (see app/index.tsx).
 void SplashScreen.preventAutoHideAsync();
@@ -25,9 +29,8 @@ if (Platform.OS === 'web') {
   require('../styles/scrollbar.css');
 }
 
-export default function RootLayout() {
+function RootLayout() {
   useEffect(() => {
-    initSentry();
     initNotifications();
     const unsub = setupNotificationResponseRouting();
     return unsub;
@@ -92,7 +95,7 @@ export default function RootLayout() {
           name="(stack)/workout/active"
           options={{ 
             presentation: 'modal', 
-            gestureEnabled: true,
+            gestureEnabled: false,
             animation: 'slide_from_right'
           }}
         />
@@ -140,6 +143,10 @@ export default function RootLayout() {
           name="create-custom-exercise"
           options={{ gestureEnabled: true, animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="help-support"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
       </Stack>
 
       {/* Global UI components */}
@@ -149,15 +156,20 @@ export default function RootLayout() {
     </PaywallProvider>
   );
 
-  // Wrap with GestureHandlerRootView for native platforms
-  if (Platform.OS !== 'web') {
-    return (
-      <ThemeProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>{content}</GestureHandlerRootView>
-      </ThemeProvider>
-    );
-  }
+  const wrapped = (
+    <ThemeProvider>
+      <RootErrorBoundary>
+        {Platform.OS !== 'web' ? (
+          <GestureHandlerRootView style={{ flex: 1 }}>{content}</GestureHandlerRootView>
+        ) : (
+          content
+        )}
+      </RootErrorBoundary>
+    </ThemeProvider>
+  );
 
-  return <ThemeProvider>{content}</ThemeProvider>;
+  return wrapped;
 }
+
+export default Sentry.wrap(RootLayout);
 

@@ -18,6 +18,7 @@ import Animated, {
   withSequence,
   Easing,
   interpolate,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
 import { Dumbbell, Timer, RotateCcw } from 'lucide-react-native';
@@ -32,6 +33,7 @@ import { TourTarget } from '../../src/components/tour/TourTarget';
 import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 import {
   deleteSessionWithExercises,
+  materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
 import {
@@ -39,6 +41,7 @@ import {
   getUserTemplatesCached,
 } from '../../src/lib/cache/templateCache';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
+import { invalidateWorkoutStatsCache } from '../../src/lib/cache/dashboardStatsCache';
 import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { hapticMedium, hapticWarning } from '../../src/lib/utils/haptics';
@@ -87,29 +90,26 @@ const CircularButton = ({
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
-    if (isCompleted || disabled) return;
-
-    // Single ripple animation that repeats every 5 seconds
-    const startRipple = () => {
+    if (isCompleted || disabled) {
+      cancelAnimation(ripple);
       ripple.value = 0;
-      ripple.value = withRepeat(
-        withSequence(
-          withTiming(1, {
-            duration: 3000,
-            easing: Easing.out(Easing.ease),
-          }),
-          withTiming(0, { duration: 0 })
-        ),
-        -1,
-        false
-      );
-    };
+      return;
+    }
 
-    startRipple();
-    const interval = setInterval(startRipple, 5000); // Restart every 5 seconds
+    ripple.value = withRepeat(
+      withSequence(
+        withTiming(1, {
+          duration: 3000,
+          easing: Easing.out(Easing.ease),
+        }),
+        withTiming(0, { duration: 0 })
+      ),
+      -1,
+      false
+    );
 
     return () => {
-      clearInterval(interval);
+      cancelAnimation(ripple);
       ripple.value = 0;
     };
   }, [isCompleted, disabled, ripple]);
@@ -481,10 +481,30 @@ export default function WorkoutTab() {
         }
       }
 
+      const isBorrowing = !planDayNamesMatch(planDayName, todayName);
+      if (isBorrowing && slotsForDay.length > 0) {
+        const slotExerciseIds = [
+          ...new Set(
+            slotsForDay.flatMap(
+              (slot) => [slot.exercise_id, slot.custom_exercise_id].filter(Boolean) as string[],
+            ),
+          ),
+        ];
+        const mergedSlots =
+          slotExerciseIds.length > 0 ? await listMergedExercisesCached(userId, slotExerciseIds) : [];
+        const nameById = new Map(mergedSlots.map((e) => [e.id, e.name]));
+        exercisesToShow = [...slotsForDay]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((slot) => ({
+            id: slot.id,
+            name: nameById.get(slot.exercise_id || slot.custom_exercise_id || '') ?? 'Unknown Exercise',
+          }));
+      }
+
       setSelectedDayExercises(exercisesToShow);
 
       // Selected workout is completed when its session status is 'completed'
-      const isTrulyCompleted = viewingSession?.status === 'completed';
+      const isTrulyCompleted = isBorrowing ? false : viewingSession?.status === 'completed';
       setIsWorkoutCompleted(isTrulyCompleted);
 
       if (__DEV__) {
@@ -616,7 +636,9 @@ export default function WorkoutTab() {
 
   const handleStartWorkout = async () => {
     if (startInProgressRef.current) return;
-    if (selectedSession?.status === 'completed' || isWorkoutCompleted) {
+    const todayName = getTodayDayName();
+    const borrowing = !planDayNamesMatch(selectedPlanDayName, todayName);
+    if (!borrowing && (selectedSession?.status === 'completed' || isWorkoutCompleted)) {
       return;
     }
     if (selectedSession?.status === 'active' && selectedSession.control_device === 'watch') {
@@ -630,7 +652,7 @@ export default function WorkoutTab() {
       if (!activeTemplate || !currentDay) return;
 
       // Continue / open existing active session (same session Plan shows)
-      if (selectedSession?.status === 'active' && selectedSession.id) {
+      if (!borrowing && selectedSession?.status === 'active' && selectedSession.id) {
         if (selectedSession.control_device === 'watch') {
           toast.info('Workout is running on Apple Watch.');
           return;
@@ -645,7 +667,6 @@ export default function WorkoutTab() {
         return;
       }
 
-      const todayName = getTodayDayName();
       const planDay = findPlanDay(templateDays, selectedPlanDayName);
       const slots = planDay?.slots ?? [];
 
@@ -667,6 +688,43 @@ export default function WorkoutTab() {
         slots,
         experience: profile?.experience_level || 'beginner',
       });
+
+      if (borrowing) {
+        const existingBorrowed = ensured.sessions.find(
+          (s) => planDayNamesMatch(s.day_name ?? '', selectedPlanDayName) && s.status !== 'completed',
+        );
+        if (existingBorrowed) {
+          if (existingBorrowed.control_device === 'watch') {
+            toast.info('Workout is running on Apple Watch. Finish or abandon it there first.');
+            return;
+          }
+          const openIndex = Math.max(0, ensured.sessions.findIndex((s) => s.id === existingBorrowed.id));
+          setSessionsToday(ensured.sessions);
+          setSelectedWorkoutIndex(openIndex);
+          router.push({ pathname: '/workout/active', params: { sessionId: existingBorrowed.id } });
+          return;
+        }
+        if (slots.length === 0) {
+          toast.error('No exercises scheduled for this day');
+          return;
+        }
+        const created = await materializeWorkoutFromTemplateSlots({
+          userId,
+          templateId: activeTemplate.id,
+          dayName: selectedPlanDayName,
+          slots,
+          experience: profile?.experience_level || 'beginner',
+        });
+        if (!created) {
+          toast.error('Failed to start workout');
+          return;
+        }
+        invalidateSessionsInRangeForUser(userId);
+        invalidateWorkoutStatsCache(userId);
+        toast.success('Workout started');
+        router.push({ pathname: '/workout/active', params: { sessionId: created.id } });
+        return;
+      }
 
       if (__DEV__) {
         devLog('workout-tab', {
@@ -740,6 +798,7 @@ export default function WorkoutTab() {
           devError('workout-tab', deleteError, { action: 'handleResetWorkout', sessionId: selectedSession.id });
         } else {
           invalidateSessionsInRangeForUser(userId);
+          invalidateWorkoutStatsCache(userId);
         }
       } else {
         const today = new Date();
@@ -762,6 +821,7 @@ export default function WorkoutTab() {
         }
         if ((sessionsToDelete?.length ?? 0) > 0) {
           invalidateSessionsInRangeForUser(userId);
+          invalidateWorkoutStatsCache(userId);
         }
       }
 

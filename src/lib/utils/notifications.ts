@@ -183,7 +183,7 @@ export function setupNotificationResponseRouting(): () => void {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { router } = require('expo-router') as typeof import('expo-router');
-      router.push('/(tabs)');
+      router.replace('/(tabs)');
     } catch {
       /* ignore */
     }

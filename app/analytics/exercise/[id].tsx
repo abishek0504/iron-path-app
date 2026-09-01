@@ -127,7 +127,7 @@ export default function ExerciseAnalyticsScreen() {
             </ChartSection>
 
             {e1rmTrend.length > 0 ? (
-              <ChartSection title="Est. 1RM" styles={styles}>
+              <ChartSection title="Theoretical 1RM" styles={styles}>
                 <TrendLineChart
                   data={e1rmTrend}
                   formatValue={(v) => formatWeight(v)}

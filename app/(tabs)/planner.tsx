@@ -64,6 +64,7 @@ import {
 } from '../../src/lib/supabase/queries/workouts';
 import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/lib/supabase/queries/workouts_helpers';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
+import { invalidateWorkoutStatsCache } from '../../src/lib/cache/dashboardStatsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS } from '../../src/lib/utils/date';
 import { createUuid } from '../../src/lib/utils/uuid';
@@ -1556,6 +1557,7 @@ export default function PlannerTab() {
             setPlannerNeedsRefetch(true);
           } else {
             invalidateSessionsInRangeForUser(userId);
+            invalidateWorkoutStatsCache(userId);
           }
           await loadSessionsForDay(userId, {
             forceRefresh: true,
@@ -1777,6 +1779,7 @@ export default function PlannerTab() {
         setPlannerNeedsRefetch(true);
       } else {
         invalidateSessionsInRangeForUser(userId);
+        invalidateWorkoutStatsCache(userId);
       }
       await loadSessionsForDay(userId, {
         forceRefresh: true,
@@ -1886,6 +1889,7 @@ export default function PlannerTab() {
 
           invalidateTemplate(activeTemplateId);
           invalidateSessionsInRangeForUser(userId);
+          invalidateWorkoutStatsCache(userId);
           await loadTemplate(activeTemplateId);
           useUIStore.getState().setPlannerNeedsRefetch(true);
           toast.success(`${selectedDay.day.day_name} set as rest day`);
@@ -2091,6 +2095,7 @@ export default function PlannerTab() {
                                 } else {
                                   toast.success('Workout removed');
                                   invalidateSessionsInRangeForUser(userId);
+                                  invalidateWorkoutStatsCache(userId);
                                 }
                                 await loadSessionsForDay(userId, {
                                   forceRefresh: true,

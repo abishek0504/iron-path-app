@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TextInput } from 'react-native';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { Button } from '../../src/components/ui/Button';
@@ -10,7 +10,15 @@ import { useUIStore } from '../../src/stores/uiStore';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { mapAuthError } from '../../src/lib/auth/authErrors';
 
-type CallbackType = 'recovery' | 'password' | 'email_change' | string | null;
+type CallbackType = 'recovery' | 'password' | 'email_change' | 'signup' | 'magiclink' | 'invite' | 'email' | string | null;
+
+function isPasswordResetType(type: CallbackType): boolean {
+  return type === 'recovery' || type === 'password';
+}
+
+function isEmailChangeType(type: CallbackType): boolean {
+  return type === 'email_change';
+}
 
 export default function AuthCallbackScreen() {
   const params = useLocalSearchParams<{ code?: string; type?: string }>();
@@ -25,10 +33,17 @@ export default function AuthCallbackScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const exchangedCodeRef = useRef<string | null>(null);
+
+  const code =
+    typeof params.code === 'string'
+      ? params.code
+      : Array.isArray(params.code)
+        ? params.code[0]
+        : undefined;
+  const type = (typeof params.type === 'string' ? params.type : Array.isArray(params.type) ? params.type[0] : null) as CallbackType;
 
   useEffect(() => {
-    const code = typeof params.code === 'string' ? params.code : Array.isArray(params.code) ? params.code[0] : undefined;
-    const type = (params.type as CallbackType) || null;
     setCbType(type);
 
     const run = async () => {
@@ -37,9 +52,12 @@ export default function AuthCallbackScreen() {
         setMessage('Missing verification code.');
         return;
       }
+      if (exchangedCodeRef.current === code) return;
+      exchangedCodeRef.current = code;
       try {
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
+          exchangedCodeRef.current = null;
           setStatus('error');
           setMessage(mapAuthError(error, 'Unable to verify link.'));
           if (__DEV__) devError('auth-callback', error, { type });
@@ -51,23 +69,28 @@ export default function AuthCallbackScreen() {
         if (typeof window !== 'undefined' && window.history?.replaceState) {
           window.history.replaceState({}, document.title, window.location.pathname);
         }
-        if (type === 'email_change') {
+        if (isEmailChangeType(type)) {
           setStatus('done');
           setMessage('Email verified. You can continue.');
           showToast('Email updated', 'success');
-        } else {
+        } else if (isPasswordResetType(type)) {
           setStatus('ready');
           setMessage('Set your new password.');
+        } else {
+          setStatus('done');
+          setMessage('Email confirmed. You can continue.');
+          showToast('Email confirmed', 'success');
         }
       } catch (error) {
+        exchangedCodeRef.current = null;
         setStatus('error');
         setMessage('Unable to verify link.');
         if (__DEV__) devError('auth-callback', error, { type });
       }
     };
 
-    run();
-  }, [params, showToast]);
+    void run();
+  }, [code, type, showToast]);
 
   const handleSetPassword = async () => {
     if (!password || password.length < 8) {
@@ -108,16 +131,18 @@ export default function AuthCallbackScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>Account update</Text>
         <Text style={styles.subtitle}>
-          {cbType === 'email_change'
+          {isEmailChangeType(cbType)
             ? 'Your email change is almost done.'
-            : 'Finish resetting your password.'}
+            : isPasswordResetType(cbType)
+              ? 'Finish resetting your password.'
+              : 'Your email is confirmed.'}
         </Text>
 
         {message ? <Text style={styles.infoText}>{message}</Text> : null}
 
         {status === 'pending' ? (
           <LogoEdgeLoader size="large" />
-        ) : cbType === 'email_change' || status === 'done' ? (
+        ) : isEmailChangeType(cbType) || status === 'done' ? (
           <Button label="Continue" onPress={handleContinue} fullWidth style={styles.button} />
         ) : (
           <>

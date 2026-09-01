@@ -3,8 +3,9 @@
  * Loops a compressed bundled workout b-roll with a themed gradient fallback underneath.
  */
 
-import React, { useMemo } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { type ThemeColors } from '../../lib/utils/theme';
@@ -16,6 +17,7 @@ const AUTH_BACKGROUND_VIDEO = require('../../../assets/cover-video.mp4');
 export function AuthVideoBackground() {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const isFocused = useIsFocused();
 
   const player = useVideoPlayer(AUTH_BACKGROUND_VIDEO, (videoPlayer) => {
     videoPlayer.loop = true;
@@ -23,6 +25,20 @@ export function AuthVideoBackground() {
     videoPlayer.keepScreenOnWhilePlaying = false;
     videoPlayer.play();
   });
+
+  useEffect(() => {
+    if (isFocused) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isFocused, player]);
+
+  useEffect(() => {
+    return () => {
+      player.pause();
+    };
+  }, [player]);
 
   return (
     <View style={styles.container}>
@@ -33,7 +49,7 @@ export function AuthVideoBackground() {
         style={styles.video}
         contentFit="cover"
         nativeControls={false}
-        surfaceType="textureView"
+        {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as const } : {})}
       />
       <View style={styles.overlay} pointerEvents="none" />
     </View>

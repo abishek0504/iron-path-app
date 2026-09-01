@@ -1,0 +1,32 @@
+diff --git a/node_modules/expo-modules-core/ios/Core/ExpoBridgeModule.mm b/node_modules/expo-modules-core/ios/Core/ExpoBridgeModule.mm
+index 2ed1c00..79c0c35 100644
+--- a/node_modules/expo-modules-core/ios/Core/ExpoBridgeModule.mm
++++ b/node_modules/expo-modules-core/ios/Core/ExpoBridgeModule.mm
+@@ -1,6 +1,8 @@
+ // Copyright 2024-present 650 Industries. All rights reserved.
+ 
+ #import <ReactCommon/RCTTurboModule.h>
++#import <React/RCTBridge+Private.h>
++#import <React/RCTJSThread.h>
+ #import <ExpoModulesCore/ExpoBridgeModule.h>
+ #import <ExpoModulesCore/Swift.h>
+ 
+@@ -46,7 +48,17 @@ RCT_EXPORT_MODULE(ExpoModulesCore);
+   _appContext.reactBridge = bridge;
+ 
+ #if !__has_include(<ReactCommon/RCTRuntimeExecutor.h>)
+-  _appContext._runtime = [EXJavaScriptRuntimeManager runtimeFromBridge:bridge];
++  // Hop runtime install onto RCTJSThread. Synchronous setBridge: on the main
++  // thread raced JSIExecutor::initializeRuntime() and corrupted Hermes GC.
++  __weak EXAppContext *weakAppContext = _appContext;
++  __weak RCTBridge *weakBridge = bridge;
++  [bridge dispatchBlock:^{
++    EXAppContext *strongAppContext = weakAppContext;
++    RCTBridge *strongBridge = weakBridge;
++    if (strongAppContext != nil && strongBridge != nil && strongAppContext._runtime == nil) {
++      strongAppContext._runtime = [EXJavaScriptRuntimeManager runtimeFromBridge:strongBridge];
++    }
++  } queue:RCTJSThread];
+ #endif // React Native <0.74
+ }
+ 

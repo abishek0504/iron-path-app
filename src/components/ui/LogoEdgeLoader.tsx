@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, StyleSheet, View, useColorScheme, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
+  cancelAnimation,
   useAnimatedProps,
   useSharedValue,
   withRepeat,
@@ -80,6 +81,7 @@ export function LogoEdgeLoader({
 
   useEffect(() => {
     if (reduceMotion) {
+      cancelAnimation(fade);
       fade.value = (IRONPATH_LOADER_FADE_MIN_OPACITY + IRONPATH_LOADER_FADE_MAX_OPACITY) / 2;
       return;
     }
@@ -99,6 +101,10 @@ export function LogoEdgeLoader({
       -1,
       false,
     );
+
+    return () => {
+      cancelAnimation(fade);
+    };
   }, [reduceMotion, fade]);
 
   const animatedGroupProps = useAnimatedProps(() => ({

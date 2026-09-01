@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import * as Sentry from '@sentry/react-native';
 
 const SENSITIVE_KEYS = new Set([
   'email',
@@ -45,32 +46,28 @@ export function initSentry(): void {
     process.env.EXPO_PUBLIC_SENTRY_DSN;
   if (!dsn) return;
 
-  void import('@sentry/react-native')
-    .then((Sentry) => {
-      Sentry.init({
-        dsn,
-        enabled: !__DEV__,
-        sendDefaultPii: false,
-        enableAutoSessionTracking: true,
-        tracesSampleRate: __DEV__ ? 0 : 0.15,
-        beforeBreadcrumb(breadcrumb) {
-          if (breadcrumb.data && typeof breadcrumb.data === 'object') {
-            breadcrumb.data = scrubObject(breadcrumb.data as Record<string, unknown>);
+  Sentry.init({
+    dsn,
+    enabled: !__DEV__,
+    sendDefaultPii: false,
+    enableAutoSessionTracking: true,
+    tracesSampleRate: __DEV__ ? 0 : 0.15,
+    beforeBreadcrumb(breadcrumb) {
+      if (breadcrumb.data && typeof breadcrumb.data === 'object') {
+        breadcrumb.data = scrubObject(breadcrumb.data as Record<string, unknown>);
+      }
+      return breadcrumb;
+    },
+    beforeSend(event) {
+      if (event.user?.email) delete event.user.email;
+      if (event.request?.headers) {
+        for (const key of Object.keys(event.request.headers)) {
+          if (key.toLowerCase() === 'authorization') {
+            event.request.headers[key] = '[redacted]';
           }
-          return breadcrumb;
-        },
-        beforeSend(event) {
-          if (event.user?.email) delete event.user.email;
-          if (event.request?.headers) {
-            for (const key of Object.keys(event.request.headers)) {
-              if (key.toLowerCase() === 'authorization') {
-                event.request.headers[key] = '[redacted]';
-              }
-            }
-          }
-          return event;
-        },
-      });
-    })
-    .catch(() => undefined);
+        }
+      }
+      return event;
+    },
+  });
 }

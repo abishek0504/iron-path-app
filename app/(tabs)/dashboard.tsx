@@ -33,6 +33,7 @@ import { devLog, devError } from '../../src/lib/utils/logger';
 import { isAppleHealthConnected, syncBodyMassWithHealth } from '../../src/lib/health/healthIntegration';
 import { TourTarget } from '../../src/components/tour/TourTarget';
 import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
+import { getLocalDayKey } from '../../src/lib/utils/date';
 
 /** Volume from getYearToDateStats is in lbs; convert to kg for metric display. */
 /** Circular control: half of 44×44 hit target. */
@@ -448,7 +449,7 @@ export default function DashboardTab() {
                   <Text style={styles.listPrimary}>{weekdayLabel}</Text>
                   <Text style={styles.listSecondary}>
                     {completedAt
-                      ? `${completedAt.toISOString().split('T')[0]} ${completedAt.toLocaleTimeString('en-US', {
+                      ? `${getLocalDayKey(completedAt)} ${completedAt.toLocaleTimeString('en-US', {
                           hour: 'numeric',
                           minute: '2-digit',
                         })}`

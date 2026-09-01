@@ -54,6 +54,9 @@ export function getDateBoundsForDayName(dayName: string): { startIso: string; en
   const now = new Date();
   const todayIndex = now.getDay();
   const targetIndex = WEEK_DAYS.indexOf(dayName as (typeof WEEK_DAYS)[number]);
+  if (targetIndex < 0) {
+    return getLocalDayBoundsIso(now);
+  }
   const targetDate = new Date(now);
   targetDate.setDate(now.getDate() + (targetIndex - todayIndex));
   return getLocalDayBoundsIso(targetDate);

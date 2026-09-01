@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePlateBreakdown, formatPlateLine } from './plateCalculator';
+import { calculatePlateBreakdown, expandPlatesPerSide, formatPlateLine } from './plateCalculator';
 
 describe('calculatePlateBreakdown', () => {
   it('returns null for invalid targets', () => {
@@ -17,6 +17,11 @@ describe('calculatePlateBreakdown', () => {
   it('reports leftover when the load is not plateable', () => {
     const result = calculatePlateBreakdown(46, true);
     expect(result?.leftoverPerSide).toBeGreaterThan(0);
+  });
+
+  it('expands per-side counts into load order', () => {
+    const result = calculatePlateBreakdown(225, true);
+    expect(result && expandPlatesPerSide(result.perSide)).toEqual([45, 45]);
   });
 
   it('formats a plate line', () => {

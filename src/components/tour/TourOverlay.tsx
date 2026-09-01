@@ -193,7 +193,8 @@ export function TourOverlay({
       onRequestClose={onSkip}
     >
       <View style={styles.root} accessibilityViewIsModal>
-        <Svg width={screenWidth} height={screenHeight} style={StyleSheet.absoluteFill}>
+        <View style={StyleSheet.absoluteFill} pointerEvents="auto" />
+        <Svg width={screenWidth} height={screenHeight} style={StyleSheet.absoluteFill} pointerEvents="none">
           <Path
             d={scrimPath}
             fill={`rgba(0,0,0,${SCRIM_OPACITY})`}

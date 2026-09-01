@@ -50,4 +50,11 @@ describe('date utils', () => {
     expect(now.getTime()).toBeGreaterThanOrEqual(new Date(startIso).getTime());
     expect(now.getTime()).toBeLessThan(new Date(endIsoExclusive).getTime());
   });
+
+  it('getDateBoundsForDayName falls back to today for an invalid day name', () => {
+    const now = new Date();
+    const { startIso, endIsoExclusive } = getDateBoundsForDayName('Notaday');
+    expect(now.getTime()).toBeGreaterThanOrEqual(new Date(startIso).getTime());
+    expect(now.getTime()).toBeLessThan(new Date(endIsoExclusive).getTime());
+  });
 });

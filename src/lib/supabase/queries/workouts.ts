@@ -1123,7 +1123,7 @@ export async function getYearToDateStats(userId: string): Promise<YearToDateStat
     const uniqueDates = new Set<string>();
     for (const s of sessionList) {
       if (s.completed_at) {
-        uniqueDates.add(s.completed_at.split('T')[0]);
+        uniqueDates.add(getLocalDayKey(new Date(s.completed_at)));
       }
     }
 
@@ -1227,14 +1227,14 @@ export async function getStreak(userId: string): Promise<number> {
     const dateSet = new Set<string>();
     for (const s of sessions || []) {
       if (s.completed_at) {
-        dateSet.add(s.completed_at.split('T')[0]);
+        dateSet.add(getLocalDayKey(new Date(s.completed_at)));
       }
     }
 
     let cursor = new Date();
     cursor.setHours(0, 0, 0, 0);
     let streakCount = 0;
-    while (dateSet.has(cursor.toISOString().split('T')[0])) {
+    while (dateSet.has(getLocalDayKey(cursor))) {
       streakCount += 1;
       cursor.setDate(cursor.getDate() - 1);
     }
@@ -1481,7 +1481,7 @@ export function formatPRDisplay(p: TopPR, unitsLabel: string): string {
       p.reps > 0 &&
       p.weight > 0
     ) {
-      return `${base} · e1RM ${Math.round(estimateOneRepMaxLbs(p.weight, p.reps))}`;
+      return `${base} · theoretical 1RM ${Math.round(estimateOneRepMaxLbs(p.weight, p.reps))}`;
     }
     return base;
   }
@@ -2352,6 +2352,20 @@ export async function insertWarmupSets(
     if (insertError) {
       if (__DEV__) {
         devError('workout-query', insertError, { action: 'insertWarmupSets_insert', sessionExerciseId });
+      }
+      const toUnshift = [...toShift].sort((a, b) => a.set_number - b.set_number);
+      for (const set of toUnshift) {
+        const { error: rollbackError } = await supabase
+          .from('v2_session_sets')
+          .update({ set_number: set.set_number })
+          .eq('id', set.id);
+        if (rollbackError && __DEV__) {
+          devError('workout-query', rollbackError, {
+            action: 'insertWarmupSets_rollback',
+            sessionExerciseId,
+            setId: set.id,
+          });
+        }
       }
       return { ok: false, reason: 'error' };
     }

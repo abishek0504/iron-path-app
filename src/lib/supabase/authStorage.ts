@@ -5,22 +5,47 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import {
+  AUTH_KEYCHAIN_SERVICE,
+  CHUNK_COUNT_SUFFIX,
+  CHUNK_SIZE,
+  chunkIndexKeys,
+  extraChunkKeysToDelete,
+  nextChunkCount,
+  parseChunkCount,
+} from './authStorageKeys';
 
-const CHUNK_SIZE = 2000;
-const CHUNK_COUNT_SUFFIX = '_chunk_count';
+const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainService: AUTH_KEYCHAIN_SERVICE,
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+};
+
+function getItem(key: string): Promise<string | null> {
+  return SecureStore.getItemAsync(key, SECURE_STORE_OPTIONS);
+}
+
+function setItem(key: string, value: string): Promise<void> {
+  return SecureStore.setItemAsync(key, value, SECURE_STORE_OPTIONS);
+}
+
+function deleteItem(key: string): Promise<void> {
+  return SecureStore.deleteItemAsync(key, SECURE_STORE_OPTIONS).catch(() => undefined);
+}
+
+async function deleteKeys(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await Promise.all(keys.map((key) => deleteItem(key)));
+}
 
 async function secureGetItem(key: string): Promise<string | null> {
-  const countStr = await SecureStore.getItemAsync(`${key}${CHUNK_COUNT_SUFFIX}`);
-  if (countStr == null) {
-    return SecureStore.getItemAsync(key);
+  const count = parseChunkCount(await getItem(`${key}${CHUNK_COUNT_SUFFIX}`));
+  if (count == null) {
+    return getItem(key);
   }
 
-  const count = Number.parseInt(countStr, 10);
-  if (!Number.isFinite(count) || count <= 0) return null;
-
   const parts: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const part = await SecureStore.getItemAsync(`${key}_chunk_${i}`);
+  for (const chunkKey of chunkIndexKeys(key, count)) {
+    const part = await getItem(chunkKey);
     if (part == null) return null;
     parts.push(part);
   }
@@ -28,38 +53,37 @@ async function secureGetItem(key: string): Promise<string | null> {
 }
 
 async function secureSetItem(key: string, value: string): Promise<void> {
-  if (value.length <= CHUNK_SIZE) {
-    await SecureStore.deleteItemAsync(`${key}${CHUNK_COUNT_SUFFIX}`).catch(() => undefined);
-    for (let i = 0; i < 32; i++) {
-      await SecureStore.deleteItemAsync(`${key}_chunk_${i}`).catch(() => undefined);
-    }
-    await SecureStore.setItemAsync(key, value);
+  const countKey = `${key}${CHUNK_COUNT_SUFFIX}`;
+  const previousCount = parseChunkCount(await getItem(countKey));
+  const chunkCount = nextChunkCount(value.length);
+
+  if (chunkCount === 0) {
+    await deleteKeys([
+      ...chunkIndexKeys(key, previousCount ?? 0),
+      ...(previousCount != null ? [countKey] : []),
+    ]);
+    await setItem(key, value);
     return;
   }
 
-  const count = Math.ceil(value.length / CHUNK_SIZE);
-  await SecureStore.setItemAsync(`${key}${CHUNK_COUNT_SUFFIX}`, String(count));
-  for (let i = 0; i < count; i++) {
-    await SecureStore.setItemAsync(
+  await setItem(countKey, String(chunkCount));
+  for (let i = 0; i < chunkCount; i++) {
+    await setItem(
       `${key}_chunk_${i}`,
       value.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE),
     );
   }
-  await SecureStore.deleteItemAsync(key).catch(() => undefined);
+  await deleteKeys([key, ...extraChunkKeysToDelete(key, previousCount, chunkCount)]);
 }
 
 async function secureRemoveItem(key: string): Promise<void> {
-  const countStr = await SecureStore.getItemAsync(`${key}${CHUNK_COUNT_SUFFIX}`);
-  if (countStr != null) {
-    const count = Number.parseInt(countStr, 10);
-    if (Number.isFinite(count) && count > 0) {
-      for (let i = 0; i < count; i++) {
-        await SecureStore.deleteItemAsync(`${key}_chunk_${i}`).catch(() => undefined);
-      }
-    }
-    await SecureStore.deleteItemAsync(`${key}${CHUNK_COUNT_SUFFIX}`).catch(() => undefined);
-  }
-  await SecureStore.deleteItemAsync(key).catch(() => undefined);
+  const countKey = `${key}${CHUNK_COUNT_SUFFIX}`;
+  const previousCount = parseChunkCount(await getItem(countKey));
+  await deleteKeys([
+    ...chunkIndexKeys(key, previousCount ?? 0),
+    ...(previousCount != null ? [countKey] : []),
+    key,
+  ]);
 }
 
 const webStorage = {

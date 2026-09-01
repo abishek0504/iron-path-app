@@ -29,7 +29,10 @@ export function ExerciseAnalyticsList() {
 
   const load = useCallback(async () => {
     const userId = profile?.id;
-    if (!userId) return;
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { start, end } = getRangeForPreset('12w');

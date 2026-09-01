@@ -18,15 +18,15 @@ import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, 
 import { spacing, borderRadius, typography, THEME_OPTIONS, getThemeLabel, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
-import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/uiStore';
 import { useUserStore } from '../../stores/userStore';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { LegalLinks } from '../ui/LegalLinks';
 import { requestAccountDeletion } from '../../lib/supabase/queries/users';
 import { invalidateProfileCache } from '../../lib/cache/dashboardStatsCache';
-import { logOutRevenueCat, presentCustomerCenter } from '../../lib/subscriptions/revenueCat';
+import { presentCustomerCenter } from '../../lib/subscriptions/revenueCat';
 import { usePaywall } from '../paywall/PaywallProvider';
+import { signOutAndClearLocalState } from '../../lib/auth/signOutAndClear';
 
 interface SettingsMenuProps {
   onClose?: () => void;
@@ -40,7 +40,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const showToast = useUIStore((state) => state.showToast);
   const runAfterBottomSheetClosed = useUIStore((state) => state.runAfterBottomSheetClosed);
   const profile = useUserStore((state) => state.profile);
-  const clearProfile = useUserStore((state) => state.clearProfile);
   const { isPro, showPaywall, restoreSubscription } = usePaywall();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -87,8 +86,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     if (onClose) {
       onClose();
     }
-    await logOutRevenueCat().catch(() => undefined);
-    const { error } = await supabase.auth.signOut();
+    const { error } = await signOutAndClearLocalState();
     if (error) {
       showToast('Unable to log out', 'error');
       return;
@@ -107,13 +105,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
         return;
       }
 
-      // Sign out locally regardless (Edge Function also revokes tokens)
-      await logOutRevenueCat().catch(() => undefined);
-      await supabase.auth.signOut().catch(() => undefined);
+      await signOutAndClearLocalState();
       if (profile?.id) {
         invalidateProfileCache(profile.id);
       }
-      clearProfile();
 
       setShowDeleteConfirm(false);
       if (onClose) {

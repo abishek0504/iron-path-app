@@ -5,7 +5,7 @@ import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-na
 import { Dumbbell, Calendar, TrendingUp, Trophy } from "lucide-react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { spacing, typography, type ThemeColors } from "../../src/lib/utils/theme";
 import { useTheme } from "../../src/lib/utils/ThemeContext";
 import { supabase } from "../../src/lib/supabase/client";
@@ -19,6 +19,7 @@ import { useTourStore } from "../../src/stores/tourStore";
 import { useUserStore } from "../../src/stores/userStore";
 import { TourTarget } from "../../src/components/tour/TourTarget";
 import { syncSessionAuthToWatch } from "../../src/lib/watch/syncWatchAuth";
+import { signOutAndClearLocalState, clearLocalAuthState } from "../../src/lib/auth/signOutAndClear";
 
 const CustomTabBar = (props: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
@@ -176,12 +177,11 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       const storeProfile = useUserStore.getState().profile;
       if (storeProfile?.id) {
         if (isAccountPendingDeletion(storeProfile)) {
-          await supabase.auth.signOut();
+          await signOutAndClearLocalState();
           if (cancelled) return;
           router.replace('/login');
           setAuthenticated(false);
           setReady(true);
-          void syncSessionAuthToWatch(null);
           return;
         }
         setAuthenticated(true);
@@ -196,7 +196,7 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       if (!session) {
         router.replace('/get-started');
         setAuthenticated(false);
-        void syncSessionAuthToWatch(null);
+        void clearLocalAuthState();
         setReady(true);
         return;
       }
@@ -210,10 +210,9 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       if (profile) setProfile(profile);
 
       if (isAccountPendingDeletion(profile)) {
-        await supabase.auth.signOut();
+        await signOutAndClearLocalState();
         router.replace('/login');
         setAuthenticated(false);
-        void syncSessionAuthToWatch(null);
       } else if (session) {
         setAuthenticated(true);
         void syncSessionAuthToWatch(session);
@@ -225,7 +224,7 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       if (cancelled) return;
       if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
         setAuthenticated(false);
-        void syncSessionAuthToWatch(null);
+        void clearLocalAuthState();
         router.replace('/get-started');
       } else if (event === 'SIGNED_IN' && session) {
         setAuthenticated(true);
@@ -263,10 +262,15 @@ function AppTourEffect() {
 function AppOpenPaywallEffect() {
   const { tryAppOpenPaywall, isLoading } = usePaywall();
   const isTourActive = useTourStore((s) => s.isActive);
+  const skippedForTourRef = useRef(false);
 
   useEffect(() => {
     if (isLoading) return;
-    if (isTourActive || hasPendingAppTour()) return;
+    if (isTourActive || hasPendingAppTour()) {
+      skippedForTourRef.current = true;
+      return;
+    }
+    if (skippedForTourRef.current) return;
 
     const timer = setTimeout(() => {
       tryAppOpenPaywall();

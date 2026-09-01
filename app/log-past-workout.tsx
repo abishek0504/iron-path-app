@@ -32,6 +32,7 @@ import { supabase } from '../src/lib/supabase/client';
 import { devLog, devError } from '../src/lib/utils/logger';
 import { createBackloggedWorkout, type BackloggedExerciseInput } from '../src/lib/supabase/queries/workouts';
 import { invalidateSessionsInRangeForUser } from '../src/lib/cache/sessionsCache';
+import { invalidateWorkoutStatsCache } from '../src/lib/cache/dashboardStatsCache';
 import type { Exercise } from '../src/types/exercisePicker';
 
 const REPS_MIN = 1;
@@ -318,6 +319,7 @@ export default function LogPastWorkoutScreen() {
 
       // Match the app's pattern: caller invalidates the sessions-in-range cache.
       invalidateSessionsInRangeForUser(userId);
+      invalidateWorkoutStatsCache(userId);
 
       if (__DEV__) {
         devLog('log-past-workout', {

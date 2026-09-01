@@ -71,11 +71,14 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
   const [isPurchasing, setIsPurchasing] = useState(false);
   const onSubscribedRef = useRef<(() => void) | null>(null);
 
-  // If Pro resolves after the modal opened (RC/profile race), do not leave it stuck.
+  // If Pro resolves after the modal opened (RC/profile race), close it but keep the
+  // subscribe callback so an in-flight purchase can still start AI generate / etc.
   useEffect(() => {
     if (isPro && visible) {
       setVisible(false);
+      const onSubscribed = onSubscribedRef.current;
       onSubscribedRef.current = null;
+      onSubscribed?.();
     }
   }, [isPro, visible]);
 
@@ -164,8 +167,9 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
           await refresh();
           setVisible(false);
           toast.success('Welcome to IronPath Pro!');
-          onSubscribedRef.current?.();
+          const onSubscribed = onSubscribedRef.current;
           onSubscribedRef.current = null;
+          onSubscribed?.();
         }
       } finally {
         setIsPurchasing(false);
@@ -194,8 +198,9 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
     const restored = await restoreSubscription();
     if (restored) {
       setVisible(false);
-      onSubscribedRef.current?.();
+      const onSubscribed = onSubscribedRef.current;
       onSubscribedRef.current = null;
+      onSubscribed?.();
     }
   }, [restoreSubscription]);
 

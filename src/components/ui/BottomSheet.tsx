@@ -88,27 +88,42 @@ export const BottomSheet = forwardRef<BottomSheetHandle, BottomSheetProps>(funct
   const dragOffset = useSharedValue(0);
   const keyboardOffset = useSharedValue(0);
   const isAnimatingCloseRef = useRef(false);
+  const mountedRef = useRef(true);
   const [isMounted, setIsMounted] = useState(visible);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelAnimation(slideOffset);
+      cancelAnimation(dragOffset);
+      cancelAnimation(keyboardOffset);
+    };
+  }, [slideOffset, dragOffset, keyboardOffset]);
+
   const finishExitAnimation = useCallback(() => {
+    if (!mountedRef.current) return;
     isAnimatingCloseRef.current = false;
     setIsMounted(false);
     onClosed?.();
   }, [onClosed]);
 
   const completeGestureDismiss = useCallback(() => {
+    if (!mountedRef.current) return;
     isAnimatingCloseRef.current = true;
     onClose();
     finishExitAnimation();
   }, [onClose, finishExitAnimation]);
 
   const handleAnimatedCloseComplete = useCallback(() => {
+    if (!mountedRef.current) return;
     isAnimatingCloseRef.current = false;
     onClose();
     finishExitAnimation();
   }, [onClose, finishExitAnimation]);
 
   const resetAnimatingClose = useCallback(() => {
+    if (!mountedRef.current) return;
     isAnimatingCloseRef.current = false;
   }, []);
 

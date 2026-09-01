@@ -46,6 +46,11 @@ export function calculatePlateBreakdown(target: number, useImperial: boolean): P
   return { bar, unit, perSide, leftoverPerSide, target };
 }
 
+/** Heaviest-first plates for one side, one entry per plate (load order). */
+export function expandPlatesPerSide(perSide: PlateCount[]): number[] {
+  return perSide.flatMap(({ plate, count }) => Array.from({ length: count }, () => plate));
+}
+
 export function formatPlateLine(breakdown: PlateBreakdown): string {
   if (breakdown.perSide.length === 0 && breakdown.leftoverPerSide <= 0) {
     return `Bar only (${breakdown.bar} ${breakdown.unit})`;

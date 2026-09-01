@@ -104,3 +104,9 @@ export function getOrSetCached<T>(
 
   return refresh();
 }
+
+/** Drop every in-memory TTL entry. Used on sign-out so the next account cannot reuse cache. */
+export function clearAllMemoryCache(): void {
+  store.clear();
+  inflight.clear();
+}

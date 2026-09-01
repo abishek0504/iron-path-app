@@ -32,6 +32,11 @@ final class WatchHealthWorkoutManager: NSObject, ObservableObject {
     }
 
     private func startCollection(sessionId: String) {
+        if session != nil {
+            if activeSessionId == sessionId { return }
+            endCollection()
+        }
+
         guard HKHealthStore.isHealthDataAvailable(),
               let heartRateType else {
             return

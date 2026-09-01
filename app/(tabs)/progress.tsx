@@ -2,7 +2,7 @@
  * Progress tab — calendar, analytics trends, and exercise rankings.
  */
 
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, RefreshControl } from 'react-native';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { Chip } from '../../src/components/ui/Chip';
@@ -152,6 +152,11 @@ export default function ProgressTab() {
       load();
     }, [load]),
   );
+
+  useEffect(() => {
+    lastFocusLoadRef.current = Date.now();
+    void load();
+  }, [currentDate, viewMode, segment, load]);
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;

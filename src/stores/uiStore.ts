@@ -7,6 +7,8 @@
 import { create } from 'zustand';
 import { devLog } from '../lib/utils/logger';
 
+const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export type BottomSheetId =
   | 'exercisePicker'
   | 'settingsMenu'
@@ -126,38 +128,31 @@ export const useUIStore = create<UIState>((set) => ({
     if (__DEV__) {
       devLog('ui-store', { action: 'onBottomSheetClosed' });
     }
-    let afterClose: (() => void) | null = null;
-    let openedPendingSheet = false;
-    set((state) => {
-      afterClose = state.pendingAfterClose;
-      const pending = state.pendingBottomSheet;
-      const pendingProps = state.pendingBottomSheetProps;
-      // Clear activeBottomSheet and bottomSheetProps
-      if (pending) {
-        openedPendingSheet = true;
-        // If there's a pending sheet, open it immediately
-        return {
-          activeBottomSheet: pending,
-          bottomSheetProps: pendingProps,
-          isBottomSheetOpen: true,
-          pendingBottomSheet: null,
-          pendingBottomSheetProps: {},
-          pendingAfterClose: null,
-        };
-      } else {
-        // No pending sheet, just clear everything
-        return {
-          activeBottomSheet: null,
-          bottomSheetProps: {},
-          pendingBottomSheet: null,
-          pendingBottomSheetProps: {},
-          pendingAfterClose: null,
-        };
-      }
-    });
-    // Avoid stacking another overlay on a newly opened sheet
+    const snapshot = useUIStore.getState();
+    const queuedAfterClose = snapshot.pendingAfterClose;
+    const pending = snapshot.pendingBottomSheet;
+    const pendingProps = snapshot.pendingBottomSheetProps;
+    const openedPendingSheet = !!pending;
+    set(
+      pending
+        ? {
+            activeBottomSheet: pending,
+            bottomSheetProps: pendingProps,
+            isBottomSheetOpen: true,
+            pendingBottomSheet: null,
+            pendingBottomSheetProps: {},
+            pendingAfterClose: null,
+          }
+        : {
+            activeBottomSheet: null,
+            bottomSheetProps: {},
+            pendingBottomSheet: null,
+            pendingBottomSheetProps: {},
+            pendingAfterClose: null,
+          },
+    );
     if (!openedPendingSheet) {
-      afterClose?.();
+      queuedAfterClose?.();
     }
   },
   
@@ -170,15 +165,21 @@ export const useUIStore = create<UIState>((set) => ({
       toasts: [...state.toasts, { id, message, type, duration }],
     }));
     
-    // Auto-remove after duration
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      toastTimers.delete(id);
       set((state) => ({
         toasts: state.toasts.filter((t) => t.id !== id),
       }));
     }, duration);
+    toastTimers.set(id, timer);
   },
   
   removeToast: (id) => {
+    const timer = toastTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimers.delete(id);
+    }
     set((state) => ({
       toasts: state.toasts.filter((t) => t.id !== id),
     }));

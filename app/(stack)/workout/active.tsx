@@ -65,6 +65,8 @@ import { invalidateMuscleFreshnessCache } from '../../../src/lib/cache/muscleFre
 import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
 import { useUserStore } from '../../../src/stores/userStore';
+import { getUserProfileCached, invalidateWorkoutStatsCache } from '../../../src/lib/cache/dashboardStatsCache';
+import { isUuid } from '../../../src/lib/utils/uuid';
 import { useUIStore } from '../../../src/stores/uiStore';
 import { useToast } from '../../../src/hooks/useToast';
 import { calculateWeightSuggestion } from '../../../src/lib/utils/weightSuggestions';
@@ -170,15 +172,20 @@ type WorkoutPhase =
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ sessionId?: string }>();
+  const params = useLocalSearchParams<{ sessionId?: string | string[] }>();
   const toast = useToast();
   const profile = useUserStore((state) => state.profile);
+  const setProfile = useUserStore((state) => state.setProfile);
+  const routedSessionId = (() => {
+    const raw = Array.isArray(params.sessionId) ? params.sessionId[0] : params.sessionId;
+    return raw && isUuid(raw) ? raw : undefined;
+  })();
   const userId = profile?.id;
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [loading, setLoading] = useState(true);
-  const [sessionId, setSessionId] = useState<string | null>(params.sessionId ?? null);
+  const [sessionId, setSessionId] = useState<string | null>(routedSessionId ?? null);
   const [sessionTemplateId, setSessionTemplateId] = useState<string | null>(null);
   const [sessionDayName, setSessionDayName] = useState<string | null>(null);
   const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
@@ -235,13 +242,46 @@ export default function ActiveWorkoutScreen() {
   const [isMutatingExercises, setIsMutatingExercises] = useState(false);
   const [isAbandoning, setIsAbandoning] = useState(false);
   const modal = useModal();
+  const loadGenRef = useRef(0);
+  const completingSetRef = useRef(false);
+  const screenMountedRef = useRef(true);
 
   useEffect(() => {
-    if (userId) {
-      loadActiveSession();
-    }
+    screenMountedRef.current = true;
+    return () => {
+      screenMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (profile?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (!user) {
+        toast.error('Please log in');
+        router.replace('/(tabs)');
+        return;
+      }
+      const loaded = await getUserProfileCached(user.id);
+      if (!cancelled && loaded) setProfile(loaded);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once when profile missing
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const gen = ++loadGenRef.current;
+    void loadActiveSession(gen);
+    return () => {
+      loadGenRef.current += 1;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadActiveSession is stable for session bootstrap
-  }, [userId, params.sessionId]);
+  }, [userId, routedSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,7 +349,7 @@ export default function ActiveWorkoutScreen() {
       const remaining = Math.max(0, Math.ceil(endsAt - Date.now() / 1000));
       return computeHeldDurationSec(target, remaining);
     }
-    return target;
+    return 0;
   };
 
   const setExerciseTimerEnd = (endsAtEpochSec: number | null) => {
@@ -328,9 +368,11 @@ export default function ActiveWorkoutScreen() {
     setRestStartedAtEpoch(null);
 
     const exerciseList = exercisesRef.current;
+    const nextExercise = exerciseList[phase.nextExerciseIndex];
+    if (!nextExercise) return;
     const exerciseIdx = currentExerciseIndexRef.current;
     if (phase.nextExerciseIndex !== exerciseIdx) {
-      const rpes = exerciseList[phase.nextExerciseIndex].sets.map((s) => s.rpe || 7);
+      const rpes = nextExercise.sets.map((s) => s.rpe || 7);
       setCurrentExerciseIndex(phase.nextExerciseIndex);
       setCurrentSetRPEs(rpes);
     }
@@ -346,6 +388,7 @@ export default function ActiveWorkoutScreen() {
 
   useEffect(() => {
     const unsubscribe = addSetCompletedListener((event) => {
+      if (!screenMountedRef.current) return;
       // Watch events only drive phone-owned sessions (mirror mode).
       if (controlDeviceRef.current !== 'phone') return;
       if (workoutPhaseRef.current.type !== 'execution') return;
@@ -398,6 +441,7 @@ export default function ActiveWorkoutScreen() {
 
   useEffect(() => {
     const unsubSkip = addSkipRestListener((event) => {
+      if (!screenMountedRef.current) return;
       if (controlDeviceRef.current !== 'phone') return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
@@ -406,6 +450,7 @@ export default function ActiveWorkoutScreen() {
     });
 
     const unsubExtend = addExtendRestListener((event) => {
+      if (!screenMountedRef.current) return;
       if (controlDeviceRef.current !== 'phone') return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
@@ -414,6 +459,7 @@ export default function ActiveWorkoutScreen() {
     });
 
     const unsubRpe = addSubmitRpeListener((event) => {
+      if (!screenMountedRef.current) return;
       if (controlDeviceRef.current !== 'phone') return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
@@ -462,6 +508,7 @@ export default function ActiveWorkoutScreen() {
 
   useEffect(() => {
     const unsubHr = addHeartRateListener((event) => {
+      if (!screenMountedRef.current) return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
       appendHeartRateSample(activeSessionId, event.bpm, event.timestamp);
@@ -469,6 +516,7 @@ export default function ActiveWorkoutScreen() {
     });
 
     const unsubEnded = addWorkoutEndedListener((event) => {
+      if (!screenMountedRef.current) return;
       const activeSessionId = sessionIdRef.current;
       if (!activeSessionId || event.sessionId !== activeSessionId) return;
       setWatchHkWorkoutUuid(activeSessionId, event.hkWorkoutUuid);
@@ -623,20 +671,23 @@ export default function ActiveWorkoutScreen() {
     }
   };
 
-  const loadActiveSession = async () => {
+  const loadActiveSession = async (gen?: number) => {
     if (!userId) return;
+    const requestGen = gen ?? ++loadGenRef.current;
+    const isStale = () => requestGen !== loadGenRef.current;
 
     setLoading(true);
     if (__DEV__) {
       const { devLog } = require('../../../src/lib/utils/logger');
-      devLog('workout-active', { action: 'loadActiveSession_start', sessionId: params.sessionId });
+      devLog('workout-active', { action: 'loadActiveSession_start', sessionId: routedSessionId });
     }
     try {
-      const session = params.sessionId
-        ? await getSessionById(userId, params.sessionId)
+      const session = routedSessionId
+        ? await getSessionById(userId, routedSessionId)
         : await getActiveSession(userId);
+      if (isStale()) return;
       if (!session) {
-        toast.error(params.sessionId ? 'Workout not found' : 'No active workout found');
+        toast.error(routedSessionId ? 'Workout not found' : 'No active workout found');
         goBack();
         return;
       }
@@ -670,6 +721,7 @@ export default function ActiveWorkoutScreen() {
           : Promise.resolve(null),
         canCheckStaleness ? getLastCompletedWorkoutAt(userId) : Promise.resolve(null),
       ]);
+      if (isStale()) return;
       if (!sessionData) {
         toast.error('Failed to load workout data');
         return;
@@ -684,6 +736,7 @@ export default function ActiveWorkoutScreen() {
       const mergedList = exerciseIds.length > 0
         ? await listMergedExercisesCached(userId, exerciseIds)
         : [];
+      if (isStale()) return;
       const metaById = new Map(mergedList.map((m) => [m.id, m]));
 
       const exercisesWithMeta: Exercise[] = [];
@@ -731,8 +784,26 @@ export default function ActiveWorkoutScreen() {
       }
 
       if (!foundIncomplete && exercisesWithMeta.length > 0) {
-        // All exercises complete
-        setWorkoutPhase({ type: 'complete' });
+        const lastIndex = exercisesWithMeta.length - 1;
+        const placeholderLogIndex = exercisesWithMeta.findIndex(
+          (ex) =>
+            ex.mode === 'reps' &&
+            !ex.is_stretch &&
+            ex.sets.every((s) => s.completed) &&
+            ex.sets.some((s) => (s.weight ?? 0) <= 0),
+        );
+        if (placeholderLogIndex >= 0) {
+          const logExercise = exercisesWithMeta[placeholderLogIndex];
+          setCurrentExerciseIndex(placeholderLogIndex);
+          setCurrentSetRPEs(logExercise.sets.map((s) => s.rpe || 7));
+          setCurrentSetRIRs(logExercise.sets.map((s) => s.rir ?? DEFAULT_RIR));
+          setWorkoutPhase({ type: 'logging' });
+        } else {
+          setCurrentExerciseIndex(lastIndex);
+          setCurrentSetRPEs(exercisesWithMeta[lastIndex].sets.map((s) => s.rpe || 7));
+          setCurrentSetRIRs(exercisesWithMeta[lastIndex].sets.map((s) => s.rir ?? DEFAULT_RIR));
+          setWorkoutPhase({ type: 'complete' });
+        }
       }
 
       // Smart Refresh: detect staleness when session has template + day (fetched in parallel above)
@@ -769,13 +840,14 @@ export default function ActiveWorkoutScreen() {
         devLog('workout-active', { action: 'loadActiveSession_done', exerciseCount: exercisesWithMeta.length });
       }
     } catch (error) {
+      if (isStale()) return;
       if (__DEV__) {
         const { devError } = require('../../../src/lib/utils/logger');
         devError('workout-active', error, { action: 'loadActiveSession' });
       }
       toast.error('Failed to load workout');
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   };
 
@@ -918,10 +990,12 @@ export default function ActiveWorkoutScreen() {
 
   /** Switch the active exercise, re-seeding the per-set intensity arrays from its sets. */
   const moveToExercise = (exerciseList: Exercise[], exerciseIndex: number) => {
+    const exercise = exerciseList[exerciseIndex];
+    if (!exercise) return;
     setCurrentExerciseIndex(exerciseIndex);
-    const rpes = exerciseList[exerciseIndex].sets.map((s) => s.rpe || 7);
+    const rpes = exercise.sets.map((s) => s.rpe || 7);
     setCurrentSetRPEs(rpes);
-    setCurrentSetRIRs(exerciseList[exerciseIndex].sets.map((s) => s.rir ?? DEFAULT_RIR));
+    setCurrentSetRIRs(exercise.sets.map((s) => s.rir ?? DEFAULT_RIR));
   };
 
   const goToTimedSetRpeStep = (setIndex: number, elapsedDurationSec: number) => {
@@ -930,7 +1004,9 @@ export default function ActiveWorkoutScreen() {
   };
 
   const handleCompleteSet = async (elapsedDurationSec?: number, rpeOverride?: number) => {
+    if (completingSetRef.current) return;
     const exercise = exercises[currentExerciseIndex];
+    if (!exercise) return;
 
     if (workoutPhase.type !== 'execution' && workoutPhase.type !== 'timedSetRpe') return;
 
@@ -949,6 +1025,8 @@ export default function ActiveWorkoutScreen() {
       return;
     }
 
+    completingSetRef.current = true;
+    try {
     hapticHeavy();
 
     let timedDurationSec = elapsedDurationSec;
@@ -1050,18 +1128,14 @@ export default function ActiveWorkoutScreen() {
 
       void persistPromise.then((ok) => {
         if (ok === false) {
-          // Roll back optimistic completion on failure.
+          const rolledSetId = currentSet.id;
           setExercises((prev) =>
-            prev.map((ex, idx) =>
-              idx === currentExerciseIndex
-                ? {
-                    ...ex,
-                    sets: ex.sets.map((s, sIdx) =>
-                      sIdx === currentSetIdx ? { ...s, completed: false } : s
-                    ),
-                  }
-                : ex
-            )
+            prev.map((ex) => ({
+              ...ex,
+              sets: ex.sets.map((s) =>
+                s.id === rolledSetId ? { ...s, completed: false } : s
+              ),
+            }))
           );
           toast.error('Failed to save set');
         }
@@ -1129,12 +1203,16 @@ export default function ActiveWorkoutScreen() {
       moveToExercise(updatedExercises, next.exerciseIndex);
       setWorkoutPhase({ type: 'execution', setIndex: next.setIndex });
     }
+    } finally {
+      completingSetRef.current = false;
+    }
   };
   // Keep the watch-event handler pointing at the latest closure.
   handleCompleteSetRef.current = handleCompleteSet;
 
   const handleSaveAndContinue = async () => {
     const exercise = exercises[currentExerciseIndex];
+    if (!exercise) return;
 
     const hasErrors = setLogs.some(log => {
       if (exercise.mode === 'reps') {
@@ -1236,6 +1314,11 @@ export default function ActiveWorkoutScreen() {
     } else {
       const nextIndex = currentExerciseIndex + 1;
       const nextExercise = updatedExercises[nextIndex];
+      if (!nextExercise) {
+        setWorkoutPhase({ type: 'complete' });
+        toast.success('All exercises complete!');
+        return;
+      }
       moveToExercise(updatedExercises, nextIndex);
       const firstIncompleteSet = nextExercise.sets.findIndex((s) => !s.completed);
       if (firstIncompleteSet < 0) {
@@ -1258,6 +1341,7 @@ export default function ActiveWorkoutScreen() {
       if (userId) {
         invalidateSessionsInRangeForUser(userId);
         invalidateMuscleFreshnessCache(userId);
+        invalidateWorkoutStatsCache(userId);
       }
       useUIStore.getState().setWorkoutNeedsRefetch(true);
       void clearWorkoutContext();
@@ -1569,7 +1653,10 @@ export default function ActiveWorkoutScreen() {
         toast.error('Failed to abandon workout');
         return;
       }
-      if (userId) invalidateSessionsInRangeForUser(userId);
+      if (userId) {
+        invalidateSessionsInRangeForUser(userId);
+        invalidateWorkoutStatsCache(userId);
+      }
       void clearWorkoutContext();
       clearWorkoutHealthBuffer(sessionId);
       setShowAbandonConfirm(false);
@@ -1649,7 +1736,17 @@ export default function ActiveWorkoutScreen() {
     );
   }
 
-  const currentExercise = exercises[currentExerciseIndex];
+  const currentExercise = exercises[Math.min(Math.max(0, currentExerciseIndex), exercises.length - 1)];
+  if (!currentExercise) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No exercises in this workout</Text>
+          <Button label="Go Back" onPress={goBack} />
+        </View>
+      </SafeAreaView>
+    );
+  }
   const remainingMinutes = estimateSessionTimeMinutes(
     exercises
       .map((ex) => ({
@@ -1876,6 +1973,30 @@ export default function ActiveWorkoutScreen() {
                 });
                 if (!prevLabel) return null;
                 return <Text style={styles.prevPerformanceText}>Last time: {prevLabel}</Text>;
+              })()}
+              {(() => {
+                if (currentExercise.is_stretch || currentExercise.mode !== 'reps') return null;
+                const setWeight = currentExercise.sets[workoutPhase.setIndex]?.weight;
+                const fromSet = setWeight != null && setWeight > 0 ? setWeight : null;
+                const fromSuggestion = parseFloat(suggestedWeight);
+                const plateWeight =
+                  fromSet ??
+                  (Number.isFinite(fromSuggestion) && fromSuggestion > 0 ? fromSuggestion : null);
+                if (plateWeight == null) return null;
+                return (
+                  <TouchableOpacity
+                    style={styles.platesHint}
+                    onPress={() => {
+                      setPlateTarget(plateWeight);
+                      setShowPlateCalculator(true);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Plate calculator"
+                  >
+                    <Layers size={16} color={colors.primary} />
+                    <Text style={styles.platesHintText}>How to load the bar</Text>
+                  </TouchableOpacity>
+                );
               })()}
             </View>
 
@@ -2720,6 +2841,19 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.textSecondary,
     marginTop: spacing.xs,
+  },
+  platesHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  platesHintText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.primary,
   },
   targetCard: {
     backgroundColor: colors.card,

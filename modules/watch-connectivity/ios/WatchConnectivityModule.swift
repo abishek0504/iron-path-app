@@ -46,21 +46,6 @@ enum WatchPayloadParsing {
   }
 }
 
-private func openCompanionWatchApp(sessionId: String) {
-  guard WCSession.isSupported() else { return }
-  guard WCSession.default.isWatchAppInstalled else { return }
-
-  let configuration = HKWorkoutConfiguration()
-  configuration.activityType = .traditionalStrengthTraining
-  configuration.locationType = .indoor
-
-  HKHealthStore().startWatchApp(with: configuration) { _, error in
-    if let error {
-      NSLog("IronPath startWatchApp failed for session %@: %@", sessionId, error.localizedDescription)
-    }
-  }
-}
-
 /**
  * iPhone-side WCSession bridge.
  *
@@ -88,27 +73,31 @@ public class WatchConnectivityModule: Module {
 
     OnCreate {
       self.sessionDelegate.onSetCompleted = { [weak self] payload in
-        self?.sendEvent("onSetCompleted", payload)
+        self?.emitOnMain("onSetCompleted", payload)
       }
       self.sessionDelegate.onSkipRest = { [weak self] payload in
-        self?.sendEvent("onSkipRest", payload)
+        self?.emitOnMain("onSkipRest", payload)
       }
       self.sessionDelegate.onExtendRest = { [weak self] payload in
-        self?.sendEvent("onExtendRest", payload)
+        self?.emitOnMain("onExtendRest", payload)
       }
       self.sessionDelegate.onSubmitRpe = { [weak self] payload in
-        self?.sendEvent("onSubmitRpe", payload)
+        self?.emitOnMain("onSubmitRpe", payload)
       }
       self.sessionDelegate.onHeartRate = { [weak self] payload in
-        self?.sendEvent("onHeartRate", payload)
+        self?.emitOnMain("onHeartRate", payload)
       }
       self.sessionDelegate.onWorkoutEnded = { [weak self] payload in
-        self?.sendEvent("onWorkoutEnded", payload)
+        self?.emitOnMain("onWorkoutEnded", payload)
       }
       self.sessionDelegate.onStateChanged = { [weak self] payload in
-        self?.sendEvent("onWatchStateChanged", payload)
+        self?.emitOnMain("onWatchStateChanged", payload)
       }
       self.sessionDelegate.activate()
+    }
+
+    OnDestroy {
+      self.sessionDelegate.teardown()
     }
 
     Function("isSupported") { () -> Bool in
@@ -116,16 +105,7 @@ public class WatchConnectivityModule: Module {
     }
 
     AsyncFunction("getWatchState") { () -> [String: Any] in
-      guard WCSession.isSupported() else {
-        return ["supported": false, "paired": false, "installed": false, "reachable": false]
-      }
-      let session = WCSession.default
-      return [
-        "supported": true,
-        "paired": session.isPaired,
-        "installed": session.isWatchAppInstalled,
-        "reachable": session.isReachable,
-      ]
+      self.sessionDelegate.snapshotState()
     }
 
     AsyncFunction("updateWorkoutContext") { (context: [String: Any]) in
@@ -138,7 +118,7 @@ public class WatchConnectivityModule: Module {
 
     AsyncFunction("startWatchApp") { (sessionId: String) async in
       await MainActor.run {
-        openCompanionWatchApp(sessionId: sessionId)
+        self.sessionDelegate.openCompanionWatchApp(sessionId: sessionId)
       }
     }
 
@@ -148,6 +128,13 @@ public class WatchConnectivityModule: Module {
 
     AsyncFunction("clearAuthFromWatch") { () in
       WatchSharedAuthStore.clear()
+    }
+  }
+
+  /// WCSession callbacks run off the JS thread; hop before Expo sendEvent.
+  private func emitOnMain(_ event: String, _ payload: [String: Any]) {
+    DispatchQueue.main.async { [weak self] in
+      self?.sendEvent(event, payload)
     }
   }
 }
@@ -194,13 +181,65 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   var onWorkoutEnded: (([String: Any]) -> Void)?
   var onStateChanged: (([String: Any]) -> Void)?
 
+  private let healthStore = HKHealthStore()
   private var pendingWorkoutContext: [String: Any]?
+  private var lastHeartRateEmitAt: TimeInterval = 0
+  private let heartRateMinInterval: TimeInterval = 5
+  private var cachedState: [String: Any] = [
+    "supported": false,
+    "paired": false,
+    "installed": false,
+    "reachable": false,
+  ]
 
   func activate() {
     guard WCSession.isSupported() else { return }
+    cachedState = [
+      "supported": true,
+      "paired": false,
+      "installed": false,
+      "reachable": false,
+    ]
     let session = WCSession.default
     session.delegate = self
     session.activate()
+  }
+
+  func teardown() {
+    onSetCompleted = nil
+    onSkipRest = nil
+    onExtendRest = nil
+    onSubmitRpe = nil
+    onHeartRate = nil
+    onWorkoutEnded = nil
+    onStateChanged = nil
+    if WCSession.isSupported(), WCSession.default.delegate === self {
+      WCSession.default.delegate = nil
+    }
+  }
+
+  func snapshotState() -> [String: Any] {
+    guard WCSession.isSupported() else {
+      return ["supported": false, "paired": false, "installed": false, "reachable": false]
+    }
+    return cachedState
+  }
+
+  /// Keep the HealthStore alive for the async completion — a stack-allocated
+  /// store can be freed before startWatchApp finishes (native UAF).
+  func openCompanionWatchApp(sessionId: String) {
+    guard WCSession.isSupported() else { return }
+    guard WCSession.default.isWatchAppInstalled else { return }
+
+    let configuration = HKWorkoutConfiguration()
+    configuration.activityType = .traditionalStrengthTraining
+    configuration.locationType = .indoor
+
+    healthStore.startWatchApp(with: configuration) { _, error in
+      if let error {
+        NSLog("IronPath startWatchApp failed for session %@: %@", sessionId, error.localizedDescription)
+      }
+    }
   }
 
   /// Queue the latest workout snapshot and push when the session is activated.
@@ -265,6 +304,13 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   }
 
   private func emitState(_ session: WCSession) {
+    let payload: [String: Any] = [
+      "supported": true,
+      "paired": session.isPaired,
+      "installed": session.isWatchAppInstalled,
+      "reachable": session.isReachable,
+    ]
+    cachedState = payload
     onStateChanged?([
       "paired": session.isPaired,
       "installed": session.isWatchAppInstalled,
@@ -426,6 +472,12 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
         return
       }
       let timestamp = WatchPayloadParsing.doubleFromPayload(payload["timestamp"]) ?? Date().timeIntervalSince1970
+      let now = Date().timeIntervalSince1970
+      guard now - lastHeartRateEmitAt >= heartRateMinInterval else {
+        replyHandler?(["ok": true])
+        return
+      }
+      lastHeartRateEmitAt = now
       onHeartRate?([
         "type": "heartRate",
         "sessionId": sessionId,
