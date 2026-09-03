@@ -2,7 +2,7 @@
 
 **Purpose**: Document core architectural decisions and WHY they were made.
 
-**Last Updated**: 2026-06-11
+**Last Updated**: 2026-09-03
 
 ## Core Principles
 
@@ -608,7 +608,7 @@ targets/watch/               # SwiftUI watchOS companion (@bacons/apple-targets)
 ### Account Lifecycle (soft-delete + purge)
 - **Delete** (App Store Guideline 5.1.1(v)): `requestAccountDeletion()` invokes the `delete-account` Edge Function, which sets `v2_profiles.deleted_at` and `scheduled_purge_at = now() + 30 days`, then revokes refresh tokens
 - **Restore**: during the grace period, login detects the soft-delete markers and offers Restore (`restoreAccount` clears both columns via owner RLS)
-- **Purge**: nightly pg_cron job `purge_soft_deleted_accounts()` hard-deletes expired `auth.users` rows (batched); all `v2_*` data cascades via `ON DELETE CASCADE`
+- **Purge**: nightly pg_cron job `purge_soft_deleted_accounts()` deletes matching `storage.objects` in the `avatars` bucket (`name LIKE {user_id}-%` or `owner_id = {user_id}`), then hard-deletes expired `auth.users` rows (batched); all `v2_*` data cascades via `ON DELETE CASCADE`
 
 ### API Keys
 - Only anon key in client

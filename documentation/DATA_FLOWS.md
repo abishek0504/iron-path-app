@@ -2,7 +2,7 @@
 
 **Purpose**: Document how components, queries, and stores connect. Show critical user flows end-to-end.
 
-**Last Updated**: 2026-06-11
+**Last Updated**: 2026-09-03
 
 ## Query → Store → Component Patterns
 
@@ -473,8 +473,10 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ Offers Restore → restoreAccount(userId) clears both columns (owner RLS)
 
 3. After grace period: nightly pg_cron job
-   └→ purge_soft_deleted_accounts() deletes auth.users rows where
-       scheduled_purge_at <= now() (batched); all v2_* data cascades
+   └→ purge_soft_deleted_accounts() (batch of 50) for each due account:
+       └→ deletes matching storage.objects in avatars
+           (name like `{id}-%` or owner_id = id)
+       └→ then deletes auth.users; all v2_* data cascades
 ```
 
 ## Bottom Sheet State Machine

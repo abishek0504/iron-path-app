@@ -2,7 +2,7 @@
 
 **Purpose**: Document database structure, migrations, and RLS policies.
 
-**Last Updated**: 2026-07-23
+**Last Updated**: 2026-09-03
 
 ## Migration Order
 
@@ -45,7 +45,7 @@ Apply migrations in this exact order:
 35. **20260510000000_health_hk_links_session_validation.sql** - Adds hk_workout_uuid (sessions) and hk_sample_uuid (weight logs) with unique partial indexes; creates v2_health_sync; tightens RPE (0-10) and RIR (0-15) checks
 36. **20260609000000_workout_flow_set_types_supersets_rest.sql** - Adds set_type to v2_session_sets; superset_group + rest_sec to v2_session_exercises and v2_template_slots
 37. **20260609000001_pr_trigger_exclude_warmups.sql** - PR trigger ignores warm-up sets (set_type = 'warmup'); pins function search_path
-38. **20260609000002_purge_soft_deleted_accounts_cron.sql** - pg_cron job (daily 03:00 UTC) hard-deletes auth.users past scheduled_purge_at; v2_* data cascades
+38. **20260609000002_purge_soft_deleted_accounts_cron.sql** - pg_cron job (daily 03:00 UTC) hard-deletes auth.users past scheduled_purge_at; v2_* data cascades. Matching `avatars` storage objects are deleted by the function replace in 20260903130000 (before each `auth.users` delete)
 39. **20260609000003_security_advisor_remediation.sql** - Pins function search_paths, revokes EXECUTE on trigger functions, drops broad avatars-bucket policies, revokes all anon grants on v2_* tables
 40. **20260610000000_ai_generations_openai_source.sql** - Allows 'openai' as a v2_ai_generations.source value (backend moved from Gemini to OpenAI)
 41. **20260611120000_import_master_exercises_from_csv.sql** - Master exercise import from `supabase/seed/master_exercises_and_stretches_expanded_advanced.csv`: 388 exercises (45 updates, 343 inserts), including 48 stretches
@@ -68,6 +68,8 @@ Apply migrations in this exact order:
 58. **20260723000001_fix_v2_profiles_first_name_nullable.sql** - Drops NOT NULL on `v2_profiles.first_name` so signup trigger succeeds before onboarding collects the name
 59. **20260723010000_workout_session_origin_dedup.sql** - Adds `origin` ('auto' | 'manual') to `v2_workout_sessions` + partial unique index to dedupe auto-materialized sessions per day
 60. **20260723020000_revoke_graphql_from_client_roles.sql** - Revokes `graphql`/`graphql_public` schema usage + function execute from `anon`/`authenticated` (app uses PostgREST only; defense-in-depth against GraphQL schema discovery)
+61. **20260903120000_widen_session_sets_rest_sec.sql** - Widens `v2_session_sets.rest_sec` CHECK from 0–600 to NULL or 0–3600 so per-set rest matches per-exercise/slot rest
+62. **20260903130000_purge_avatars_on_account_delete.sql** - Replaces `purge_soft_deleted_accounts()` so each hard-delete also removes that user's objects in the `avatars` bucket (`storage.objects` where `name LIKE {user_id}-%` or `owner_id = {user_id}`) before deleting `auth.users`. Does not reschedule cron. EXECUTE remains revoked from public/anon/authenticated.
 
 ## Table Relationships
 
@@ -264,7 +266,7 @@ v2_support (Help & Support submissions)
 - `current_weight`, `goal_weight`, `height`, `gender`, `goal`, `preferred_training_style`, `avatar_url` (all nullable)
 - `subscription_tier` (NOT NULL DEFAULT 'free'), `subscription_expires_at`, `revenuecat_app_user_id` (20260612120000; synced from RevenueCat webhook)
 - `app_tour_completed_at`: Set when user completes or skips the post-onboarding app tour (20260618120000)
-- `deleted_at`, `scheduled_purge_at`: Account soft delete (20260508000001). delete-account sets both (purge = now + 30d); Restore during the grace window sets both back to NULL. A pg_cron job (`purge-soft-deleted-accounts`, daily 03:00 UTC, 20260609000002) hard-deletes `auth.users` rows past `scheduled_purge_at`; every v2_* table cascades. Partial index `idx_v2_profiles_scheduled_purge_at` supports the purge query.
+- `deleted_at`, `scheduled_purge_at`: Account soft delete (20260508000001). delete-account sets both (purge = now + 30d); Restore during the grace window sets both back to NULL. A pg_cron job (`purge-soft-deleted-accounts`, daily 03:00 UTC, 20260609000002) hard-deletes `auth.users` rows past `scheduled_purge_at`; every v2_* table cascades. Before each `auth.users` delete, `purge_soft_deleted_accounts()` also deletes matching rows in `storage.objects` for bucket `avatars` (`name LIKE {user_id}-%` or `owner_id = {user_id}`), because avatar objects have no FK and would otherwise be orphaned (20260903130000). Partial index `idx_v2_profiles_scheduled_purge_at` supports the purge query.
 
 **Required for Onboarding:**
 - `first_name`, `date_of_birth`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]`
