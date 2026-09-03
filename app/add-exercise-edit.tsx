@@ -3,7 +3,7 @@
  * per-set editor (weight/reps/duration/rest + set-type cycle), optional
  * "superset with previous", and explicit scope actions: "Add to routine"
  * (template slot + session sync) vs "Add to this day only".
- * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–600.
+ * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–3600.
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -89,7 +89,7 @@ const REPS_MAX = 50;
 const DURATION_MIN = 5;
 const DURATION_MAX = 3600;
 const REST_MIN = 0;
-const REST_MAX = 600;
+const REST_MAX = 3600;
 const HERO_ASPECT_RATIO = 3 / 2;
 /** Cap the hero so it never dominates small/tall screens. */
 const HERO_MAX_HEIGHT_FRACTION = 0.35;

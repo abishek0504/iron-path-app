@@ -374,7 +374,7 @@ v2_support (Help & Support submissions)
 - `reps` (1-50) XOR `duration_sec` (5-3600) - CHECK constraints enforce
 - `weight` (>= 0)
 - `rpe` (0-10, widened from 1-10 in 20260510000000) XOR `rir` (0-15) - CHECK constraints enforce
-- `rest_sec` (0-600)
+- `rest_sec` (0-3600, widened from 0-600 in 20260903120000)
 - `set_type` (20260609000000): 'normal' | 'warmup' | 'drop' | 'failure' (NOT NULL DEFAULT 'normal'). Warm-up sets are excluded from PR and volume calculations.
 - `notes`: Optional per-set notes
 - `performed_at`: Timestamp when set was completed (NULL = not performed; DEFAULT dropped in 20260122000003)

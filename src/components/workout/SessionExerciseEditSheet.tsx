@@ -22,6 +22,9 @@ import {
   suggestDropWeight,
 } from '../../lib/workout/setTypes';
 
+const REST_MIN = 0;
+const REST_MAX = 3600;
+
 interface SessionSet {
   id: string;
   set_number: number;
@@ -73,6 +76,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   const [saving, setSaving] = useState(false);
   const [originalSetIds, setOriginalSetIds] = useState<string[]>([]);
   const [restSec, setRestSec] = useState<string>('');
+  const [restError, setRestError] = useState<string | null>(null);
   const [isStretch, setIsStretch] = useState(false);
   const insets = useSafeAreaInsets();
 
@@ -121,6 +125,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
       setSets(loaded);
       setOriginalSetIds(loaded.map((s) => s.id));
       setRestSec(exerciseRow?.rest_sec != null ? String(exerciseRow.rest_sec) : '');
+      setRestError(null);
     } catch (error) {
       if (__DEV__) {
         devError('session-edit', error, { action: 'loadSets' });
@@ -134,6 +139,18 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
     if (__DEV__) {
       devLog('session-edit', { action: 'saveSets', sessionExerciseId, setCount: sets.length });
     }
+
+    const trimmedRest = restSec.trim();
+    let parsedRest: number | null = null;
+    if (trimmedRest !== '') {
+      const n = parseInt(trimmedRest, 10);
+      if (Number.isNaN(n) || n < REST_MIN || n > REST_MAX) {
+        setRestError(`Enter ${REST_MIN}–${REST_MAX}`);
+        return;
+      }
+      parsedRest = n;
+    }
+    setRestError(null);
 
     setSaving(true);
     try {
@@ -202,15 +219,14 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
         }
       }
 
-      // Persist the per-exercise rest override (empty input clears it)
-      const parsedRest = restSec.trim() === '' ? null : parseInt(restSec, 10);
-      const { error: restError } = await supabase
+      // Persist the per-exercise rest override (empty input clears it / use default)
+      const { error: restUpdateError } = await supabase
         .from('v2_session_exercises')
-        .update({ rest_sec: parsedRest != null && !isNaN(parsedRest) ? parsedRest : null })
+        .update({ rest_sec: parsedRest })
         .eq('id', sessionExerciseId);
 
-      if (restError && __DEV__) {
-        devError('session-edit', restError, { action: 'updateRestSec', sessionExerciseId });
+      if (restUpdateError && __DEV__) {
+        devError('session-edit', restUpdateError, { action: 'updateRestSec', sessionExerciseId });
       }
 
       onSave();
@@ -303,14 +319,18 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
               <View style={styles.restLabelGroup}>
                 <Text style={styles.inputLabel}>Rest between sets (sec)</Text>
                 <Text style={styles.restHint}>Leave empty for default (90s)</Text>
+                {restError ? <Text style={styles.errorText}>{restError}</Text> : null}
               </View>
               <TextInput
-                style={[styles.input, styles.restInput]}
+                style={[styles.input, styles.restInput, restError ? styles.inputError : null]}
                 placeholder="90"
                 placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
                 value={restSec}
-                onChangeText={setRestSec}
+                onChangeText={(value) => {
+                  setRestSec(value);
+                  if (restError) setRestError(null);
+                }}
                 maxLength={4}
               />
             </View>
@@ -604,6 +624,14 @@ function createStyles(colors: ThemeColors) {
     padding: spacing.sm,
     fontSize: typography.sizes.base,
     color: colors.textPrimary,
+  },
+  inputError: {
+    borderColor: colors.error,
+  },
+  errorText: {
+    fontSize: typography.sizes.sm,
+    color: colors.error,
+    marginTop: spacing.xs,
   },
   footer: {
     paddingTop: spacing.md,
