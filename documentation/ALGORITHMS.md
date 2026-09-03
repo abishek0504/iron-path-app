@@ -360,7 +360,7 @@ The heatmap shows current recovery (0–100) per muscle. So that recovery update
 
 - Load rows from `v2_muscle_freshness` (muscle_key, last_trained_at).
 - For each row: `freshness_now = computeFreshnessNow(muscle_key, last_trained_at)`.
-- Formula: at `last_trained_at`, fatigue = 100 (freshness 0). Fatigue(t) = 100 × e^(-λ × t), Freshness(t) = 100 - Fatigue(t). λ from `MUSCLE_DECAY_LAMBDA` (matches the Edge Function, except `adductors` is not yet listed client-side and falls back to the default λ=0.041).
+- Formula: at `last_trained_at`, fatigue = 100 (freshness 0). Fatigue(t) = 100 × e^(-λ × t), Freshness(t) = 100 - Fatigue(t). λ from `MUSCLE_DECAY_LAMBDA` (client and Edge Function both use adductors λ=0.060).
 
 So the heatmap reflects current recovery even when the user has not completed a workout since the last one; no scheduled job is required.
 

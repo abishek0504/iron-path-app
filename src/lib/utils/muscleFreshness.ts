@@ -41,6 +41,7 @@ export const MUSCLE_DECAY_LAMBDA: Record<string, number> = {
   piriformis: 0.06,
   tibialis_anterior: 0.06,
   hip_flexors: 0.06,
+  adductors: 0.060,
 };
 
 /**
