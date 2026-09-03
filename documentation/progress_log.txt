@@ -10,8 +10,8 @@ This file tracks major milestones and progress.
 - Adductors heatmap λ: client `MUSCLE_DECAY_LAMBDA.adductors = 0.060` matches `update-muscle-freshness` (`b1f948f`).
 - AI 403 copy: template-not-owned is `forbidden`, not “Session expired”; 401 unchanged (`1893973`).
 - Standalone Watch: JSON integers parsed via `intFromPayload` (NSNumber-safe) (`9532748`).
-- Rest cap: `v2_session_sets.rest_sec` CHECK and add-exercise UI unified to 0–3600 (`ca22d9d`). Migration `20260903120000` not applied live.
-- Avatar purge: `purge_soft_deleted_accounts()` deletes `storage.objects` in `avatars` before `auth.users` (`281365e`). Migration `20260903130000` not applied live.
+- Rest cap: `v2_session_sets.rest_sec` CHECK and add-exercise UI unified to 0–3600 (`ca22d9d`). Applied live 2026-09-03 (`widen_session_sets_rest_sec`).
+- Avatar purge: `purge_soft_deleted_accounts()` deletes `storage.objects` in `avatars` before `auth.users` (`281365e`). Applied live 2026-09-03 (`purge_avatars_on_account_delete`).
 - Plan: `documentation/PLAN_2026-09-03_prelaunch_leftover_fixes.md`.
 
 ---
