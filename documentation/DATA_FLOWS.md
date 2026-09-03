@@ -378,14 +378,16 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ If job already committed → return { committed: true } (no OpenAI, no quota)
    └→ If job has cached sessions_json → skip OpenAI, retry commit only
    └→ Weekly quota: only source='openai' rows in v2_ai_generations (max 40 / 7 days)
-   └→ OpenAI + validation (up to 2 attempts on validation failure)
-   └→ commit_ai_generation RPC (Postgres transaction): template slots + sessions + sets
+   └→ Catalog: fetch 200 allow-listed lifts, hard-filter by dayFocus + avoidMuscles, prompt cap 50
+   └→ 400 focus_catalog_too_small if the focused catalog has fewer than 2 strength lifts
+   └→ OpenAI + finalizeAiSessions (up to 2 attempts): drop off-focus / avoided / duplicate names
+   └→ commit_ai_generation RPC: clear_plan_day_for_ai_replace (slots + unperformed sets + empty sessions), then insert unique exercise_ids
    └→ Audit row only after successful commit (source 'openai')
    └→ Fallback rows logged for observability; do not count toward quota
 
 3. Client consumes result
-   └→ If committed: true → invalidate caches only (no client-side slot inserts)
-   └→ Else (legacy fallback during rollout): client persist loop in executeAiDayGeneration
+   └→ If committed: true → invalidate caches only (do not clear; RPC already wrote the new plan)
+   └→ Else (legacy fallback during rollout): clearPlanDayForGeneration, then persist loop in executeAiDayGeneration (skip duplicate exercise_ids)
    └→ Crash recovery: pending job in SecureStore reuses same generationId on retry
    └→ toast.success('{day} generated')
 ```

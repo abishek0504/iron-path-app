@@ -574,10 +574,11 @@ Generate one template day (exercise selection **with** prescribed targets: sets/
 
 ### Constants
 ```
-DAILY_QUOTA = 10                 // generations per user per rolling 24h (recorded in v2_ai_generations)
+PRO_WEEKLY_QUOTA = 40            // successful source=openai generations per rolling 7 days
 MAX_SESSIONS_PER_DAY = 6
 MIN/MAX_EXERCISES_PER_SESSION = 2 / 8
-EXERCISE_COUNT_TOLERANCE = 1     // around user-requested count
+CATALOG_FETCH_LIMIT = 200        // ranked allow-list rows pulled before focus/avoid filter
+CATALOG_PROMPT_LIMIT = 50        // rows actually sent to the LLM after focus/avoid
 MAX_STRETCH_COUNT = 5
 FRESHNESS_LOOKBACK_HOURS = 48
 HISTORY_LOOKBACK_DAYS = 60       // warmups excluded; cap HISTORY_MAX_SETS = 300
@@ -585,13 +586,16 @@ DEFAULT_MODEL = 'gpt-5.6-luna'   // overridable via OPENAI_MODEL
 TARGET_BOUNDS: sets 1-10, reps 1-50, weight 0-2000, duration_sec 5-3600, target_rpe 5-10
 ```
 
+Day-focus matching lives in `src/lib/ai/dayFocus.ts` and must stay in sync with `supabase/functions/generate-workout/dayFocus.ts`. Push accepts push-pattern or chest / anterior+lateral delts / triceps. Hinge/glute work (e.g. Hip Thrust) is rejected on Push. Pull / Legs / Upper / Lower / muscle-group focuses follow the same pattern+muscle rules. Empty focus (“Let AI decide”) accepts any allow-listed lift.
+
 ### Algorithm
 1. Auth (user JWT), verify template ownership, enforce the Pro weekly quota (`PRO_WEEKLY_QUOTA = 40` successful generations per rolling 7 days).
-2. Build per-request context: allow-list catalog (`v2_ai_recommended_exercises`, active, limit 400, stretches excluded), profile, muscle freshness (last 48h), per-exercise history summary (last set, top set, avg RPE) from completed sessions, split-day position.
-3. **Stretch handling**: when the user requests `stretchCount` (1-5), a separate stretch catalog (`v2_exercises` where `is_stretch = true`) is sent; the LLM appends exactly that many stretches per session, in addition to strength exercises.
+2. Build per-request context: allow-list catalog (`v2_ai_recommended_exercises`, active, fetch 200, stretches excluded), then **hard-filter** by `dayFocus` and `avoidMuscles` and cap at 50 for the prompt. If the focused catalog has fewer than `MIN_EXERCISES_PER_SESSION` (2) strength lifts, return 400 `focus_catalog_too_small`. Also load profile, muscle freshness (last 48h), per-exercise history summary (last set, top set, avg RPE) from completed sessions, split-day position.
+3. **Stretch handling**: when the user requests `stretchCount` (1-5), a separate stretch catalog (`v2_exercises` where `is_stretch = true`) is sent; the LLM appends exactly that many stretches per session, in addition to strength exercises. Stretches are not day-focus filtered.
 4. Call OpenAI with strict JSON-schema structured output.
-5. Validate: every returned ID must be in the catalog (allow-list is the security boundary); dedupe within the day; per-session strength count must be within tolerance of the requested count (else the whole result is rejected → fallback); out-of-bounds or mode-mismatched targets are nulled (client falls back to prescription-based targets) rather than failing generation.
-6. Audit every call to `v2_ai_generations`. Only `source = 'openai'` rows count toward the weekly quota; fallback rows are logged for observability but do not consume quota.
+5. Validate in `finalizeAiSessions`: every returned ID must be in the catalog (allow-list is the security boundary); drop off-focus and avoided-muscle strength lifts; dedupe by `exercise_id` **and** normalized name across the day (one Hip Thrust identity, not seven copies); per-session strength count must match the requested count or the auto min/max (else the whole result is rejected → fallback); pad missing strength from the **focused** catalog; out-of-bounds or mode-mismatched targets are nulled (client / `resolve_ai_exercise_targets` falls back to prescription-based targets) rather than failing generation.
+6. `commit_ai_generation` (service_role only) calls `clear_plan_day_for_ai_replace` **before** insert: delete all `v2_template_slots` for that day, delete unperformed session exercises/sets in the day’s date bounds, delete leftover empty active sessions, then insert unique `exercise_id`s. Re-generating a day replaces the plan; it does not append. Client fallback (`executeAiDayGeneration`) clears only when `committed !== true`, so a successful RPC is never wiped.
+7. Audit every call to `v2_ai_generations`. Only `source = 'openai'` rows count toward the weekly quota; fallback rows are logged for observability but do not consume quota.
 
 On any failure the response has `source: 'fallback'` with empty sessions; the client (`src/lib/ai/generateWorkoutDay.ts`) surfaces this as `ai_unavailable` ("try again later") — it intentionally does **not** silently substitute the local deterministic engine, because the user explicitly asked for an AI generation.
 

@@ -28,6 +28,7 @@ import {
   DEFAULT_DAY_CONSTRAINTS,
 } from './generateWorkoutDay';
 import { addAiGenerationBreadcrumb } from '../monitoring/aiGenerationBreadcrumb';
+import { clearPlanDayForGeneration } from './clearPlanDay';
 
 export type AiGenerationResult =
   | { ok: true; dayName: string; slotsCreated: number; outcome: 'generated' }
@@ -181,9 +182,15 @@ export async function executeAiDayGeneration(
       return { ok: false, code: 'no_slots' };
     }
 
+    const cleared = await clearPlanDayForGeneration({ userId, dayId, dayName });
+    if (!cleared.ok) {
+      return { ok: false, code: 'unknown', message: cleared.message };
+    }
+
     const existingSessions = await fetchSessionsForDay(userId, dayName);
     let slotsCreated = 0;
-    let sortOrder = day.slots.length;
+    let sortOrder = 0;
+    const seenExerciseIds = new Set<string>();
     const exp = profile?.experience_level || 'beginner';
 
     for (let sIdx = 0; sIdx < sessionGroups.length; sIdx++) {
@@ -214,6 +221,8 @@ export async function executeAiDayGeneration(
 
       for (const aiPlan of group) {
         const exerciseId = aiPlan.exercise_id;
+        if (!exerciseId || seenExerciseIds.has(exerciseId)) continue;
+        seenExerciseIds.add(exerciseId);
         sortOrder += 1;
 
         const newSlot = await createTemplateSlot(day.day.id, {

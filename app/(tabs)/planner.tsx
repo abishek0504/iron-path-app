@@ -58,7 +58,6 @@ import {
 import {
   createWorkoutSession,
   deleteSessionWithExercises,
-  getSessionsForToday,
   materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
@@ -97,6 +96,7 @@ import { WorkoutPresetLoadOptionsSheet } from '../../src/components/planner/Work
 import { WorkoutTargetPickerSheet } from '../../src/components/planner/WorkoutTargetPickerSheet';
 import { ConfirmDialog } from '../../src/components/ui/ConfirmDialog';
 import { DEFAULT_DAY_CONSTRAINTS, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
+import { clearPlanDayForGeneration } from '../../src/lib/ai/clearPlanDay';
 import { GenerateDayForm } from '../../src/components/ai/GenerateDayForm';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
@@ -1849,42 +1849,14 @@ export default function PlannerTab() {
       }
       try {
         if (sessionsPerDay === 0) {
-          // Rest day: clear the day's planned slots and remove unstarted
-          // exercises from any of that day's sessions (performed sets are kept).
-          const slotIds = selectedDay.slots.map((s) => s.id);
-          if (slotIds.length > 0) {
-            const { error: slotErr } = await supabase
-              .from('v2_template_slots')
-              .delete()
-              .in('id', slotIds);
-            if (slotErr) {
-              if (__DEV__) devError('planner-ai', slotErr, { action: 'restDay_clearSlots' });
-              toast.error('Failed to clear the day');
-              return;
-            }
-          }
-
-          const { startIso, endIsoExclusive } = getDateBoundsForDayName(selectedDay.day.day_name);
-          const daySessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
-          for (const session of daySessions) {
-            if (session.status !== 'active') continue;
-            const { data: sessionExercises } = await supabase
-              .from('v2_session_exercises')
-              .select('id')
-              .eq('session_id', session.id);
-            const exerciseIds = (sessionExercises || []).map((r) => r.id);
-            if (exerciseIds.length === 0) continue;
-            const { data: performedSets } = await supabase
-              .from('v2_session_sets')
-              .select('session_exercise_id')
-              .in('session_exercise_id', exerciseIds)
-              .not('performed_at', 'is', null);
-            const protectedIds = new Set((performedSets || []).map((r) => r.session_exercise_id));
-            const deletableIds = exerciseIds.filter((id) => !protectedIds.has(id));
-            if (deletableIds.length > 0) {
-              await supabase.from('v2_session_sets').delete().in('session_exercise_id', deletableIds);
-              await supabase.from('v2_session_exercises').delete().in('id', deletableIds);
-            }
+          const cleared = await clearPlanDayForGeneration({
+            userId,
+            dayId: selectedDay.day.id,
+            dayName: selectedDay.day.day_name,
+          });
+          if (!cleared.ok) {
+            toast.error(cleared.message);
+            return;
           }
 
           invalidateTemplate(activeTemplateId);

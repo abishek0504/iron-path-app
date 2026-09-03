@@ -5,6 +5,16 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-03 - AI generate: replace day + hard day-focus (no Hip Thrust ×7)
+------------------------------------------------------------------------
+- Root cause: `commit_ai_generation` appended slots, and day focus was prompt-only, so Push + a high-priority Hip Thrust in the top-50 catalog could land (and then multiply across re-generates).
+- Day-focus matcher: `src/lib/ai/dayFocus.ts` + `supabase/functions/generate-workout/dayFocus.ts` (keep in sync). Catalog fetch 200 → filter focus/avoid → prompt 50. `finalizeAiSessions` drops off-focus, avoided, and duplicate names.
+- Replace: `clear_plan_day_for_ai_replace` inside `commit_ai_generation`; client fallback `src/lib/ai/clearPlanDay.ts` only when `committed !== true`. Rest-day (sessions = 0) uses the same clearer.
+- Live: helper + commit rewrite + empty-session delete applied. `generate-workout` v31 is a minified bundle of `index.ts` + `jobs.ts` + `dayFocus.ts` (MCP cannot upload the 76KB three-file source). Plan: `documentation/PLAN_2026-09-03_ai_generate_duplicates.md`.
+- Tests: `src/lib/ai/dayFocus.vitest.ts`. 22 live option cases on `test123@gmail.com` (Push replace, no Hip Thrust on Push, unique names, avoid Chest, stretches 2).
+
+---
+
 2026-09-03 - Five leftover prelaunch fixes (separate commits)
 ------------------------------------------------------------------------
 - Adductors heatmap λ: client `MUSCLE_DECAY_LAMBDA.adductors = 0.060` matches `update-muscle-freshness` (`b1f948f`).

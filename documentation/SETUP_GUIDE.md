@@ -134,6 +134,10 @@ npx supabase secrets set REVENUECAT_WEBHOOK_SECRET=your-webhook-secret
 
 # Deploy all functions
 npx supabase functions deploy generate-workout
+# If the Supabase MCP deploy payload is too large (~76KB for the three source
+# files), bundle first then upload that as index.ts:
+#   npx esbuild supabase/functions/generate-workout/index.ts --bundle --format=esm --minify --target=esnext --outfile=/tmp/generate-workout.js --external:jsr:@supabase/supabase-js@2
+# Live 2026-09-03 is v31 (minified bundle of index.ts + jobs.ts + dayFocus.ts). The repo keeps the readable three-file source.
 npx supabase functions deploy update-muscle-freshness
 npx supabase functions deploy delete-account
 npx supabase functions deploy revenuecat-webhook --no-verify-jwt
@@ -142,7 +146,7 @@ npx supabase functions deploy revenuecat-webhook --no-verify-jwt
 **AI generation reliability & cost monitoring**
 
 - Weekly user quota counts only successful commits (`v2_ai_generations.source = 'openai'`).
-- Idempotency: client sends `idempotencyKey` + `dayId`; server caches jobs in `v2_ai_generation_jobs` and commits slots via `commit_ai_generation` RPC (atomic).
+- Idempotency: client sends `idempotencyKey` + `dayId`; server caches jobs in `v2_ai_generation_jobs` and commits slots via `commit_ai_generation` RPC (atomic). Commit **replaces** that day’s slots (and unperformed session rows) through `clear_plan_day_for_ai_replace`; it does not append. `dayFocus.ts` must be deployed with the function (keep in sync with `src/lib/ai/dayFocus.ts`).
 - Set an OpenAI dashboard **hard monthly budget** and email alert at ~80% usage.
 - Weekly fallback-rate check (Supabase SQL editor):
 

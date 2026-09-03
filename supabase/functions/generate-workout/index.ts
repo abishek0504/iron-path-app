@@ -59,6 +59,12 @@ import {
   purgeExpiredJobs,
   upsertPendingJob,
 } from './jobs.ts';
+import {
+  exerciseHitsAvoidedMuscles,
+  exerciseMatchesDayFocus,
+  filterExercisesByDayFocus,
+  normalizeExerciseName,
+} from './dayFocus.ts';
 
 // ============================================================================
 // Constants
@@ -80,6 +86,9 @@ const MAX_EXERCISES_PER_SESSION = 8;
 
 /** Cap on allow-list exercises embedded in the LLM prompt — matches the local engine (`weekGeneration.ts` limit 50). Sending the full 340-exercise catalog causes the model to return invalid IDs or too few exercises, failing server validation. */
 const CATALOG_PROMPT_LIMIT = 50;
+
+/** Fetch more allow-list rows than the prompt cap so focus filtering still leaves a full catalog. */
+const CATALOG_FETCH_LIMIT = 200;
 
 /** Minimum exercises per session — prevents the LLM from returning empty lists. */
 const MIN_EXERCISES_PER_SESSION = 2;
@@ -811,10 +820,15 @@ function pickStrengthForSession(
   catalog: AllowListedExercise[],
   count: number,
   seenAcrossDay: Set<string>,
+  seenNames: Set<string>,
 ): AllowListedExercise[] {
   if (count <= 0) return [];
   return catalog
-    .filter((ex) => !ex.is_stretch && !seenAcrossDay.has(ex.id))
+    .filter((ex) => {
+      if (ex.is_stretch || seenAcrossDay.has(ex.id)) return false;
+      const nameKey = normalizeExerciseName(ex.name);
+      return !seenNames.has(nameKey);
+    })
     .sort((a, b) => a.priority_order - b.priority_order)
     .slice(0, count);
 }
@@ -849,6 +863,7 @@ function finalizeAiSessions(
   requestedExercisesPerSession: number | null,
   stretchCount: number,
   experience: string,
+  constraints: DayConstraints,
 ): { sessions: AiExercisePlan[][]; reason: null } | { sessions: null; reason: string } {
   const normalized = normalizeSessionGroups(raw, sessionsPerDay);
   if (!normalized.groups) {
@@ -864,7 +879,12 @@ function finalizeAiSessions(
     : MIN_EXERCISES_PER_SESSION;
 
   const seenAcrossDay = new Set<string>();
+  const seenNames = new Set<string>();
   const finalized: AiExercisePlan[][] = [];
+  const focusCatalog = filterExercisesByDayFocus(
+    catalog.filter((ex) => !exerciseHitsAvoidedMuscles(ex, constraints.avoidMuscles)),
+    constraints.dayFocus,
+  );
 
   for (const group of sessionGroups) {
     const sessionExercises: AiExercisePlan[] = [];
@@ -876,16 +896,32 @@ function finalizeAiSessions(
       const exercise = catalogById.get(plan.exercise_id);
       if (!exercise) continue;
       if (seenAcrossDay.has(plan.exercise_id)) continue;
+      const nameKey = normalizeExerciseName(exercise.name);
+      if (seenNames.has(nameKey)) continue;
+      if (
+        !exercise.is_stretch &&
+        !exerciseMatchesDayFocus(exercise, constraints.dayFocus)
+      ) {
+        continue;
+      }
+      if (
+        !exercise.is_stretch &&
+        exerciseHitsAvoidedMuscles(exercise, constraints.avoidMuscles)
+      ) {
+        continue;
+      }
 
       if (exercise.is_stretch) {
         if (stretchCount === 0 || stretchInSession >= stretchCount) continue;
         stretchInSession += 1;
         seenAcrossDay.add(plan.exercise_id);
+        seenNames.add(nameKey);
         sessionExercises.push(applyStretchPrescription(plan, experience));
       } else {
         if (strengthCount >= maxStrengthPerSession) continue;
         strengthCount += 1;
         seenAcrossDay.add(plan.exercise_id);
+        seenNames.add(nameKey);
         sessionStrengthMeta.push(exercise);
         sessionExercises.push(sanitizeTargets(plan, exercise));
       }
@@ -895,7 +931,7 @@ function finalizeAiSessions(
 
     if (requestedExercisesPerSession !== null && strengthCount < requestedExercisesPerSession) {
       const need = requestedExercisesPerSession - strengthCount;
-      const fillers = pickStrengthForSession(catalog, need, seenAcrossDay);
+      const fillers = pickStrengthForSession(focusCatalog, need, seenAcrossDay, seenNames);
       if (fillers.length < need) {
         return {
           sessions: null,
@@ -904,6 +940,7 @@ function finalizeAiSessions(
       }
       for (const ex of fillers) {
         seenAcrossDay.add(ex.id);
+        seenNames.add(normalizeExerciseName(ex.name));
         sessionStrengthMeta.push(ex);
         sessionExercises.push(emptyStrengthPlan(ex.id));
         strengthCount += 1;
@@ -1355,7 +1392,7 @@ Deno.serve(async (req) => {
           .select('exercise_id, priority_order, v2_exercises(id, name, primary_muscles, equipment_needed, is_timed, is_stretch, movement_pattern)')
           .eq('is_active', true)
           .order('priority_order', { ascending: true })
-          .limit(CATALOG_PROMPT_LIMIT),
+          .limit(CATALOG_FETCH_LIMIT),
         constraints.stretchCount > 0
           ? serviceClient
             .from('v2_exercises')
@@ -1448,6 +1485,17 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'AI exercise allow-list is empty' }, 500);
       }
 
+      const promptCatalog = filterExercisesByDayFocus(catalog, constraints.dayFocus)
+        .filter((ex) => !exerciseHitsAvoidedMuscles(ex, constraints.avoidMuscles))
+        .slice(0, CATALOG_PROMPT_LIMIT);
+
+      if (promptCatalog.length < MIN_EXERCISES_PER_SESSION) {
+        return jsonResponse(
+          { error: 'Not enough allow-listed exercises for those constraints', code: 'focus_catalog_too_small' },
+          400,
+        );
+      }
+
       const catalogById = new Map<string, AllowListedExercise>(
         [...catalog, ...stretchCatalog].map((ex) => [ex.id, ex]),
       );
@@ -1506,7 +1554,7 @@ Deno.serve(async (req) => {
             const llm = await callOpenAi({
               apiKey: openAiApiKey,
               model: openAiModel,
-              catalog,
+              catalog: promptCatalog,
               stretchCatalog,
               user: userContext,
               dayName,
@@ -1519,13 +1567,14 @@ Deno.serve(async (req) => {
             auditModel = llm.model;
             const validated = finalizeAiSessions(
               llm.sessions,
-              catalog,
+              promptCatalog,
               stretchCatalog,
               catalogById,
               sessionsPerDay,
               constraints.exercisesPerSession,
               constraints.stretchCount > 0 && stretchCatalog.length > 0 ? constraints.stretchCount : 0,
               userContext.experience_level,
+              constraints,
             );
             if (validated.sessions) {
               resultSessions = validated.sessions;
