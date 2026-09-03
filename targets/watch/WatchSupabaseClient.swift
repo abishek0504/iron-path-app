@@ -1,5 +1,23 @@
 import Foundation
 
+private func intFromPayload(_ value: Any?) -> Int? {
+    guard let value else { return nil }
+    if let intValue = value as? Int { return intValue }
+    if let number = value as? NSNumber {
+        let doubleValue = number.doubleValue
+        guard doubleValue.isFinite else { return nil }
+        let rounded = Int(doubleValue.rounded())
+        guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+        return rounded
+    }
+    if let doubleValue = value as? Double, doubleValue.isFinite {
+        let rounded = Int(doubleValue.rounded())
+        guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+        return rounded
+    }
+    return nil
+}
+
 enum WatchSupabaseError: Error, LocalizedError {
     case notAuthenticated
     case http(Int, String)
@@ -234,12 +252,12 @@ actor WatchSupabaseClient {
         for slot in slots {
             var seBody: [String: Any] = [
                 "session_id": sessionId,
-                "sort_order": slot["sort_order"] as? Int ?? 0,
+                "sort_order": intFromPayload(slot["sort_order"]) ?? 0,
             ]
             if let exerciseId = slot["exercise_id"] as? String { seBody["exercise_id"] = exerciseId }
             if let customId = slot["custom_exercise_id"] as? String { seBody["custom_exercise_id"] = customId }
-            if let rest = slot["rest_sec"] as? Int { seBody["rest_sec"] = rest }
-            if let group = slot["superset_group"] as? Int { seBody["superset_group"] = group }
+            if let rest = intFromPayload(slot["rest_sec"]) { seBody["rest_sec"] = rest }
+            if let group = intFromPayload(slot["superset_group"]) { seBody["superset_group"] = group }
 
             guard let seRows = try await postJSON(path: "/rest/v1/v2_session_exercises", body: seBody) as? [[String: Any]],
                   let seId = seRows.first?["id"] as? String else {

@@ -1,6 +1,24 @@
 import Foundation
 import WatchKit
 
+private func intFromPayload(_ value: Any?) -> Int? {
+    guard let value else { return nil }
+    if let intValue = value as? Int { return intValue }
+    if let number = value as? NSNumber {
+        let doubleValue = number.doubleValue
+        guard doubleValue.isFinite else { return nil }
+        let rounded = Int(doubleValue.rounded())
+        guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+        return rounded
+    }
+    if let doubleValue = value as? Double, doubleValue.isFinite {
+        let rounded = Int(doubleValue.rounded())
+        guard abs(doubleValue - Double(rounded)) < 0.0001 else { return nil }
+        return rounded
+    }
+    return nil
+}
+
 /// Owns watch-controlled workout progression, local snapshot, and outbox flush.
 @MainActor
 final class WatchStandaloneEngine: ObservableObject {
@@ -90,12 +108,12 @@ final class WatchStandaloneEngine: ObservableObject {
                 let performed = row["performed_at"] as? String
                 return WatchLocalSet(
                     id: id,
-                    setNumber: row["set_number"] as? Int ?? 1,
-                    reps: row["reps"] as? Int,
+                    setNumber: intFromPayload(row["set_number"]) ?? 1,
+                    reps: intFromPayload(row["reps"]),
                     weight: Self.doubleValue(row["weight"]),
-                    durationSec: row["duration_sec"] as? Int,
-                    rpe: row["rpe"] as? Int,
-                    restSec: row["rest_sec"] as? Int,
+                    durationSec: intFromPayload(row["duration_sec"]),
+                    rpe: intFromPayload(row["rpe"]),
+                    restSec: intFromPayload(row["rest_sec"]),
                     setType: WatchSetType(rawValue: row["set_type"] as? String ?? "normal") ?? .normal,
                     performedAt: performed,
                     completed: performed != nil,
@@ -111,9 +129,9 @@ final class WatchStandaloneEngine: ObservableObject {
                     customExerciseId: customId,
                     name: bundle.names[nameKey] ?? "Exercise",
                     mode: mode,
-                    sortOrder: se["sort_order"] as? Int ?? 0,
-                    supersetGroup: se["superset_group"] as? Int,
-                    restSec: se["rest_sec"] as? Int,
+                    sortOrder: intFromPayload(se["sort_order"]) ?? 0,
+                    supersetGroup: intFromPayload(se["superset_group"]),
+                    restSec: intFromPayload(se["rest_sec"]),
                     sets: sets
                 )
             )
