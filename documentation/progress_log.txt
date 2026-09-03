@@ -5,6 +5,17 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-03 - Five leftover prelaunch fixes (separate commits)
+------------------------------------------------------------------------
+- Adductors heatmap λ: client `MUSCLE_DECAY_LAMBDA.adductors = 0.060` matches `update-muscle-freshness` (`b1f948f`).
+- AI 403 copy: template-not-owned is `forbidden`, not “Session expired”; 401 unchanged (`1893973`).
+- Standalone Watch: JSON integers parsed via `intFromPayload` (NSNumber-safe) (`9532748`).
+- Rest cap: `v2_session_sets.rest_sec` CHECK and add-exercise UI unified to 0–3600 (`ca22d9d`). Migration `20260903120000` not applied live.
+- Avatar purge: `purge_soft_deleted_accounts()` deletes `storage.objects` in `avatars` before `auth.users` (`281365e`). Migration `20260903130000` not applied live.
+- Plan: `documentation/PLAN_2026-09-03_prelaunch_leftover_fixes.md`.
+
+---
+
 2026-03-12 - Planner: "Plan for {Day}" header when showing template with no sessions
 ------------------------------------------------------------------------
 - When sessions are deleted, planner shows template slots (plan). User may think delete failed because exercises still visible. Added "Plan for {day_name}" header to distinguish plan from workout containers. Makes clear these are planned exercises, not the deleted workout.
