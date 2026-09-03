@@ -188,6 +188,11 @@ export default function GenerateAiScreen() {
           case 'auth_error':
             toast.error('Session expired — please log in again to use AI generation');
             break;
+          case 'forbidden':
+            toast.error(
+              "This plan cannot be generated. The template is missing or isn't yours.",
+            );
+            break;
           case 'ai_unavailable': {
             const reason = result.message ?? '';
             if (reason.includes('quota') || reason.includes('HTTP 429')) {
@@ -216,9 +221,13 @@ export default function GenerateAiScreen() {
           case 'no_slots':
             toast.error('No exercises were added. Check the console for details.');
             break;
-          default:
+          case 'unknown':
             toast.error('Failed to generate week');
             break;
+          default: {
+            const _exhaustive: never = result.code;
+            return _exhaustive;
+          }
         }
       } catch (error) {
         if (__DEV__) {

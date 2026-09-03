@@ -38,6 +38,7 @@ export type AiGenerationResult =
         | 'paywall_required'
         | 'quota_exceeded'
         | 'auth_error'
+        | 'forbidden'
         | 'ai_unavailable'
         | 'no_slots'
         | 'unknown';
@@ -129,6 +130,10 @@ export async function executeAiDayGeneration(
 
     if (aiResult.source === 'auth_error') {
       return { ok: false, code: 'auth_error' };
+    }
+
+    if (aiResult.source === 'forbidden') {
+      return { ok: false, code: 'forbidden' };
     }
 
     if (aiResult.source === 'ai_unavailable') {

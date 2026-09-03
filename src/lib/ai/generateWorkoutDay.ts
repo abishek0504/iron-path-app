@@ -86,11 +86,41 @@ export type GenerateAiDayResult =
       source: 'auth_error';
     }
   | {
+      source: 'forbidden';
+    }
+  | {
       // The AI could not produce a valid result (overloaded, busy, timed out,
       // invalid response) or the Edge Function was unreachable.
       source: 'ai_unavailable';
       reason: string;
     };
+
+export type GenerateWorkoutHttpErrorSource =
+  | 'paywall_required'
+  | 'quota_exceeded'
+  | 'auth_error'
+  | 'forbidden';
+
+/**
+ * Maps generate-workout HTTP statuses the client handles as distinct outcomes.
+ * 401 is a logged-out session; 403 is template-not-owned / forbidden.
+ */
+export function mapGenerateWorkoutHttpError(
+  status: number,
+): GenerateWorkoutHttpErrorSource | null {
+  switch (status) {
+    case 402:
+      return 'paywall_required';
+    case 429:
+      return 'quota_exceeded';
+    case 401:
+      return 'auth_error';
+    case 403:
+      return 'forbidden';
+    default:
+      return null;
+  }
+}
 
 interface EdgeResponse {
   sessions?: AiSessionExercise[][];
@@ -203,25 +233,42 @@ export async function generateAiDay(args: {
     if (error) {
       const httpInfo = await tryReadHttpError(error);
 
-      if (httpInfo?.status === 402) {
-        if (__DEV__) {
-          devLog('ai-generate', { action: 'paywall_required' });
-        }
-        return { source: 'paywall_required' };
-      }
+      if (httpInfo) {
+        const mappedSource = mapGenerateWorkoutHttpError(httpInfo.status);
 
-      if (httpInfo?.status === 429) {
-        if (__DEV__) {
-          devLog('ai-generate', { action: 'quota_exceeded' });
+        switch (mappedSource) {
+          case 'paywall_required':
+            if (__DEV__) {
+              devLog('ai-generate', { action: 'paywall_required' });
+            }
+            return { source: 'paywall_required' };
+          case 'quota_exceeded':
+            if (__DEV__) {
+              devLog('ai-generate', { action: 'quota_exceeded' });
+            }
+            return { source: 'quota_exceeded' };
+          case 'auth_error':
+            if (__DEV__) {
+              devLog('ai-generate', { action: 'auth_error', status: httpInfo.status });
+            }
+            return { source: 'auth_error' };
+          case 'forbidden':
+            if (__DEV__) {
+              devLog('ai-generate', {
+                action: 'forbidden',
+                status: httpInfo.status,
+                error: httpInfo.body.error ?? null,
+                code: httpInfo.body.code ?? null,
+              });
+            }
+            return { source: 'forbidden' };
+          case null:
+            break;
+          default: {
+            const _exhaustive: never = mappedSource;
+            return _exhaustive;
+          }
         }
-        return { source: 'quota_exceeded' };
-      }
-
-      if (httpInfo?.status === 401 || httpInfo?.status === 403) {
-        if (__DEV__) {
-          devLog('ai-generate', { action: 'auth_error', status: httpInfo.status });
-        }
-        return { source: 'auth_error' };
       }
 
       if (__DEV__) {
