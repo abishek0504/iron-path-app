@@ -279,11 +279,22 @@ export async function executeAiDayGeneration(
                   aiPlan.sets != null &&
                   (aiPlan.reps != null || aiPlan.duration_sec != null);
                 if (hasAiTargets) {
+                  let resolvedWeight = aiPlan.weight ?? undefined;
+                  if (resolvedWeight == null && aiPlan.reps != null) {
+                    const target = await selectExerciseTargets(
+                      { exerciseId },
+                      userId,
+                      { experience: exp },
+                      0,
+                      mergedExercise ?? undefined,
+                    );
+                    resolvedWeight = target?.weight;
+                  }
                   targetsMap.set(exerciseId, {
                     sets: aiPlan.sets!,
                     reps: aiPlan.reps ?? undefined,
                     duration_sec: aiPlan.duration_sec ?? undefined,
-                    weight: aiPlan.weight ?? undefined,
+                    weight: resolvedWeight,
                   });
                 } else {
                   const target = await selectExerciseTargets(

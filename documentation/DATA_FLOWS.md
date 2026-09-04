@@ -380,14 +380,16 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ Weekly quota: only source='openai' rows in v2_ai_generations (max 40 / 7 days)
    └→ Catalog: fetch 200 allow-listed lifts, hard-filter by dayFocus + avoidMuscles, prompt cap 50
    └→ 400 focus_catalog_too_small if the focused catalog has fewer than 2 strength lifts
+   └→ Context still loaded in parallel with the catalog (independent of focus filter): profile (including current_weight / use_imperial), v2_muscle_freshness last 48h, completed non-warmup session_sets last 60 days
    └→ OpenAI + finalizeAiSessions (up to 2 attempts): drop off-focus / avoided / duplicate names
-   └→ commit_ai_generation RPC: clear_plan_day_for_ai_replace (slots + unperformed sets + empty sessions), then insert unique exercise_ids
+   └→ commit_ai_generation RPC: clear_plan_day_for_ai_replace (slots + unperformed sets + empty sessions; performed sets and completed sessions are left alone), then insert unique exercise_ids
+   └→ resolve_ai_exercise_targets writes sets/reps/weight: LLM weight wins; null LLM weight is filled from prescription × profile bodyweight (20260903150000)
    └→ Audit row only after successful commit (source 'openai')
    └→ Fallback rows logged for observability; do not count toward quota
 
 3. Client consumes result
    └→ If committed: true → invalidate caches only (do not clear; RPC already wrote the new plan)
-   └→ Else (legacy fallback during rollout): clearPlanDayForGeneration, then persist loop in executeAiDayGeneration (skip duplicate exercise_ids)
+   └→ Else (legacy fallback during rollout): clearPlanDayForGeneration, then persist loop in executeAiDayGeneration (skip duplicate exercise_ids). If the LLM omitted weight, selectExerciseTargets supplies it from history or prescription.
    └→ Crash recovery: pending job in SecureStore reuses same generationId on retry
    └→ toast.success('{day} generated')
 ```

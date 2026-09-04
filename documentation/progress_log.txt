@@ -5,6 +5,17 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-03 - AI generate ecosystem check (fatigue, weight, PRs, progress, edits)
+--------------------------------------------------------------------------------
+- Fatigue: generate-workout still queries `v2_muscle_freshness` (48h) and puts it in the prompt. Independent of the focus catalog filter. Test user has 28 freshness rows; none in the last 48h (last trained 2026-01-31), so generate correctly sees `{}`.
+- History / PRs / progress: 60-day completed non-warmup history is still fetched. Test user has 0 sets in that window, 1 completed session, 7 performed sets, and 1 PR (Calf Raise 31.5×10). Clear/replace does not delete performed sets or completed sessions.
+- Weight gap found: LLM left Thursday weights null (no history + “leave null if unsafe”). `resolve_ai_exercise_targets` used that null and never filled prescription. Fixed in `20260903150000_resolve_ai_targets_fill_null_weight.sql` (live `resolve_ai_targets_fill_null_weight`) and client fallback in `executeAiDayGeneration.ts`. Proof at 125 lb intermediate: Bench 156.5, Incline DB 44, OHP 75; explicit LLM weight 185 is kept. Dip / Close-Grip stay 0 (prescription multiplier 0).
+- Manual edits: planner add / reorder / remove / template+session structure edits were not removed. Regenerating a day still replaces that day’s unperformed plan (including prior manual slots on that day).
+- Tests: `dayFocus`, `generateWorkoutDay`, `muscleFreshness`, `workoutFlow`, `ensureSessionsForPlanDay` — 38 passed.
+- Plan: `documentation/PLAN_2026-09-03_ai_generate_ecosystem_check.md`.
+
+---
+
 2026-09-03 - AI generate: replace day + hard day-focus (no Hip Thrust ×7)
 ------------------------------------------------------------------------
 - Root cause: `commit_ai_generation` appended slots, and day focus was prompt-only, so Push + a high-priority Hip Thrust in the top-50 catalog could land (and then multiply across re-generates).
