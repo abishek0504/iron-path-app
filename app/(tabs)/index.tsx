@@ -32,10 +32,12 @@ import { useUIStore } from '../../src/stores/uiStore';
 import { TourTarget } from '../../src/components/tour/TourTarget';
 import { useRegisterTourScroll } from '../../src/components/tour/TourScroll';
 import {
-  deleteSessionWithExercises,
   materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
+import { resetSessionProgress } from '../../src/lib/supabase/queries/workouts_helpers';
+import { clearWorkoutHealthBuffer } from '../../src/lib/health/workoutHealthBuffer';
+import { clearWorkoutContext } from '../../modules/watch-connectivity';
 import {
   getTemplateWithDaysAndSlotsCached,
   getUserTemplatesCached,
@@ -791,22 +793,20 @@ export default function WorkoutTab() {
         return;
       }
 
-      // Reset only the selected workout (multi-workout-per-day)
+      // Clear logged progress in place; never delete the session, so today-only
+      // exercises and sessions on plan days without template slots survive.
+      const targetContext = { experience: profile?.experience_level || 'beginner' };
+      const sessionIdsToReset: string[] = [];
+
       if (selectedSession?.id && selectedSession.status === 'active') {
-        const { error: deleteError } = await deleteSessionWithExercises(userId, selectedSession.id);
-        if (deleteError && __DEV__) {
-          devError('workout-tab', deleteError, { action: 'handleResetWorkout', sessionId: selectedSession.id });
-        } else {
-          invalidateSessionsInRangeForUser(userId);
-          invalidateWorkoutStatsCache(userId);
-        }
+        sessionIdsToReset.push(selectedSession.id);
       } else {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
-        const { data: sessionsToDelete } = await supabase
+        const { data: sessionsToReset } = await supabase
           .from('v2_workout_sessions')
           .select('id')
           .eq('user_id', userId)
@@ -816,13 +816,41 @@ export default function WorkoutTab() {
           .gte('started_at', today.toISOString())
           .lt('started_at', tomorrow.toISOString());
 
-        for (const s of sessionsToDelete || []) {
-          await deleteSessionWithExercises(userId, s.id);
+        for (const s of sessionsToReset || []) {
+          sessionIdsToReset.push(s.id);
         }
-        if ((sessionsToDelete?.length ?? 0) > 0) {
-          invalidateSessionsInRangeForUser(userId);
-          invalidateWorkoutStatsCache(userId);
+      }
+
+      let exerciseCount = 0;
+      let deletedSetCount = 0;
+      let prefilledExerciseCount = 0;
+
+      for (const sessionId of sessionIdsToReset) {
+        const result = await resetSessionProgress(userId, sessionId, targetContext);
+        if (result.error) {
+          toast.error('Failed to reset workout');
+          return;
         }
+        exerciseCount += result.exerciseCount;
+        deletedSetCount += result.deletedSetCount;
+        prefilledExerciseCount += result.prefilledExerciseCount;
+        clearWorkoutHealthBuffer(sessionId);
+      }
+
+      if (sessionIdsToReset.length > 0) {
+        void clearWorkoutContext();
+        invalidateSessionsInRangeForUser(userId);
+        invalidateWorkoutStatsCache(userId);
+      }
+
+      if (__DEV__) {
+        devLog('workout-tab', {
+          action: 'handleResetWorkout:done',
+          sessionCount: sessionIdsToReset.length,
+          exerciseCount,
+          deletedSetCount,
+          prefilledExerciseCount,
+        });
       }
 
       setShowResetModal(false);

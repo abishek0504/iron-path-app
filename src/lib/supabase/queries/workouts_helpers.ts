@@ -567,3 +567,165 @@ export async function applySmartRefresh(
   }
   return true;
 }
+
+export interface ResetSessionProgressResult {
+  error: Error | null;
+  exerciseCount: number;
+  deletedSetCount: number;
+  prefilledExerciseCount: number;
+}
+
+/**
+ * Reset a session back to its "not started" state without destroying it.
+ * Session and session-exercise rows are preserved so routine, today-only, and
+ * mid-workout additions all survive; only logged/prefilled sets are replaced.
+ */
+export async function resetSessionProgress(
+  userId: string,
+  sessionId: string,
+  context: TargetSelectionContext
+): Promise<ResetSessionProgressResult> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'resetSessionProgress', userId, sessionId });
+  }
+
+  const failure = (error: Error, action: string): ResetSessionProgressResult => {
+    if (__DEV__) devError('workout-query', error, { action, sessionId });
+    return { error, exerciseCount: 0, deletedSetCount: 0, prefilledExerciseCount: 0 };
+  };
+
+  try {
+    const { data: session, error: sessionFetchError } = await supabase
+      .from('v2_workout_sessions')
+      .select('id, started_at')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (sessionFetchError) {
+      return failure(sessionFetchError, 'resetSessionProgress_sessionFetch');
+    }
+    if (!session) {
+      return failure(new Error('Session not found'), 'resetSessionProgress_sessionMissing');
+    }
+
+    const { data: sessionExercises, error: exercisesError } = await supabase
+      .from('v2_session_exercises')
+      .select('id, exercise_id, custom_exercise_id')
+      .eq('session_id', sessionId)
+      .order('sort_order', { ascending: true });
+
+    if (exercisesError) {
+      return failure(exercisesError, 'resetSessionProgress_exercisesFetch');
+    }
+
+    const exercises = sessionExercises ?? [];
+    let deletedSetCount = 0;
+
+    if (exercises.length > 0) {
+      const { data: deletedSets, error: setsDeleteError } = await supabase
+        .from('v2_session_sets')
+        .delete()
+        .in(
+          'session_exercise_id',
+          exercises.map((se) => se.id)
+        )
+        .select('id');
+
+      if (setsDeleteError) {
+        return failure(setsDeleteError, 'resetSessionProgress_setsDelete');
+      }
+      deletedSetCount = deletedSets?.length ?? 0;
+    }
+
+    const targetsMap = new Map<
+      string,
+      { sets: number; reps?: number; duration_sec?: number; weight?: number }
+    >();
+
+    for (const se of exercises) {
+      const exerciseKey = se.exercise_id || se.custom_exercise_id;
+      if (!exerciseKey || targetsMap.has(exerciseKey)) continue;
+
+      const target = await selectExerciseTargets(
+        {
+          exerciseId: se.exercise_id || undefined,
+          customExerciseId: se.custom_exercise_id || undefined,
+        },
+        userId,
+        context,
+        0
+      );
+      if (target) {
+        targetsMap.set(exerciseKey, {
+          sets: target.sets,
+          reps: target.reps,
+          duration_sec: target.duration_sec,
+          weight: target.weight,
+        });
+      }
+    }
+
+    if (exercises.length > 0 && targetsMap.size > 0) {
+      await prefillSessionSets(sessionId, exercises, targetsMap);
+    }
+
+    const { error: healthDeleteError } = await supabase
+      .from('v2_session_health_metrics')
+      .delete()
+      .eq('session_id', sessionId);
+
+    if (healthDeleteError) {
+      return failure(healthDeleteError, 'resetSessionProgress_healthDelete');
+    }
+
+    // Keep started_at when the session belongs to an earlier calendar day so the
+    // reset session stays inside its own local-day bounds.
+    const { startIso, endIsoExclusive } = getLocalDayBoundsIso();
+    const startedAt = session.started_at as string | null;
+    const isStartedToday =
+      !!startedAt && startedAt >= startIso && startedAt < endIsoExclusive;
+
+    const { error: updateError } = await supabase
+      .from('v2_workout_sessions')
+      .update({
+        status: 'active',
+        completed_at: null,
+        control_device: null,
+        ...(isStartedToday ? { started_at: new Date().toISOString() } : {}),
+      })
+      .eq('id', sessionId)
+      .eq('user_id', userId);
+
+    if (updateError) {
+      return failure(updateError, 'resetSessionProgress_sessionUpdate');
+    }
+
+    const prefilledExerciseCount = exercises.filter((se) => {
+      const key = se.exercise_id || se.custom_exercise_id;
+      return !!key && targetsMap.has(key);
+    }).length;
+
+    if (__DEV__) {
+      devLog('workout-query', {
+        action: 'resetSessionProgress_done',
+        sessionId,
+        exerciseCount: exercises.length,
+        deletedSetCount,
+        prefilledExerciseCount,
+      });
+    }
+
+    return {
+      error: null,
+      exerciseCount: exercises.length,
+      deletedSetCount,
+      prefilledExerciseCount,
+    };
+  } catch (error) {
+    return failure(
+      error instanceof Error ? error : new Error(String(error)),
+      'resetSessionProgress_exception'
+    );
+  }
+}
