@@ -1,4 +1,4 @@
-import type { AnalyticsSetRow, ExerciseMeta, TrendGranularity, TrendPoint } from './types';
+import type { AnalyticsSetRow, DateRange, ExerciseMeta, TrendGranularity, TrendPoint } from './types';
 import { aggregateIntoBuckets } from './dateBuckets';
 
 export function isWorkingSet(set: AnalyticsSetRow): boolean {
@@ -69,9 +69,11 @@ export function muscleGroupVolumeSplit(
 export function buildVolumeTrend(
   sessions: { completedAt: string; volumeLbs: number }[],
   granularity: TrendGranularity,
+  range?: DateRange,
 ): TrendPoint[] {
   return aggregateIntoBuckets(
     sessions.map((s) => ({ dateIso: s.completedAt, value: s.volumeLbs })),
     granularity,
+    range,
   );
 }

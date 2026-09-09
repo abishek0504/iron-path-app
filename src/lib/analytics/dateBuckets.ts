@@ -39,6 +39,63 @@ export function getRangeForPreset(preset: '4w' | '12w' | '6mo' | 'ytd'): DateRan
   return { start, end };
 }
 
+export function startOfMondayWeek(date: Date): Date {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const day = start.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  start.setDate(start.getDate() + diff);
+  return start;
+}
+
+export function enumerateBucketKeys(range: DateRange, granularity: TrendGranularity): string[] {
+  const keys: string[] = [];
+  if (granularity === 'day') {
+    const cursor = new Date(range.start);
+    cursor.setHours(0, 0, 0, 0);
+    const end = new Date(range.end);
+    end.setHours(0, 0, 0, 0);
+    while (cursor <= end) {
+      keys.push(toLocalDateKey(cursor.toISOString()));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return keys;
+  }
+  if (granularity === 'week') {
+    const cursor = startOfMondayWeek(range.start);
+    const end = startOfMondayWeek(range.end);
+    while (cursor <= end) {
+      keys.push(toWeekKey(cursor.toISOString()));
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return keys;
+  }
+  const cursor = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
+  const end = new Date(range.end.getFullYear(), range.end.getMonth(), 1);
+  while (cursor <= end) {
+    keys.push(toMonthKey(cursor.toISOString()));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return keys;
+}
+
+export function fillEmptyBuckets(
+  points: TrendPoint[],
+  range: DateRange,
+  granularity: TrendGranularity,
+): TrendPoint[] {
+  const present = new Map(points.map((point) => [point.bucketKey, point]));
+  return enumerateBucketKeys(range, granularity).map((bucketKey) => {
+    return (
+      present.get(bucketKey) ?? {
+        bucketKey,
+        label: formatBucketLabel(bucketKey, granularity),
+        value: 0,
+      }
+    );
+  });
+}
+
 /** ISO week key: YYYY-Www (Monday-based week). */
 export function toWeekKey(iso: string): string {
   const d = new Date(iso);
@@ -88,17 +145,19 @@ export function formatBucketLabel(bucketKey: string, granularity: TrendGranulari
 export function aggregateIntoBuckets(
   items: { dateIso: string; value: number }[],
   granularity: TrendGranularity,
+  range?: DateRange,
 ): TrendPoint[] {
   const map = new Map<string, number>();
   for (const item of items) {
     const key = bucketKeyForDate(item.dateIso, granularity);
     map.set(key, (map.get(key) ?? 0) + item.value);
   }
-  return Array.from(map.entries())
+  const points = Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([bucketKey, value]) => ({
       bucketKey,
       label: formatBucketLabel(bucketKey, granularity),
       value,
     }));
+  return range ? fillEmptyBuckets(points, range, granularity) : points;
 }

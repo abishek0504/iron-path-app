@@ -16,6 +16,7 @@ interface SmartRefreshConfirmationSheetProps {
   visible: boolean;
   plan: SmartRefreshPlan | null;
   onClose: () => void;
+  onClosed?: () => void;
   onApply: () => void;
   applying: boolean;
 }
@@ -24,6 +25,7 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
   visible,
   plan,
   onClose,
+  onClosed,
   onApply,
   applying,
 }) => {
@@ -74,6 +76,7 @@ export const SmartRefreshConfirmationSheet: React.FC<SmartRefreshConfirmationShe
     <BottomSheet
       visible={visible}
       onClose={onClose}
+      onClosed={onClosed}
       title="Plan Update Available"
       height="70%"
     >

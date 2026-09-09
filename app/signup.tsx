@@ -17,6 +17,7 @@ import { LegalLinks } from '../src/components/ui/LegalLinks';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { Button } from '../src/components/ui/Button';
 import { mapAuthError } from '../src/lib/auth/authErrors';
+import { authCallbackRedirectTo } from '../src/lib/auth/authRedirect';
 
 export default function Signup() {
   const router = useRouter();
@@ -134,6 +135,9 @@ export default function Signup() {
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
+        options: {
+          emailRedirectTo: authCallbackRedirectTo('signup'),
+        },
       });
 
       if (error) {

@@ -17,6 +17,7 @@ import {
   TextInput,
   ScrollView,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   Platform,
@@ -65,6 +66,8 @@ import { invalidateMuscleFreshnessCache } from '../../../src/lib/cache/muscleFre
 import { getTemplateSlotsForDay } from '../../../src/lib/supabase/queries/templates';
 import { supabase } from '../../../src/lib/supabase/client';
 import { useUserStore } from '../../../src/stores/userStore';
+import { useWorkoutSessionStore } from '../../../src/stores/workoutSessionStore';
+import { resolveUseImperial } from '../../../src/lib/units/resolveImperial';
 import { getUserProfileCached, invalidateWorkoutStatsCache } from '../../../src/lib/cache/dashboardStatsCache';
 import { isUuid } from '../../../src/lib/utils/uuid';
 import { useUIStore } from '../../../src/stores/uiStore';
@@ -75,13 +78,11 @@ import { devError, devLog } from '../../../src/lib/utils/logger';
 import { selectExerciseTargets } from '../../../src/lib/engine/targetSelection';
 import { detectSessionStaleness } from '../../../src/lib/engine/sessionStaleness';
 import {
-  getSmartRefreshPlan,
   applySmartRefresh,
   applyStructureEditToSession,
+  getSmartRefreshPlan,
   setSessionSupersetGroup,
-  type SmartRefreshPlan,
 } from '../../../src/lib/supabase/queries/workouts_helpers';
-import { SmartRefreshConfirmationSheet } from '../../../src/components/ui/SmartRefreshConfirmationSheet';
 import { ConfirmDialog } from '../../../src/components/ui/ConfirmDialog';
 import { Button } from '../../../src/components/ui/Button';
 import { useModal } from '../../../src/hooks/useModal';
@@ -100,6 +101,8 @@ import {
   type WatchWorkoutContext,
 } from '../../../modules/watch-connectivity';
 import { REST_EXTEND_SEC } from '../../../src/lib/workout/restConstants';
+import { suggestExerciseSubstitutions } from '../../../src/lib/engine/exerciseSubstitution';
+import { getBundledMasterExercises } from '../../../src/data/bundledCatalog';
 import { formatPreviousPerformanceLabel } from '../../../src/lib/workout/formatPreviousPerformance';
 import {
   appendHeartRateSample,
@@ -208,6 +211,8 @@ export default function ActiveWorkoutScreen() {
 
   // Weight suggestion
   const [suggestedWeight, setSuggestedWeight] = useState<string>('');
+  const [liveWeight, setLiveWeight] = useState('');
+  const [liveReps, setLiveReps] = useState('');
 
   // Previous performance for the current exercise (Hevy-style "last time" prefill context)
   const [prevPerformance, setPrevPerformance] = useState<PreviousPerformance | null>(null);
@@ -227,13 +232,12 @@ export default function ActiveWorkoutScreen() {
     biomechanical: boolean;
     target: boolean;
   } | null>(null);
-  const [showRefreshSheet, setShowRefreshSheet] = useState(false);
-  const [refreshPlan, setRefreshPlan] = useState<SmartRefreshPlan | null>(null);
   const [isApplyingRefresh, setIsApplyingRefresh] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [liveHeartRateBpm, setLiveHeartRateBpm] = useState<number | null>(null);
   const [restEndsAtEpoch, setRestEndsAtEpoch] = useState<number | null>(null);
   const [restStartedAtEpoch, setRestStartedAtEpoch] = useState<number | null>(null);
+  const [exerciseTimerPrepEndsAt, setExerciseTimerPrepEndsAt] = useState<number | null>(null);
 
   // Workout overflow menu (Add exercise / Remove current exercise / Abandon workout)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
@@ -242,6 +246,8 @@ export default function ActiveWorkoutScreen() {
   const [isMutatingExercises, setIsMutatingExercises] = useState(false);
   const [isAbandoning, setIsAbandoning] = useState(false);
   const modal = useModal();
+  const patchBottomSheetProps = useUIStore((s) => s.patchBottomSheetProps);
+  const activeBottomSheet = useUIStore((s) => s.activeBottomSheet);
   const loadGenRef = useRef(0);
   const completingSetRef = useRef(false);
   const screenMountedRef = useRef(true);
@@ -252,6 +258,11 @@ export default function ActiveWorkoutScreen() {
       screenMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeBottomSheet !== 'smartRefresh') return;
+    patchBottomSheetProps({ applying: isApplyingRefresh });
+  }, [activeBottomSheet, isApplyingRefresh, patchBottomSheetProps]);
 
   useEffect(() => {
     if (profile?.id) return;
@@ -331,6 +342,7 @@ export default function ActiveWorkoutScreen() {
   // The watch renders whatever state the phone pushes; completion taps come
   // back as events and reuse the exact same handler as the on-screen button.
   const handleCompleteSetRef = useRef<(elapsedDurationSec?: number, rpeOverride?: number) => void>(() => {});
+  const savingLogsRef = useRef(false);
   const workoutPhaseRef = useRef(workoutPhase);
   workoutPhaseRef.current = workoutPhase;
   const sessionIdRef = useRef(sessionId);
@@ -355,7 +367,40 @@ export default function ActiveWorkoutScreen() {
   const setExerciseTimerEnd = (endsAtEpochSec: number | null) => {
     exerciseTimerEndsAtRef.current = endsAtEpochSec;
     setExerciseTimerEndsAt(endsAtEpochSec);
+    if (endsAtEpochSec == null) setExerciseTimerPrepEndsAt(null);
   };
+
+  useEffect(() => {
+    if (!sessionId || loading) return;
+    useWorkoutSessionStore.getState().persist({
+      sessionId,
+      workoutPhase,
+      currentExerciseIndex,
+      restEndsAtEpoch,
+      restStartedAtEpoch,
+      liveWeight,
+      liveReps,
+      currentSetRPEs,
+      currentSetRIRs,
+      exerciseTimerPhase:
+        exerciseTimerEndsAt != null ? 'hold' : exerciseTimerPrepEndsAt != null ? 'prep' : 'idle',
+      exerciseTimerPrepEndsAt,
+      exerciseTimerHoldEndsAt: exerciseTimerEndsAt,
+    });
+  }, [
+    sessionId,
+    loading,
+    workoutPhase,
+    currentExerciseIndex,
+    restEndsAtEpoch,
+    restStartedAtEpoch,
+    liveWeight,
+    liveReps,
+    currentSetRPEs,
+    currentSetRIRs,
+    exerciseTimerEndsAt,
+    exerciseTimerPrepEndsAt,
+  ]);
 
   const advanceFromRestRef = useRef<() => void>(() => {});
   const extendRestByRef = useRef<(seconds: number) => void>(() => {});
@@ -557,7 +602,7 @@ export default function ActiveWorkoutScreen() {
       return;
     }
 
-    const unitsLabel = profile?.use_imperial ? 'lbs' : 'kg';
+    const unitsLabel = resolveUseImperial(profile?.use_imperial) ? 'lbs' : 'kg';
     const formatSetTarget = (set?: SetData): string => {
       if (!set) return '';
       if (exercise.mode === 'timed') {
@@ -586,7 +631,7 @@ export default function ActiveWorkoutScreen() {
       const lastTimeText = formatPreviousPerformanceLabel(prevPerformance, {
         mode: exercise.mode,
         setNumber: set?.set_number,
-        useImperial: profile?.use_imperial,
+        useImperial: resolveUseImperial(profile?.use_imperial),
       });
       pushWatchContext({
         active: true,
@@ -740,29 +785,38 @@ export default function ActiveWorkoutScreen() {
       const metaById = new Map(mergedList.map((m) => [m.id, m]));
 
       const exercisesWithMeta: Exercise[] = [];
+      let missingCatalogCount = 0;
       for (const ex of sessionData.exercises) {
         const key = ex.exercise_id || ex.custom_exercise_id;
         const meta = key ? metaById.get(key) : null;
-        if (meta) {
-          exercisesWithMeta.push({
-            id: ex.id,
-            name: meta.name,
-            exercise_id: ex.exercise_id,
-            custom_exercise_id: ex.custom_exercise_id,
-            mode: meta.is_timed ? 'timed' : 'reps',
-            is_stretch: meta.is_stretch === true,
-            notes: ex.notes,
-            superset_group: ex.superset_group ?? null,
-            rest_sec: ex.rest_sec ?? null,
-            setup_buffer_sec: meta.setup_buffer_sec ?? 0,
-            avg_time_per_set_sec: meta.avg_time_per_set_sec ?? 0,
-            is_unilateral: meta.is_unilateral === true,
-            primary_muscles: meta.primary_muscles ?? [],
-            description: meta.description,
-            demo_video_url: meta.demo_video_url,
-            sets: ex.sets.map((s) => ({ ...s, completed: !!s.performed_at })),
-          });
+        if (!meta) {
+          missingCatalogCount += 1;
         }
+        exercisesWithMeta.push({
+          id: ex.id,
+          name: meta?.name ?? 'Unavailable exercise',
+          exercise_id: ex.exercise_id,
+          custom_exercise_id: ex.custom_exercise_id,
+          mode: meta?.is_timed ? 'timed' : 'reps',
+          is_stretch: meta?.is_stretch === true,
+          notes: ex.notes,
+          superset_group: ex.superset_group ?? null,
+          rest_sec: ex.rest_sec ?? null,
+          setup_buffer_sec: meta?.setup_buffer_sec ?? 0,
+          avg_time_per_set_sec: meta?.avg_time_per_set_sec ?? 0,
+          is_unilateral: meta?.is_unilateral === true,
+          primary_muscles: meta?.primary_muscles ?? [],
+          description: meta?.description,
+          demo_video_url: meta?.demo_video_url,
+          sets: ex.sets.map((s) => ({ ...s, completed: !!s.performed_at })),
+        });
+      }
+      if (missingCatalogCount > 0) {
+        toast.error(
+          missingCatalogCount === 1
+            ? 'One exercise is missing from the catalog'
+            : `${missingCatalogCount} exercises are missing from the catalog`,
+        );
       }
 
       setExercises(exercisesWithMeta);
@@ -839,6 +893,41 @@ export default function ActiveWorkoutScreen() {
         const { devLog } = require('../../../src/lib/utils/logger');
         devLog('workout-active', { action: 'loadActiveSession_done', exerciseCount: exercisesWithMeta.length });
       }
+
+      const persisted = await useWorkoutSessionStore.getState().hydrate();
+      if (!isStale() && persisted?.sessionId === session.id) {
+        const nowSec = Date.now() / 1000;
+        setLiveWeight(persisted.liveWeight);
+        setLiveReps(persisted.liveReps);
+        if (persisted.currentSetRPEs.length > 0) setCurrentSetRPEs(persisted.currentSetRPEs);
+        if (persisted.currentSetRIRs.length > 0) setCurrentSetRIRs(persisted.currentSetRIRs);
+        if (
+          persisted.currentExerciseIndex >= 0 &&
+          persisted.currentExerciseIndex < exercisesWithMeta.length
+        ) {
+          setCurrentExerciseIndex(persisted.currentExerciseIndex);
+        }
+        if (persisted.exerciseTimerPrepEndsAt != null && persisted.exerciseTimerPrepEndsAt > nowSec) {
+          setExerciseTimerPrepEndsAt(persisted.exerciseTimerPrepEndsAt);
+        }
+        if (persisted.exerciseTimerHoldEndsAt != null && persisted.exerciseTimerHoldEndsAt > nowSec) {
+          setExerciseTimerEnd(persisted.exerciseTimerHoldEndsAt);
+        }
+        const phase = persisted.workoutPhase;
+        if (phase.type === 'rest' && persisted.restEndsAtEpoch != null && persisted.restEndsAtEpoch > nowSec) {
+          setRestEndsAtEpoch(persisted.restEndsAtEpoch);
+          setRestStartedAtEpoch(persisted.restStartedAtEpoch);
+          setWorkoutPhase(phase);
+        } else if (phase.type === 'execution') {
+          const persistedExercise = exercisesWithMeta[persisted.currentExerciseIndex];
+          const persistedSet = persistedExercise?.sets[phase.setIndex];
+          if (persistedSet && !persistedSet.completed) {
+            setWorkoutPhase(phase);
+          }
+        } else if (phase.type === 'timedSetRpe' || phase.type === 'logging') {
+          setWorkoutPhase(phase);
+        }
+      }
     } catch (error) {
       if (isStale()) return;
       if (__DEV__) {
@@ -869,7 +958,7 @@ export default function ActiveWorkoutScreen() {
       firstSet.reps,
       firstSet.duration_sec,
       profile?.experience_level,
-      profile?.use_imperial ?? true
+      resolveUseImperial(profile?.use_imperial)
     );
 
     // Set suggested weight for display (use existing set weight or suggestion)
@@ -880,6 +969,17 @@ export default function ActiveWorkoutScreen() {
       setSuggestedWeight(suggestion.weight === 0 ? 'Bodyweight' : suggestion.weight.toString());
     } else {
       setSuggestedWeight('');
+    }
+    const currentSet = exercise.sets[workoutPhase.type === 'execution' ? workoutPhase.setIndex : 0];
+    if (currentSet) {
+      setLiveWeight(
+        currentSet.weight != null
+          ? String(currentSet.weight)
+          : suggestion.weight != null
+            ? String(suggestion.weight)
+            : '',
+      );
+      setLiveReps(currentSet.reps != null ? String(currentSet.reps) : '');
     }
     
     // Pre-fill all sets for batch logging.
@@ -985,6 +1085,34 @@ export default function ActiveWorkoutScreen() {
       toast.error('Failed to recalculate targets');
     } finally {
       setIsRecalculatingTargets(false);
+    }
+  };
+
+  const handleApplySmartRefresh = async () => {
+    if (!sessionId || !sessionTemplateId || !sessionDayName || !userId) return;
+    setIsApplyingRefresh(true);
+    try {
+      const success = await applySmartRefresh(
+        sessionId,
+        sessionTemplateId,
+        sessionDayName,
+        userId,
+        profile?.experience_level || 'beginner'
+      );
+      if (success) {
+        toast.success('Workout updated from plan');
+        await loadActiveSession();
+        modal.closeSheet();
+      } else {
+        toast.error('Failed to apply updates');
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error('Smart Refresh apply error:', error);
+      }
+      toast.error('Failed to apply updates');
+    } finally {
+      setIsApplyingRefresh(false);
     }
   };
 
@@ -1096,14 +1224,19 @@ export default function ActiveWorkoutScreen() {
       const persistPromise =
         exercise.mode === 'reps'
           ? (() => {
-              const hasValidDefaults =
-                currentSet.weight !== null &&
-                currentSet.weight !== undefined &&
-                currentSet.reps !== null &&
-                currentSet.reps !== undefined;
+              const draftedWeight = parseFloat(liveWeight);
+              const draftedReps = parseInt(liveReps, 10);
+              const weight =
+                Number.isFinite(draftedWeight) && draftedWeight >= 0
+                  ? draftedWeight
+                  : currentSet.weight ?? 0;
+              const reps =
+                Number.isFinite(draftedReps) && draftedReps > 0
+                  ? draftedReps
+                  : currentSet.reps || 0;
               return markSetComplete(currentSet.id, {
-                weight: hasValidDefaults ? currentSet.weight! : 0,
-                reps: hasValidDefaults ? currentSet.reps! : (currentSet.reps || 0),
+                weight,
+                reps,
                 ...intensityWrite,
                 set_type: currentSet.set_type ?? 'normal',
               });
@@ -1126,20 +1259,20 @@ export default function ActiveWorkoutScreen() {
               });
             })();
 
-      void persistPromise.then((ok) => {
-        if (ok === false) {
-          const rolledSetId = currentSet.id;
-          setExercises((prev) =>
-            prev.map((ex) => ({
-              ...ex,
-              sets: ex.sets.map((s) =>
-                s.id === rolledSetId ? { ...s, completed: false } : s
-              ),
-            }))
-          );
-          toast.error('Failed to save set');
-        }
-      });
+      const persistOk = await persistPromise;
+      if (persistOk === false) {
+        const rolledSetId = currentSet.id;
+        setExercises((prev) =>
+          prev.map((ex) => ({
+            ...ex,
+            sets: ex.sets.map((s) =>
+              s.id === rolledSetId ? { ...s, completed: false } : s
+            ),
+          }))
+        );
+        toast.error('Failed to save set');
+        return;
+      }
     }
 
     setExerciseTimerEnd(null);
@@ -1212,7 +1345,9 @@ export default function ActiveWorkoutScreen() {
 
   const handleSaveAndContinue = async () => {
     const exercise = exercises[currentExerciseIndex];
-    if (!exercise) return;
+    if (!exercise || savingLogsRef.current) return;
+    savingLogsRef.current = true;
+    try {
 
     const hasErrors = setLogs.some(log => {
       if (exercise.mode === 'reps') {
@@ -1328,6 +1463,9 @@ export default function ActiveWorkoutScreen() {
         setWorkoutPhase({ type: 'execution', setIndex: firstIncompleteSet });
       }
     }
+    } finally {
+      savingLogsRef.current = false;
+    }
   };
 
   const handleCompleteWorkout = async () => {
@@ -1346,8 +1484,21 @@ export default function ActiveWorkoutScreen() {
       useUIStore.getState().setWorkoutNeedsRefetch(true);
       void clearWorkoutContext();
       if (sessionId) clearWorkoutHealthBuffer(sessionId);
+      useWorkoutSessionStore.getState().clear(sessionId);
       hapticSuccess();
-      toast.success('Workout completed!');
+      const { data: sessionPrs } = await supabase
+        .from('v2_user_exercise_prs')
+        .select('pr_type')
+        .eq('session_id', sessionId);
+      if (sessionPrs && sessionPrs.length > 0) {
+        toast.success(
+          sessionPrs.length === 1
+            ? 'New personal record!'
+            : `${sessionPrs.length} new personal records!`,
+        );
+      } else {
+        toast.success('Workout completed!');
+      }
       tryRandomPaywallFromOutside('finish_workout');
       goBack();
     } else {
@@ -1543,7 +1694,17 @@ export default function ActiveWorkoutScreen() {
       toast.error('Cannot replace an exercise with completed sets');
       return;
     }
+    const catalog = getBundledMasterExercises().map((item) => ({
+      id: item.id,
+      primary_muscles: item.primary_muscles ?? [],
+    }));
+    const currentId = target.exercise_id ?? target.custom_exercise_id ?? target.id;
+    const suggestedIds = suggestExerciseSubstitutions(
+      { id: currentId, primary_muscles: target.primary_muscles ?? [] },
+      catalog,
+    ).map((item) => item.id);
     modal.openSheet('exercisePicker', {
+      suggestedIds,
       onSelect: (exercise: { id: string }) => {
         modal.closeSheet();
         if (exercise?.id) {
@@ -1659,6 +1820,7 @@ export default function ActiveWorkoutScreen() {
       }
       void clearWorkoutContext();
       clearWorkoutHealthBuffer(sessionId);
+      useWorkoutSessionStore.getState().clear(sessionId);
       setShowAbandonConfirm(false);
       toast.success('Workout abandoned');
       goBack();
@@ -1694,7 +1856,7 @@ export default function ActiveWorkoutScreen() {
       : parseFloat(setLogs.find((log) => log.setType !== 'warmup')?.weight ?? '');
     setIsMutatingExercises(true);
     try {
-      const result = await insertWarmupSets(exercise.id, workingWeight, profile?.use_imperial ?? true);
+      const result = await insertWarmupSets(exercise.id, workingWeight, resolveUseImperial(profile?.use_imperial));
       if (result.ok) {
         toast.success(`Added ${result.warmupCount} warmup sets`);
         await loadActiveSession();
@@ -1757,7 +1919,7 @@ export default function ActiveWorkoutScreen() {
       }))
       .filter((ex) => ex.sets > 0),
   );
-  const unitsLabel = profile?.use_imperial ? 'lbs' : 'kg';
+  const unitsLabel = resolveUseImperial(profile?.use_imperial) ? 'lbs' : 'kg';
   const shareStats: ShareWorkoutStats = (() => {
     const workingSets = exercises.flatMap((ex) =>
       ex.sets
@@ -1803,6 +1965,10 @@ export default function ActiveWorkoutScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -1810,6 +1976,8 @@ export default function ActiveWorkoutScreen() {
             goBack();
           }} 
           style={styles.headerButton}
+          accessibilityRole="button"
+          accessibilityLabel="Close workout"
         >
           <ArrowLeft size={24} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -1842,8 +2010,13 @@ export default function ActiveWorkoutScreen() {
                       sessionDayName,
                       userId
                     );
-                    setRefreshPlan(plan ?? null);
-                    setShowRefreshSheet(true);
+                    modal.openSheet('smartRefresh', {
+                      plan: plan ?? null,
+                      applying: false,
+                      onApply: () => {
+                        void handleApplySmartRefresh();
+                      },
+                    });
                   } else {
                     await handleRecalculateTargets();
                   }
@@ -1879,7 +2052,7 @@ export default function ActiveWorkoutScreen() {
       >
         {workoutPhase.type === 'rest' && restEndsAtEpoch != null ? (
           <View style={styles.restContainer}>
-            <Text style={[styles.exerciseName, styles.restExerciseName]}>{currentExercise.name}</Text>
+            <Text style={[styles.exerciseName, styles.restExerciseName]} numberOfLines={2} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
             <RestTimer
               endsAtEpoch={restEndsAtEpoch}
               startedAtEpoch={restStartedAtEpoch ?? undefined}
@@ -1915,7 +2088,7 @@ export default function ActiveWorkoutScreen() {
         </View>
 
         {/* Exercise Name */}
-        <Text style={styles.exerciseName}>{currentExercise.name}</Text>
+        <Text style={styles.exerciseName} numberOfLines={2} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
 
         {/* Superset badge */}
         {currentExercise.superset_group != null && (() => {
@@ -1963,19 +2136,48 @@ export default function ActiveWorkoutScreen() {
               <Text style={styles.targetValue}>
                 {currentExercise.mode === 'timed'
                   ? `${currentExercise.sets[workoutPhase.setIndex]?.duration_sec || 0} sec hold`
-                  : `${currentExercise.sets[workoutPhase.setIndex]?.reps || 0} reps${suggestedWeight ? ` @ ${suggestedWeight} ${profile?.use_imperial ? 'lbs' : 'kg'}` : ''}`}
+                  : `${currentExercise.sets[workoutPhase.setIndex]?.reps || 0} reps${
+                      suggestedWeight
+                        ? suggestedWeight === 'Bodyweight'
+                          ? ' @ Bodyweight'
+                          : ` @ ${suggestedWeight} ${resolveUseImperial(profile?.use_imperial) ? 'lbs' : 'kg'}`
+                        : ''
+                    }`}
               </Text>
+              {currentExercise.mode === 'reps' && !currentExercise.is_stretch ? (
+                <View style={styles.logInputRow}>
+                  <TextInput
+                    style={styles.logInput}
+                    value={liveWeight}
+                    onChangeText={setLiveWeight}
+                    keyboardType="decimal-pad"
+                    placeholder="Weight"
+                    placeholderTextColor={colors.textMuted}
+                    accessibilityLabel="Weight"
+                  />
+                  <TextInput
+                    style={styles.logInput}
+                    value={liveReps}
+                    onChangeText={setLiveReps}
+                    keyboardType="number-pad"
+                    placeholder="Reps"
+                    placeholderTextColor={colors.textMuted}
+                    accessibilityLabel="Reps"
+                  />
+                </View>
+              ) : null}
               {(() => {
                 const prevLabel = formatPreviousPerformanceLabel(prevPerformance, {
                   mode: currentExercise.mode,
                   setNumber: currentExercise.sets[workoutPhase.setIndex]?.set_number,
-                  useImperial: profile?.use_imperial,
+                  useImperial: resolveUseImperial(profile?.use_imperial),
                 });
                 if (!prevLabel) return null;
                 return <Text style={styles.prevPerformanceText}>Last time: {prevLabel}</Text>;
               })()}
               {(() => {
                 if (currentExercise.is_stretch || currentExercise.mode !== 'reps') return null;
+                if (!/barbell/i.test(currentExercise.name)) return null;
                 const setWeight = currentExercise.sets[workoutPhase.setIndex]?.weight;
                 const fromSet = setWeight != null && setWeight > 0 ? setWeight : null;
                 const fromSuggestion = parseFloat(suggestedWeight);
@@ -2070,15 +2272,22 @@ export default function ActiveWorkoutScreen() {
               <ExerciseTimer
                 key={`${currentExercise.id}-${workoutPhase.setIndex}`}
                 durationSec={currentExercise.sets[workoutPhase.setIndex]?.duration_sec ?? 0}
-                onStarted={() => {
-                  const durationSec = currentExercise.sets[workoutPhase.setIndex]?.duration_sec ?? 0;
-                  setExerciseTimerEnd(Date.now() / 1000 + durationSec);
+                prepEndsAtEpoch={exerciseTimerPrepEndsAt}
+                holdEndsAtEpoch={exerciseTimerEndsAt}
+                onPrepStarted={(endsAt) => {
+                  setExerciseTimerPrepEndsAt(endsAt);
+                }}
+                onStarted={(endsAt) => {
+                  setExerciseTimerPrepEndsAt(null);
+                  setExerciseTimerEnd(endsAt);
                   if (__DEV__) {
                     const { devLog } = require('../../../src/lib/utils/logger');
+                    const durationSec = currentExercise.sets[workoutPhase.setIndex]?.duration_sec ?? 0;
                     devLog('workout-active', {
                       action: 'exercise_timer_start',
                       setIndex: workoutPhase.setIndex,
                       durationSec,
+                      endsAt,
                     });
                   }
                 }}
@@ -2407,44 +2616,6 @@ export default function ActiveWorkoutScreen() {
         )}
       </ScrollView>
 
-      <SmartRefreshConfirmationSheet
-        visible={showRefreshSheet}
-        plan={refreshPlan}
-        onClose={() => {
-          setShowRefreshSheet(false);
-          setRefreshPlan(null);
-        }}
-        onApply={async () => {
-          if (!sessionId || !sessionTemplateId || !sessionDayName || !userId) return;
-          setIsApplyingRefresh(true);
-          try {
-            const success = await applySmartRefresh(
-              sessionId,
-              sessionTemplateId,
-              sessionDayName,
-              userId,
-              profile?.experience_level || 'beginner'
-            );
-            if (success) {
-              toast.success('Workout updated from plan');
-              await loadActiveSession();
-              setShowRefreshSheet(false);
-              setRefreshPlan(null);
-            } else {
-              toast.error('Failed to apply updates');
-            }
-          } catch (error) {
-            if (__DEV__) {
-              console.error('Smart Refresh apply error:', error);
-            }
-            toast.error('Failed to apply updates');
-          } finally {
-            setIsApplyingRefresh(false);
-          }
-        }}
-        applying={isApplyingRefresh}
-      />
-
       {/* Workout overflow menu: anchored top-right via the overlay; tap outside to dismiss. */}
       <Modal
         visible={showOverflowMenu}
@@ -2603,6 +2774,7 @@ export default function ActiveWorkoutScreen() {
         </Pressable>
       </Modal>
 
+    </KeyboardAvoidingView>
       <ConfirmDialog
         visible={showRemoveExerciseConfirm}
         title="Remove this exercise?"
@@ -2620,7 +2792,7 @@ export default function ActiveWorkoutScreen() {
       <PlateCalculatorSheet
         visible={showPlateCalculator}
         target={plateTarget}
-        useImperial={profile?.use_imperial ?? true}
+        useImperial={resolveUseImperial(profile?.use_imperial)}
         onClose={() => setShowPlateCalculator(false)}
       />
 
@@ -2656,6 +2828,10 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     borderBottomColor: colors.cardBorder,
   },
   headerButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: spacing.xs,
   },
   headerActions: {

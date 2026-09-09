@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 
 interface UseCountdownOptions {
   durationSec: number;
@@ -97,16 +98,25 @@ export function useCountdownToEpoch({
   }, [endsAtEpoch, computeSecondsLeft]);
 
   useEffect(() => {
-    const id = setInterval(() => {
+    const tick = () => {
       const next = computeSecondsLeft();
       setSecondsLeft(next);
       if (next <= 0 && !completedRef.current) {
         completedRef.current = true;
         onCompleteRef.current?.();
       }
-    }, 1000);
+    };
 
-    return () => clearInterval(id);
+    const id = setInterval(tick, 1000);
+    const onAppState = (state: AppStateStatus) => {
+      if (state === 'active') tick();
+    };
+    const sub = AppState.addEventListener('change', onAppState);
+
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
   }, [computeSecondsLeft]);
 
   const totalSec =

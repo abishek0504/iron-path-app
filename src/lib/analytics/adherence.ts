@@ -1,4 +1,4 @@
-import { toLocalDateKey } from './dateBuckets';
+import { startOfMondayWeek, toLocalDateKey } from './dateBuckets';
 
 export type AdherenceSummary = {
   sessionsCompleted: number;
@@ -33,6 +33,41 @@ export function summarizeAdherence(
     avgSessionsPerWeek: Math.round(avgSessionsPerWeek * 10) / 10,
     adherencePct,
   };
+}
+
+/** Consecutive Monday weeks that met days-per-week. Current week is skipped until the target is hit. */
+export function consecutiveAdherenceWeeks(
+  completedDates: string[],
+  asOf: Date,
+  daysPerWeekTarget: number,
+): number {
+  if (daysPerWeekTarget <= 0) {
+    return rollingFourWeekFrequency(completedDates, asOf);
+  }
+  const dayKeys = completedDates.map(toLocalDateKey);
+  const monday = startOfMondayWeek(asOf);
+  let streak = 0;
+  for (let weekOffset = 0; weekOffset < 52; weekOffset += 1) {
+    const weekStart = new Date(monday);
+    weekStart.setDate(weekStart.getDate() - weekOffset * 7);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const count = new Set(
+      dayKeys.filter((key) => {
+        const day = new Date(`${key}T12:00:00`);
+        return day >= weekStart && day <= weekEnd;
+      }),
+    ).size;
+    if (weekOffset === 0 && count < daysPerWeekTarget) {
+      continue;
+    }
+    if (count >= daysPerWeekTarget) {
+      streak += 1;
+      continue;
+    }
+    break;
+  }
+  return streak;
 }
 
 export function rollingFourWeekFrequency(completedDates: string[], asOf: Date): number {

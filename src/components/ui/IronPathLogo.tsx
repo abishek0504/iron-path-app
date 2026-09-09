@@ -11,7 +11,7 @@ import {
   IRONPATH_LOADER_VIEWBOX,
   resolveLogoArtThemeId,
 } from './ironpathLogoLoaderArt';
-import { useThemeMode } from '../../lib/utils/ThemeContext';
+import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 
 export interface IronPathLogoProps {
   size?: number;
@@ -24,11 +24,12 @@ export function IronPathLogo({
   style,
   accessibilityLabel = 'IronPath',
 }: IronPathLogoProps) {
+  const colors = useTheme();
   const { themeMode } = useThemeMode();
   const colorScheme = useColorScheme();
   const paths = useMemo(
-    () => getLogoPaths(resolveLogoArtThemeId(themeMode, colorScheme)),
-    [themeMode, colorScheme],
+    () => getLogoPaths(resolveLogoArtThemeId(themeMode, colorScheme), colors.primary),
+    [themeMode, colorScheme, colors.primary],
   );
 
   return (

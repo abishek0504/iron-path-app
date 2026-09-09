@@ -5,11 +5,11 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
 import { BottomSheet } from '../ui/BottomSheet';
 import { Button } from '../ui/Button';
+import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { spacing, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import type { WorkoutPreset } from '../../lib/supabase/queries/presets';
@@ -123,7 +123,7 @@ export const WorkoutPresetPickerSheet: React.FC<Props> = ({
     >
       {loading ? (
         <View style={styles.loader}>
-          <ActivityIndicator color={colors.primary} />
+          <LogoEdgeLoader size="small" />
         </View>
       ) : presets.length === 0 ? (
         <View style={styles.empty}>

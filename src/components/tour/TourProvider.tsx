@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Dimensions } from 'react-native';
+import { InteractionManager, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePaywall } from '../paywall/PaywallProvider';
 import { useTourStore } from '../../stores/tourStore';
 import { useUserStore } from '../../stores/userStore';
 import { updateUserProfile } from '../../lib/supabase/queries/users';
+import { clearTourPersistence } from '../../lib/onboarding/tourBridge';
 import { TOUR_STEPS, TOUR_STEP_COUNT } from '../../lib/onboarding/tourSteps';
 import { hapticSelection } from '../../lib/utils/haptics';
 import { spacing } from '../../lib/utils/theme';
@@ -19,12 +20,10 @@ import {
 import { TourScrollRegistryProvider, useTourScroll } from './TourScroll';
 
 const TAB_ROUTE_PREFIX = '/(tabs)';
-const MEASURE_RETRY_MS = 150;
-const MEASURE_MAX_RETRIES = 8;
-const SCROLL_SETTLE_MS = 350;
-/** Reserved space below target for tooltip when deciding if scroll is needed. */
+const TARGET_TIMEOUT_MS = 1600;
 const TOOLTIP_RESERVED_BELOW = 200;
 const TOOLTIP_RESERVED_ABOVE = 180;
+const PAYWALL_AFTER_TOUR_MS = 450;
 
 function tabHref(tab: (typeof TOUR_STEPS)[number]['tab']): string {
   if (tab === 'index') {
@@ -33,14 +32,11 @@ function tabHref(tab: (typeof TOUR_STEPS)[number]['tab']): string {
   return `${TAB_ROUTE_PREFIX}/${tab}`;
 }
 
-function delay(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
 function TourOrchestrator({ children }: { children: ReactNode }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { measureTarget } = useTourTargets();
+  const { height: screenHeight } = useWindowDimensions();
+  const { measureTarget, waitForTarget } = useTourTargets();
   const { getScrollController } = useTourScroll();
   const { showPaywall } = usePaywall();
   const profile = useUserStore((s) => s.profile);
@@ -51,15 +47,19 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
   const setStepIndex = useTourStore((s) => s.setStepIndex);
   const endTour = useTourStore((s) => s.endTour);
 
+  const [displayedStepIndex, setDisplayedStepIndex] = useState(currentStepIndex);
   const [targetRect, setTargetRect] = useState<TourTargetMeasurement | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
   const measureTokenRef = useRef(0);
 
   const currentStep = TOUR_STEPS[currentStepIndex] ?? null;
+  const displayedStep = TOUR_STEPS[displayedStepIndex] ?? currentStep;
 
   const persistTourCompletion = useCallback(async () => {
     const userId = profile?.id;
     const completedAt = new Date().toISOString();
     updateProfile({ app_tour_completed_at: completedAt });
+    await clearTourPersistence();
     if (userId) {
       await updateUserProfile(userId, { app_tour_completed_at: completedAt });
     }
@@ -70,10 +70,13 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
       if (__DEV__) {
         devLog('app-tour', { action: 'finishTour', reason, stepIndex: currentStepIndex });
       }
-      endTour();
+      setTooltipVisible(false);
       setTargetRect(null);
+      endTour();
       await persistTourCompletion();
-      showPaywall('onboarding_complete');
+      setTimeout(() => {
+        showPaywall('onboarding_complete');
+      }, PAYWALL_AFTER_TOUR_MS);
     },
     [currentStepIndex, endTour, persistTourCompletion, showPaywall],
   );
@@ -83,14 +86,16 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
       const step = TOUR_STEPS[stepIndex];
       if (!step) return null;
 
+      await waitForTarget(step.targetId, TARGET_TIMEOUT_MS);
       const primary = await measureTarget(step.targetId);
       if (primary) return primary;
       if (step.fallbackTargetId) {
+        await waitForTarget(step.fallbackTargetId, TARGET_TIMEOUT_MS);
         return measureTarget(step.fallbackTargetId);
       }
       return null;
     },
-    [measureTarget],
+    [measureTarget, waitForTarget],
   );
 
   const scrollTargetIntoView = useCallback(
@@ -103,7 +108,6 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
         return { scrolled: false, rect };
       }
 
-      const { height: screenHeight } = Dimensions.get('window');
       const visibleTop = insets.top + spacing.lg + TOOLTIP_RESERVED_ABOVE * 0.35;
       const visibleBottom = screenHeight - insets.bottom - TOOLTIP_RESERVED_BELOW;
 
@@ -120,77 +124,58 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
 
       const nextY = controller.getScrollY() + delta;
       controller.scrollToY(nextY, true);
-      await delay(SCROLL_SETTLE_MS);
+      await new Promise<void>((resolve) => {
+        InteractionManager.runAfterInteractions(() => resolve());
+      });
       return { scrolled: true, rect };
     },
-    [getScrollController, insets.bottom, insets.top],
+    [getScrollController, insets.bottom, insets.top, screenHeight],
   );
 
   useEffect(() => {
     if (!isActive || !currentStep) {
       setTargetRect(null);
+      setTooltipVisible(false);
       return;
     }
 
     const token = ++measureTokenRef.current;
-    // Keep prior spotlight until the new measure succeeds (no blank flash).
+    setTooltipVisible(false);
+    setTargetRect(null);
     router.navigate(tabHref(currentStep.tab) as never);
 
     let cancelled = false;
-    let attempt = 0;
 
     const runMeasure = async () => {
-      while (!cancelled && attempt < MEASURE_MAX_RETRIES) {
-        await delay(MEASURE_RETRY_MS);
-        let rect = await measureStepTarget(currentStepIndex);
-        if (cancelled || token !== measureTokenRef.current) {
-          return;
-        }
-        if (rect) {
-          const beforeScroll = rect;
-          const scrollResult = await scrollTargetIntoView(currentStep.tab, rect);
-          if (cancelled || token !== measureTokenRef.current) {
-            return;
-          }
+      await new Promise<void>((resolve) => {
+        InteractionManager.runAfterInteractions(() => resolve());
+      });
+      if (cancelled || token !== measureTokenRef.current) return;
 
-          if (scrollResult.scrolled) {
-            const remeasured = await measureStepTarget(currentStepIndex);
-            if (cancelled || token !== measureTokenRef.current) {
-              return;
-            }
-            if (remeasured) {
-              rect = remeasured;
-            }
-          }
+      let rect = await measureStepTarget(currentStepIndex);
+      if (cancelled || token !== measureTokenRef.current) return;
 
-          setTargetRect(rect);
-          if (__DEV__) {
-            const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
-            devLog('app-tour', {
-              action: 'measureStep',
-              stepIndex: currentStepIndex,
-              stepId: currentStep.id,
-              tab: currentStep.tab,
-              scrolled: scrollResult.scrolled,
-              rect,
-              beforeScroll,
-              window: { width: screenWidth, height: screenHeight },
-            });
-          }
-          return;
+      if (rect && !currentStep.fixed) {
+        const scrollResult = await scrollTargetIntoView(currentStep.tab, rect);
+        if (cancelled || token !== measureTokenRef.current) return;
+        if (scrollResult.scrolled) {
+          const remeasured = await measureStepTarget(currentStepIndex);
+          if (cancelled || token !== measureTokenRef.current) return;
+          if (remeasured) rect = remeasured;
         }
-        attempt += 1;
       }
 
-      if (!cancelled && token === measureTokenRef.current) {
-        setTargetRect(null);
-        if (__DEV__) {
-          devLog('app-tour', {
-            action: 'measureStepFailed',
-            stepIndex: currentStepIndex,
-            stepId: currentStep.id,
-          });
-        }
+      setTargetRect(rect);
+      setDisplayedStepIndex(currentStepIndex);
+      setTooltipVisible(true);
+      if (__DEV__) {
+        devLog('app-tour', {
+          action: 'measureStep',
+          stepIndex: currentStepIndex,
+          stepId: currentStep.id,
+          tab: currentStep.tab,
+          rect,
+        });
       }
     };
 
@@ -210,6 +195,12 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
     setStepIndex(currentStepIndex + 1);
   }, [currentStepIndex, finishTour, setStepIndex]);
 
+  const handleBack = useCallback(() => {
+    if (currentStepIndex <= 0) return;
+    hapticSelection();
+    setStepIndex(currentStepIndex - 1);
+  }, [currentStepIndex, setStepIndex]);
+
   const handleSkip = useCallback(() => {
     hapticSelection();
     void finishTour('skip');
@@ -218,14 +209,16 @@ function TourOrchestrator({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      {isActive && currentStep ? (
+      {isActive && displayedStep ? (
         <TourOverlay
           visible
-          step={currentStep}
-          stepIndex={currentStepIndex}
+          step={displayedStep}
+          stepIndex={displayedStepIndex}
           stepCount={TOUR_STEP_COUNT}
           targetRect={targetRect}
+          tooltipVisible={tooltipVisible}
           onNext={handleNext}
+          onBack={handleBack}
           onSkip={handleSkip}
         />
       ) : null}

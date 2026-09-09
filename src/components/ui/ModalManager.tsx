@@ -13,6 +13,16 @@ import { PlanDayPicker } from './PlanDayPicker';
 import { WorkoutPicker } from './WorkoutPicker';
 import { WorkoutHeatmap } from '../workout/WorkoutHeatmap';
 import { SessionDetailSheet } from '../progress/SessionDetailSheet';
+import { GenerateDayForm } from '../ai/GenerateDayForm';
+import { DatePicker } from './DatePicker';
+import { GenderPickerSheet } from './GenderPickerSheet';
+import { WeightEntrySheet } from './WeightEntrySheet';
+import { SmartRefreshConfirmationSheet } from './SmartRefreshConfirmationSheet';
+import { SessionExerciseEditSheet } from '../workout/SessionExerciseEditSheet';
+import { SaveWorkoutPresetSheet } from '../planner/SaveWorkoutPresetSheet';
+import { WorkoutPresetPickerSheet } from '../planner/WorkoutPresetPickerSheet';
+import { WorkoutPresetLoadOptionsSheet } from '../planner/WorkoutPresetLoadOptionsSheet';
+import { WorkoutTargetPickerSheet } from '../planner/WorkoutTargetPickerSheet';
 import { supabase } from '../../lib/supabase/client';
 
 export const ModalManager: React.FC = () => {
@@ -22,20 +32,14 @@ export const ModalManager: React.FC = () => {
   const closeBottomSheet = useUIStore((state) => state.closeBottomSheet);
   const onBottomSheetClosed = useUIStore((state) => state.onBottomSheetClosed);
 
-  // Keep sheet mounted while closing (isBottomSheetOpen === false but activeBottomSheet !== null)
-  // This allows exit animation to complete before unmounting
-  const shouldRenderExercisePicker = activeBottomSheet === 'exercisePicker';
-  const shouldRenderSettingsMenu = activeBottomSheet === 'settingsMenu';
-  const shouldRenderPlanDayPicker = activeBottomSheet === 'planDayPicker';
-  const shouldRenderWorkoutPicker = activeBottomSheet === 'workoutPicker';
-  const shouldRenderMuscleStatus = activeBottomSheet === 'muscleStatus';
-  const shouldRenderSessionDetail = activeBottomSheet === 'sessionDetail';
+  const isVisible = (id: NonNullable<typeof activeBottomSheet>) =>
+    isBottomSheetOpen && activeBottomSheet === id;
 
   return (
     <>
-      {shouldRenderExercisePicker && (
+      {activeBottomSheet === 'exercisePicker' && (
         <BottomSheet
-          visible={isBottomSheetOpen && activeBottomSheet === 'exercisePicker'}
+          visible={isVisible('exercisePicker')}
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           title="Select Exercise"
@@ -45,13 +49,14 @@ export const ModalManager: React.FC = () => {
             onSelect={bottomSheetProps.onSelect}
             onSelectMultiple={bottomSheetProps.onSelectMultiple}
             multiSelect={bottomSheetProps.multiSelect}
+            suggestedIds={bottomSheetProps.suggestedIds}
           />
         </BottomSheet>
       )}
 
-      {shouldRenderSettingsMenu && (
+      {activeBottomSheet === 'settingsMenu' && (
         <BottomSheet
-          visible={isBottomSheetOpen && activeBottomSheet === 'settingsMenu'}
+          visible={isVisible('settingsMenu')}
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           title="Settings"
@@ -62,9 +67,9 @@ export const ModalManager: React.FC = () => {
         </BottomSheet>
       )}
 
-      {shouldRenderPlanDayPicker && (
+      {activeBottomSheet === 'planDayPicker' && (
         <BottomSheet
-          visible={isBottomSheetOpen && activeBottomSheet === 'planDayPicker'}
+          visible={isVisible('planDayPicker')}
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           title="Choose plan day"
@@ -81,9 +86,9 @@ export const ModalManager: React.FC = () => {
         </BottomSheet>
       )}
 
-      {shouldRenderWorkoutPicker && (
+      {activeBottomSheet === 'workoutPicker' && (
         <BottomSheet
-          visible={isBottomSheetOpen && activeBottomSheet === 'workoutPicker'}
+          visible={isVisible('workoutPicker')}
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           title="Choose workout"
@@ -98,18 +103,18 @@ export const ModalManager: React.FC = () => {
         </BottomSheet>
       )}
 
-      {shouldRenderMuscleStatus && (
+      {activeBottomSheet === 'muscleStatus' && (
         <MuscleStatusSheet
-          visible={isBottomSheetOpen && activeBottomSheet === 'muscleStatus'}
+          visible={isVisible('muscleStatus')}
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           bottomSheetProps={bottomSheetProps}
         />
       )}
 
-      {shouldRenderSessionDetail && (
+      {activeBottomSheet === 'sessionDetail' && (
         <BottomSheet
-          visible={isBottomSheetOpen && activeBottomSheet === 'sessionDetail'}
+          visible={isVisible('sessionDetail')}
           onClose={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           title="Session Details"
@@ -122,6 +127,127 @@ export const ModalManager: React.FC = () => {
             onSessionDeleted={bottomSheetProps.onSessionDeleted}
           />
         </BottomSheet>
+      )}
+
+      {activeBottomSheet === 'generateDay' && (
+        <GenerateDayForm
+          visible={isVisible('generateDay')}
+          dayName={bottomSheetProps.dayName ?? 'this day'}
+          splitValue={bottomSheetProps.splitValue}
+          onCancel={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onGenerate={bottomSheetProps.onGenerate}
+        />
+      )}
+
+      {activeBottomSheet === 'datePicker' && (
+        <DatePicker
+          visible={isVisible('datePicker')}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          value={bottomSheetProps.value}
+          onChange={bottomSheetProps.onChange}
+          maximumDate={bottomSheetProps.maximumDate}
+          minimumDate={bottomSheetProps.minimumDate}
+        />
+      )}
+
+      {activeBottomSheet === 'genderPicker' && (
+        <GenderPickerSheet
+          visible={isVisible('genderPicker')}
+          value={bottomSheetProps.value ?? ''}
+          onChange={bottomSheetProps.onChange}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+        />
+      )}
+
+      {activeBottomSheet === 'weightEntry' && (
+        <WeightEntrySheet
+          visible={isVisible('weightEntry')}
+          unitsLabel={bottomSheetProps.unitsLabel ?? ''}
+          initialValue={bottomSheetProps.initialValue ?? ''}
+          placeholder={bottomSheetProps.placeholder ?? ''}
+          onSave={bottomSheetProps.onSave}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+        />
+      )}
+
+      {activeBottomSheet === 'smartRefresh' && (
+        <SmartRefreshConfirmationSheet
+          visible={isVisible('smartRefresh')}
+          plan={bottomSheetProps.plan}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onApply={bottomSheetProps.onApply}
+          applying={bottomSheetProps.applying}
+        />
+      )}
+
+      {activeBottomSheet === 'sessionExerciseEdit' && (
+        <SessionExerciseEditSheet
+          visible={isVisible('sessionExerciseEdit')}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onSave={bottomSheetProps.onSave}
+          onDelete={bottomSheetProps.onDelete}
+          sessionExerciseId={bottomSheetProps.sessionExerciseId}
+          exerciseName={bottomSheetProps.exerciseName}
+          mode={bottomSheetProps.mode}
+          useImperial={bottomSheetProps.useImperial}
+          supersetGroup={bottomSheetProps.supersetGroup}
+          canAddToSuperset={bottomSheetProps.canAddToSuperset}
+          onToggleSuperset={bottomSheetProps.onToggleSuperset}
+          supersetToggleDisabled={bottomSheetProps.supersetToggleDisabled}
+        />
+      )}
+
+      {activeBottomSheet === 'savePreset' && (
+        <SaveWorkoutPresetSheet
+          visible={isVisible('savePreset')}
+          mode={bottomSheetProps.mode}
+          defaultName={bottomSheetProps.defaultName}
+          saving={bottomSheetProps.saving}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onSave={bottomSheetProps.onSave}
+        />
+      )}
+
+      {activeBottomSheet === 'presetPicker' && (
+        <WorkoutPresetPickerSheet
+          visible={isVisible('presetPicker')}
+          presets={bottomSheetProps.presets ?? []}
+          selectedPreset={bottomSheetProps.selectedPreset ?? null}
+          loading={bottomSheetProps.loading}
+          applying={bottomSheetProps.applying}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onSelectPreset={bottomSheetProps.onSelectPreset}
+          onLoadPreset={bottomSheetProps.onLoadPreset}
+          onDelete={bottomSheetProps.onDelete}
+        />
+      )}
+
+      {activeBottomSheet === 'presetLoadOptions' && (
+        <WorkoutPresetLoadOptionsSheet
+          visible={isVisible('presetLoadOptions')}
+          presetName={bottomSheetProps.presetName}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onSelect={bottomSheetProps.onSelect}
+        />
+      )}
+
+      {activeBottomSheet === 'presetTargetPicker' && (
+        <WorkoutTargetPickerSheet
+          visible={isVisible('presetTargetPicker')}
+          workouts={bottomSheetProps.workouts ?? []}
+          onClose={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onSelect={bottomSheetProps.onSelect}
+        />
       )}
     </>
   );
@@ -167,5 +293,4 @@ const MuscleStatusSheet: React.FC<MuscleStatusSheetProps> = ({
       {userId && <WorkoutHeatmap userId={userId} />}
     </BottomSheet>
   );
-}
-
+};

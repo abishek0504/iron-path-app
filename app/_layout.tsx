@@ -6,7 +6,7 @@
 
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Sentry from '@sentry/react-native';
@@ -18,6 +18,7 @@ import { ThemeProvider } from '../src/lib/utils/ThemeContext';
 import { RootErrorBoundary } from '../src/components/ui/RootErrorBoundary';
 import { initNotifications, setupNotificationResponseRouting } from '../src/lib/utils/notifications';
 import { initSentry } from '../src/lib/monitoring/initSentry';
+import { flushOfflineSetQueue } from '../src/lib/workout/offlineSetQueue';
 
 initSentry();
 
@@ -33,7 +34,14 @@ function RootLayout() {
   useEffect(() => {
     initNotifications();
     const unsub = setupNotificationResponseRouting();
-    return unsub;
+    void flushOfflineSetQueue();
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void flushOfflineSetQueue();
+    });
+    return () => {
+      unsub();
+      appStateSub.remove();
+    };
   }, []);
 
   // Apply web-specific styles
@@ -121,6 +129,10 @@ function RootLayout() {
         />
         <Stack.Screen
           name="export-data"
+          options={{ presentation: 'modal', gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="progress-photos"
           options={{ presentation: 'modal', gestureEnabled: true }}
         />
         <Stack.Screen

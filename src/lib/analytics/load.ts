@@ -1,5 +1,5 @@
-import type { AnalyticsSetRow, ExerciseMeta, TrendGranularity, TrendPoint } from './types';
-import { bucketKeyForDate, formatBucketLabel } from './dateBuckets';
+import type { AnalyticsSetRow, DateRange, ExerciseMeta, TrendGranularity, TrendPoint } from './types';
+import { aggregateIntoBuckets } from './dateBuckets';
 import { setStimulus } from './intensity';
 
 function clamp(value: number, min: number, max: number): number {
@@ -55,17 +55,11 @@ export function totalTrainingLoad(
 export function buildTrainingLoadTrend(
   sessions: { completedAt: string; load: number }[],
   granularity: TrendGranularity,
+  range?: DateRange,
 ): TrendPoint[] {
-  const map = new Map<string, number>();
-  for (const s of sessions) {
-    const key = bucketKeyForDate(s.completedAt, granularity);
-    map.set(key, (map.get(key) ?? 0) + s.load);
-  }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([bucketKey, value]) => ({
-      bucketKey,
-      label: formatBucketLabel(bucketKey, granularity),
-      value,
-    }));
+  return aggregateIntoBuckets(
+    sessions.map((s) => ({ dateIso: s.completedAt, value: s.load })),
+    granularity,
+    range,
+  );
 }

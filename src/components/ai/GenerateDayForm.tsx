@@ -56,6 +56,7 @@ interface GenerateDayFormProps {
   /** Stored `preferred_training_style` (split id or legacy free text). */
   splitValue: string | null | undefined;
   onCancel: () => void;
+  onClosed?: () => void;
   onGenerate: (sessionsPerDay: number, constraints: DayConstraints) => void;
 }
 
@@ -64,6 +65,7 @@ export function GenerateDayForm({
   dayName,
   splitValue,
   onCancel,
+  onClosed,
   onGenerate,
 }: GenerateDayFormProps) {
   const colors = useTheme();
@@ -126,6 +128,7 @@ export function GenerateDayForm({
     <BottomSheet
       visible={visible}
       onClose={onCancel}
+      onClosed={onClosed}
       title={`Generate ${dayName}`}
       height={SHEET_HEIGHT_PERCENT}
     >

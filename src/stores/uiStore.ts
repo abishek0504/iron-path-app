@@ -16,6 +16,16 @@ export type BottomSheetId =
   | 'workoutPicker'
   | 'muscleStatus'
   | 'sessionDetail'
+  | 'generateDay'
+  | 'datePicker'
+  | 'genderPicker'
+  | 'weightEntry'
+  | 'smartRefresh'
+  | 'sessionExerciseEdit'
+  | 'savePreset'
+  | 'presetPicker'
+  | 'presetLoadOptions'
+  | 'presetTargetPicker'
   | null;
 
 export type Toast = {
@@ -48,6 +58,8 @@ interface UIState {
   openBottomSheet: (id: BottomSheetId, props?: Record<string, any>) => void;
   closeBottomSheet: () => void;
   onBottomSheetClosed: () => void;
+  /** Merge into the open sheet's props (live saving / applying / lists). */
+  patchBottomSheetProps: (props: Record<string, any>) => void;
   /** Queue work to run after the open sheet finishes closing (avoids nested RN Modals). */
   runAfterBottomSheetClosed: (action: () => void) => void;
   
@@ -115,6 +127,13 @@ export const useUIStore = create<UIState>((set) => ({
     }
     // Set isBottomSheetOpen to false but keep activeBottomSheet until animation completes
     set({ isBottomSheetOpen: false });
+  },
+
+  patchBottomSheetProps: (props) => {
+    set((state) => {
+      if (!state.activeBottomSheet) return state;
+      return { bottomSheetProps: { ...state.bottomSheetProps, ...props } };
+    });
   },
 
   runAfterBottomSheetClosed: (action) => {

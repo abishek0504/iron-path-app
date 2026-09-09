@@ -4,10 +4,10 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  ActivityIndicator,
 } from 'react-native';
 import { BottomSheet, type BottomSheetHandle } from '../ui/BottomSheet';
 import { Button } from '../ui/Button';
+import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { PRESET_NAME_MAX_LENGTH } from '../../lib/supabase/queries/presets';
@@ -20,6 +20,7 @@ type Props = {
   defaultName: string;
   saving?: boolean;
   onClose: () => void;
+  onClosed?: () => void;
   onSave: (name: string) => void;
 };
 
@@ -29,6 +30,7 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
   defaultName,
   saving = false,
   onClose,
+  onClosed,
   onSave,
 }) => {
   const colors = useTheme();
@@ -92,6 +94,7 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
       ref={sheetRef}
       visible={visible}
       onClose={onClose}
+      onClosed={onClosed}
       title={mode === 'create' ? 'Save as preset' : 'Rename preset'}
       height={320}
       avoidKeyboard
@@ -127,9 +130,7 @@ export const SaveWorkoutPresetSheet: React.FC<Props> = ({
             disabled={!canSave}
             style={styles.actionButton}
           >
-            {saving ? (
-              <ActivityIndicator color={colors.onPrimaryContrast} size="small" />
-            ) : undefined}
+            {saving ? <LogoEdgeLoader size="small" variant="inverted" /> : undefined}
           </Button>
         </View>
       </View>

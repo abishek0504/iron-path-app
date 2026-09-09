@@ -22,7 +22,6 @@ import { useRouter } from 'expo-router';
 import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import type { NavigationAction } from '@react-navigation/routers';
 import { X } from 'lucide-react-native';
-import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
 import { updateUserProfile } from '../src/lib/supabase/queries/users';
@@ -46,14 +45,11 @@ import { Button } from '../src/components/ui/Button';
 import { Chip } from '../src/components/ui/Chip';
 import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
-import { BottomSheet } from '../src/components/ui/BottomSheet';
-import { DatePicker } from '../src/components/ui/DatePicker';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
+import { useModal } from '../src/hooks/useModal';
+import { GENDER_PLACEHOLDER } from '../src/components/ui/GenderPickerSheet';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
-const GENDER_OPTIONS = ['Male', 'Female', 'Prefer not to say'];
-/** Sentinel for scroller placeholder — never persisted to the DB. */
-const GENDER_PLACEHOLDER = '__select__';
 const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -66,6 +62,7 @@ export default function EditProfileScreen() {
   const cachedProfile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
   const showToast = useUIStore((state) => state.showToast);
+  const { openSheet } = useModal();
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -77,8 +74,6 @@ export default function EditProfileScreen() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [gender, setGender] = useState('');
   const [experienceLevel, setExperienceLevel] = useState('');
   const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
@@ -281,6 +276,9 @@ export default function EditProfileScreen() {
 
       const success = await updateUserProfile(profile.id, updates);
       if (!success) {
+        if (unitsChanged) {
+          await convertUserStoredWeights(previousImperial);
+        }
         showToast('Failed to save profile.', 'error');
         return;
       }
@@ -386,7 +384,14 @@ export default function EditProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>Date of Birth</Text>
           <TouchableOpacity
-            onPress={() => setShowDatePicker(true)}
+            onPress={() =>
+              openSheet('datePicker', {
+                value: dateOfBirth,
+                onChange: (date: Date) => setDateOfBirth(date),
+                maximumDate: new Date(),
+                minimumDate: new Date(1900, 0, 1),
+              })
+            }
             style={styles.datePickerButton}
           >
             <Text style={[styles.datePickerText, !dateOfBirth && styles.datePickerPlaceholder]}>
@@ -403,7 +408,12 @@ export default function EditProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>Gender</Text>
           <TouchableOpacity
-            onPress={() => setShowGenderPicker(true)}
+            onPress={() =>
+              openSheet('genderPicker', {
+                value: gender,
+                onChange: (next: string) => setGender(next),
+              })
+            }
             style={styles.datePickerButton}
           >
             <Text style={[styles.datePickerText, !gender && styles.datePickerPlaceholder]}>
@@ -548,39 +558,6 @@ export default function EditProfileScreen() {
         </Button>
       </View>
       </KeyboardAvoidingView>
-
-      {/* Date Picker Bottom Sheet */}
-      <DatePicker
-        visible={showDatePicker}
-        onClose={() => setShowDatePicker(false)}
-        value={dateOfBirth}
-        onChange={(date) => setDateOfBirth(date)}
-        maximumDate={new Date()}
-        minimumDate={new Date(1900, 0, 1)}
-      />
-
-      {/* Gender Picker Bottom Sheet */}
-      <BottomSheet
-        visible={showGenderPicker}
-        onClose={() => setShowGenderPicker(false)}
-        title="Select gender"
-        height={280}
-      >
-        <Picker
-          selectedValue={gender || GENDER_PLACEHOLDER}
-          onValueChange={(itemValue) => {
-            if (itemValue === GENDER_PLACEHOLDER) return;
-            setGender(itemValue);
-          }}
-          style={styles.weightPicker}
-          itemStyle={styles.weightPickerItem}
-        >
-          <Picker.Item label="(Select)" value={GENDER_PLACEHOLDER} />
-          {GENDER_OPTIONS.map((opt) => (
-            <Picker.Item key={opt} label={opt} value={opt} />
-          ))}
-        </Picker>
-      </BottomSheet>
 
       <ConfirmDialog
         visible={showDiscardConfirm}
@@ -728,14 +705,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   preferredDaysSection: {
     marginTop: spacing.md,
     gap: spacing.sm,
-  },
-  weightPicker: {
-    width: '100%',
-    color: colors.textPrimary,
-  },
-  weightPickerItem: {
-    color: colors.textPrimary,
-    fontSize: typography.sizes.base,
   },
   infoRow: {
     flexDirection: 'row',

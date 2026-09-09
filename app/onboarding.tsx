@@ -25,7 +25,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Picker } from '@react-native-picker/picker';
 import Slider from '@react-native-community/slider';
 import { supabase } from '../src/lib/supabase/client';
 import { signOutAndClearLocalState } from '../src/lib/auth/signOutAndClear';
@@ -61,11 +60,11 @@ import Animated, {
   runOnJS,
   cancelAnimation,
 } from 'react-native-reanimated';
-import { BottomSheet } from '../src/components/ui/BottomSheet';
-import { DatePicker } from '../src/components/ui/DatePicker';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
 import { Button } from '../src/components/ui/Button';
 import { convertBodyWeight } from '../src/lib/utils/units';
+import { useModal } from '../src/hooks/useModal';
+import { GENDER_OPTIONS, GENDER_PLACEHOLDER } from '../src/components/ui/GenderPickerSheet';
 
 const EXPERIENCE_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
@@ -78,13 +77,6 @@ const EQUIPMENT_OPTIONS = [
   { value: 'Bands', label: 'Bands' },
   { value: 'Bodyweight only', label: 'Bodyweight Only' },
 ] as const;
-const GENDER_OPTIONS = [
-  { value: 'Male', label: 'Male' },
-  { value: 'Female', label: 'Female' },
-  { value: 'Prefer not to say', label: 'Prefer Not To Say' },
-] as const;
-/** Sentinel for scroller placeholders — never persisted to the DB. */
-const GENDER_PLACEHOLDER = '__select__';
 const WEEKDAY_OPTIONS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const TOTAL_STEPS = 7;
 const SLIDE_DURATION_MS = 280;
@@ -98,6 +90,7 @@ export default function Onboarding() {
   const router = useRouter();
   const setProfile = useUserStore((state) => state.setProfile);
   const toast = useToast();
+  const { openSheet } = useModal();
   const colors = useTheme();
   const { themeMode, setThemeMode } = useThemeMode();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -114,8 +107,6 @@ export default function Onboarding() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState<Date | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showGenderPicker, setShowGenderPicker] = useState(false);
   const [useImperial, setUseImperial] = useState(true);
   const [currentWeight, setCurrentWeight] = useState<number | null>(null);
   const [weightText, setWeightText] = useState('');
@@ -511,7 +502,14 @@ export default function Onboarding() {
       <View style={styles.section}>
         <Text style={styles.label}>Date of Birth *</Text>
         <TouchableOpacity
-          onPress={() => setShowDatePicker(true)}
+          onPress={() =>
+            openSheet('datePicker', {
+              value: dateOfBirth,
+              onChange: (date: Date) => setDateOfBirth(date),
+              maximumDate: new Date(),
+              minimumDate: new Date(1900, 0, 1),
+            })
+          }
           style={styles.datePickerButton}
         >
           <Text style={[styles.datePickerText, !dateOfBirth && styles.datePickerPlaceholder]}>
@@ -598,7 +596,12 @@ export default function Onboarding() {
       <View style={styles.section}>
         <Text style={styles.label}>Gender</Text>
         <TouchableOpacity
-          onPress={() => setShowGenderPicker(true)}
+          onPress={() =>
+            openSheet('genderPicker', {
+              value: gender,
+              onChange: (next: string) => setGender(next),
+            })
+          }
           style={styles.datePickerButton}
         >
           <Text style={[styles.datePickerText, !gender && styles.datePickerPlaceholder]}>
@@ -868,38 +871,6 @@ export default function Onboarding() {
           </Button>
         </View>
       </SafeAreaView>
-
-      <DatePicker
-        visible={showDatePicker}
-        onClose={() => setShowDatePicker(false)}
-        value={dateOfBirth}
-        onChange={(date) => setDateOfBirth(date)}
-        maximumDate={new Date()}
-        minimumDate={new Date(1900, 0, 1)}
-      />
-
-      <BottomSheet
-        visible={showGenderPicker}
-        onClose={() => setShowGenderPicker(false)}
-        title="Select gender"
-        height={280}
-      >
-        <Picker
-          selectedValue={gender || GENDER_PLACEHOLDER}
-          onValueChange={(itemValue) => {
-            // Placeholder cannot be chosen — forces a real scroll onto a gender.
-            if (itemValue === GENDER_PLACEHOLDER) return;
-            setGender(itemValue);
-          }}
-          style={styles.weightPicker}
-          itemStyle={styles.weightPickerItem}
-        >
-          <Picker.Item label="(Select)" value={GENDER_PLACEHOLDER} />
-          {GENDER_OPTIONS.map((opt) => (
-            <Picker.Item key={opt.value} label={opt.label} value={opt.value} />
-          ))}
-        </Picker>
-      </BottomSheet>
     </View>
   );
 }

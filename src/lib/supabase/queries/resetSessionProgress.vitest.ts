@@ -200,7 +200,7 @@ describe('resetSessionProgress', () => {
     expect(updates[0].payload).toMatchObject({
       status: 'active',
       completed_at: null,
-      control_device: null,
+      control_device: 'phone',
     });
     expect((updates[0].payload as { started_at?: string }).started_at).toBeTruthy();
     expect(findQueries('v2_session_health_metrics', 'delete')).toHaveLength(1);

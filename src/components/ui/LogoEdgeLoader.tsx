@@ -64,8 +64,8 @@ export function LogoEdgeLoader({
     if (variant === 'inverted') {
       return getMonochromeLogoPaths(colors.onPrimaryContrast);
     }
-    return getLogoPaths(resolveLogoArtThemeId(themeMode, colorScheme));
-  }, [variant, colors.onPrimaryContrast, themeMode, colorScheme]);
+    return getLogoPaths(resolveLogoArtThemeId(themeMode, colorScheme), colors.primary);
+  }, [variant, colors.onPrimaryContrast, colors.primary, themeMode, colorScheme]);
 
   useEffect(() => {
     let mounted = true;

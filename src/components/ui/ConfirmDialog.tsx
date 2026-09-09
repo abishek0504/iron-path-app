@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, GestureResponderEvent } from 'react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
+import { hapticSelection, hapticWarning } from '../../lib/utils/haptics';
 
 interface ConfirmDialogProps {
   visible: boolean;
@@ -69,11 +70,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       gap: spacing.sm,
     },
     button: {
+      minHeight: 44,
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       borderRadius: borderRadius.md,
       borderWidth: 1,
       borderColor: colors.cardBorder,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     secondary: {
       backgroundColor: colors.card,
@@ -122,12 +126,22 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
           <View style={styles.actions}>
-            <TouchableOpacity style={[styles.button, cancelButtonStyle]} onPress={onCancel}>
+            <TouchableOpacity
+              style={[styles.button, cancelButtonStyle]}
+              onPress={(event) => {
+                if (cancelDestructive) hapticWarning();
+                else hapticSelection();
+                onCancel(event);
+              }}
+            >
               <Text style={cancelTextStyle}>{cancelLabel}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.button, confirmButtonStyle, confirmDisabled && styles.buttonDisabled]}
-              onPress={onConfirm}
+              onPress={(event) => {
+                hapticSelection();
+                onConfirm(event);
+              }}
               disabled={confirmDisabled}
             >
               <Text style={confirmTextStyle}>{confirmLabel}</Text>

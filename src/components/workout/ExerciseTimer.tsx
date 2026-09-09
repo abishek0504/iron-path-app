@@ -2,12 +2,13 @@
  * Exercise Timer
  *
  * Manual start → 5s prep countdown → hold countdown with early complete.
+ * Both countdowns are wall-clock so backgrounding does not drift.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Play, SkipForward } from 'lucide-react-native';
-import { formatCountdownTime, useCountdown } from '../../hooks/useCountdown';
+import { formatCountdownTime, useCountdownToEpoch } from '../../hooks/useCountdown';
 import { computeHeldDurationSec } from '../../lib/utils/workoutDuration';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -18,19 +19,29 @@ type ExerciseTimerPhase = 'idle' | 'prep' | 'hold';
 
 interface ExerciseTimerProps {
   durationSec: number;
+  prepEndsAtEpoch?: number | null;
+  holdEndsAtEpoch?: number | null;
   onComplete: (elapsedSec: number) => void;
-  onStarted?: () => void;
+  onPrepStarted?: (endsAtEpoch: number) => void;
+  onStarted?: (endsAtEpoch: number) => void;
 }
 
 export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
   durationSec,
+  prepEndsAtEpoch = null,
+  holdEndsAtEpoch = null,
   onComplete,
+  onPrepStarted,
   onStarted,
 }) => {
   const colors = useTheme();
   const [phase, setPhase] = useState<ExerciseTimerPhase>('idle');
+  const [prepEndsAt, setPrepEndsAt] = useState<number | null>(null);
+  const [holdEndsAt, setHoldEndsAt] = useState<number | null>(null);
   const completedRef = useRef(false);
   const holdStartedAtRef = useRef<number | null>(null);
+  const phaseRef = useRef<ExerciseTimerPhase>('idle');
+  phaseRef.current = phase;
 
   const finish = useCallback(
     (elapsedSec: number) => {
@@ -41,51 +52,83 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
     [onComplete],
   );
 
-  const holdCountdown = useCountdown({
-    durationSec,
-    autoStart: false,
-    onComplete: () => finish(computeHeldDurationSec(durationSec, 0)),
+  const beginHold = useCallback(
+    (endsAt: number) => {
+      if (__DEV__) {
+        const { devLog } = require('../../lib/utils/logger');
+        devLog('exercise-timer', { action: 'hold_start', durationSec, endsAt });
+      }
+      holdStartedAtRef.current = Date.now();
+      setHoldEndsAt(endsAt);
+      setPhase('hold');
+      onStarted?.(endsAt);
+    },
+    [durationSec, onStarted],
+  );
+
+  useEffect(() => {
+    const now = Date.now() / 1000;
+    if (holdEndsAtEpoch != null && holdEndsAtEpoch > now) {
+      completedRef.current = false;
+      holdStartedAtRef.current = (holdEndsAtEpoch - durationSec) * 1000;
+      setHoldEndsAt(holdEndsAtEpoch);
+      setPhase('hold');
+      return;
+    }
+    if (prepEndsAtEpoch != null && prepEndsAtEpoch > now) {
+      completedRef.current = false;
+      setPrepEndsAt(prepEndsAtEpoch);
+      setPhase('prep');
+    }
+  }, [prepEndsAtEpoch, holdEndsAtEpoch, durationSec]);
+
+  const holdCountdown = useCountdownToEpoch({
+    endsAtEpoch: holdEndsAt ?? Number.POSITIVE_INFINITY,
+    startedAtEpoch: holdEndsAt != null ? holdEndsAt - durationSec : undefined,
+    onComplete: () => {
+      if (phaseRef.current !== 'hold') return;
+      finish(computeHeldDurationSec(durationSec, 0));
+    },
   });
 
   const getHeldSec = useCallback(() => {
-    const fromCountdown = computeHeldDurationSec(durationSec, holdCountdown.secondsLeft);
+    const remaining = holdEndsAt != null
+      ? Math.max(0, Math.ceil(holdEndsAt - Date.now() / 1000))
+      : holdCountdown.secondsLeft;
+    const fromCountdown = computeHeldDurationSec(durationSec, remaining);
     if (holdStartedAtRef.current == null) return fromCountdown;
     const fromClock = Math.min(
       durationSec,
       Math.max(0, Math.round((Date.now() - holdStartedAtRef.current) / 1000)),
     );
     return Math.max(fromCountdown, fromClock);
-  }, [durationSec, holdCountdown.secondsLeft]);
+  }, [durationSec, holdCountdown.secondsLeft, holdEndsAt]);
 
-  const beginHold = useCallback(() => {
-    if (__DEV__) {
-      const { devLog } = require('../../lib/utils/logger');
-      devLog('exercise-timer', { action: 'hold_start', durationSec });
-    }
-    holdStartedAtRef.current = Date.now();
-    onStarted?.();
-    setPhase('hold');
-    holdCountdown.start();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- holdCountdown.start is the stable hook API
-  }, [durationSec, holdCountdown.start, onStarted]);
-
-  const prepCountdown = useCountdown({
-    durationSec: EXERCISE_PREP_COUNTDOWN_SEC,
-    autoStart: false,
-    onComplete: beginHold,
+  const prepCountdown = useCountdownToEpoch({
+    endsAtEpoch: prepEndsAt ?? Number.POSITIVE_INFINITY,
+    startedAtEpoch: prepEndsAt != null ? prepEndsAt - EXERCISE_PREP_COUNTDOWN_SEC : undefined,
+    onComplete: () => {
+      if (phaseRef.current !== 'prep') return;
+      const endsAt = Date.now() / 1000 + durationSec;
+      beginHold(endsAt);
+    },
   });
 
   const handleStart = () => {
+    const endsAt = Date.now() / 1000 + EXERCISE_PREP_COUNTDOWN_SEC;
     if (__DEV__) {
       const { devLog } = require('../../lib/utils/logger');
       devLog('exercise-timer', {
         action: 'prep_start',
         prepSec: EXERCISE_PREP_COUNTDOWN_SEC,
         durationSec,
+        endsAt,
       });
     }
+    completedRef.current = false;
+    setPrepEndsAt(endsAt);
     setPhase('prep');
-    prepCountdown.start();
+    onPrepStarted?.(endsAt);
   };
 
   const handleCompleteEarly = () => {
@@ -138,6 +181,7 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
           paddingVertical: spacing.md,
           paddingHorizontal: spacing.lg,
           width: '100%',
+          minHeight: 44,
         },
         startText: {
           fontSize: typography.sizes.lg,
@@ -176,6 +220,7 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
           backgroundColor: colors.primary + '20',
           borderRadius: borderRadius.sm,
           marginLeft: spacing.sm,
+          minHeight: 44,
         },
         completeEarlyText: {
           fontSize: typography.sizes.sm,
@@ -192,7 +237,12 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
         <View style={styles.idleContent}>
           <Text style={styles.label}>Hold for</Text>
           <Text style={styles.targetDuration}>{durationSec} sec</Text>
-          <TouchableOpacity style={styles.startButton} onPress={handleStart}>
+          <TouchableOpacity
+            style={styles.startButton}
+            onPress={handleStart}
+            accessibilityRole="button"
+            accessibilityLabel="Start hold timer"
+          >
             <Play size={20} color={colors.onPrimaryContrast} />
             <Text style={styles.startText}>Start</Text>
           </TouchableOpacity>
@@ -222,7 +272,12 @@ export const ExerciseTimer: React.FC<ExerciseTimerProps> = ({
             <View style={[styles.progressFill, { width: `${holdCountdown.progress * 100}%` }]} />
           </View>
         </View>
-        <TouchableOpacity style={styles.completeEarlyButton} onPress={handleCompleteEarly}>
+        <TouchableOpacity
+          style={styles.completeEarlyButton}
+          onPress={handleCompleteEarly}
+          accessibilityRole="button"
+          accessibilityLabel="Complete hold early"
+        >
           <SkipForward size={20} color={colors.primary} />
           <Text style={styles.completeEarlyText}>Complete early</Text>
         </TouchableOpacity>

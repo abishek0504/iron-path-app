@@ -4,14 +4,15 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Pressable,
   SafeAreaView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
 import { TrendLineChart } from '../../../src/components/charts/TrendLineChart';
+import { LoadingScreen } from '../../../src/components/ui/LoadingScreen';
+import { ScreenHeader } from '../../../src/components/ui/ScreenHeader';
 import { spacing, typography, borderRadius, type ThemeColors } from '../../../src/lib/utils/theme';
 import { useTheme } from '../../../src/lib/utils/ThemeContext';
+import { useUIStore } from '../../../src/stores/uiStore';
 import { getRangeForPreset } from '../../../src/lib/analytics/dateBuckets';
 import {
   getExerciseTrendCached,
@@ -27,6 +28,7 @@ export default function ExerciseAnalyticsScreen() {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
+  const showToast = useUIStore((state) => state.showToast);
   const profile = useUserStore((s) => s.profile);
   const useImperial = profile?.use_imperial !== false;
   const params = useLocalSearchParams<{ id: string; name?: string }>();
@@ -56,10 +58,12 @@ export default function ExerciseAnalyticsScreen() {
       ]);
       setTrend(trendData);
       setPrs(prData);
+    } catch {
+      showToast('Failed to load exercise analytics', 'error');
     } finally {
       setLoading(false);
     }
-  }, [exerciseKey, profile?.id]);
+  }, [exerciseKey, profile?.id, showToast]);
 
   useEffect(() => {
     void load();
@@ -105,89 +109,80 @@ export default function ExerciseAnalyticsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <ChevronLeft size={24} color={colors.textPrimary} />
-        </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
-      </View>
+      <ScreenHeader title={title} onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {loading ? (
-          <Text style={styles.loading}>Loading…</Text>
-        ) : (
-          <>
-            <ChartSection title="Volume" styles={styles}>
+      {loading ? (
+        <LoadingScreen />
+      ) : (
+        <ScrollView contentContainerStyle={styles.content}>
+          <ChartSection title="Volume" styles={styles}>
+            <TrendLineChart
+              data={volumeTrend}
+              formatValue={(v) => `${Math.round(v)} ${useImperial ? 'lb' : 'kg'}`}
+            />
+          </ChartSection>
+
+          {e1rmTrend.length > 0 ? (
+            <ChartSection title="Theoretical 1RM" styles={styles}>
               <TrendLineChart
-                data={volumeTrend}
-                formatValue={(v) => `${Math.round(v)} ${useImperial ? 'lb' : 'kg'}`}
+                data={e1rmTrend}
+                formatValue={(v) => formatWeight(v)}
               />
             </ChartSection>
+          ) : null}
 
-            {e1rmTrend.length > 0 ? (
-              <ChartSection title="Theoretical 1RM" styles={styles}>
-                <TrendLineChart
-                  data={e1rmTrend}
-                  formatValue={(v) => formatWeight(v)}
-                />
-              </ChartSection>
-            ) : null}
+          {weightTrend.length > 0 ? (
+            <ChartSection title="Best set weight" styles={styles}>
+              <TrendLineChart
+                data={weightTrend}
+                formatValue={(v) => formatWeight(v)}
+              />
+            </ChartSection>
+          ) : null}
 
-            {weightTrend.length > 0 ? (
-              <ChartSection title="Best set weight" styles={styles}>
-                <TrendLineChart
-                  data={weightTrend}
-                  formatValue={(v) => formatWeight(v)}
-                />
-              </ChartSection>
-            ) : null}
-
-            {prs.length > 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>PR history</Text>
-                {prs.map((pr, i) => (
-                  <View key={`${pr.sessionId}-${i}`} style={styles.prRow}>
-                    <Text style={styles.prDate}>
-                      {pr.performedAt
-                        ? new Date(pr.performedAt).toLocaleDateString()
-                        : '—'}
-                    </Text>
-                    <Text style={styles.prValue}>
-                      {pr.prType === 'timed'
-                        ? `${pr.value}s`
-                        : pr.prType === 'reps_only'
-                          ? `${pr.value} reps`
-                          : formatWeight(pr.value)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-
+          {prs.length > 0 ? (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Recent sessions</Text>
-              {trend.length === 0 ? (
-                <Text style={styles.muted}>No sessions in range</Text>
-              ) : (
-                [...trend].reverse().slice(0, 10).map((p) => (
-                  <View key={p.sessionId} style={styles.sessionRow}>
-                    <Text style={styles.sessionDate}>
-                      {new Date(p.completedAt).toLocaleDateString()}
-                    </Text>
-                    <Text style={styles.sessionMeta}>
-                      {formatWeight(p.bestWeightLbs)}
-                      {p.bestReps != null ? ` × ${p.bestReps}` : ''}
-                      {p.avgRpe != null ? ` · RPE ${p.avgRpe.toFixed(1)}` : ''}
-                    </Text>
-                  </View>
-                ))
-              )}
+              <Text style={styles.cardTitle}>PR history</Text>
+              {prs.map((pr, i) => (
+                <View key={`${pr.sessionId}-${i}`} style={styles.prRow}>
+                  <Text style={styles.prDate}>
+                    {pr.performedAt
+                      ? new Date(pr.performedAt).toLocaleDateString()
+                      : '—'}
+                  </Text>
+                  <Text style={styles.prValue}>
+                    {pr.prType === 'timed'
+                      ? `${pr.value}s`
+                      : pr.prType === 'reps_only'
+                        ? `${pr.value} reps`
+                        : formatWeight(pr.value)}
+                  </Text>
+                </View>
+              ))}
             </View>
-          </>
-        )}
-      </ScrollView>
+          ) : null}
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Recent sessions</Text>
+            {trend.length === 0 ? (
+              <Text style={styles.muted}>No sessions in range</Text>
+            ) : (
+              [...trend].reverse().slice(0, 10).map((p) => (
+                <View key={p.sessionId} style={styles.sessionRow}>
+                  <Text style={styles.sessionDate}>
+                    {new Date(p.completedAt).toLocaleDateString()}
+                  </Text>
+                  <Text style={styles.sessionMeta}>
+                    {formatWeight(p.bestWeightLbs)}
+                    {p.bestReps != null ? ` × ${p.bestReps}` : ''}
+                    {p.avgRpe != null ? ` · RPE ${p.avgRpe.toFixed(1)}` : ''}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -215,32 +210,9 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       backgroundColor: colors.background,
     },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      gap: spacing.sm,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
-    },
-    backBtn: {
-      padding: spacing.xs,
-    },
-    title: {
-      flex: 1,
-      fontSize: typography.sizes.lg,
-      fontWeight: typography.weights.bold,
-      color: colors.textPrimary,
-    },
     content: {
       padding: spacing.lg,
       gap: spacing.md,
-    },
-    loading: {
-      color: colors.textSecondary,
-      textAlign: 'center',
-      padding: spacing.xl,
     },
     card: {
       backgroundColor: colors.card,

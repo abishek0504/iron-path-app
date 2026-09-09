@@ -252,23 +252,28 @@ export async function getAnalyticsTrends(
     });
   }
 
+  const range = { start: new Date(startIso), end: new Date(endIso) };
   return {
     summaries,
     volumeTrend: buildVolumeTrend(
       summaries.map((s) => ({ completedAt: s.completedAt, volumeLbs: s.volumeLbs })),
       granularity,
+      range,
     ),
     sessionCountTrend: buildSessionCountTrend(
       summaries.map((s) => ({ completedAt: s.completedAt })),
       granularity,
+      range,
     ),
     avgRpeTrend: buildAvgRpeTrend(
       summaries.map((s) => ({ completedAt: s.completedAt, avgRpe: s.avgRpe })),
       granularity,
+      range,
     ),
     trainingLoadTrend: buildTrainingLoadTrend(
       summaries.map((s) => ({ completedAt: s.completedAt, load: s.trainingLoad })),
       granularity,
+      range,
     ),
   };
 }

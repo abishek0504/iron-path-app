@@ -82,13 +82,14 @@ export function resolveLogoArtThemeId(
   return colorScheme === 'light' ? 'light' : 'dark';
 }
 
-export function getLogoPaths(themeId: LogoArtThemeId): LogoPathShape[] {
+export function getLogoPaths(themeId: LogoArtThemeId, accentFill?: string): LogoPathShape[] {
   const markFill = THEME_MARK_FILLS[themeId];
+  const accent = accentFill ?? ACCENT_FILL;
 
   return LOGO_SHAPE_GEOMETRY.map((shape) => ({
     id: shape.id,
     d: shape.d,
-    fill: ACCENT_SHAPE_IDS.has(shape.id) ? ACCENT_FILL : markFill,
+    fill: ACCENT_SHAPE_IDS.has(shape.id) ? accent : markFill,
   }));
 }
 

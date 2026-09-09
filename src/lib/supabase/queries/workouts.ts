@@ -5,6 +5,7 @@
 
 import { supabase } from '../client';
 import { devLog, devError } from '../../utils/logger';
+import { enqueueSetWrite, isNetworkError } from '../../workout/offlineSetQueue';
 import {
   getDateBoundsForDayName,
   getLocalDayKey,
@@ -19,6 +20,7 @@ import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
 import { consumeWorkoutHealthBuffer } from '../../health/workoutHealthBuffer';
 import { upsertDailyWorkoutStatsForSession } from './analytics';
 import { invalidateAnalyticsCache } from '../../cache/analyticsCache';
+import { consecutiveAdherenceWeeks } from '../../analytics/adherence';
 import type { TemplateSlot } from './templates';
 
 /**
@@ -132,16 +134,6 @@ async function isSessionExerciseOwnedByUser(sessionExerciseId: string, userId: s
     .maybeSingle();
   if (!exercise?.session_id) return false;
   return isSessionOwnedByUser(exercise.session_id, userId);
-}
-
-async function isSessionSetOwnedByUser(setId: string, userId: string): Promise<boolean> {
-  const { data: setRow } = await supabase
-    .from('v2_session_sets')
-    .select('session_exercise_id')
-    .eq('id', setId)
-    .maybeSingle();
-  if (!setRow?.session_exercise_id) return false;
-  return isSessionExerciseOwnedByUser(setRow.session_exercise_id, userId);
 }
 
 export type SessionControlDevice = 'phone' | 'watch';
@@ -730,20 +722,27 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
     const userId = user?.id;
     if (!userId) return false;
 
-    const { error } = await supabase
+    const { data: completed, error } = await supabase
       .from('v2_workout_sessions')
       .update({
         status: 'completed',
         completed_at: new Date().toISOString(),
       })
       .eq('id', sessionId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .select('id')
+      .maybeSingle();
 
     if (error) {
       if (__DEV__) {
         devError('workout-query', error, { sessionId });
       }
       return false;
+    }
+
+    if (!completed) {
+      return true;
     }
 
     // Fallback: call Edge Function directly (DB trigger may not be configured)
@@ -1193,7 +1192,7 @@ export async function getYearToDateStats(userId: string): Promise<YearToDateStat
 }
 
 /**
- * Get current streak: consecutive days with at least one completed workout, counting backwards from today.
+ * Adherence streak: consecutive Monday weeks that met days_per_week.
  */
 export async function getStreak(userId: string): Promise<number> {
   const now = new Date();
@@ -1208,14 +1207,17 @@ export async function getStreak(userId: string): Promise<number> {
   }
 
   try {
-    const { data: sessions, error } = await supabase
-      .from('v2_workout_sessions')
-      .select('completed_at')
-      .eq('user_id', userId)
-      .eq('status', 'completed')
-      .not('completed_at', 'is', null)
-      .gte('completed_at', startIso)
-      .lte('completed_at', endIso);
+    const [{ data: sessions, error }, { data: profile }] = await Promise.all([
+      supabase
+        .from('v2_workout_sessions')
+        .select('completed_at')
+        .eq('user_id', userId)
+        .eq('status', 'completed')
+        .not('completed_at', 'is', null)
+        .gte('completed_at', startIso)
+        .lte('completed_at', endIso),
+      supabase.from('v2_profiles').select('days_per_week').eq('id', userId).maybeSingle(),
+    ]);
 
     if (error) {
       if (__DEV__) {
@@ -1224,20 +1226,14 @@ export async function getStreak(userId: string): Promise<number> {
       return 0;
     }
 
-    const dateSet = new Set<string>();
-    for (const s of sessions || []) {
-      if (s.completed_at) {
-        dateSet.add(getLocalDayKey(new Date(s.completed_at)));
-      }
-    }
-
-    let cursor = new Date();
-    cursor.setHours(0, 0, 0, 0);
-    let streakCount = 0;
-    while (dateSet.has(getLocalDayKey(cursor))) {
-      streakCount += 1;
-      cursor.setDate(cursor.getDate() - 1);
-    }
+    const completedDates = (sessions ?? [])
+      .map((row) => row.completed_at)
+      .filter((value): value is string => Boolean(value));
+    const streakCount = consecutiveAdherenceWeeks(
+      completedDates,
+      now,
+      profile?.days_per_week ?? 0,
+    );
 
     if (__DEV__) {
       devLog('workout-query', { action: 'getStreak_result', userId, streakCount });
@@ -2130,7 +2126,18 @@ export async function prefillSessionSets(
   }
 
   try {
-    // Create sets for each session exercise
+    const rows: {
+      session_exercise_id: string;
+      set_number: number;
+      reps: number | null;
+      weight: number | null;
+      duration_sec: number | null;
+      rpe: null;
+      rir: null;
+      rest_sec: null;
+      notes: null;
+    }[] = [];
+
     for (const sessionExercise of sessionExercises) {
       const exerciseRef = {
         exerciseId: sessionExercise.exercise_id || undefined,
@@ -2143,33 +2150,28 @@ export async function prefillSessionSets(
       const target = targets.get(exerciseKey);
       if (!target) continue;
 
-      // Create sets for the planned set count
       for (let setNumber = 1; setNumber <= target.sets; setNumber++) {
-        const { error } = await supabase
-          .from('v2_session_sets')
-          .insert({
-            session_exercise_id: sessionExercise.id,
-            set_number: setNumber,
-            reps: target.reps || null,
-            weight: target.weight || null,
-            duration_sec: target.duration_sec || null,
-            // RPE/RIR are null initially (user fills these during workout)
-            rpe: null,
-            rir: null,
-            rest_sec: null,
-            notes: null,
-          });
+        rows.push({
+          session_exercise_id: sessionExercise.id,
+          set_number: setNumber,
+          reps: target.reps || null,
+          weight: target.weight || null,
+          duration_sec: target.duration_sec || null,
+          rpe: null,
+          rir: null,
+          rest_sec: null,
+          notes: null,
+        });
+      }
+    }
 
-        if (error) {
-          if (__DEV__) {
-            devError('workout-query', error, {
-              sessionId,
-              sessionExerciseId: sessionExercise.id,
-              setNumber,
-            });
-          }
-          return false;
+    if (rows.length > 0) {
+      const { error } = await supabase.from('v2_session_sets').insert(rows);
+      if (error) {
+        if (__DEV__) {
+          devError('workout-query', error, { sessionId, rowCount: rows.length });
         }
+        return false;
       }
     }
 
@@ -2221,14 +2223,6 @@ export async function markSetComplete(
   }
 
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const userId = user?.id;
-    if (!userId || !(await isSessionSetOwnedByUser(setId, userId))) {
-      return false;
-    }
-
     const update: {
       reps?: number;
       weight?: number;
@@ -2252,12 +2246,21 @@ export async function markSetComplete(
       update.rir = null;
     }
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('v2_session_sets')
       .update(update)
-      .eq('id', setId);
+      .eq('id', setId)
+      .select('id')
+      .maybeSingle();
 
-    if (error) {
+    if (error || !data) {
+      if (error && isNetworkError(error)) {
+        await enqueueSetWrite({ setId, values: update });
+        if (__DEV__) {
+          devLog('workout-query', { action: 'markSetComplete:queued', setId });
+        }
+        return true;
+      }
       if (__DEV__) {
         devError('workout-query', error, { setId, values });
       }
@@ -2274,6 +2277,20 @@ export async function markSetComplete(
 
     return true;
   } catch (error) {
+    if (isNetworkError(error)) {
+      try {
+        await enqueueSetWrite({
+          setId,
+          values: {
+            performed_at: new Date().toISOString(),
+            ...values,
+          },
+        });
+        return true;
+      } catch {
+        // fall through
+      }
+    }
     if (__DEV__) {
       devError('workout-query', error, { setId });
     }
@@ -2529,4 +2546,128 @@ export async function getSessionWithSets(sessionId: string): Promise<{
     }
     return null;
   }
+}
+
+/**
+ * Insert a planned session without abandoning other actives.
+ * Used by copy-last-week so cloning Sun–Sat does not mark earlier copies abandoned.
+ */
+export async function createCopiedWorkoutSession(
+  userId: string,
+  templateId: string | undefined,
+  dayName: string,
+  startedAt: string,
+): Promise<WorkoutSession | null> {
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'createCopiedWorkoutSession',
+      userId,
+      templateId: templateId ?? null,
+      dayName,
+      startedAt,
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('v2_workout_sessions')
+      .insert({
+        user_id: userId,
+        template_id: templateId ?? null,
+        day_name: dayName,
+        status: 'active',
+        started_at: startedAt,
+        origin: 'manual',
+        control_device: 'phone',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { action: 'createCopiedWorkoutSession', userId, dayName });
+      }
+      return null;
+    }
+    return data;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { action: 'createCopiedWorkoutSession', userId, dayName });
+    }
+    return null;
+  }
+}
+
+/**
+ * Clone session exercises and prescribed set fields onto a destination session.
+ * performed_at is omitted so copied sets stay unperformed.
+ */
+export async function copyPrescribedSessionContent(
+  sourceSessionId: string,
+  destSessionId: string,
+): Promise<boolean> {
+  const source = await getSessionWithSets(sourceSessionId);
+  if (!source || source.exercises.length === 0) return false;
+
+  if (__DEV__) {
+    devLog('workout-query', {
+      action: 'copyPrescribedSessionContent',
+      sourceSessionId,
+      destSessionId,
+      exerciseCount: source.exercises.length,
+    });
+  }
+
+  let copiedAny = false;
+  for (const exercise of source.exercises) {
+    const { data: inserted, error: exerciseError } = await supabase
+      .from('v2_session_exercises')
+      .insert({
+        session_id: destSessionId,
+        exercise_id: exercise.exercise_id ?? null,
+        custom_exercise_id: exercise.custom_exercise_id ?? null,
+        sort_order: exercise.sort_order,
+        superset_group: exercise.superset_group ?? null,
+        rest_sec: exercise.rest_sec ?? null,
+      })
+      .select('id')
+      .single();
+
+    if (exerciseError || !inserted) {
+      if (__DEV__) {
+        devError('workout-query', exerciseError ?? new Error('copy exercise failed'), {
+          sourceSessionId,
+          destSessionId,
+        });
+      }
+      continue;
+    }
+
+    const setRows = exercise.sets
+      .map((set) => {
+        const hasReps = set.reps != null;
+        const hasDuration = set.duration_sec != null;
+        if (!hasReps && !hasDuration) return null;
+        return {
+          session_exercise_id: inserted.id,
+          set_number: set.set_number,
+          reps: hasReps ? set.reps ?? null : null,
+          weight: set.weight ?? null,
+          duration_sec: hasReps ? null : set.duration_sec ?? null,
+          set_type: set.set_type ?? 'normal',
+          rest_sec: set.rest_sec ?? null,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row != null);
+
+    if (setRows.length > 0) {
+      const { error: setsError } = await supabase.from('v2_session_sets').insert(setRows);
+      if (setsError && __DEV__) {
+        devError('workout-query', setsError, { destSessionId, sessionExerciseId: inserted.id });
+      }
+    }
+    copiedAny = true;
+  }
+
+  return copiedAny;
 }

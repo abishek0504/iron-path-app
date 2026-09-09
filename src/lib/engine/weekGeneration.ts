@@ -35,6 +35,26 @@ const ESTIMATED_STIMULUS = 0.7;
 const MAX_FATIGUE_PER_MUSCLE = 10;
 const GREEN_THRESHOLD = 0.5; // 0–50% stress
 const RED_THRESHOLD = 0.85; // >85% stress = hard stop
+export const DELOAD_WEEK_INTERVAL = 4;
+export const DELOAD_VOLUME_FACTOR = 0.6;
+
+/** ISO-8601 week number (Monday-based, week 1 contains the first Thursday). */
+export function getIsoWeekNumber(date: Date): number {
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  return Math.ceil(((utc.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+/** Every 4th ISO week reduces volume (ceil, minimum 1 set). */
+export function applyDeloadToTargetSets(
+  targetSets: number,
+  isoWeekNumber: number = getIsoWeekNumber(new Date()),
+): number {
+  if (isoWeekNumber % DELOAD_WEEK_INTERVAL !== 0) return targetSets;
+  return Math.max(1, Math.ceil(targetSets * DELOAD_VOLUME_FACTOR));
+}
 
 type FatigueZone = 'green' | 'yellow' | 'red';
 
@@ -317,6 +337,16 @@ export async function generateWeekForTemplate(
     const excluded: string[] = [];
     /** Exercises excluded due to missing prescription — we fail fast to surface data issues. */
     const missingPrescription: { exerciseId: string; name: string; mode: 'reps' | 'timed' }[] = [];
+    const isoWeekNumber = getIsoWeekNumber(new Date());
+    const isDeloadWeek = isoWeekNumber % DELOAD_WEEK_INTERVAL === 0;
+    if (__DEV__) {
+      devLog('week-generation', {
+        action: 'deload_week',
+        isoWeekNumber,
+        isDeloadWeek,
+        volumeFactor: isDeloadWeek ? DELOAD_VOLUME_FACTOR : 1,
+      });
+    }
 
     for (const row of aiExercises) {
       const exerciseId = row.exercise_id;
@@ -360,7 +390,8 @@ export async function generateWeekForTemplate(
         continue;
       }
 
-      const targetSets = Math.round((setsMin + setsMax) / 2);
+      const rawTargetSets = Math.round((setsMin + setsMax) / 2);
+      const targetSets = applyDeloadToTargetSets(rawTargetSets, isoWeekNumber);
 
       // Build muscle weights from primary_muscles + implicit_hits
       const weights = new Map<string, number>();

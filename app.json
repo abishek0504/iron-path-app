@@ -30,8 +30,11 @@
       },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "NSSupportsLiveActivities": true,
         "NSUserNotificationsUsageDescription": "IronPath sends reminders to help you stay consistent with your workouts.",
-        "NSHealthShareUsageDescription": "IronPath reads body weight and heart rate from Apple Health to import your history and enrich workout analytics.",
+        "NSCameraUsageDescription": "IronPath uses the camera to take progress photos.",
+        "NSPhotoLibraryUsageDescription": "IronPath uses your photo library to add progress photos.",
+        "NSHealthShareUsageDescription": "IronPath reads body weight, heart rate, and active energy from Apple Health to import your history and enrich workout analytics.",
         "NSHealthUpdateUsageDescription": "IronPath writes completed workouts, active energy, heart rate, and body weight to Apple Health when you connect."
       },
       "privacyManifests": {
@@ -73,6 +76,46 @@
           {
             "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCrashData",
             "NSPrivacyCollectedDataTypeLinked": false,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeName",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeHealth",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypePurchaseHistory",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCustomerSupport",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeOtherDataTypes",
+            "NSPrivacyCollectedDataTypeLinked": true,
             "NSPrivacyCollectedDataTypeTracking": false,
             "NSPrivacyCollectedDataTypePurposes": [
               "NSPrivacyCollectedDataTypePurposeAppFunctionality"
@@ -133,7 +176,7 @@
       [
         "@kingstinct/react-native-healthkit",
         {
-          "NSHealthShareUsageDescription": "IronPath reads body weight and heart rate from Apple Health to import your history and enrich workout analytics.",
+          "NSHealthShareUsageDescription": "IronPath reads body weight, heart rate, and active energy from Apple Health to import your history and enrich workout analytics.",
           "NSHealthUpdateUsageDescription": "IronPath writes completed workouts, active energy, heart rate, and body weight to Apple Health when you connect.",
           "background": false
         }

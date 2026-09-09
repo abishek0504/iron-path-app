@@ -13,6 +13,7 @@ import { useTheme } from '../../lib/utils/ThemeContext';
 interface DatePickerProps {
   visible: boolean;
   onClose: () => void;
+  onClosed?: () => void;
   value: Date | null;
   onChange: (date: Date) => void;
   maximumDate?: Date;
@@ -22,6 +23,7 @@ interface DatePickerProps {
 export const DatePicker: React.FC<DatePickerProps> = ({
   visible,
   onClose,
+  onClosed,
   value,
   onChange,
   maximumDate = new Date(),
@@ -115,6 +117,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     <BottomSheet
       visible={visible}
       onClose={onClose}
+      onClosed={onClosed}
       title="Select Date of Birth"
       height={350}
     >

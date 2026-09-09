@@ -57,10 +57,45 @@ function annualSavingsPercent(monthlyPrice: number, annualPrice: number): number
   return pct >= 10 ? pct : null;
 }
 
-function priceDisclosure(plan: PlanId, pkg: PurchasesPackage | null): string {
-  const price = pkg?.product.priceString ?? (plan === 'annual' ? '$59.99' : '$9.99');
-  const period = plan === 'annual' ? 'year' : 'month';
-  return `Then ${price}/${period} after trial unless canceled.`;
+function introPrice(pkg: PurchasesPackage) {
+  return pkg.product.introPrice ?? null;
+}
+
+function periodNoun(plan: PlanId): 'year' | 'month' {
+  return plan === 'annual' ? 'year' : 'month';
+}
+
+function trialSublabel(pkg: PurchasesPackage): string | null {
+  const intro = introPrice(pkg);
+  if (!intro || intro.price !== 0) return null;
+  const units = intro.periodNumberOfUnits;
+  const unit = (intro.periodUnit ?? 'DAY').toLowerCase();
+  if (unit.startsWith('day')) return `${units}-day free trial`;
+  if (unit.startsWith('week')) return units === 1 ? '1-week free trial' : `${units}-week free trial`;
+  if (unit.startsWith('month')) return units === 1 ? '1-month free trial' : `${units}-month free trial`;
+  return `${units}-${unit} free trial`;
+}
+
+function planPriceLabel(pkg: PurchasesPackage, plan: PlanId): string {
+  const period = periodNoun(plan);
+  return `${pkg.product.priceString}/${period === 'year' ? 'yr' : 'mo'}`;
+}
+
+function ctaLabel(pkg: PurchasesPackage | null): string {
+  if (!pkg) return 'Subscribe';
+  const trial = trialSublabel(pkg);
+  if (trial) return `Start ${trial}`;
+  return `Subscribe for ${pkg.product.priceString}`;
+}
+
+function priceDisclosure(plan: PlanId, pkg: PurchasesPackage | null): string | null {
+  if (!pkg) return null;
+  const price = pkg.product.priceString;
+  const period = periodNoun(plan);
+  if (trialSublabel(pkg)) {
+    return `Then ${price}/${period} after trial unless canceled.`;
+  }
+  return `${price}/${period}. Auto-renews unless canceled.`;
 }
 
 export function PaywallModal({
@@ -87,7 +122,7 @@ export function PaywallModal({
       ctaScale.value = 1;
       return;
     }
-    setSelectedPlan('annual');
+    setSelectedPlan(annualPackage ? 'annual' : monthlyPackage ? 'monthly' : 'annual');
     const timer = setTimeout(() => {
       setCanDismiss(true);
       ctaScale.value = withRepeat(
@@ -100,7 +135,15 @@ export function PaywallModal({
       clearTimeout(timer);
       cancelAnimation(ctaScale);
     };
-  }, [visible, ctaScale]);
+  }, [visible, ctaScale, annualPackage, monthlyPackage]);
+
+  useEffect(() => {
+    if (selectedPlan === 'annual' && !annualPackage && monthlyPackage) {
+      setSelectedPlan('monthly');
+    } else if (selectedPlan === 'monthly' && !monthlyPackage && annualPackage) {
+      setSelectedPlan('annual');
+    }
+  }, [annualPackage, monthlyPackage, selectedPlan]);
 
   const ctaAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: ctaScale.value }],
@@ -155,25 +198,34 @@ export function PaywallModal({
           <Text style={styles.subhead}>Cancel anytime</Text>
 
           <View style={styles.plans}>
-            <PlanRow
-              styles={styles}
-              label="Annual"
-              price={annualPackage?.product.priceString ?? '$59.99/yr'}
-              sublabel="7-day free trial"
-              selected={selectedPlan === 'annual'}
-              muted={false}
-              badge={savingsPct != null ? `Save ${savingsPct}%` : undefined}
-              onPress={() => setSelectedPlan('annual')}
-            />
-            <PlanRow
-              styles={styles}
-              label="Monthly"
-              price={monthlyPackage?.product.priceString ?? '$9.99/mo'}
-              sublabel="7-day free trial"
-              selected={selectedPlan === 'monthly'}
-              muted={selectedPlan !== 'monthly'}
-              onPress={() => setSelectedPlan('monthly')}
-            />
+            {annualPackage ? (
+              <PlanRow
+                styles={styles}
+                label="Annual"
+                price={planPriceLabel(annualPackage, 'annual')}
+                sublabel={trialSublabel(annualPackage)}
+                selected={selectedPlan === 'annual'}
+                muted={false}
+                badge={savingsPct != null ? `Save ${savingsPct}%` : undefined}
+                onPress={() => setSelectedPlan('annual')}
+              />
+            ) : null}
+            {monthlyPackage ? (
+              <PlanRow
+                styles={styles}
+                label="Monthly"
+                price={planPriceLabel(monthlyPackage, 'monthly')}
+                sublabel={trialSublabel(monthlyPackage)}
+                selected={selectedPlan === 'monthly'}
+                muted={selectedPlan !== 'monthly'}
+                onPress={() => setSelectedPlan('monthly')}
+              />
+            ) : null}
+            {!annualPackage && !monthlyPackage ? (
+              <Text style={styles.plansUnavailable}>
+                Subscription options are unavailable right now. Restore purchases or try again later.
+              </Text>
+            ) : null}
           </View>
 
           <View style={styles.bullets}>
@@ -188,7 +240,7 @@ export function PaywallModal({
         <View style={styles.footer}>
           <Animated.View style={canDismiss ? ctaAnimatedStyle : undefined}>
             <Button
-              label="Start 7-day free trial"
+              label={ctaLabel(selectedPackage)}
               onPress={handlePurchasePress}
               disabled={!selectedPackage || isPurchasing}
               fullWidth
@@ -199,7 +251,7 @@ export function PaywallModal({
             </Button>
           </Animated.View>
 
-          <Text style={styles.disclosure}>{disclosure}</Text>
+          {disclosure ? <Text style={styles.disclosure}>{disclosure}</Text> : null}
 
           <TouchableOpacity
             onPress={onRestore}
@@ -207,7 +259,7 @@ export function PaywallModal({
             style={styles.restore}
             activeOpacity={0.85}
           >
-            <Text style={styles.restoreText}>Have a subscription?</Text>
+            <Text style={styles.restoreText}>Restore Purchases</Text>
           </TouchableOpacity>
 
           <LegalLinks
@@ -233,7 +285,7 @@ function PlanRow({
   styles: ReturnType<typeof createStyles>;
   label: string;
   price: string;
-  sublabel: string;
+  sublabel: string | null;
   selected: boolean;
   muted: boolean;
   badge?: string;
@@ -262,7 +314,7 @@ function PlanRow({
         <Text style={[styles.planPrice, muted && !selected && styles.planLabelMuted]}>
           {price}
         </Text>
-        <Text style={styles.planTrial}>{sublabel}</Text>
+        {sublabel ? <Text style={styles.planTrial}>{sublabel}</Text> : null}
       </View>
       <View style={[styles.radio, selected && styles.radioSelected]}>
         {selected ? <View style={styles.radioDot} /> : null}
@@ -315,6 +367,13 @@ function createStyles(colors: ThemeColors) {
   },
   plans: {
     gap: spacing.sm,
+  },
+  plansUnavailable: {
+    color: colors.textSecondary,
+    fontSize: typography.sizes.sm,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingVertical: spacing.md,
   },
   planRow: {
     flexDirection: 'row',

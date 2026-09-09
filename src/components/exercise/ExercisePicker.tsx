@@ -54,12 +54,14 @@ interface ExercisePickerProps {
   /** Multi-select mode: tap to toggle, confirm with the footer button. */
   onSelectMultiple?: (exercises: Exercise[]) => void;
   multiSelect?: boolean;
+  suggestedIds?: string[];
 }
 
 export const ExercisePicker: React.FC<ExercisePickerProps> = ({
   onSelect,
   onSelectMultiple,
   multiSelect = false,
+  suggestedIds = [],
 }) => {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -78,8 +80,7 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
 
   useEffect(() => {
     filterExercises();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterExercises closes over searchQuery and exercises
-  }, [searchQuery, exercises]);
+  }, [searchQuery, exercises, suggestedIds]);
 
   const loadExercises = async () => {
     if (__DEV__) {
@@ -110,6 +111,15 @@ export const ExercisePicker: React.FC<ExercisePickerProps> = ({
 
   const filterExercises = () => {
     const filtered = searchExercisesByName(exercises, searchQuery);
+    if (searchQuery.trim().length === 0 && suggestedIds.length > 0) {
+      const suggested = suggestedIds
+        .map((id) => exercises.find((exercise) => exercise.id === id))
+        .filter((exercise): exercise is Exercise => Boolean(exercise));
+      const suggestedSet = new Set(suggestedIds);
+      const rest = filtered.filter((exercise) => !suggestedSet.has(exercise.id));
+      setFilteredExercises([...suggested, ...rest]);
+      return;
+    }
     setFilteredExercises(filtered);
 
     if (__DEV__) {

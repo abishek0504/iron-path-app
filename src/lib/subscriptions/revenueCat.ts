@@ -19,12 +19,12 @@ function getPurchases(): PurchasesModule | null {
   }
 }
 
+/** Store keys are not interchangeable, so a missing platform key must disable RevenueCat. */
 export function getRevenueCatApiKey(): string | null {
-  const key = process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY;
   if (Platform.OS === 'android') {
-    return process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ?? key ?? null;
+    return process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ?? null;
   }
-  return key ?? null;
+  return process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? null;
 }
 
 export async function configureRevenueCat(userId: string): Promise<boolean> {

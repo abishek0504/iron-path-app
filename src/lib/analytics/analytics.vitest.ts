@@ -6,6 +6,7 @@ import {
   estimateOneRepMaxLbs,
   bestSetForProgression,
   summarizeAdherence,
+  consecutiveAdherenceWeeks,
   wallClockDurationSec,
   computeActiveDurationSec,
   setStimulus,
@@ -80,6 +81,19 @@ describe('adherence', () => {
     );
     expect(summary.sessionsCompleted).toBe(3);
     expect(summary.adherencePct).toBeGreaterThan(0);
+  });
+
+  it('counts consecutive weeks that met the weekly target', () => {
+    const asOf = new Date('2026-06-22T12:00:00');
+    const dates = [
+      '2026-06-08T10:00:00Z',
+      '2026-06-09T10:00:00Z',
+      '2026-06-10T10:00:00Z',
+      '2026-06-15T10:00:00Z',
+      '2026-06-16T10:00:00Z',
+      '2026-06-17T10:00:00Z',
+    ];
+    expect(consecutiveAdherenceWeeks(dates, asOf, 3)).toBe(2);
   });
 });
 

@@ -10,6 +10,8 @@ export interface TourStep {
   body: string;
   placement: TourTooltipPlacement;
   fallbackTargetId?: string;
+  /** Fixed chrome (tab bar, settings) should not be scrolled into view. */
+  fixed?: boolean;
 }
 
 export const TOUR_STEPS: TourStep[] = [
@@ -17,74 +19,45 @@ export const TOUR_STEPS: TourStep[] = [
     id: 'tabs-overview',
     targetId: 'tour.tabs.bar',
     tab: 'index',
-    title: 'Welcome to IronPath',
-    body: 'Four areas: Workout for daily training, Plan to build your program, Progress for history, and Dashboard for stats and settings.',
+    title: 'Four places to work from',
+    body: 'Workout is today. Plan is your week. Progress is history. Dashboard holds stats and settings.',
     placement: 'auto',
+    fixed: true,
   },
   {
-    id: 'plan-day-selector',
+    id: 'plan-a-day',
     targetId: 'tour.plan.daySelector',
     tab: 'planner',
-    title: 'Your weekly plan',
-    body: 'Your week is organized by day — tap a day to view and edit its workouts.',
+    title: 'Plan any day of the week',
+    body: 'Each day holds its own workouts. You can add sessions or change exercises here before you train.',
     placement: 'auto',
   },
   {
-    id: 'plan-add-workout',
-    targetId: 'tour.plan.addWorkout',
-    tab: 'planner',
-    title: 'Add workouts',
-    body: 'Add one or more workouts to any day of the week.',
-    placement: 'auto',
-  },
-  {
-    id: 'plan-generate-ai',
+    id: 'generate-ai',
     targetId: 'tour.plan.generateAi',
     tab: 'planner',
-    title: 'Generate with AI',
-    body: 'Build a full day instantly. IronPath Pro unlocks unlimited AI generation.',
+    title: 'Generate a day with AI',
+    body: 'IronPath can build a full day from your split, equipment, and recent training. Pro includes a weekly generation quota.',
     placement: 'auto',
   },
   {
     id: 'workout-start',
     targetId: 'tour.workout.start',
     tab: 'index',
-    title: "Today's workout",
-    body: "See what's scheduled for today, then tap Start to begin — come back anytime to continue where you left off.",
+    title: "Today's session",
+    body: "This card is today's workout. Start begins logging. You can leave and pick up later.",
     placement: 'auto',
     fallbackTargetId: 'tour.workout.card',
-  },
-  {
-    id: 'progress-toggle',
-    targetId: 'tour.progress.viewToggle',
-    tab: 'progress',
-    title: 'Training history',
-    body: 'Browse your completed sessions by week or month. Tap any day for details.',
-    placement: 'auto',
-  },
-  {
-    id: 'dashboard-heatmap',
-    targetId: 'tour.dashboard.heatmap',
-    tab: 'dashboard',
-    title: 'Muscle status',
-    body: "See muscle freshness and what you've trained recently on the body map.",
-    placement: 'auto',
-  },
-  {
-    id: 'dashboard-stats',
-    targetId: 'tour.dashboard.stats',
-    tab: 'dashboard',
-    title: 'Track your progress',
-    body: 'Monitor your weekly goal and training streak to stay consistent.',
-    placement: 'auto',
   },
   {
     id: 'dashboard-settings',
     targetId: 'tour.dashboard.settings',
     tab: 'dashboard',
-    title: 'Settings & Pro',
-    body: 'Profile, reminders, Apple Health, and IronPath Pro all live here.',
+    title: 'Dashboard and settings',
+    body: 'The body map and weekly stats live here. Settings is how you manage your profile, Health, and IronPath Pro.',
     placement: 'auto',
+    fixed: true,
+    fallbackTargetId: 'tour.dashboard.heatmap',
   },
 ];
 

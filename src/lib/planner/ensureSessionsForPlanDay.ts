@@ -16,6 +16,7 @@ import {
   getLocalDayBoundsIso,
   WEEK_DAYS,
 } from '../utils/date';
+import { isMaterializeSuppressed } from './materializeSuppression';
 import { devLog } from '../utils/logger';
 
 /** Module-level guard so Plan + Workout do not double-materialize the same day. */
@@ -81,9 +82,11 @@ export async function ensureSessionsForPlanDay(
   let sessions = await getSessionsForToday(userId, startIso, endIsoExclusive);
   let materialized = false;
 
+  const suppressed = await isMaterializeSuppressed(userId, startIso);
   const canMaterialize =
     sessions.length === 0 &&
     !skipMaterialize &&
+    !suppressed &&
     !!templateId &&
     slots.length > 0;
 

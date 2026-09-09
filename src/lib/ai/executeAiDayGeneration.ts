@@ -187,7 +187,9 @@ export async function executeAiDayGeneration(
       return { ok: false, code: 'unknown', message: cleared.message };
     }
 
-    const existingSessions = await fetchSessionsForDay(userId, dayName);
+    const existingSessions = (await fetchSessionsForDay(userId, dayName)).filter(
+      (session) => session.status === 'active',
+    );
     let slotsCreated = 0;
     let sortOrder = 0;
     const seenExerciseIds = new Set<string>();

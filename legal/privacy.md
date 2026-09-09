@@ -11,14 +11,18 @@ IronPath ("the App", "we", "us") is a workout planning and tracking app for iPho
 - **User ID** — a random identifier linking your data to your account.
 
 ### Fitness and profile data you provide
+- Identity details: first and last name, date of birth, and (optionally) gender. Date of birth is used to confirm you meet the minimum age and to tailor training recommendations.
 - Profile details: experience level, training goals, body weight, height, unit preference.
 - Workout data: planned routines, exercises, sets, reps, weights, durations, RPE/RIR ratings, personal records, exercise notes, and workout schedules.
 
+### Purchase data
+If you subscribe to IronPath Pro, we store your subscription status, plan tier, and expiry date, along with an identifier linking your account to your RevenueCat subscriber record. Payment details are handled entirely by Apple; **we never receive your payment card or Apple ID credentials.**
+
 ### Apple Health (optional)
 If you choose to connect Apple Health:
-- **We write**: completed workouts and body weight entries you log in IronPath.
-- **We read**: body weight only — used to import your existing weight history and keep IronPath in sync.
-- Health data is processed on your device and stored in your IronPath account only where needed for app functionality (e.g. imported weight entries). **Health data is never used for advertising or sold to third parties**, and is never shared with the AI service described below.
+- **We read**: body weight, heart rate, and active energy burned. Body weight is used to import your existing weight history and keep IronPath in sync. Heart rate and active energy are used to attach workout intensity and calorie data to sessions you record in IronPath.
+- **We write**: completed workouts, body weight entries you log in IronPath, and the active energy and heart rate associated with those workouts.
+- Health data is processed on your device and stored in your IronPath account only where needed for app functionality (e.g. imported weight entries and per-session workout metrics). **Health data is never used for advertising or sold to third parties**, and is never shared with the AI service described below.
 - You can revoke access anytime in iOS Settings → Privacy & Security → Health.
 
 ### Apple Watch (optional)
@@ -29,7 +33,7 @@ If you use the IronPath Apple Watch companion, workout state (such as the active
 
 ## AI workout generation
 
-When you use "Generate with AI", a summary of your training context (experience level, preferred training split, available days, recent workout performance such as sets, reps, weight and effort ratings, and muscle-group coverage) is sent to OpenAI's API to generate a workout plan. Your email, name, and Apple Health data are **not** sent. Generations are rate-limited per day and logged in your account so you can review what was created.
+When you use "Generate with AI", a summary of your training context (experience level, preferred training split, available days, recent workout performance such as sets, reps, weight and effort ratings, and muscle-group coverage) is sent to OpenAI's API to generate a workout plan. Your email, name, and Apple Health data are **not** sent. AI generation requires an IronPath Pro subscription and is rate-limited to 40 workout days per rolling 7-day period. Generations are logged in your account so you can review what was created.
 
 ## How we store data
 
@@ -43,7 +47,7 @@ Your data is stored with Supabase (PostgreSQL) with row-level security: only you
 
 ## Data retention and account deletion
 
-You can delete your account in the App (Settings → Account → Delete account). Deletion is scheduled immediately and your data is permanently purged from our systems after a short grace period (30 days), during which you can contact us to cancel the deletion. When configured, we also request deletion of your RevenueCat subscriber record. Workouts written to Apple Health remain in Apple Health unless you remove them there.
+You can delete your account in the App (Settings → Danger zone → Delete account). Deletion is scheduled immediately and your data is permanently purged from our systems after a grace period of 30 days. During that window you can cancel the deletion by signing back in, or by contacting us. When configured, we also request deletion of your RevenueCat subscriber record. Workouts and health samples written to Apple Health remain in Apple Health unless you remove them there. Deleting your account does not cancel an active subscription — cancel it in your Apple ID Account Settings.
 
 ## Third-party services
 
@@ -53,7 +57,7 @@ You can delete your account in the App (Settings → Account → Delete account)
 | RevenueCat | In-app subscription management (iOS) | Anonymous app user ID linked to your account; purchase and entitlement status |
 | OpenAI API | AI workout generation (on request) | Training context summary only |
 | Sentry | Crash and performance diagnostics | Device/app diagnostics |
-| Apple HealthKit | Optional health sync | Body weight (read/write), workouts (write) |
+| Apple HealthKit | Optional health sync | Body weight, heart rate, active energy (read); workouts, body weight, heart rate, active energy (write) |
 
 ## Children
 

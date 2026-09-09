@@ -13,16 +13,14 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
-  ScrollView,
-  TextInput,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Scale } from 'lucide-react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { useUserStore } from '../../stores/userStore';
 import { useUIStore } from '../../stores/uiStore';
+import { useModal } from '../../hooks/useModal';
 import {
   getWeightHistoryCached,
   invalidateWeightCache,
@@ -30,7 +28,6 @@ import {
 } from '../../lib/cache/dashboardStatsCache';
 import { insertWeightLog } from '../../lib/supabase/queries/weight';
 import { aggregateWeightLogsByDay, computeWeightMetrics } from '../../lib/utils/weightChart';
-import { BottomSheet } from './BottomSheet';
 import { LogoEdgeLoader } from './LogoEdgeLoader';
 import { WeightTrendChart } from './WeightTrendChart';
 import { devLog } from '../../lib/utils/logger';
@@ -60,25 +57,15 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
   const profile = useUserStore((state) => state.profile);
   const setProfile = useUserStore((state) => state.setProfile);
   const showToast = useUIStore((state) => state.showToast);
+  const { openSheet, closeSheet } = useModal();
 
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState<WeightLog[]>([]);
-  const [showWeightPicker, setShowWeightPicker] = useState(false);
-  const [weightInput, setWeightInput] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const insets = useSafeAreaInsets();
   const useImperial = profile?.use_imperial ?? true;
   const currentWeight = profile?.current_weight ?? null;
   const unitsLabel = useImperial ? 'lbs' : 'kg';
-
-  const seedWeightInput = useCallback(() => {
-    const seed =
-      currentWeight != null
-        ? Math.round(currentWeight)
-        : defaultWeightForUnit(useImperial);
-    setWeightInput(String(seed));
-  }, [currentWeight, useImperial]);
 
   const loadHistory = useCallback(async () => {
     // Keep showing last-known history while SWR refreshes.
@@ -126,19 +113,29 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
   );
 
   const openWeightInput = () => {
-    seedWeightInput();
-    setShowWeightPicker(true);
+    const seed =
+      currentWeight != null
+        ? Math.round(currentWeight)
+        : defaultWeightForUnit(useImperial);
+    openSheet('weightEntry', {
+      unitsLabel,
+      initialValue: String(seed),
+      placeholder: String(defaultWeightForUnit(useImperial)),
+      onSave: (value: string) => {
+        void handleUpdateWeight(value);
+      },
+    });
   };
 
-  const handleUpdateWeight = async () => {
-    const parsed = Number.parseFloat(weightInput);
+  const handleUpdateWeight = async (raw: string) => {
+    const parsed = Number.parseFloat(raw);
     if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_WEIGHT) {
       showToast(`Enter a weight up to ${MAX_WEIGHT} ${unitsLabel}`, 'error');
       return;
     }
 
     const weightToSave = Math.round(parsed);
-    setShowWeightPicker(false);
+    closeSheet();
     setSaving(true);
     try {
       const { success } = await insertWeightLog(userId, weightToSave, {
@@ -255,44 +252,6 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
       color: colors.textSecondary,
       fontSize: typography.sizes.sm,
     },
-    pickerScroll: {
-      flex: 1,
-    },
-    pickerContainer: {
-      paddingHorizontal: spacing.md,
-      gap: spacing.md,
-    },
-    weightInputRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.sm,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.cardBorder,
-      paddingVertical: spacing.sm,
-    },
-    weightInput: {
-      flex: 1,
-      color: colors.textPrimary,
-      fontSize: typography.sizes['2xl'],
-      fontWeight: typography.weights.semibold,
-      paddingVertical: spacing.sm,
-    },
-    weightInputUnit: {
-      color: colors.textSecondary,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.medium,
-    },
-    confirmButton: {
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.md,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
-    },
-    confirmButtonText: {
-      color: colors.onPrimaryContrast,
-      fontSize: typography.sizes.base,
-      fontWeight: typography.weights.semibold,
-    },
   }), [colors]);
 
   return (
@@ -371,46 +330,6 @@ export function WeightTrackerCard({ userId, onRefresh, refreshSignal }: WeightTr
           )}
         </>
       )}
-
-      <BottomSheet
-        visible={showWeightPicker}
-        onClose={() => setShowWeightPicker(false)}
-        title={`Enter weight (${unitsLabel})`}
-        height={260}
-      >
-        <ScrollView
-          style={styles.pickerScroll}
-          contentContainerStyle={[
-            styles.pickerContainer,
-            { paddingBottom: Math.max(spacing.xl, insets.bottom) },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.weightInputRow}>
-            <TextInput
-              style={styles.weightInput}
-              value={weightInput}
-              onChangeText={setWeightInput}
-              keyboardType="decimal-pad"
-              placeholder={String(defaultWeightForUnit(useImperial))}
-              placeholderTextColor={colors.textMuted}
-              autoFocus
-              selectTextOnFocus
-              maxLength={6}
-              accessibilityLabel={`Weight in ${unitsLabel}`}
-            />
-            <Text style={styles.weightInputUnit}>{unitsLabel}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.confirmButton}
-            onPress={handleUpdateWeight}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.confirmButtonText}>Save</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </BottomSheet>
     </View>
   );
 }

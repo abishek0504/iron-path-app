@@ -1,5 +1,5 @@
 /**
- * RevenueCat webhook → sync ironpath_pro entitlement to v2_profiles.
+ * RevenueCat webhook → sync the Ironpath Pro entitlement to v2_profiles.
  *
  * Set REVENUECAT_WEBHOOK_SECRET in Supabase secrets; configure the same value
  * as the Authorization header in the RevenueCat dashboard.
@@ -7,7 +7,7 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const ENTITLEMENT_PRO = 'ironpath_pro';
+const ENTITLEMENT_PRO = 'Ironpath Pro';
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -17,6 +17,7 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 interface RevenueCatEvent {
+  id?: string;
   type?: string;
   app_user_id?: string;
   expiration_at_ms?: number | null;
@@ -33,7 +34,12 @@ function hasProEntitlement(event: RevenueCatEvent): boolean {
   return ids.includes(ENTITLEMENT_PRO);
 }
 
-function tierFromEventType(type: string, event: RevenueCatEvent): 'free' | 'pro' {
+function expirationFromEvent(event: RevenueCatEvent): string | null {
+  if (event.expiration_at_ms == null) return null;
+  return new Date(event.expiration_at_ms).toISOString();
+}
+
+function rawTierFromEvent(type: string, event: RevenueCatEvent): 'free' | 'pro' {
   switch (type) {
     case 'INITIAL_PURCHASE':
     case 'RENEWAL':
@@ -47,11 +53,27 @@ function tierFromEventType(type: string, event: RevenueCatEvent): 'free' | 'pro'
       }
       return 'free';
     case 'EXPIRATION':
-    case 'BILLING_ISSUE':
       return 'free';
+    case 'BILLING_ISSUE':
+      return hasProEntitlement(event) ? 'pro' : 'free';
     default:
       return hasProEntitlement(event) ? 'pro' : 'free';
   }
+}
+
+function resolveSubscription(
+  type: string,
+  event: RevenueCatEvent,
+): { tier: 'free' | 'pro'; expiresAt: string | null } {
+  const rawTier = rawTierFromEvent(type, event);
+  const expiresAt = expirationFromEvent(event);
+  if (rawTier !== 'pro') {
+    return { tier: 'free', expiresAt: null };
+  }
+  if (!expiresAt || new Date(expiresAt).getTime() <= Date.now()) {
+    return { tier: 'free', expiresAt: null };
+  }
+  return { tier: 'pro', expiresAt };
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -65,11 +87,6 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function expirationFromEvent(event: RevenueCatEvent): string | null {
-  if (event.expiration_at_ms == null) return null;
-  return new Date(event.expiration_at_ms).toISOString();
-}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
@@ -106,12 +123,25 @@ Deno.serve(async (req) => {
   if (!UUID_RE.test(userId)) {
     return jsonResponse({ error: 'Invalid app_user_id' }, 400);
   }
-  const tier = tierFromEventType(event.type, event);
-  const expiresAt = tier === 'pro' ? expirationFromEvent(event) : null;
 
   const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  if (event.id) {
+    const { error: eventInsertError } = await serviceClient
+      .from('revenuecat_webhook_events')
+      .insert({ event_id: event.id, event_type: event.type });
+    if (eventInsertError) {
+      if (eventInsertError.code === '23505') {
+        return jsonResponse({ ok: true, duplicate: true }, 200);
+      }
+      console.error('revenuecat-webhook event insert failed', eventInsertError.message);
+      return jsonResponse({ error: 'Failed to record event' }, 500);
+    }
+  }
+
+  const { tier, expiresAt } = resolveSubscription(event.type, event);
 
   const { error } = await serviceClient
     .from('v2_profiles')

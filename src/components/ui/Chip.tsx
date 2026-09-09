@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
+import { hapticSelection } from '../../lib/utils/haptics';
 
 /** Comfortable tap target for option chips (iOS HIG 44pt). */
 const CHIP_MIN_HEIGHT = 44;
@@ -44,7 +45,10 @@ export const Chip: React.FC<ChipProps> = ({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        if (!disabled) hapticSelection();
+        onPress();
+      }}
       disabled={disabled}
       style={({ pressed }) => [
         styles.chip,

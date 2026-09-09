@@ -76,10 +76,13 @@ export default function AuthCallbackScreen() {
         } else if (isPasswordResetType(type)) {
           setStatus('ready');
           setMessage('Set your new password.');
-        } else {
+        } else if (type === 'signup' || type === 'email' || type === 'magiclink' || type === 'invite') {
           setStatus('done');
           setMessage('Email confirmed. You can continue.');
           showToast('Email confirmed', 'success');
+        } else {
+          setStatus('done');
+          setMessage('You can continue.');
         }
       } catch (error) {
         exchangedCodeRef.current = null;
@@ -123,7 +126,7 @@ export default function AuthCallbackScreen() {
   };
 
   const handleContinue = () => {
-    router.replace('/(tabs)');
+    router.replace('/');
   };
 
   return (
@@ -135,7 +138,9 @@ export default function AuthCallbackScreen() {
             ? 'Your email change is almost done.'
             : isPasswordResetType(cbType)
               ? 'Finish resetting your password.'
-              : 'Your email is confirmed.'}
+              : cbType === 'signup' || cbType === 'email' || cbType === 'magiclink' || cbType === 'invite'
+                ? 'Your email is confirmed.'
+                : 'Finish signing in.'}
         </Text>
 
         {message ? <Text style={styles.infoText}>{message}</Text> : null}

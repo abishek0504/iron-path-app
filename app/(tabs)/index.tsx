@@ -979,7 +979,7 @@ export default function WorkoutTab() {
             ) : selectedDayExercises.length === 0 && selectedPlanSlots.length > 0 ? (
               <TourTarget id="tour.workout.card" testID="tour-workout-card">
               <Animated.View entering={FadeIn.duration(400).delay(50)} style={styles.card}>
-                <Text style={styles.cardTitle}>Couldn't load today's workout</Text>
+                <Text style={styles.cardTitle}>{"Couldn't load today's workout"}</Text>
                 <Text style={styles.cardSubtext}>Pull to refresh or tap Start to retry.</Text>
               </Animated.View>
               </TourTarget>
@@ -999,7 +999,12 @@ export default function WorkoutTab() {
                       </View>
                     </View>
                     {hasActiveWorkout && (
-                      <Pressable onPress={() => setShowResetModal(true)} style={styles.resetButton}>
+                      <Pressable
+                        onPress={() => setShowResetModal(true)}
+                        style={styles.resetButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Reset workout"
+                      >
                         <RotateCcw size={20} color={colors.textMuted} />
                       </Pressable>
                     )}
@@ -1035,7 +1040,7 @@ export default function WorkoutTab() {
                             <Dumbbell size={12} color={colors.primary} />
                           </View>
                           <View style={styles.exerciseNameRow}>
-                            <Text style={styles.exerciseName}>{exercise.name}</Text>
+                            <Text style={styles.exerciseName} numberOfLines={1}>{exercise.name}</Text>
                             {exercise.isTodayOnly && (
                               <View style={styles.todayOnlyTag}>
                                 <Text style={styles.todayOnlyTagText}>
@@ -1319,9 +1324,11 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     textTransform: 'uppercase',
   },
   resetButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 22,
     backgroundColor: colors.workoutControlSurface,
     alignItems: 'center',
     justifyContent: 'center',

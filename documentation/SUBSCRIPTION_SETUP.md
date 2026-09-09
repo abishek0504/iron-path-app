@@ -34,8 +34,10 @@ Apple allows **one introductory offer per subscription group per Apple ID** — 
 ### 3. Products & entitlement
 
 1. **Product catalog** → confirm `ironpath_pro_monthly` and `ironpath_pro_annual` appear.
-2. **Entitlements** → create **`ironpath_pro`**.
-3. Attach both products to `ironpath_pro`.
+2. **Entitlements** → create **`Ironpath Pro`**.
+3. Attach both products to `Ironpath Pro`.
+
+An entitlement's identifier (`lookup_key`) **cannot be renamed after creation**, so `ENTITLEMENT_ID` in `src/lib/subscriptions/constants.ts` and `ENTITLEMENT_PRO` in the webhook must both match the dashboard exactly — including the space and capitals.
 
 ### 4. Offerings (required for paywall)
 
@@ -61,7 +63,7 @@ supabase functions deploy revenuecat-webhook --no-verify-jwt
 4. RevenueCat → **Integrations** → **Webhooks** → add:
    - **URL:** `https://wmraczqltegkqbststik.supabase.co/functions/v1/revenuecat-webhook`
    - **Authorization header:** `Bearer <same REVENUECAT_WEBHOOK_SECRET>`
-5. Enable events: `INITIAL_PURCHASE`, `RENEWAL`, `CANCELLATION`, `EXPIRATION`, `UNCANCELLATION`, `PRODUCT_CHANGE`.
+5. Enable events: `INITIAL_PURCHASE`, `RENEWAL`, `CANCELLATION`, `UNCANCELLATION`, `EXPIRATION`, `PRODUCT_CHANGE`, `BILLING_ISSUE`, and `SUBSCRIPTION_EXTENDED`. A webhook with no event-type filter delivers all of these.
 
 ### 6. API keys
 
@@ -73,7 +75,7 @@ supabase functions deploy revenuecat-webhook --no-verify-jwt
 | Variable | Where | Notes |
 |----------|--------|-------|
 | `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | `.env`, EAS `production`/`preview` env | Public SDK key (`appl_…`) |
-| `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY` | EAS (when Android ships) | Optional until Play Store |
+| `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY` | EAS (when Android ships) | Required on Android; without it RevenueCat stays unconfigured there and pro access falls back to `v2_profiles.subscription_tier` |
 | `REVENUECAT_WEBHOOK_SECRET` | Supabase Edge Function secrets | Same value as webhook Authorization bearer |
 
 Copy `.env.example` → `.env` and fill in values. For EAS, add keys in [expo.dev](https://expo.dev) project secrets or `eas.json` `env` blocks.
@@ -124,7 +126,7 @@ After changing env vars or native deps, rebuild and reinstall on the test device
 6. Verify:
    - Settings shows **IronPath Pro** / **Active**
    - AI form opens after subscribe
-   - RevenueCat dashboard shows active `ironpath_pro`
+   - RevenueCat dashboard shows active `Ironpath Pro`
    - `v2_profiles.subscription_tier` = `pro` (via webhook; may lag a few seconds)
 
 ## Settings in app

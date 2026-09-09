@@ -691,7 +691,9 @@ export async function resetSessionProgress(
       .update({
         status: 'active',
         completed_at: null,
-        control_device: null,
+        // Reset is always driven from the phone, and control_device is NOT NULL
+        // CHECK ('phone','watch') — writing null fails after the sets are gone.
+        control_device: 'phone',
         ...(isStartedToday ? { started_at: new Date().toISOString() } : {}),
       })
       .eq('id', sessionId)

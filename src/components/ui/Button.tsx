@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
+import { hapticSelection } from '../../lib/utils/haptics';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'ghost';
 export type ButtonSize = 'md' | 'sm';
@@ -70,7 +71,10 @@ export const Button: React.FC<ButtonProps> = ({
 
   return (
     <TouchableOpacity
-      onPress={onPress}
+      onPress={(event) => {
+        if (!disabled) hapticSelection();
+        onPress(event);
+      }}
       disabled={disabled}
       activeOpacity={PRESS_OPACITY}
       style={containerStyle}

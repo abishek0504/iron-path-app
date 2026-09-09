@@ -1,10 +1,15 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SkipForward, Plus } from 'lucide-react-native';
 import { formatCountdownTime, useCountdownToEpoch } from '../../hooks/useCountdown';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { REST_EXTEND_SEC } from '../../lib/workout/restConstants';
+import {
+  endRestLiveActivity,
+  startRestLiveActivity,
+  updateRestLiveActivity,
+} from '../../lib/workout/liveActivity';
 
 interface RestTimerProps {
   endsAtEpoch: number;
@@ -30,6 +35,20 @@ export const RestTimer: React.FC<RestTimerProps> = ({
     startedAtEpoch,
     onComplete,
   });
+
+  const endsAtEpochRef = useRef(endsAtEpoch);
+  endsAtEpochRef.current = endsAtEpoch;
+
+  useEffect(() => {
+    void startRestLiveActivity(endsAtEpochRef.current);
+    return () => {
+      void endRestLiveActivity();
+    };
+  }, []);
+
+  useEffect(() => {
+    void updateRestLiveActivity(endsAtEpoch);
+  }, [endsAtEpoch]);
 
   const styles = useMemo(() => StyleSheet.create({
     container: {

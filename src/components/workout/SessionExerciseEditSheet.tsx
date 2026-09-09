@@ -39,6 +39,7 @@ interface SessionSet {
 interface SessionExerciseEditSheetProps {
   visible: boolean;
   onClose: () => void;
+  onClosed?: () => void;
   onSave: () => void;
   onDelete?: () => void; // Optional delete handler
   sessionExerciseId: string;
@@ -54,6 +55,7 @@ interface SessionExerciseEditSheetProps {
 export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> = ({
   visible,
   onClose,
+  onClosed,
   onSave,
   onDelete,
   sessionExerciseId,
@@ -285,7 +287,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
   };
 
   return (
-    <BottomSheet ref={sheetRef} visible={visible} onClose={onClose} height="75%">
+    <BottomSheet ref={sheetRef} visible={visible} onClose={onClose} onClosed={onClosed} height="75%">
       <View style={styles.container}>
         <View style={styles.header}>
           <View style={styles.titleContainer}>

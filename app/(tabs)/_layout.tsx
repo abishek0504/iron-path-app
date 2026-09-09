@@ -14,7 +14,7 @@ import { isAccountPendingDeletion } from "../../src/lib/auth/accountLifecycle";
 import { hapticSelection } from "../../src/lib/utils/haptics";
 import { usePaywall } from "../../src/components/paywall/PaywallProvider";
 import { APP_OPEN_PAYWALL_DELAY_MS } from "../../src/lib/subscriptions/constants";
-import { hasPendingAppTour, takePendingAppTour } from "../../src/lib/onboarding/tourBridge";
+import { hasPendingAppTour, loadTourResumeState } from "../../src/lib/onboarding/tourBridge";
 import { useTourStore } from "../../src/stores/tourStore";
 import { useUserStore } from "../../src/stores/userStore";
 import { TourTarget } from "../../src/components/tour/TourTarget";
@@ -248,12 +248,17 @@ function AppTourEffect() {
   const profile = useUserStore((s) => s.profile);
 
   useEffect(() => {
-    if (profile?.app_tour_completed_at) {
-      return;
-    }
-    if (takePendingAppTour()) {
-      startTour();
-    }
+    let cancelled = false;
+    const run = async () => {
+      if (profile?.app_tour_completed_at) return;
+      const { pending, stepIndex } = await loadTourResumeState();
+      if (cancelled || !pending) return;
+      startTour(stepIndex);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [profile?.app_tour_completed_at, startTour]);
 
   return null;
@@ -285,6 +290,7 @@ export default function TabLayout() {
   const { ready, authenticated } = useSessionGuard();
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const isTourActive = useTourStore((s) => s.isActive);
 
   if (!ready || !authenticated) {
     return (
@@ -303,8 +309,8 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        lazy: true,
-        freezeOnBlur: true,
+        lazy: !isTourActive,
+        freezeOnBlur: !isTourActive,
         tabBarStyle: {
           backgroundColor: 'transparent',
           height: 72,

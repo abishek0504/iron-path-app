@@ -1,19 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import {
-  View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
 import { spacing, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { Button } from '../src/components/ui/Button';
+import { ScreenHeader } from '../src/components/ui/ScreenHeader';
 import { useUIStore } from '../src/stores/uiStore';
 import { supabase } from '../src/lib/supabase/client';
 import {
@@ -51,18 +49,7 @@ export default function HealthConnectScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <ChevronLeft size={26} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Apple Health</Text>
-        <View style={{ width: 26 }} />
-      </View>
+      <ScreenHeader title="Apple Health" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.lead}>
@@ -104,18 +91,6 @@ export default function HealthConnectScreen() {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-    },
-    headerTitle: {
-      fontSize: typography.sizes.lg,
-      fontWeight: typography.weights.semibold,
-      color: colors.textPrimary,
-    },
     body: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
     lead: {
       color: colors.textSecondary,

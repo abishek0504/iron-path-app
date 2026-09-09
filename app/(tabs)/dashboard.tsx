@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
+import { AppState, View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, RefreshControl } from 'react-native';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { Button } from '../../src/components/ui/Button';
@@ -103,7 +103,18 @@ export default function DashboardTab() {
     [setProfile],
   );
 
-  const today = useMemo(() => new Date(), []);
+  const [today, setToday] = useState(() => new Date());
+  useEffect(() => {
+    const refreshToday = () => setToday(new Date());
+    const interval = setInterval(refreshToday, 60_000);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshToday();
+    });
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, []);
   const unitsLabel = useMemo(() => ((profile?.use_imperial ?? true) ? 'lbs' : 'kg'), [profile]);
   // Stored volume is already in the user's display unit.
   const displayVolume = yearTotalVolume;
@@ -117,7 +128,8 @@ export default function DashboardTab() {
       const getWeekRange = () => {
         const start = new Date(today);
         start.setHours(0, 0, 0, 0);
-        start.setDate(start.getDate() - start.getDay());
+        const day = start.getDay();
+        start.setDate(start.getDate() + (day === 0 ? -6 : 1 - day));
         const end = new Date(start);
         end.setDate(start.getDate() + 6);
         end.setHours(23, 59, 59, 999);

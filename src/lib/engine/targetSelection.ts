@@ -266,11 +266,13 @@ export async function selectExerciseTargets(
           'suggested_weight_kg' in prescription
         ) {
           const lbs =
-            'suggested_weight_lbs' in prescription
+            'suggested_weight_lbs' in prescription &&
+            typeof prescription.suggested_weight_lbs === 'number'
               ? prescription.suggested_weight_lbs
               : null;
           const kg =
-            'suggested_weight_kg' in prescription
+            'suggested_weight_kg' in prescription &&
+            typeof prescription.suggested_weight_kg === 'number'
               ? prescription.suggested_weight_kg
               : null;
           if (isImperial) {

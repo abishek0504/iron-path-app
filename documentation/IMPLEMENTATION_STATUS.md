@@ -271,7 +271,7 @@
 
 ### Resolved (verified 2026-08-02)
 
-- ✅ **RevenueCat + App Store Connect setup** — products (`ironpath_pro_monthly`/`ironpath_pro_annual`), entitlement `ironpath_pro`, default offering, webhook, and API keys configured (`eas.json` / env). See `SUBSCRIPTION_SETUP.md`.
+- ✅ **RevenueCat + App Store Connect setup** — products (`ironpath_pro_monthly`/`ironpath_pro_annual`), entitlement `Ironpath Pro`, default offering, webhook, and API keys configured (`eas.json` / env). See `SUBSCRIPTION_SETUP.md`.
 - ⛔ **Supabase leaked-password protection** — advisor WARN accepted as **permanently out of scope** (dashboard toggle unavailable / cannot enable). Do not treat as open work.
 
 ### Blocking submission (external, not code)

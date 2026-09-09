@@ -12,32 +12,24 @@
  */
 
 import { useMemo } from 'react';
+import { darkColors } from '../lib/utils/theme';
 
 interface MuscleColors {
   [muscleKey: string]: string;
 }
-
-// Color constants
-const COLORS = {
-  red: '#ef4444',
-  orange: '#f97316',
-  yellow: '#eab308',
-  green: '#22c55e',
-  gray: '#9ca3af', // Default for never trained
-};
 
 /**
  * Convert freshness value (0-100) to color hex
  */
 function getFreshnessColor(freshness: number | null | undefined): string {
   if (freshness === null || freshness === undefined) {
-    return COLORS.gray; // Never trained
+    return darkColors.heatmapBodyDefault;
   }
 
-  if (freshness <= 30) return COLORS.red;
-  if (freshness <= 60) return COLORS.orange;
-  if (freshness <= 80) return COLORS.yellow;
-  return COLORS.green;
+  if (freshness <= 30) return darkColors.heatmapFullyFatigued;
+  if (freshness <= 60) return darkColors.heatmapModerateFatigue;
+  if (freshness <= 80) return darkColors.heatmapLightFatigue;
+  return darkColors.heatmapFullyRecovered;
 }
 
 /**

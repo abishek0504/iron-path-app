@@ -14,7 +14,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw, Timer, Download } from 'lucide-react-native';
+import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw, Timer, Download, Compass, Camera } from 'lucide-react-native';
 import { spacing, borderRadius, typography, THEME_OPTIONS, getThemeLabel, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
@@ -22,10 +22,12 @@ import { useUIStore } from '../../stores/uiStore';
 import { useUserStore } from '../../stores/userStore';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { LegalLinks } from '../ui/LegalLinks';
-import { requestAccountDeletion } from '../../lib/supabase/queries/users';
+import { requestAccountDeletion, updateUserProfile } from '../../lib/supabase/queries/users';
 import { invalidateProfileCache } from '../../lib/cache/dashboardStatsCache';
 import { presentCustomerCenter } from '../../lib/subscriptions/revenueCat';
 import { usePaywall } from '../paywall/PaywallProvider';
+import { useTourStore } from '../../stores/tourStore';
+import { setPendingAppTour } from '../../lib/onboarding/tourBridge';
 import { signOutAndClearLocalState } from '../../lib/auth/signOutAndClear';
 
 interface SettingsMenuProps {
@@ -41,6 +43,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const runAfterBottomSheetClosed = useUIStore((state) => state.runAfterBottomSheetClosed);
   const profile = useUserStore((state) => state.profile);
   const { isPro, showPaywall, restoreSubscription } = usePaywall();
+  const startTour = useTourStore((state) => state.startTour);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -167,6 +170,13 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       onPress: () => handleNavigate('/export-data'),
     },
     {
+      id: 'progress-photos',
+      label: 'Progress photos',
+      sublabel: undefined,
+      icon: Camera,
+      onPress: () => handleNavigate('/progress-photos'),
+    },
+    {
       id: 'apple-health',
       label: 'Apple Health',
       icon: Heart,
@@ -184,6 +194,21 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
       label: 'Restore subscription',
       icon: RefreshCw,
       onPress: () => void handleRestoreSubscription(),
+    },
+    {
+      id: 'replay-tour',
+      label: 'Take the tour again',
+      icon: Compass,
+      onPress: () => {
+        useUserStore.getState().updateProfile({ app_tour_completed_at: null });
+        if (profile?.id) {
+          void updateUserProfile(profile.id, { app_tour_completed_at: null });
+          invalidateProfileCache(profile.id);
+        }
+        setPendingAppTour();
+        onClose?.();
+        startTour(0);
+      },
     },
     {
       id: 'help',

@@ -1,6 +1,5 @@
-import type { AnalyticsSetRow, TrendGranularity, TrendPoint } from './types';
-import { bucketKeyForDate, formatBucketLabel } from './dateBuckets';
-import { aggregateIntoBuckets } from './dateBuckets';
+import type { AnalyticsSetRow, DateRange, TrendGranularity, TrendPoint } from './types';
+import { aggregateIntoBuckets, bucketKeyForDate, fillEmptyBuckets, formatBucketLabel } from './dateBuckets';
 import { isWorkingSet } from './volume';
 
 const RPE_THRESHOLD = 5;
@@ -55,6 +54,7 @@ export function summarizeIntensity(sets: AnalyticsSetRow[]): IntensitySummary {
 export function buildAvgRpeTrend(
   sessions: { completedAt: string; avgRpe: number | null }[],
   granularity: TrendGranularity,
+  range?: DateRange,
 ): TrendPoint[] {
   const map = new Map<string, { sum: number; count: number }>();
   for (const s of sessions) {
@@ -64,21 +64,24 @@ export function buildAvgRpeTrend(
     map.set(key, { sum: prev.sum + s.avgRpe, count: prev.count + 1 });
   }
 
-  return Array.from(map.entries())
+  const points = Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([bucketKey, { sum, count }]) => ({
       bucketKey,
       label: formatBucketLabel(bucketKey, granularity),
       value: sum / count,
     }));
+  return range ? fillEmptyBuckets(points, range, granularity) : points;
 }
 
 export function buildSessionCountTrend(
   sessions: { completedAt: string }[],
   granularity: TrendGranularity,
+  range?: DateRange,
 ): TrendPoint[] {
   return aggregateIntoBuckets(
     sessions.map((s) => ({ dateIso: s.completedAt, value: 1 })),
     granularity,
+    range,
   );
 }

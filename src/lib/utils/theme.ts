@@ -12,6 +12,7 @@ export const darkColors = {
   cardBackground: 'rgba(24, 24, 27, 0.9)', // semantic alias for card
   tabBarSurface: '#18181b', // zinc-900 — opaque floating tab bar capsule
   cardHover: 'rgba(39, 39, 42, 0.9)', // zinc-800/90 — slightly lifted for completed/hover states
+  insetCard: '#09090b', // same as background
   cardBorder: '#27272a', // zinc-800
 
   primary: '#a3e635', // lime-400
@@ -98,6 +99,7 @@ export const lightColors = {
   cardBackground: 'rgba(255, 255, 255, 0.95)',
   tabBarSurface: '#ffffff',
   cardHover: 'rgba(244, 244, 245, 0.95)', // zinc-100/95
+  insetCard: 'rgba(244, 244, 245, 0.95)',
 
   cardBorder: '#e4e4e7', // zinc-200
 
@@ -178,6 +180,7 @@ export const pinkColors = {
   cardBackground: 'rgba(255, 255, 255, 0.95)',
   tabBarSurface: '#ffffff',
   cardHover: 'rgba(255, 228, 230, 0.95)', // rose-100
+  insetCard: 'rgba(255, 228, 230, 0.95)',
   cardBorder: '#fecdd3', // pink-200
 
   primary: '#ec4899', // pink-500

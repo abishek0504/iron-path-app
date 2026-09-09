@@ -1,5 +1,5 @@
-/** RevenueCat entitlement identifier — must match dashboard + App Store products. */
-export const ENTITLEMENT_ID = 'ironpath_pro';
+/** RevenueCat entitlement identifier: the dashboard lookup_key, which cannot be renamed. */
+export const ENTITLEMENT_ID = 'Ironpath Pro';
 
 export const PRODUCT_ID_MONTHLY = 'ironpath_pro_monthly';
 export const PRODUCT_ID_ANNUAL = 'ironpath_pro_annual';

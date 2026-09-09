@@ -2,9 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { Button } from '../../src/components/ui/Button';
-import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../src/lib/supabase/client';
+import { authCallbackRedirectTo } from '../../src/lib/auth/authRedirect';
 import { spacing, borderRadius, typography, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { useUIStore } from '../../src/stores/uiStore';
@@ -42,8 +42,7 @@ export default function ForgotPasswordScreen() {
       return;
     }
     setSending(true);
-    const redirectTo =
-      process.env.EXPO_PUBLIC_SUPABASE_REDIRECT_URL ?? Linking.createURL('/auth/callback');
+    const redirectTo = authCallbackRedirectTo('recovery');
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo,

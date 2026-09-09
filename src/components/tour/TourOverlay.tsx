@@ -1,69 +1,71 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Dimensions,
+  AccessibilityInfo,
   Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { ArrowRight } from 'lucide-react-native';
+import Animated, {
+  Easing,
+  useAnimatedProps,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Button } from '../ui/Button';
 import { borderRadius, spacing, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 import type { TourStep, TourTooltipPlacement } from '../../lib/onboarding/tourSteps';
 import type { TourTargetMeasurement } from './TourTarget';
 
-const SCRIM_OPACITY = 0.75;
 const SPOTLIGHT_PADDING = 8;
 const SPOTLIGHT_RADIUS = 12;
 const TOOLTIP_MAX_WIDTH = 320;
 const TOOLTIP_MARGIN = spacing.lg;
 const ARROW_SIZE = 10;
-const DEFAULT_TOOLTIP_HEIGHT = 160;
+const HOLE_DURATION_MS = 300;
 
-interface TourOverlayProps {
-  visible: boolean;
-  step: TourStep;
-  stepIndex: number;
-  stepCount: number;
-  targetRect: TourTargetMeasurement | null;
-  onNext: () => void;
-  onSkip: () => void;
-}
+const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 function buildScrimPath(
   width: number,
   height: number,
-  hole: TourTargetMeasurement | null,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  showHole: boolean,
 ): string {
+  'worklet';
   const outer = `M0,0 H${width} V${height} H0 Z`;
-  if (!hole) {
+  if (!showHole || w <= 0 || h <= 0) {
     return outer;
   }
 
-  const x = hole.x - SPOTLIGHT_PADDING;
-  const y = hole.y - SPOTLIGHT_PADDING;
-  const w = hole.width + SPOTLIGHT_PADDING * 2;
-  const h = hole.height + SPOTLIGHT_PADDING * 2;
-  const r = Math.min(SPOTLIGHT_RADIUS, w / 2, h / 2);
+  const hx = x - SPOTLIGHT_PADDING;
+  const hy = y - SPOTLIGHT_PADDING;
+  const hw = w + SPOTLIGHT_PADDING * 2;
+  const hh = h + SPOTLIGHT_PADDING * 2;
+  const r = Math.min(SPOTLIGHT_RADIUS, hw / 2, hh / 2);
 
-  const holePath = [
-    `M${x + r},${y}`,
-    `H${x + w - r}`,
-    `Q${x + w},${y} ${x + w},${y + r}`,
-    `V${y + h - r}`,
-    `Q${x + w},${y + h} ${x + w - r},${y + h}`,
-    `H${x + r}`,
-    `Q${x},${y + h} ${x},${y + h - r}`,
-    `V${y + r}`,
-    `Q${x},${y} ${x + r},${y}`,
+  return [
+    outer,
+    `M${hx + r},${hy}`,
+    `H${hx + hw - r}`,
+    `Q${hx + hw},${hy} ${hx + hw},${hy + r}`,
+    `V${hy + hh - r}`,
+    `Q${hx + hw},${hy + hh} ${hx + hw - r},${hy + hh}`,
+    `H${hx + r}`,
+    `Q${hx},${hy + hh} ${hx},${hy + hh - r}`,
+    `V${hy + r}`,
+    `Q${hx},${hy} ${hx + r},${hy}`,
     'Z',
   ].join(' ');
-
-  return `${outer} ${holePath}`;
 }
 
 function resolvePlacement(
@@ -92,10 +94,21 @@ function resolvePlacement(
     return 'top';
   }
 
-  // auto
   if (spaceBelow >= needed) return 'bottom';
   if (spaceAbove >= needed) return 'top';
   return spaceAbove >= spaceBelow ? 'top' : 'bottom';
+}
+
+interface TourOverlayProps {
+  visible: boolean;
+  step: TourStep;
+  stepIndex: number;
+  stepCount: number;
+  targetRect: TourTargetMeasurement | null;
+  tooltipVisible: boolean;
+  onNext: () => void;
+  onBack: () => void;
+  onSkip: () => void;
 }
 
 export function TourOverlay({
@@ -104,15 +117,74 @@ export function TourOverlay({
   stepIndex,
   stepCount,
   targetRect,
+  tooltipVisible,
   onNext,
+  onBack,
   onSkip,
 }: TourOverlayProps) {
   const colors = useTheme();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const isLastStep = stepIndex >= stepCount - 1;
-  const [tooltipHeight, setTooltipHeight] = useState(DEFAULT_TOOLTIP_HEIGHT);
+  const canGoBack = stepIndex > 0;
+  const [tooltipHeight, setTooltipHeight] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    setTooltipHeight(0);
+  }, [step.id]);
+
+  const holeX = useSharedValue(0);
+  const holeY = useSharedValue(0);
+  const holeW = useSharedValue(0);
+  const holeH = useSharedValue(0);
+  const holeOpacity = useSharedValue(0);
+  const screenW = useSharedValue(screenWidth);
+  const screenH = useSharedValue(screenHeight);
+
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (mounted) setReduceMotion(enabled);
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    screenW.value = screenWidth;
+    screenH.value = screenHeight;
+  }, [screenHeight, screenW, screenH, screenWidth]);
+
+  useEffect(() => {
+    const duration = reduceMotion ? 0 : HOLE_DURATION_MS;
+    const timing = { duration, easing: Easing.out(Easing.cubic) };
+    if (!targetRect) {
+      holeOpacity.value = withTiming(0, timing);
+      return;
+    }
+    holeX.value = withTiming(targetRect.x, timing);
+    holeY.value = withTiming(targetRect.y, timing);
+    holeW.value = withTiming(targetRect.width, timing);
+    holeH.value = withTiming(targetRect.height, timing);
+    holeOpacity.value = withTiming(1, timing);
+  }, [holeH, holeOpacity, holeW, holeX, holeY, reduceMotion, targetRect]);
+
+  const animatedProps = useAnimatedProps(() => ({
+    d: buildScrimPath(
+      screenW.value,
+      screenH.value,
+      holeX.value,
+      holeY.value,
+      holeW.value,
+      holeH.value,
+      holeOpacity.value > 0.05,
+    ),
+  }));
 
   const handleTooltipLayout = (event: LayoutChangeEvent) => {
     const nextHeight = event.nativeEvent.layout.height;
@@ -124,14 +196,15 @@ export function TourOverlay({
   const tooltipPlacement = resolvePlacement(
     step.placement,
     targetRect,
-    tooltipHeight,
+    tooltipHeight || 160,
     screenHeight,
     insets.top,
     insets.bottom,
   );
 
+  const measuredHeight = tooltipHeight || 160;
   const minTop = insets.top + TOOLTIP_MARGIN;
-  const maxTop = screenHeight - insets.bottom - TOOLTIP_MARGIN - tooltipHeight;
+  const maxTop = screenHeight - insets.bottom - TOOLTIP_MARGIN - measuredHeight;
 
   const tooltipLeft = Math.max(
     TOOLTIP_MARGIN,
@@ -145,10 +218,10 @@ export function TourOverlay({
 
   let tooltipTop: number;
   if (!targetRect) {
-    tooltipTop = Math.max(minTop, Math.min(maxTop, screenHeight / 2 - tooltipHeight / 2));
+    tooltipTop = Math.max(minTop, Math.min(maxTop, screenHeight / 2 - measuredHeight / 2));
   } else if (tooltipPlacement === 'top') {
     const preferred =
-      targetRect.y - SPOTLIGHT_PADDING - ARROW_SIZE - spacing.sm - tooltipHeight;
+      targetRect.y - SPOTLIGHT_PADDING - ARROW_SIZE - spacing.sm - measuredHeight;
     tooltipTop = Math.max(minTop, Math.min(maxTop, preferred));
   } else {
     const preferred =
@@ -172,7 +245,7 @@ export function TourOverlay({
           insets.top,
           Math.min(
             targetRect.y - SPOTLIGHT_PADDING - ARROW_SIZE,
-            tooltipTop + tooltipHeight,
+            tooltipTop + measuredHeight,
           ),
         )
       : targetRect
@@ -182,7 +255,7 @@ export function TourOverlay({
           )
         : tooltipTop;
 
-  const scrimPath = buildScrimPath(screenWidth, screenHeight, targetRect);
+  const showTooltip = tooltipVisible && tooltipHeight > 0;
 
   return (
     <Modal
@@ -190,19 +263,19 @@ export function TourOverlay({
       transparent
       animationType="fade"
       statusBarTranslucent
-      onRequestClose={onSkip}
+      onRequestClose={canGoBack ? onBack : onSkip}
     >
       <View style={styles.root} accessibilityViewIsModal>
         <View style={StyleSheet.absoluteFill} pointerEvents="auto" />
         <Svg width={screenWidth} height={screenHeight} style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Path
-            d={scrimPath}
-            fill={`rgba(0,0,0,${SCRIM_OPACITY})`}
+          <AnimatedPath
+            animatedProps={animatedProps}
+            fill={colors.overlayScrim}
             fillRule="evenodd"
           />
         </Svg>
 
-        {targetRect ? (
+        {targetRect && showTooltip ? (
           <View
             pointerEvents="none"
             style={[
@@ -241,9 +314,11 @@ export function TourOverlay({
               left: tooltipLeft,
               top: tooltipTop,
               maxWidth: TOOLTIP_MAX_WIDTH,
+              opacity: showTooltip ? 1 : 0,
             },
           ]}
           onLayout={handleTooltipLayout}
+          pointerEvents={showTooltip ? 'auto' : 'none'}
           accessibilityRole="alert"
           accessibilityLabel={`${step.title}. ${step.body}`}
         >
@@ -262,15 +337,23 @@ export function TourOverlay({
           </View>
           <Text style={styles.title}>{step.title}</Text>
           <Text style={styles.body}>{step.body}</Text>
-          <Pressable
-            style={styles.nextButton}
-            onPress={onNext}
-            accessibilityRole="button"
-            accessibilityLabel={isLastStep ? 'Finish tour' : 'Next step'}
-          >
-            <Text style={styles.nextButtonText}>{isLastStep ? 'Done' : 'Next'}</Text>
-            {!isLastStep ? <ArrowRight size={18} color={colors.onPrimaryContrast} /> : null}
-          </Pressable>
+          <View style={styles.actions}>
+            {canGoBack ? (
+              <Button
+                label="Back"
+                variant="secondary"
+                size="sm"
+                onPress={onBack}
+                style={styles.actionButton}
+              />
+            ) : null}
+            <Button
+              label={isLastStep ? 'Done' : 'Next'}
+              size="sm"
+              onPress={onNext}
+              style={styles.actionButton}
+            />
+          </View>
         </View>
       </View>
     </Modal>
@@ -326,21 +409,15 @@ function createStyles(colors: ThemeColors) {
       lineHeight: 20,
       color: colors.textSecondary,
     },
-    nextButton: {
+    actions: {
       marginTop: spacing.xs,
       flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.xs,
-      backgroundColor: colors.primary,
-      borderRadius: borderRadius.full,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.lg,
+      justifyContent: 'flex-end',
+      gap: spacing.sm,
     },
-    nextButtonText: {
-      fontSize: typography.sizes.sm,
-      fontWeight: typography.weights.semibold,
-      color: colors.onPrimaryContrast,
+    actionButton: {
+      minWidth: 88,
+      borderRadius: borderRadius.md,
     },
   });
 }

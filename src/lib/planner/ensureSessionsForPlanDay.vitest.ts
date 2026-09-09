@@ -16,11 +16,16 @@ vi.mock('../utils/logger', () => ({
   devError: vi.fn(),
 }));
 
+vi.mock('./materializeSuppression', () => ({
+  isMaterializeSuppressed: vi.fn(async () => false),
+}));
+
 import { invalidateSessionsInRangeForUser } from '../cache/sessionsCache';
 import {
   getSessionsForToday,
   materializeWorkoutFromTemplateSlots,
 } from '../supabase/queries/workouts';
+import { isMaterializeSuppressed } from './materializeSuppression';
 import {
   __resetMaterializeInFlightForTests,
   ensureSessionsForPlanDay,
@@ -31,6 +36,7 @@ import {
 const getSessionsMock = vi.mocked(getSessionsForToday);
 const materializeMock = vi.mocked(materializeWorkoutFromTemplateSlots);
 const invalidateMock = vi.mocked(invalidateSessionsInRangeForUser);
+const suppressedMock = vi.mocked(isMaterializeSuppressed);
 
 function session(partial: Partial<WorkoutSession> & { id: string }): WorkoutSession {
   return {
@@ -156,5 +162,22 @@ describe('ensureSessionsForPlanDay', () => {
 
     expect(materializeMock).not.toHaveBeenCalled();
     expect(result.sessions).toEqual([]);
+  });
+
+  it('does not materialize when the day is suppressed', async () => {
+    getSessionsMock.mockResolvedValueOnce([]);
+    suppressedMock.mockResolvedValueOnce(true);
+
+    const result = await ensureSessionsForPlanDay({
+      userId: 'user-1',
+      dayName: 'Monday',
+      templateId: 'tmpl-1',
+      slots: [slot],
+      now: monday,
+    });
+
+    expect(materializeMock).not.toHaveBeenCalled();
+    expect(result.sessions).toEqual([]);
+    expect(result.materialized).toBe(false);
   });
 });
