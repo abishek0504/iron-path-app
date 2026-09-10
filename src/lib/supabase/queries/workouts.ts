@@ -1460,7 +1460,11 @@ export function formatPrDuration(seconds: number): string {
 }
 
 /** Format a single PR for UI: weight×reps, "N reps", or timed duration. */
-export function formatPRDisplay(p: TopPR, unitsLabel: string): string {
+export function formatPRDisplay(
+  p: TopPR,
+  unitsLabel: string,
+  options?: { includeTheoretical1Rm?: boolean },
+): string {
   if (p.pr_type === 'timed' && p.duration_sec != null) {
     return formatPrDuration(p.duration_sec);
   }
@@ -1471,6 +1475,7 @@ export function formatPRDisplay(p: TopPR, unitsLabel: string): string {
     const repPart = p.reps != null ? ` × ${p.reps}` : '';
     const base = `${p.weight} ${unitsLabel}${repPart}`;
     if (
+      options?.includeTheoretical1Rm !== false &&
       p.pr_type !== 'timed' &&
       p.pr_type !== 'reps_only' &&
       p.reps != null &&

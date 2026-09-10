@@ -1,0 +1,101 @@
+{
+  "identifier" : "A91C4E27",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_developerTeamID" : "JWUD8ZKQLN",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storefrontLocale" : "en_US"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21480001",
+      "localizations" : [
+        {
+          "description" : "AI Coach plans your training week",
+          "displayName" : "IronPath Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "IronPath Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "59.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "20000001",
+          "introductoryOffer" : {
+            "internalID" : "20000011",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "Annual access to AI Coach",
+              "displayName" : "Annual",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ironpath_pro_annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "IronPath Pro Annual",
+          "subscriptionGroupID" : "21480001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "20000002",
+          "introductoryOffer" : {
+            "internalID" : "20000012",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "Monthly access to AI Coach",
+              "displayName" : "Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ironpath_pro_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "IronPath Pro Monthly",
+          "subscriptionGroupID" : "21480001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

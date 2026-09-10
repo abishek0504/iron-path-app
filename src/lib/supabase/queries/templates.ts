@@ -762,6 +762,33 @@ export async function deleteTemplateSlot(slotId: string): Promise<boolean> {
 }
 
 /**
+ * Delete every template slot for a weekday so the weekly plan stays empty.
+ */
+export async function clearTemplateSlotsForDay(dayId: string): Promise<boolean> {
+  if (__DEV__) {
+    devLog('template-query', { action: 'clearTemplateSlotsForDay', dayId });
+  }
+
+  try {
+    const { error } = await supabase.from('v2_template_slots').delete().eq('day_id', dayId);
+
+    if (error) {
+      if (__DEV__) {
+        devError('template-query', error, { action: 'clearTemplateSlotsForDay', dayId });
+      }
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    if (__DEV__) {
+      devError('template-query', error, { action: 'clearTemplateSlotsForDay', dayId });
+    }
+    return false;
+  }
+}
+
+/**
  * Delete a template day (cascades to slots)
  */
 export async function deleteTemplateDay(dayId: string): Promise<boolean> {

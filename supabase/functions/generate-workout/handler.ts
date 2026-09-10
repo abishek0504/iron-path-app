@@ -11,6 +11,7 @@ import {
   MAX_LLM_VALIDATION_ATTEMPTS,
   MAX_SESSIONS_PER_DAY,
   MIN_EXERCISES_PER_SESSION,
+  AI_QUOTA_SOURCES,
   PRO_ROLLING_WINDOW_MS,
   PRO_WEEKLY_QUOTA,
 } from './constants.ts';
@@ -28,6 +29,11 @@ import {
   sanitizeDayName,
   toPublicFallbackReason,
 } from './helpers.ts';
+import {
+  clampCoachExercisesPerSession,
+  clampCoachSessionMinutes,
+  sanitizeCoachNotes,
+} from './coachNotes.ts';
 import { computeTrainingDayPosition, summarizeHistory, type HistorySetRow } from './history.ts';
 import {
   commitGenerationJob,
@@ -286,7 +292,7 @@ export async function handleGenerateWorkout(req: Request): Promise<Response> {
         .from('v2_ai_generations')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', userId)
-        .eq('source', 'openai')
+        .in('source', [...AI_QUOTA_SOURCES])
         .gte('created_at', windowStart);
 
       if (countErr) {
@@ -311,7 +317,7 @@ export async function handleGenerateWorkout(req: Request): Promise<Response> {
         Date.now() - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
       ).toISOString();
 
-      const [allowListRes, stretchCatalogRes, profileRes, freshnessRes, historyRes] = await Promise.all([
+      const [allowListRes, stretchCatalogRes, profileLookup, freshnessRes, historyRes] = await Promise.all([
         serviceClient
           .from('v2_ai_recommended_exercises')
           .select('exercise_id, priority_order, v2_exercises(id, name, primary_muscles, equipment_needed, is_timed, is_stretch, movement_pattern)')
@@ -327,7 +333,7 @@ export async function handleGenerateWorkout(req: Request): Promise<Response> {
           : Promise.resolve({ data: [], error: null }),
         serviceClient
           .from('v2_profiles')
-          .select('experience_level, equipment_access, days_per_week, preferred_training_style, workout_days, use_imperial, current_weight, goal_weight')
+          .select('experience_level, equipment_access, days_per_week, preferred_training_style, workout_days, use_imperial, current_weight, goal_weight, goal, ai_coach_session_minutes, ai_coach_exercises_per_session, ai_coach_notes')
           .eq('id', userId)
           .maybeSingle(),
         serviceClient
@@ -354,6 +360,18 @@ export async function handleGenerateWorkout(req: Request): Promise<Response> {
       }
       if (stretchCatalogRes.error) {
         return jsonResponse({ error: 'Failed to load stretch catalog' }, 500);
+      }
+      let profileRes = profileLookup;
+      if (profileRes.error) {
+        const profileRetry = await serviceClient
+          .from('v2_profiles')
+          .select('experience_level, equipment_access, days_per_week, preferred_training_style, workout_days, use_imperial, current_weight, goal_weight, goal')
+          .eq('id', userId)
+          .maybeSingle();
+        if (profileRetry.error) {
+          return jsonResponse({ error: 'Failed to load profile' }, 500);
+        }
+        profileRes = profileRetry;
       }
 
       const catalog: AllowListedExercise[] = [];
@@ -436,8 +454,13 @@ export async function handleGenerateWorkout(req: Request): Promise<Response> {
         use_imperial: boolean | null;
         current_weight: number | null;
         goal_weight: number | null;
+        goal: string | null;
+        ai_coach_session_minutes: number | null;
+        ai_coach_exercises_per_session: number | null;
+        ai_coach_notes: string | null;
       } | null;
 
+      const notesResult = sanitizeCoachNotes(profileRow?.ai_coach_notes);
       const userContext: UserContext = {
         experience_level: profileRow?.experience_level || 'beginner',
         equipment_access: Array.isArray(profileRow?.equipment_access)
@@ -451,6 +474,12 @@ export async function handleGenerateWorkout(req: Request): Promise<Response> {
         use_imperial: profileRow?.use_imperial ?? true,
         current_weight: profileRow?.current_weight ?? null,
         goal_weight: profileRow?.goal_weight ?? null,
+        goal: profileRow?.goal ?? null,
+        session_minutes: clampCoachSessionMinutes(profileRow?.ai_coach_session_minutes),
+        exercises_per_session: clampCoachExercisesPerSession(
+          profileRow?.ai_coach_exercises_per_session,
+        ),
+        coach_notes: notesResult.ok ? notesResult.notes : null,
       };
 
       const recentStress: Record<string, number> = {};

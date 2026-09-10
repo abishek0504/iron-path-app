@@ -41,6 +41,10 @@ export interface UserContext {
   use_imperial: boolean;
   current_weight: number | null;
   goal_weight: number | null;
+  goal: string | null;
+  session_minutes: number;
+  exercises_per_session: number;
+  coach_notes: string | null;
 }
 
 /** One exercise as prescribed by the LLM (targets may be nulled by validation). */

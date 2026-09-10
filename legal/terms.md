@@ -6,7 +6,7 @@ These Terms govern your use of the IronPath app for iPhone and Apple Watch ("the
 
 ## 1. The service
 
-IronPath provides workout planning, logging, progress tracking, AI-assisted workout generation, and optional Apple Health synchronization. The App requires an account; some features require an internet connection.
+IronPath provides workout planning, logging, progress tracking, AI Coach and AI-assisted workout generation, and optional Apple Health synchronization. The App requires an account; some features require an internet connection.
 
 ## 2. Not medical advice
 
@@ -28,11 +28,11 @@ You agree not to:
 
 ## 5. AI-generated content
 
-AI-generated workout plans are produced by a third-party model (OpenAI) from your training context. They are suggestions, provided "as is", and may be imperfect. Review every plan before training with it. AI generation is rate-limited: IronPath Pro subscribers may generate up to 40 workout days per rolling 7-day period. Limits may change.
+AI Coach and Generate with AI produce workout plans with a third-party model (OpenAI) from your training context. They are suggestions, provided "as is", and may be imperfect. Review every plan before training with it. AI generation is rate-limited: IronPath Pro subscribers may generate up to 40 workout days per rolling 7-day period. Limits may change.
 
 ## 6. IronPath Pro subscription
 
-IronPath offers an optional auto-renewing subscription, **IronPath Pro**, which unlocks AI workout generation and other Pro features. Free features remain available without a subscription.
+IronPath offers an optional auto-renewing subscription, **IronPath Pro**, which unlocks AI Coach (automatic weekly planning), AI day generation, and other Pro features. Free features remain available without a subscription.
 
 **Available subscriptions**
 

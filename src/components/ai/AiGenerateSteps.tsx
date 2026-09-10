@@ -258,12 +258,15 @@ function StepRow({
 
 export interface AiGenerateStepsProps {
   stepIntervalMs?: number;
+  steps?: readonly string[];
 }
 
-export function AiGenerateSteps({ stepIntervalMs = AI_LOADING_STEP_INTERVAL_MS }: AiGenerateStepsProps) {
+export function AiGenerateSteps({
+  stepIntervalMs = AI_LOADING_STEP_INTERVAL_MS,
+  steps = AI_LOADING_STEPS,
+}: AiGenerateStepsProps) {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(), []);
-  const steps = AI_LOADING_STEPS;
   const [reduceMotion, setReduceMotion] = useState(false);
   const [entranceComplete, setEntranceComplete] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);

@@ -17,6 +17,7 @@ export type BottomSheetId =
   | 'muscleStatus'
   | 'sessionDetail'
   | 'generateDay'
+  | 'talkToCoach'
   | 'datePicker'
   | 'genderPicker'
   | 'weightEntry'

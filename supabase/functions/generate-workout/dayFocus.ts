@@ -118,9 +118,16 @@ function resolveFocusKey(raw: string): string {
   if (n === 'hamstrings' || n === 'glutes' || n === 'quads' || n === 'calves') return n;
   if (n === 'chest' || n === 'back' || n === 'shoulders' || n === 'arms') return n;
   if (n.includes('full body')) return 'full body';
+  if (n.includes('accessor')) return 'accessories';
+  if (n.includes('snatch')) return 'snatch';
+  if (n.includes('clean') || n.includes('jerk')) return 'clean jerk';
+  if (n === 'strength' || n.endsWith(' strength') || n.startsWith('strength ')) return 'strength';
   if (n.includes('shoulders') && n.includes('arm')) return 'shoulders + arms';
   if (n.includes('chest') && n.includes('back')) return 'chest + back';
+  if (n.includes('chest') && n.includes('arm')) return 'chest + arms';
   if (n.includes('hamstring') && n.includes('glute')) return 'hamstrings + glutes';
+  if (n.includes('push') && n.includes('leg')) return 'push + legs';
+  if (n.includes('pull') && n.includes('leg')) return 'pull + legs';
   if (n.includes('push')) return 'push';
   if (n.includes('pull')) return 'pull';
   if (n.includes('upper')) return 'upper';
@@ -144,18 +151,26 @@ function resolveFocusKey(raw: string): string {
 function exerciseHitsKeys(exercise: FocusableExercise, keys: string[]): boolean {
   const pattern = normalize(exercise.movement_pattern ?? '');
   const muscles = exercise.primary_muscles.map(normalize);
+  const name = normalize(exercise.name ?? '');
   return keys.some((key) => {
     const k = normalize(key);
     if (pattern === k || pattern.includes(k)) return true;
+    if (name === k || (k.length >= 4 && name.includes(k))) return true;
     return muscles.some((m) => m === k || m.includes(k) || k.includes(m));
   });
 }
 
 function ruleForFocus(focusKey: string): FocusRule | null {
-  if (focusKey === 'full body') return {};
+  if (focusKey === 'full body' || focusKey === 'accessories') return {};
   if (focusKey === 'shoulders + arms') {
     return {
       muscleKeys: [...(MUSCLE_GROUPS.shoulders ?? []), ...(MUSCLE_GROUPS.arms ?? [])],
+    };
+  }
+  if (focusKey === 'chest + arms') {
+    return {
+      patterns: ['push'],
+      muscleKeys: [...(MUSCLE_GROUPS.chest ?? []), ...(MUSCLE_GROUPS.arms ?? [])],
     };
   }
   if (focusKey === 'chest + back') {
@@ -163,6 +178,15 @@ function ruleForFocus(focusKey: string): FocusRule | null {
       patterns: ['push', 'pull'],
       muscleKeys: [...(MUSCLE_GROUPS.chest ?? []), ...(MUSCLE_GROUPS.back ?? [])],
     };
+  }
+  if (focusKey === 'snatch') {
+    return { patterns: ['snatch'] };
+  }
+  if (focusKey === 'clean jerk') {
+    return { patterns: ['clean', 'jerk'] };
+  }
+  if (focusKey === 'strength') {
+    return { patterns: ['squat', 'hinge', 'push'] };
   }
   if (focusKey === 'hamstrings + glutes') {
     return {
@@ -191,7 +215,7 @@ export function exerciseMatchesDayFocus(
 ): boolean {
   if (!dayFocus) return true;
   const focusKey = resolveFocusKey(dayFocus);
-  if (focusKey === 'full body') return true;
+  if (focusKey === 'full body' || focusKey === 'accessories') return true;
 
   if (focusKey.includes(' + ')) {
     return focusKey.split(' + ').some((part) => exerciseMatchesDayFocus(exercise, part.trim()));

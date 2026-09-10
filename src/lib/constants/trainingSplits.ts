@@ -50,7 +50,7 @@ export const TRAINING_SPLITS: Record<string, TrainingSplit> = {
     id: 'push_pull',
     label: 'Push / Pull',
     description: 'Alternate pushing and pulling days (legs mixed into both)',
-    dayFocusOptions: ['Push', 'Pull'],
+    dayFocusOptions: ['Push + Legs', 'Pull + Legs'],
   },
   push_pull_legs: {
     id: 'push_pull_legs',
@@ -217,4 +217,106 @@ export function isKnownSplitId(value: string | null | undefined): boolean {
 export function getSplitLabel(value: string | null | undefined): string | null {
   if (!value) return null;
   return TRAINING_SPLITS[value]?.label ?? value;
+}
+
+/**
+ * Deterministic focus for training-day N of the user's split.
+ * `not_sure`, unknown, and empty values return null so the model picks a coherent week.
+ */
+export function focusForTrainingDay(
+  splitId: string | null | undefined,
+  trainingDayIndex0: number,
+): string | null {
+  if (!splitId || splitId === 'not_sure' || !(splitId in TRAINING_SPLITS)) {
+    return null;
+  }
+  const options = TRAINING_SPLITS[splitId].dayFocusOptions;
+  if (options.length === 0) return null;
+  const wrapped =
+    ((trainingDayIndex0 % options.length) + options.length) % options.length;
+  return options[wrapped] ?? null;
+}
+
+export type DayFocusMap = Record<string, string>;
+
+const WEEKDAY_ORDER = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
+export function isValidDayFocus(
+  splitValue: string | null | undefined,
+  focus: string | null | undefined,
+): boolean {
+  if (!focus) return false;
+  return getDayFocusOptions(splitValue).includes(focus);
+}
+
+export function orderTrainingDays(workoutDays: string[]): string[] {
+  const allowed = new Set<string>(WEEKDAY_ORDER);
+  const unique = new Set<string>();
+  for (const day of workoutDays) {
+    if (allowed.has(day)) unique.add(day);
+  }
+  return [...unique].sort(
+    (a, b) =>
+      WEEKDAY_ORDER.indexOf(a as (typeof WEEKDAY_ORDER)[number]) -
+      WEEKDAY_ORDER.indexOf(b as (typeof WEEKDAY_ORDER)[number]),
+  );
+}
+
+export function resolveDayFocus(args: {
+  splitValue: string | null | undefined;
+  dayName: string;
+  trainingDayIndex: number;
+  overrides?: DayFocusMap | null;
+}): string | null {
+  const pinned = args.overrides?.[args.dayName];
+  if (pinned && isValidDayFocus(args.splitValue, pinned)) {
+    return pinned;
+  }
+  return focusForTrainingDay(args.splitValue, args.trainingDayIndex);
+}
+
+/** Keep pins that are still valid for the current split and selected days. */
+export function sanitizeDayFocusMap(
+  raw: unknown,
+  splitValue: string | null | undefined,
+  workoutDays: string[],
+): DayFocusMap {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const allowedDays = new Set(orderTrainingDays(workoutDays));
+  const result: DayFocusMap = {};
+  for (const [dayName, focus] of Object.entries(raw as Record<string, unknown>)) {
+    if (!allowedDays.has(dayName)) continue;
+    if (typeof focus !== 'string') continue;
+    if (!isValidDayFocus(splitValue, focus)) continue;
+    result[dayName] = focus;
+  }
+  return result;
+}
+
+/** Fill each selected day from a valid pin, else the split rotation. */
+export function seedDayFocusMap(
+  splitValue: string | null | undefined,
+  workoutDays: string[],
+  existing?: DayFocusMap | null,
+): DayFocusMap {
+  const ordered = orderTrainingDays(workoutDays);
+  const result: DayFocusMap = {};
+  ordered.forEach((dayName, trainingDayIndex) => {
+    const resolved = resolveDayFocus({
+      splitValue,
+      dayName,
+      trainingDayIndex,
+      overrides: existing,
+    });
+    if (resolved) result[dayName] = resolved;
+  });
+  return result;
 }

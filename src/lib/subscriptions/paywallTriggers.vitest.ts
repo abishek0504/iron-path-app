@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   createPaywallSessionState,
+  headlineForTrigger,
   shouldShowPaywall,
 } from './paywallTriggers';
+import { PRO_FEATURE_BULLETS, PRO_SETTINGS_SUBLABEL_FREE } from './proCopy';
 
 describe('paywallTriggers', () => {
   it('skips all triggers when isPro', () => {
@@ -19,6 +21,17 @@ describe('paywallTriggers', () => {
   it('always shows generate_ai for non-pro', () => {
     const { show } = shouldShowPaywall({
       trigger: 'generate_ai',
+      isPro: false,
+      state: createPaywallSessionState(),
+      nowMs: 1000,
+      randomRoll: 0.99,
+    });
+    expect(show).toBe(true);
+  });
+
+  it('always shows generate_week for non-pro', () => {
+    const { show } = shouldShowPaywall({
+      trigger: 'generate_week',
       isPro: false,
       state: createPaywallSessionState(),
       nowMs: 1000,
@@ -67,5 +80,21 @@ describe('paywallTriggers', () => {
     });
     expect(hit.show).toBe(true);
     state = hit.nextState;
+  });
+
+  it('names AI Coach in every Pro headline', () => {
+    const triggers = [
+      'app_open',
+      'generate_ai',
+      'generate_week',
+      'finish_workout',
+      'add_exercise',
+      'onboarding_complete',
+    ] as const;
+    for (const trigger of triggers) {
+      expect(headlineForTrigger(trigger)).toContain('AI Coach');
+    }
+    expect(PRO_FEATURE_BULLETS[0]).toContain('AI Coach');
+    expect(PRO_SETTINGS_SUBLABEL_FREE).toContain('AI Coach');
   });
 });

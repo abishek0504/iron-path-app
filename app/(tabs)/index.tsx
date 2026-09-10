@@ -48,7 +48,8 @@ import { listMergedExercisesCached } from '../../src/lib/cache/exerciseCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
 import { hapticMedium, hapticWarning } from '../../src/lib/utils/haptics';
 import type { TemplateSlot } from '../../src/lib/supabase/queries/templates';
-import { getLocalDayKey } from '../../src/lib/utils/date';
+import { getLocalDayKey, getLocalWeekSundayKey } from '../../src/lib/utils/date';
+import { shouldSkipMaterializeForCoach } from '../../src/lib/ai/coachWeek';
 import {
   computeRoutineSessionExerciseIds,
   dayOnlyBadgeLabel,
@@ -345,6 +346,11 @@ export default function WorkoutTab() {
         dayName: todayName,
         templateId: template.id,
         slots: slotsForDay,
+        skipMaterialize: shouldSkipMaterializeForCoach({
+          coachEnabled: !!profile?.ai_coach_enabled,
+          plannedWeekStart: profile?.ai_coach_planned_week_start,
+          weekSundayKey: getLocalWeekSundayKey(),
+        }),
         experience: profile?.experience_level || 'beginner',
       });
       const sessionsForToday = ensured.sessions;
@@ -688,6 +694,11 @@ export default function WorkoutTab() {
         dayName: todayName,
         templateId: activeTemplate.id,
         slots,
+        skipMaterialize: shouldSkipMaterializeForCoach({
+          coachEnabled: !!profile?.ai_coach_enabled,
+          plannedWeekStart: profile?.ai_coach_planned_week_start,
+          weekSundayKey: getLocalWeekSundayKey(),
+        }),
         experience: profile?.experience_level || 'beginner',
       });
 

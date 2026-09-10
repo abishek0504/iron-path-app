@@ -131,10 +131,6 @@ export function TourOverlay({
   const [tooltipHeight, setTooltipHeight] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
 
-  useEffect(() => {
-    setTooltipHeight(0);
-  }, [step.id]);
-
   const holeX = useSharedValue(0);
   const holeY = useSharedValue(0);
   const holeW = useSharedValue(0);
@@ -255,7 +251,7 @@ export function TourOverlay({
           )
         : tooltipTop;
 
-  const showTooltip = tooltipVisible && tooltipHeight > 0;
+  const showTooltip = tooltipVisible;
 
   return (
     <Modal
@@ -308,6 +304,7 @@ export function TourOverlay({
         ) : null}
 
         <View
+          key={step.id}
           style={[
             styles.tooltip,
             {

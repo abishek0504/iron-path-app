@@ -435,7 +435,7 @@ export default function DashboardTab() {
               <View key={p.set_id} style={styles.listRow}>
                 <Text style={styles.listPrimary}>{p.name}</Text>
                 <Text style={styles.listSecondary}>
-                  {formatPRDisplay(p, unitsLabel)}
+                  {formatPRDisplay(p, unitsLabel, { includeTheoretical1Rm: false })}
                 </Text>
               </View>
             ))

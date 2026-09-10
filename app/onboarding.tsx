@@ -61,6 +61,8 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
+import { DayFocusMapEditor } from '../src/components/ai/DayFocusMapEditor';
+import { seedDayFocusMap, type DayFocusMap } from '../src/lib/constants/trainingSplits';
 import { Button } from '../src/components/ui/Button';
 import { convertBodyWeight } from '../src/lib/utils/units';
 import { useModal } from '../src/hooks/useModal';
@@ -115,6 +117,7 @@ export default function Onboarding() {
   const [daysPerWeekSlider, setDaysPerWeekSlider] = useState<number>(0);
   const [workoutDays, setWorkoutDays] = useState<string[]>([]);
   const [preferredSplit, setPreferredSplit] = useState<string | null>(null);
+  const [dayFocusMap, setDayFocusMap] = useState<DayFocusMap>({});
   const [equipment, setEquipment] = useState<string[]>([]);
 
   const slideX = useSharedValue(0);
@@ -185,6 +188,13 @@ export default function Onboarding() {
         setDaysPerWeekSlider(profile.days_per_week ?? 0);
         setWorkoutDays(profile.workout_days || []);
         setPreferredSplit(profile.preferred_training_style || null);
+        setDayFocusMap(
+          seedDayFocusMap(
+            profile.preferred_training_style,
+            profile.workout_days || [],
+            profile.ai_coach_day_focus,
+          ),
+        );
         setEquipment(profile.equipment_access || []);
         setProfile(profile);
       }
@@ -221,8 +231,13 @@ export default function Onboarding() {
     }
     if (n < 1) {
       setPreferredSplit(null);
+      setDayFocusMap({});
     }
   };
+
+  useEffect(() => {
+    setDayFocusMap((prev) => seedDayFocusMap(preferredSplit, workoutDays, prev));
+  }, [preferredSplit, workoutDays]);
 
   const toggleWorkoutDay = (day: string) => {
     const max = daysPerWeekSlider;
@@ -376,6 +391,7 @@ export default function Onboarding() {
         days_per_week: daysPerWeek,
         workout_days: workoutDays.length === daysPerWeekSlider ? workoutDays : undefined,
         preferred_training_style: preferredSplit?.trim() || undefined,
+        ai_coach_day_focus: seedDayFocusMap(preferredSplit, workoutDays, dayFocusMap),
         equipment_access: equipment,
         first_name: firstName.trim(),
         last_name: lastName.trim() || undefined,
@@ -722,13 +738,19 @@ export default function Onboarding() {
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Preferred split</Text>
       <Text style={styles.stepSubtitle}>
-        Suggested for {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'} per week — or let us pick
+        Suggested for {daysPerWeekSlider} day{daysPerWeekSlider === 1 ? '' : 's'} per week. AI Coach uses this split to plan each training day.
       </Text>
 
       <SplitPicker
         daysPerWeek={Math.max(1, daysPerWeekSlider)}
         value={preferredSplit}
         onChange={setPreferredSplit}
+      />
+      <DayFocusMapEditor
+        splitValue={preferredSplit}
+        workoutDays={workoutDays}
+        value={dayFocusMap}
+        onChange={setDayFocusMap}
       />
       {fieldErrors.preferredSplit ? (
         <Text style={styles.errorText}>{fieldErrors.preferredSplit}</Text>

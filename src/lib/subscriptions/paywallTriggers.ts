@@ -7,6 +7,7 @@ import {
 export type PaywallTrigger =
   | 'app_open'
   | 'generate_ai'
+  | 'generate_week'
   | 'finish_workout'
   | 'add_exercise'
   | 'onboarding_complete';
@@ -56,7 +57,7 @@ export function shouldShowPaywall(args: {
     return { show: true, nextState: state };
   }
 
-  if (trigger === 'generate_ai') {
+  if (trigger === 'generate_ai' || trigger === 'generate_week') {
     state.lastShownAt = nowMs;
     return { show: true, nextState: state };
   }
@@ -85,16 +86,18 @@ export function shouldShowPaywall(args: {
 export function headlineForTrigger(trigger: PaywallTrigger): string {
   switch (trigger) {
     case 'app_open':
-      return 'Train smarter from day one';
+      return 'AI Coach plans your week';
     case 'generate_ai':
-      return 'Let AI plan this day for you';
+      return 'Let AI Coach plan this day';
+    case 'generate_week':
+      return 'Let AI Coach plan your full week';
     case 'finish_workout':
-      return 'Recover and plan your next session with AI';
+      return 'Let AI Coach plan your next session';
     case 'add_exercise':
-      return 'Build better workouts — faster';
+      return 'AI Coach builds better workouts';
     case 'onboarding_complete':
-      return 'Build your week with AI';
+      return 'Turn on AI Coach for your week';
     default:
-      return 'Build your week with AI';
+      return 'AI Coach plans your week';
   }
 }

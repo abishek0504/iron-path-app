@@ -100,6 +100,13 @@ function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="generate-week"
+          options={{
+            gestureEnabled: false,
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
           name="(stack)/workout/active"
           options={{ 
             presentation: 'modal', 

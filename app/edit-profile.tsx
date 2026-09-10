@@ -46,7 +46,20 @@ import { Chip } from '../src/components/ui/Chip';
 import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
 import { SplitPicker } from '../src/components/ui/SplitPicker';
+import { DayFocusMapEditor } from '../src/components/ai/DayFocusMapEditor';
+import { sanitizeCoachNotes } from '../src/lib/ai/coachNotes';
+import {
+  COACH_EXERCISE_COUNT_OPTIONS,
+  COACH_SESSION_MINUTE_OPTIONS,
+  DEFAULT_COACH_EXERCISES_PER_SESSION,
+  DEFAULT_COACH_SESSION_MINUTES,
+  MAX_COACH_NOTES_LENGTH,
+  clampCoachExercisesPerSession,
+  clampCoachSessionMinutes,
+} from '../src/lib/ai/coachPrefs';
+import { seedDayFocusMap, type DayFocusMap } from '../src/lib/constants/trainingSplits';
 import { useModal } from '../src/hooks/useModal';
+import { usePaywall } from '../src/components/paywall/PaywallProvider';
 import { GENDER_PLACEHOLDER } from '../src/components/ui/GenderPickerSheet';
 
 const EQUIPMENT_OPTIONS = ['Full gym', 'Dumbbells', 'Bands', 'Bodyweight only'];
@@ -63,6 +76,7 @@ export default function EditProfileScreen() {
   const setProfile = useUserStore((state) => state.setProfile);
   const showToast = useUIStore((state) => state.showToast);
   const { openSheet } = useModal();
+  const { requestGenerateWeek } = usePaywall();
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -81,6 +95,12 @@ export default function EditProfileScreen() {
   const [preferredSplit, setPreferredSplit] = useState<string | null>(null);
   const [useImperial, setUseImperial] = useState(true);
   const [equipment, setEquipment] = useState<string[]>([]);
+  const [aiCoachEnabled, setAiCoachEnabled] = useState(false);
+  const [sessionMinutes, setSessionMinutes] = useState(DEFAULT_COACH_SESSION_MINUTES);
+  const [exercisesPerSession, setExercisesPerSession] = useState(DEFAULT_COACH_EXERCISES_PER_SESSION);
+  const [dayFocusMap, setDayFocusMap] = useState<DayFocusMap>({});
+  const [coachNotes, setCoachNotes] = useState('');
+  const [notesError, setNotesError] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [allowCloseAfterSave, setAllowCloseAfterSave] = useState(false);
   const pendingRemoveActionRef = useRef<NavigationAction | null>(null);
@@ -136,6 +156,18 @@ export default function EditProfileScreen() {
         setPreferredSplit(p.preferred_training_style ?? null);
         setUseImperial(p.use_imperial ?? true);
         setEquipment(p.equipment_access ?? []);
+        setAiCoachEnabled(p.ai_coach_enabled ?? false);
+        setSessionMinutes(clampCoachSessionMinutes(p.ai_coach_session_minutes));
+        setExercisesPerSession(clampCoachExercisesPerSession(p.ai_coach_exercises_per_session));
+        setDayFocusMap(
+          seedDayFocusMap(
+            p.preferred_training_style,
+            p.workout_days ?? [],
+            p.ai_coach_day_focus,
+          ),
+        );
+        setCoachNotes(p.ai_coach_notes ?? '');
+        setNotesError(null);
 
         if (__DEV__) {
           devLog('edit-profile', { action: 'load:done', hasProfile: !!p });
@@ -173,9 +205,14 @@ export default function EditProfileScreen() {
       !workoutDaysMatch ||
       (profile.preferred_training_style ?? null) !== (preferredSplit?.trim() || null) ||
       (profile.use_imperial ?? true) !== useImperial ||
-      equipChanged
+      equipChanged ||
+      !!profile.ai_coach_enabled !== aiCoachEnabled ||
+      clampCoachSessionMinutes(profile.ai_coach_session_minutes) !== sessionMinutes ||
+      clampCoachExercisesPerSession(profile.ai_coach_exercises_per_session) !== exercisesPerSession ||
+      JSON.stringify(profile.ai_coach_day_focus ?? {}) !== JSON.stringify(dayFocusMap) ||
+      (profile.ai_coach_notes ?? '') !== coachNotes
     );
-  }, [dateOfBirth, daysPerWeekSlider, equipment, experienceLevel, firstName, gender, lastName, preferredSplit, profile, useImperial, workoutDays]);
+  }, [aiCoachEnabled, coachNotes, dateOfBirth, dayFocusMap, daysPerWeekSlider, equipment, exercisesPerSession, experienceLevel, firstName, gender, lastName, preferredSplit, profile, sessionMinutes, useImperial, workoutDays]);
 
   usePreventRemove(hasChanges && !allowCloseAfterSave, ({ data }) => {
     pendingRemoveActionRef.current = data.action;
@@ -209,6 +246,10 @@ export default function EditProfileScreen() {
     router.back();
   };
 
+  useEffect(() => {
+    setDayFocusMap((prev) => seedDayFocusMap(preferredSplit, workoutDays, prev));
+  }, [preferredSplit, workoutDays]);
+
   const handleKeepEditing = () => {
     setShowDiscardConfirm(false);
     pendingRemoveActionRef.current = null;
@@ -225,10 +266,16 @@ export default function EditProfileScreen() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (opts?: { skipCoachPaywall?: boolean }) => {
     if (!profile) return;
     if (!firstName.trim()) {
       showToast('Enter your first name.', 'error');
+      return;
+    }
+    if (!opts?.skipCoachPaywall && aiCoachEnabled && !profile.ai_coach_enabled) {
+      requestGenerateWeek(() => {
+        void handleSave({ skipCoachPaywall: true });
+      });
       return;
     }
     setSaving(true);
@@ -261,6 +308,13 @@ export default function EditProfileScreen() {
       }
 
       const daysNum = daysPerWeekSlider >= 1 ? daysPerWeekSlider : undefined;
+      const notesResult = sanitizeCoachNotes(coachNotes);
+      if (!notesResult.ok) {
+        setNotesError('That note looks like an instruction to the model. Rephrase your preference.');
+        showToast('Coach notes could not be saved.', 'error');
+        return;
+      }
+      const nextFocusMap = seedDayFocusMap(preferredSplit, workoutDays, dayFocusMap);
       const updates: Partial<UserProfile> = {
         first_name: firstName.trim(),
         last_name: lastName.trim() || undefined,
@@ -272,7 +326,23 @@ export default function EditProfileScreen() {
         preferred_training_style: preferredSplit?.trim() || undefined,
         use_imperial: useImperial,
         equipment_access: equipment,
+        ai_coach_enabled: aiCoachEnabled,
+        ai_coach_session_minutes: sessionMinutes,
+        ai_coach_exercises_per_session: exercisesPerSession,
+        ai_coach_day_focus: nextFocusMap,
+        ai_coach_notes: notesResult.notes,
       };
+
+      const splitChanged =
+        (profile.preferred_training_style ?? null) !== (preferredSplit?.trim() || null);
+      const daysChanged =
+        (profile.days_per_week ?? undefined) !== daysNum ||
+        (profile.workout_days ?? []).join('|') !== workoutDays.join('|');
+      const coachPrefsChanged =
+        clampCoachSessionMinutes(profile.ai_coach_session_minutes) !== sessionMinutes ||
+        clampCoachExercisesPerSession(profile.ai_coach_exercises_per_session) !== exercisesPerSession ||
+        JSON.stringify(profile.ai_coach_day_focus ?? {}) !== JSON.stringify(nextFocusMap) ||
+        (profile.ai_coach_notes ?? '') !== (notesResult.notes ?? '');
 
       const success = await updateUserProfile(profile.id, updates);
       if (!success) {
@@ -306,7 +376,11 @@ export default function EditProfileScreen() {
         });
       }
       await rescheduleRemindersAfterProfileWorkoutDays(updates.workout_days);
-      showToast('Profile saved', 'success');
+      if (aiCoachEnabled && (splitChanged || daysChanged || coachPrefsChanged)) {
+        showToast('Profile saved. Regenerate your week to apply the new split.', 'success');
+      } else {
+        showToast('Profile saved', 'success');
+      }
       setAllowCloseAfterSave(true);
     } catch (error) {
       if (__DEV__) {
@@ -494,13 +568,79 @@ export default function EditProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>Preferred Split</Text>
           <Text style={styles.helperText}>
-            Suggestions match your days per week — the AI uses this to plan each day
+            Suggestions match your days per week — AI Coach uses this to plan each day
           </Text>
           <SplitPicker
             daysPerWeek={daysPerWeekSlider > 0 ? daysPerWeekSlider : 3}
             value={preferredSplit}
             onChange={setPreferredSplit}
           />
+          <DayFocusMapEditor
+            splitValue={preferredSplit}
+            workoutDays={workoutDays}
+            value={dayFocusMap}
+            onChange={setDayFocusMap}
+          />
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.unitsRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>AI Coach</Text>
+              <Text style={styles.helperText}>
+                Pro: AI Coach plans your training days each week from this split
+              </Text>
+            </View>
+            <Switch
+              value={aiCoachEnabled}
+              onValueChange={setAiCoachEnabled}
+              thumbColor={aiCoachEnabled ? colors.primary : colors.borderLight}
+              trackColor={{ true: colors.primaryDark, false: colors.border }}
+            />
+          </View>
+          <Text style={styles.label}>Session length</Text>
+          <View style={styles.chipGroup}>
+            {COACH_SESSION_MINUTE_OPTIONS.map((minutes) => (
+              <Chip
+                key={minutes}
+                label={`${minutes} min`}
+                selected={sessionMinutes === minutes}
+                onPress={() => setSessionMinutes(minutes)}
+              />
+            ))}
+          </View>
+          <Text style={styles.label}>Exercises per session</Text>
+          <View style={styles.chipGroup}>
+            {COACH_EXERCISE_COUNT_OPTIONS.map((count) => (
+              <Chip
+                key={count}
+                label={String(count)}
+                selected={exercisesPerSession === count}
+                onPress={() => setExercisesPerSession(count)}
+              />
+            ))}
+          </View>
+          <Text style={styles.label}>Talk to your coach</Text>
+          <Text style={styles.helperText}>
+            Likes, dislikes, injuries, how sessions should feel
+          </Text>
+          <TextInput
+            value={coachNotes}
+            onChangeText={(text) => {
+              setCoachNotes(text);
+              setNotesError(null);
+            }}
+            placeholder="e.g. No hip thrusts. Shoulders feel beat up."
+            placeholderTextColor={colors.textMuted}
+            style={styles.notesInput}
+            multiline
+            textAlignVertical="top"
+            maxLength={MAX_COACH_NOTES_LENGTH}
+          />
+          <Text style={styles.helperText}>
+            {coachNotes.trim().length}/{MAX_COACH_NOTES_LENGTH}
+          </Text>
+          {notesError ? <Text style={styles.errorText}>{notesError}</Text> : null}
         </View>
 
         {/* Units toggle */}
@@ -550,7 +690,9 @@ export default function EditProfileScreen() {
       <View style={[styles.saveFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
         <Button
           label="Save"
-          onPress={handleSave}
+          onPress={() => {
+            void handleSave();
+          }}
           disabled={saving}
           fullWidth
         >
@@ -719,6 +861,19 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.textPrimary,
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.medium,
+  },
+  notesInput: {
+    minHeight: 96,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+  },
+  errorText: {
+    color: colors.error,
+    fontSize: typography.sizes.sm,
   },
   }); }
 

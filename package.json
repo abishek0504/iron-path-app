@@ -11,6 +11,7 @@
     "ios:dev": "expo run:ios",
     "ios:device": "expo run:ios --device 'iPhone 17 Pro Max'",
     "ios:simulator": "xcrun simctl boot 'iPhone 17 Pro Max' 2>/dev/null || true && open -a Simulator",
+    "ios:xcode": "open ios/IronPath.xcworkspace",
     "prebuild:ios": "expo prebuild --platform ios --clean",
     "prebuild:android": "expo prebuild --platform android --clean",
     "prebuild:all": "expo prebuild --clean",

@@ -31,6 +31,7 @@ interface PaywallContextValue {
   tryRandomPaywall: (trigger: PaywallTrigger) => void;
   tryAppOpenPaywall: () => void;
   requestGenerateAi: (onAllowed: () => void) => void;
+  requestGenerateWeek: (onAllowed: () => void) => void;
   restoreSubscription: () => Promise<boolean>;
 }
 
@@ -87,8 +88,9 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
       setTrigger(nextTrigger);
       onSubscribedRef.current = onSubscribed ?? null;
       setVisible(true);
+      void refresh();
     },
-    [],
+    [refresh],
   );
 
   const showPaywall = useCallback(
@@ -152,6 +154,25 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
     [isPro, openPaywall],
   );
 
+  const requestGenerateWeek = useCallback(
+    (onAllowed: () => void) => {
+      if (isPro) {
+        onAllowed();
+        return;
+      }
+      const result = shouldShowPaywall({
+        trigger: 'generate_week',
+        isPro: false,
+        state: sessionRef.current,
+        nowMs: Date.now(),
+        randomRoll: 0,
+      });
+      sessionRef.current = result.nextState;
+      openPaywall('generate_week', onAllowed);
+    },
+    [isPro, openPaywall],
+  );
+
   const handleDismiss = useCallback(() => {
     setVisible(false);
     onSubscribedRef.current = null;
@@ -166,7 +187,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
           hapticSuccess();
           await refresh();
           setVisible(false);
-          toast.success('Welcome to IronPath Pro!');
+          toast.success('Welcome to IronPath Pro. AI Coach is ready.');
           const onSubscribed = onSubscribedRef.current;
           onSubscribedRef.current = null;
           onSubscribed?.();
@@ -212,6 +233,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
       tryRandomPaywall,
       tryAppOpenPaywall,
       requestGenerateAi,
+      requestGenerateWeek,
       restoreSubscription,
     }),
     [
@@ -221,6 +243,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
       tryRandomPaywall,
       tryAppOpenPaywall,
       requestGenerateAi,
+      requestGenerateWeek,
       restoreSubscription,
     ],
   );
@@ -238,6 +261,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
         trigger={trigger}
         monthlyPackage={monthlyPackage}
         annualPackage={annualPackage}
+        isLoading={isLoading}
         isPurchasing={isPurchasing}
         onDismiss={handleDismiss}
         onPurchase={handlePurchase}

@@ -1,7 +1,10 @@
 /** Shared constants for generate-workout. */
 
-/** Pro subscribers: max successful AI generations per rolling 7 days (source = openai only). */
+/** Pro subscribers: max successful AI generations per rolling 7 days. */
 export const PRO_WEEKLY_QUOTA = 40;
+
+/** Successful LLM commits that count toward the rolling quota. */
+export const AI_QUOTA_SOURCES = ['openai', 'openai_week'] as const;
 
 /** Retry OpenAI when the model returns structurally invalid output (not on HTTP errors). */
 export const MAX_LLM_VALIDATION_ATTEMPTS = 2;
@@ -14,7 +17,7 @@ export const MAX_SESSIONS_PER_DAY = 6;
 /** Hard upper bound on exercises returned per session — keeps prompts small and bounds DB inserts. */
 export const MAX_EXERCISES_PER_SESSION = 8;
 
-/** Cap on allow-list exercises embedded in the LLM prompt — matches the local engine (`weekGeneration.ts` limit 50). Sending the full 340-exercise catalog causes the model to return invalid IDs or too few exercises, failing server validation. */
+/** Cap on allow-list exercises embedded in the LLM prompt. Sending the full catalog causes invalid IDs or too few exercises. */
 export const CATALOG_PROMPT_LIMIT = 50;
 
 /** Fetch more allow-list rows than the prompt cap so focus filtering still leaves a full catalog. */

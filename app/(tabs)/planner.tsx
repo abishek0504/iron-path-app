@@ -8,25 +8,27 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Pressable,
   RefreshControl,
+  Switch,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Trash2, CheckCircle, Bookmark, Sparkles, Copy } from 'lucide-react-native';
+import { Plus, Trash2, CheckCircle, Bookmark, Sparkles, Copy, RefreshCw, MessageSquare } from 'lucide-react-native';
 import { spacing, layout, typography, borderRadius, type ThemeColors } from '../../src/lib/utils/theme';
 import { useTheme } from '../../src/lib/utils/ThemeContext';
 import { TAB_HEADER_HEIGHT, TabHeader } from '../../src/components/ui/TabHeader';
 import { Button } from '../../src/components/ui/Button';
-import { Chip } from '../../src/components/ui/Chip';
 import { TourTarget } from '../../src/components/tour/TourTarget';
+import { PlanDayScroller } from '../../src/components/planner/PlanDayScroller';
 import { useRegisterTourScroll, type TourScrollable } from '../../src/components/tour/TourScroll';
 import { useToast } from '../../src/hooks/useToast';
 import { useModal } from '../../src/hooks/useModal';
 import { useDateContext } from '../../src/hooks/useDateContext';
 import { useUserStore } from '../../src/stores/userStore';
+import { sanitizeCoachNotes } from '../../src/lib/ai/coachNotes';
+import { clampCoachExercisesPerSession, clampCoachSessionMinutes } from '../../src/lib/ai/coachPrefs';
 import { useUIStore } from '../../src/stores/uiStore';
 import { supabase } from '../../src/lib/supabase/client';
 import {
@@ -59,14 +61,21 @@ import {
 import {
   createWorkoutSession,
   deleteSessionWithExercises,
+  getSessionsForToday,
   materializeWorkoutFromTemplateSlots,
   type WorkoutSession,
 } from '../../src/lib/supabase/queries/workouts';
 import { applyStructureEditToSession, setSessionSupersetGroup } from '../../src/lib/supabase/queries/workouts_helpers';
 import { invalidateSessionsInRangeForUser } from '../../src/lib/cache/sessionsCache';
-import { invalidateWorkoutStatsCache } from '../../src/lib/cache/dashboardStatsCache';
+import { invalidateProfileCache, invalidateWorkoutStatsCache } from '../../src/lib/cache/dashboardStatsCache';
 import { devLog, devError } from '../../src/lib/utils/logger';
-import { getDateBoundsForDayName, getLocalDayBoundsIso, WEEK_DAYS } from '../../src/lib/utils/date';
+import {
+  getDateBoundsForDayName,
+  getLocalDayBoundsIso,
+  getLocalWeekBoundsIso,
+  getLocalWeekSundayKey,
+  WEEK_DAYS,
+} from '../../src/lib/utils/date';
 import { createUuid } from '../../src/lib/utils/uuid';
 import {
   computeRoutineSessionExerciseIds as computeRoutineIdsFromSlots,
@@ -80,9 +89,18 @@ import {
 } from '../../src/lib/planner/ensureSessionsForPlanDay';
 import {
   clearMaterializeSuppressionForDay,
+  isMaterializeSuppressed,
   suppressMaterializeForDay,
 } from '../../src/lib/planner/materializeSuppression';
-import { applyStructureEditToTemplate, setTemplateSlotSupersetGroup } from '../../src/lib/supabase/queries/templates';
+import {
+  shouldClearWeeklyPlanOnWorkoutDelete,
+  shouldSeedAddWorkoutFromTemplateSlots,
+} from '../../src/lib/planner/planDayWorkout';
+import {
+  applyStructureEditToTemplate,
+  clearTemplateSlotsForDay,
+  setTemplateSlotSupersetGroup,
+} from '../../src/lib/supabase/queries/templates';
 import {
   listWorkoutPresets,
   createWorkoutPresetFromSession,
@@ -98,10 +116,25 @@ import {
 import { ConfirmDialog } from '../../src/components/ui/ConfirmDialog';
 import { DEFAULT_DAY_CONSTRAINTS, type DayConstraints } from '../../src/lib/ai/generateWorkoutDay';
 import { clearPlanDayForGeneration } from '../../src/lib/ai/clearPlanDay';
+import {
+  buildCoachWeekDays,
+  protectedCoachDayNames,
+  sessionCoachDayNames,
+  shouldAutoPlanCoachWeek,
+  shouldReplaceCoachLeftovers,
+  shouldSkipMaterializeForCoach,
+  type CoachWeekMode,
+} from '../../src/lib/ai/coachWeek';
+import { listSessionIdsWithPerformedWork } from '../../src/lib/ai/coachWeekSessions';
+import { executeAiWeekGeneration } from '../../src/lib/ai/executeAiWeekGeneration';
+import { updateUserProfile } from '../../src/lib/supabase/queries/users';
 import { LogoEdgeLoader } from '../../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { usePaywall } from '../../src/components/paywall/PaywallProvider';
 import { copyLastWeek } from '../../src/lib/planner/copyLastWeek';
+
+const SHOW_COPY_LAST_WEEK = false;
+const COACH_AUTO_RETRY_MS = 30_000;
 
 type PlannerSessionExercise = {
   id: string;
@@ -115,7 +148,7 @@ export default function PlannerTab() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const { requestGenerateAi } = usePaywall();
+  const { requestGenerateAi, requestGenerateWeek, isPro } = usePaywall();
   const profile = useUserStore((state) => state.profile);
   const plannerNeedsRefetch = useUIStore((s) => s.plannerNeedsRefetch);
   const setPlannerNeedsRefetch = useUIStore((s) => s.setPlannerNeedsRefetch);
@@ -159,6 +192,7 @@ export default function PlannerTab() {
   const [sessionIdToDelete, setSessionIdToDelete] = useState<string | null>(null);
   const [showCopyLastWeekConfirm, setShowCopyLastWeekConfirm] = useState(false);
   const [isCopyingLastWeek, setIsCopyingLastWeek] = useState(false);
+  const [isCoachPlanning, setIsCoachPlanning] = useState(false);
   const pendingPresetForLoadRef = useRef<WorkoutPreset | null>(null);
   const pendingPresetToDeleteRef = useRef<WorkoutPreset | null>(null);
   const plannerSheetHandlersRef = useRef<{
@@ -200,6 +234,9 @@ export default function PlannerTab() {
   const RECOVERY_THROTTLE_MS = 5000;
   const lastPlanRefetchRef = useRef(0);
   const REFETCH_THROTTLE_MS = 3000;
+  const autoWeekInFlightRef = useRef(false);
+  const autoWeekFailedRef = useRef<string | null>(null);
+  const autoWeekFailedAtRef = useRef(0);
   /** Refs for load callbacks so useFocusEffect doesn't re-run when their identity changes (e.g. loadTemplate when hasInitializedSelection flips). */
   const loadTemplateRef = useRef<(id: string) => Promise<void>>(() => Promise.resolve());
   const loadTodaySessionExercisesRef = useRef<(userId: string) => Promise<void>>(() => Promise.resolve());
@@ -620,12 +657,17 @@ export default function PlannerTab() {
       };
 
       try {
+        const skipCoachMaterialize = shouldSkipMaterializeForCoach({
+          coachEnabled: !!profile?.ai_coach_enabled,
+          plannedWeekStart: profile?.ai_coach_planned_week_start,
+          weekSundayKey: getLocalWeekSundayKey(),
+        });
         const ensured = await ensureSessionsForPlanDay({
           userId,
           dayName: requestedDayName,
           templateId: options?.templateId,
           slots: options?.templateSlots,
-          skipMaterialize: options?.skipMaterialize,
+          skipMaterialize: options?.skipMaterialize || skipCoachMaterialize,
           experience: profile?.experience_level || 'beginner',
         });
         if (__DEV__) {
@@ -1892,8 +1934,26 @@ export default function PlannerTab() {
       const startedAt = dateContext.isToday
         ? undefined
         : getDateBoundsForDayName(selectedDay.day.day_name).startIso;
+      const planDayStartIso = resolvePlanDayBounds(selectedDay.day.day_name).startIso;
+      const isDaySuppressed = await isMaterializeSuppressed(userId, planDayStartIso);
+      const seedFromSlots = shouldSeedAddWorkoutFromTemplateSlots({
+        sessionCount: sessionsTodayWithExercises.length,
+        slotCount: selectedDay.slots.length,
+        isMaterializeSuppressed: isDaySuppressed,
+      });
+      if (__DEV__) {
+        devLog('planner', {
+          action: 'addWorkout',
+          dayName: selectedDay.day.day_name,
+          sessionCount: sessionsTodayWithExercises.length,
+          slotCount: selectedDay.slots.length,
+          startIso: planDayStartIso,
+          isDaySuppressed,
+          seedFromSlots,
+        });
+      }
 
-      if (sessionsTodayWithExercises.length === 0 && selectedDay.slots.length > 0) {
+      if (seedFromSlots) {
         const session = await materializeWorkoutFromTemplateSlots({
           userId,
           templateId: activeTemplateId,
@@ -2022,6 +2082,12 @@ export default function PlannerTab() {
     const userId = await getCurrentUserId();
     if (!userId) return;
 
+    const remainingSessionCount = sessionsTodayWithExercises.filter(
+      ({ session: s }) => s.id !== sessionIdToRemove,
+    ).length;
+    const clearWeeklyPlan = shouldClearWeeklyPlanOnWorkoutDelete(remainingSessionCount);
+    const planDayStartIso = resolvePlanDayBounds(selectedDay.day.day_name).startIso;
+
     setSessionsTodayWithExercises((prev) =>
       prev.filter(({ session: s }) => s.id !== sessionIdToRemove),
     );
@@ -2029,26 +2095,59 @@ export default function PlannerTab() {
     setIsSaving(true);
     try {
       const { error } = await deleteSessionWithExercises(userId, sessionIdToRemove);
+      let slotsCleared = false;
       if (error) {
         toast.error('Failed to delete workout');
         if (__DEV__) devError('planner', error, { sessionId: sessionIdToRemove });
       } else {
-        toast.success('Workout removed');
-        await suppressMaterializeForDay(
-          userId,
-          resolvePlanDayBounds(selectedDay.day.day_name).startIso,
-        );
+        if (clearWeeklyPlan) {
+          slotsCleared = await clearTemplateSlotsForDay(selectedDay.day.id);
+          if (slotsCleared) {
+            setTemplateData((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                days: prev.days.map((dayEntry) =>
+                  dayEntry.day.id === selectedDay.day.id ? { ...dayEntry, slots: [] } : dayEntry,
+                ),
+              };
+            });
+            if (activeTemplateId) {
+              invalidateTemplate(activeTemplateId);
+            }
+          } else {
+            toast.error('Workout removed, but the weekly plan could not be cleared');
+          }
+        }
+        if (!clearWeeklyPlan || slotsCleared) {
+          toast.success('Workout removed');
+        }
+        await suppressMaterializeForDay(userId, planDayStartIso);
         invalidateSessionsInRangeForUser(userId);
         invalidateWorkoutStatsCache(userId);
+        if (__DEV__) {
+          devLog('planner', {
+            action: 'deleteWorkout',
+            dayName: selectedDay.day.day_name,
+            sessionId: sessionIdToRemove,
+            remainingSessionCount,
+            slotsCleared: clearWeeklyPlan ? slotsCleared : false,
+            startIso: planDayStartIso,
+          });
+        }
       }
+      const clearedPlan = clearWeeklyPlan && slotsCleared;
       await loadSessionsForDay(userId, {
         forceRefresh: true,
         skipMaterialize: true,
         dayName: selectedDay.day.day_name,
-        templateExerciseKeys: selectedDayTemplateKeys,
+        templateExerciseKeys: clearedPlan ? [] : selectedDayTemplateKeys,
         templateId: activeTemplateId ?? undefined,
-        templateSlots: selectedDay.slots,
+        templateSlots: clearedPlan ? [] : selectedDay.slots,
       });
+      if (clearedPlan) {
+        autoWeekFailedRef.current = null;
+      }
     } catch (err) {
       if (__DEV__) {
         devError('planner', err, { action: 'deleteWorkout_exception', sessionId: sessionIdToRemove });
@@ -2068,6 +2167,7 @@ export default function PlannerTab() {
   }, [
     sessionIdToDelete,
     selectedDay,
+    sessionsTodayWithExercises,
     selectedDayTemplateKeys,
     activeTemplateId,
     loadSessionsForDay,
@@ -2103,6 +2203,278 @@ export default function PlannerTab() {
     closeSheet,
     selectedDay?.day.day_name,
     profile?.preferred_training_style,
+  ]);
+
+  const collectCoachWeekDays = useCallback(
+    async (mode: CoachWeekMode) => {
+      if (!templateData || !profile) return [];
+      const userId = await getCurrentUserId();
+      if (!userId) return [];
+      const now = new Date();
+      const weekBounds = getLocalWeekBoundsIso(now);
+      const weekStartDate = getLocalWeekSundayKey(now);
+      const sessions = await getSessionsForToday(userId, weekBounds.startIso, weekBounds.endIsoExclusive);
+      const performedSessionIds = await listSessionIdsWithPerformedWork(sessions.map((session) => session.id));
+      const protectedDays = protectedCoachDayNames(sessions, performedSessionIds);
+      const sessionDays = sessionCoachDayNames(sessions);
+      const replaceLeftovers = shouldReplaceCoachLeftovers({
+        mode,
+        plannedWeekStart: profile.ai_coach_planned_week_start,
+        weekSundayKey: weekStartDate,
+      });
+      if (__DEV__) {
+        devLog('planner', {
+          action: 'collectCoachWeekDays',
+          mode,
+          weekStartDate,
+          replaceLeftovers,
+          sessionCount: sessions.length,
+          protectedDayCount: protectedDays.size,
+          protectedDays: [...protectedDays],
+          sessionDays: [...sessionDays],
+          startIso: weekBounds.startIso,
+          endIsoExclusive: weekBounds.endIsoExclusive,
+        });
+      }
+      return buildCoachWeekDays({
+        now,
+        mode,
+        replaceLeftovers,
+        workoutDays: profile.workout_days ?? [],
+        splitValue: profile.preferred_training_style,
+        dayFocusMap: profile.ai_coach_day_focus ?? {},
+        templateDays: templateData.days.map((entry, index) => ({
+          dayId: entry.day.id,
+          dayName: entry.day.day_name,
+          dayIndex: index,
+          hasProtectedSession: protectedDays.has(entry.day.day_name),
+          hasSession: sessionDays.has(entry.day.day_name),
+          hasSlots: entry.slots.length > 0,
+        })),
+      });
+    },
+    [templateData, profile, getCurrentUserId],
+  );
+
+  const startCoachWeek = useCallback(
+    async (mode: CoachWeekMode) => {
+      if (!activeTemplateId) {
+        toast.error('No template loaded');
+        return;
+      }
+      const weekStartDate = getLocalWeekSundayKey();
+      const days = await collectCoachWeekDays(mode);
+      if (days.length === 0) {
+        if (mode === 'regenerate') {
+          toast.error('No remaining training days to plan');
+        }
+        return;
+      }
+      if (__DEV__) {
+        devLog('planner', {
+          action: 'coach_week_start',
+          mode,
+          weekStartDate,
+          dayNames: days.map((day) => day.dayName),
+          dayCount: days.length,
+        });
+      }
+      router.push({
+        pathname: '/generate-week',
+        params: {
+          templateId: activeTemplateId,
+          mode,
+          weekStartDate,
+          days: JSON.stringify(days),
+          generationId: createUuid(),
+        },
+      });
+    },
+    [activeTemplateId, collectCoachWeekDays, router, toast],
+  );
+
+  const runCoachWeekAuto = useCallback(async () => {
+    const coachEnabled =
+      useUserStore.getState().profile?.ai_coach_enabled ?? profile?.ai_coach_enabled;
+    if (
+      !coachEnabled ||
+      !isPro ||
+      !templateData ||
+      !activeTemplateId ||
+      isLoadingTemplate
+    ) {
+      return;
+    }
+    if (autoWeekInFlightRef.current || isCoachPlanning) return;
+
+    const weekStartDate = getLocalWeekSundayKey();
+    if (autoWeekFailedRef.current === weekStartDate) {
+      if (Date.now() - autoWeekFailedAtRef.current < COACH_AUTO_RETRY_MS) return;
+      autoWeekFailedRef.current = null;
+    }
+
+    const days = await collectCoachWeekDays('auto');
+    if (
+      !shouldAutoPlanCoachWeek({
+        coachEnabled: true,
+        daysToGenerate: days.length,
+      })
+    ) {
+      return;
+    }
+
+    const userId = await getCurrentUserId();
+    if (!userId) return;
+
+    autoWeekInFlightRef.current = true;
+    setIsCoachPlanning(true);
+    if (__DEV__) {
+      devLog('planner', {
+        action: 'coach_week_auto',
+        weekStartDate,
+        dayNames: days.map((day) => day.dayName),
+        dayCount: days.length,
+      });
+    }
+
+    try {
+      const result = await executeAiWeekGeneration({
+        userId,
+        templateId: activeTemplateId,
+        idempotencyKey: createUuid(),
+        mode: 'auto',
+        weekStartDate,
+        days,
+      });
+
+      if (result.ok) {
+        autoWeekFailedRef.current = null;
+        toast.success(
+          days.length === 1
+            ? `Your coach planned ${days[0]?.dayName ?? 'this day'}`
+            : 'Your coach planned this week',
+        );
+        await loadTemplate(activeTemplateId);
+        return;
+      }
+
+      autoWeekFailedRef.current = weekStartDate;
+      autoWeekFailedAtRef.current = Date.now();
+      if (result.code === 'paywall_required') return;
+      if (result.code === 'quota_exceeded') {
+        toast.error("You've reached this week's AI limit. Try again later.");
+        return;
+      }
+      if (result.code === 'auth_error') {
+        toast.error('Session expired — please log in again to use AI Coach');
+        return;
+      }
+      if (result.code === 'forbidden') {
+        toast.error("This plan cannot be generated. The template is missing or isn't yours.");
+        return;
+      }
+      if (result.code === 'no_slots') {
+        toast.error('Your coach could not add exercises. It will try again shortly.');
+        return;
+      }
+      const reason = result.message ?? '';
+      if (reason === 'commit_failed') {
+        toast.error("Week was generated but couldn't be saved. Your coach will retry.");
+        return;
+      }
+      if (reason === 'edge_unreachable') {
+        toast.error("Couldn't reach the server. Your coach will retry.");
+        return;
+      }
+      toast.error('Your coach is still setting up this week. It will retry shortly.');
+    } finally {
+      autoWeekInFlightRef.current = false;
+      setIsCoachPlanning(false);
+    }
+  }, [
+    profile?.ai_coach_enabled,
+    isPro,
+    templateData,
+    activeTemplateId,
+    isLoadingTemplate,
+    isCoachPlanning,
+    collectCoachWeekDays,
+    getCurrentUserId,
+    loadTemplate,
+    toast,
+  ]);
+
+  const handleCoachToggle = useCallback(
+    (enabled: boolean) => {
+      const apply = async () => {
+        const userId = await getCurrentUserId();
+        if (!userId) {
+          toast.error('Please log in');
+          return;
+        }
+        const ok = await updateUserProfile(userId, { ai_coach_enabled: enabled });
+        if (!ok) {
+          toast.error('Could not update AI Coach');
+          return;
+        }
+        invalidateProfileCache(userId);
+        useUserStore.getState().updateProfile({ ai_coach_enabled: enabled });
+        if (enabled) {
+          autoWeekFailedRef.current = null;
+          void runCoachWeekAuto();
+        }
+      };
+      if (enabled) {
+        requestGenerateWeek(() => {
+          void apply();
+        });
+        return;
+      }
+      void apply();
+    },
+    [getCurrentUserId, requestGenerateWeek, runCoachWeekAuto, toast],
+  );
+
+  const handleSaveCoachNotes = useCallback(
+    async (notes: string | null) => {
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        toast.error('Please log in');
+        return;
+      }
+      const sanitized = sanitizeCoachNotes(notes);
+      if (!sanitized.ok) {
+        toast.error('That note looks like an instruction to the model. Rephrase your preference.');
+        return;
+      }
+      const ok = await updateUserProfile(userId, { ai_coach_notes: sanitized.notes });
+      if (!ok) {
+        toast.error('Could not save coach notes');
+        return;
+      }
+      invalidateProfileCache(userId);
+      useUserStore.getState().updateProfile({ ai_coach_notes: sanitized.notes });
+      closeSheet();
+      toast.success('Saved. Regenerate your week to apply.');
+    },
+    [closeSheet, getCurrentUserId, toast],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      void runCoachWeekAuto();
+    }, [runCoachWeekAuto]),
+  );
+
+  useEffect(() => {
+    if (!profile?.ai_coach_enabled || isLoadingSessionsForDay || isSaving) return;
+    void runCoachWeekAuto();
+  }, [
+    profile?.ai_coach_enabled,
+    sessionsTodayWithExercises.length,
+    isLoadingSessionsForDay,
+    isSaving,
+    runCoachWeekAuto,
   ]);
 
   const runGenerateWithAI = useCallback(
@@ -2247,32 +2619,17 @@ export default function PlannerTab() {
           />
         }
       >
-        {/* Day selector - always show all 7 days in fixed order */}
         <TourTarget id="tour.plan.daySelector" testID="tour-plan-day-selector">
-        <View style={styles.daySelector}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daySelectorRow}>
-            {WEEK_DAYS.map((weekday) => {
-              // Find corresponding template_day record (should always exist after ensureTemplateHasWeekDays)
-              const dayData = templateData.days.find((d) => d.day.day_name === weekday);
-              const isSelected = selectedDay?.day.day_name === weekday;
-
-              return (
-                <Chip
-                  key={dayData?.day.id || weekday}
-                  label={weekday}
-                  selected={isSelected}
-                  onPress={() => {
-                    // Find index of this day in templateData.days array
-                    const dayIndex = templateData.days.findIndex((d) => d.day.day_name === weekday);
-                    if (dayIndex >= 0) {
-                      setSelectedDayIndex(dayIndex);
-                    }
-                  }}
-                />
-              );
-            })}
-          </ScrollView>
-        </View>
+          <PlanDayScroller
+            days={WEEK_DAYS}
+            selectedDayName={selectedDay?.day.day_name ?? null}
+            onSelectDayName={(weekday) => {
+              const dayIndex = templateData.days.findIndex((d) => d.day.day_name === weekday);
+              if (dayIndex >= 0) {
+                setSelectedDayIndex(dayIndex);
+              }
+            }}
+          />
         </TourTarget>
 
         {/* Selected day content */}
@@ -2295,6 +2652,7 @@ export default function PlannerTab() {
                   </View>
                 </Button>
                 </TourTarget>
+                {SHOW_COPY_LAST_WEEK ? (
                 <Button
                   label="Copy last week"
                   variant="secondary"
@@ -2307,6 +2665,7 @@ export default function PlannerTab() {
                     <Text style={styles.addButtonText}>Copy last week</Text>
                   </View>
                 </Button>
+                ) : null}
               </View>
             </View>
 
@@ -2317,12 +2676,24 @@ export default function PlannerTab() {
                   <LogoEdgeLoader size="small" style={{ marginBottom: spacing.sm }} />
                   <Text style={styles.emptySlotsSubtext}>Loading workouts...</Text>
                 </View>
-              ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length === 0 ? (
+              ) : sessionsTodayWithExercises.length === 0 ? (
                 <View style={styles.emptySlotsContainer}>
+                  {isCoachPlanning ? (
+                    <LogoEdgeLoader size="small" style={{ marginBottom: spacing.sm }} />
+                  ) : null}
                   <Text style={styles.emptySlotsText}>
                     {`No workouts planned for ${dateContext.isToday ? 'today' : selectedDay.day.day_name}`}
                   </Text>
-                  <Text style={styles.emptySlotsSubtext}>Add a workout, copy last week, or generate with AI to get started</Text>
+                  <Text style={styles.emptySlotsSubtext}>
+                    {profile?.ai_coach_enabled
+                      ? isCoachPlanning
+                        ? 'Your coach is writing today\'s lifts and targets'
+                        : 'Your coach is building this week from your split and history'
+                      : SHOW_COPY_LAST_WEEK
+                        ? 'Add a workout, copy last week, or generate with AI to get started'
+                        : 'Add a workout or generate with AI to get started'}
+                  </Text>
+                  {SHOW_COPY_LAST_WEEK ? (
                   <Button
                     label="Copy last week"
                     variant="secondary"
@@ -2335,15 +2706,7 @@ export default function PlannerTab() {
                       <Text style={styles.addButtonText}>Copy last week</Text>
                     </View>
                   </Button>
-                </View>
-              ) : sessionsTodayWithExercises.length === 0 && selectedDay.slots.length > 0 ? (
-                <View style={styles.emptySlotsContainer}>
-                  <Text style={styles.emptySlotsText}>
-                    {dateContext.isToday
-                      ? "Couldn't load today's workout"
-                      : `Couldn't load workout for ${selectedDay.day.day_name}`}
-                  </Text>
-                  <Text style={styles.emptySlotsSubtext}>Pull to refresh or tap Add Workout to retry</Text>
+                  ) : null}
                 </View>
               ) : (
                 sessionsTodayWithExercises.map(({ session, exercises }, idx) => {
@@ -2566,6 +2929,65 @@ export default function PlannerTab() {
               )}
             </>
 
+            <TourTarget id="tour.plan.aiCoach" testID="tour-plan-ai-coach">
+            <View style={styles.coachRow}>
+              <View style={styles.coachCopy}>
+                <Text style={styles.coachTitle}>AI Coach</Text>
+                <Text style={styles.coachSub}>
+                  {`${clampCoachSessionMinutes(profile?.ai_coach_session_minutes)} min · ${clampCoachExercisesPerSession(profile?.ai_coach_exercises_per_session)} exercises`}
+                </Text>
+              </View>
+              <Switch
+                value={!!profile?.ai_coach_enabled}
+                onValueChange={handleCoachToggle}
+                thumbColor={profile?.ai_coach_enabled ? colors.primary : colors.borderLight}
+                trackColor={{ true: colors.primaryDark, false: colors.border }}
+              />
+            </View>
+            </TourTarget>
+
+            {profile?.ai_coach_enabled ? (
+              <>
+              <Button
+                label="Talk to your coach"
+                variant="secondary"
+                onPress={() => {
+                  openSheet('talkToCoach', {
+                    initialNotes: profile.ai_coach_notes ?? '',
+                    onSave: (notes: string | null) => {
+                      void handleSaveCoachNotes(notes);
+                    },
+                  });
+                }}
+                disabled={isCoachPlanning || isSaving}
+                fullWidth
+                style={styles.regenerateWeekButton}
+              >
+                <View style={styles.addButtonContent}>
+                  <MessageSquare size={18} color={colors.primary} />
+                  <Text style={styles.addButtonText}>Talk to your coach</Text>
+                </View>
+              </Button>
+              <Button
+                label="Regenerate week"
+                variant="secondary"
+                onPress={() => {
+                  requestGenerateWeek(() => {
+                    void startCoachWeek('regenerate');
+                  });
+                }}
+                disabled={isCoachPlanning || isSaving}
+                fullWidth
+                style={styles.regenerateWeekButton}
+              >
+                <View style={styles.addButtonContent}>
+                  <RefreshCw size={18} color={colors.primary} />
+                  <Text style={styles.addButtonText}>Regenerate week</Text>
+                </View>
+              </Button>
+              </>
+            ) : null}
+
             {/* Generate with AI button */}
             <TourTarget id="tour.plan.generateAi" testID="tour-plan-generate-ai">
               <Button
@@ -2626,7 +3048,14 @@ export default function PlannerTab() {
       <ConfirmDialog
         visible={sessionIdToDelete != null}
         title="Remove this workout?"
-        message="This deletes today's session. Your weekly routine stays, but this day will not be rebuilt automatically."
+        message={
+          sessionIdToDelete != null &&
+          shouldClearWeeklyPlanOnWorkoutDelete(
+            sessionsTodayWithExercises.filter(({ session }) => session.id !== sessionIdToDelete).length,
+          )
+            ? 'This removes the workout and clears this day from your weekly plan. Next week this day will stay empty until you add exercises again.'
+            : 'This removes this workout. Other workouts on this day are kept.'
+        }
         confirmLabel="Remove"
         cancelLabel="Cancel"
         confirmDestructive
@@ -2710,6 +3139,29 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   },
   loadPresetButton: {
     marginTop: spacing.sm,
+  },
+  coachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  coachCopy: {
+    flex: 1,
+  },
+  coachTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.semibold,
+  },
+  coachSub: {
+    color: colors.textMuted,
+    fontSize: typography.sizes.sm,
+    marginTop: spacing.xs,
+  },
+  regenerateWeekButton: {
+    marginBottom: spacing.sm,
   },
   generateButtonContent: {
     flexDirection: 'row',

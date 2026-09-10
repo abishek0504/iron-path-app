@@ -14,6 +14,7 @@ import { WorkoutPicker } from './WorkoutPicker';
 import { WorkoutHeatmap } from '../workout/WorkoutHeatmap';
 import { SessionDetailSheet } from '../progress/SessionDetailSheet';
 import { GenerateDayForm } from '../ai/GenerateDayForm';
+import { TalkToCoachSheet } from '../ai/TalkToCoachSheet';
 import { DatePicker } from './DatePicker';
 import { GenderPickerSheet } from './GenderPickerSheet';
 import { WeightEntrySheet } from './WeightEntrySheet';
@@ -137,6 +138,16 @@ export const ModalManager: React.FC = () => {
           onCancel={closeBottomSheet}
           onClosed={onBottomSheetClosed}
           onGenerate={bottomSheetProps.onGenerate}
+        />
+      )}
+
+      {activeBottomSheet === 'talkToCoach' && (
+        <TalkToCoachSheet
+          visible={isVisible('talkToCoach')}
+          initialNotes={bottomSheetProps.initialNotes}
+          onCancel={closeBottomSheet}
+          onClosed={onBottomSheetClosed}
+          onSave={bottomSheetProps.onSave}
         />
       )}
 

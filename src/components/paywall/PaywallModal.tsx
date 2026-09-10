@@ -24,6 +24,7 @@ import { LegalLinks } from '../ui/LegalLinks';
 import { SOFT_DISMISS_DELAY_MS } from '../../lib/subscriptions/constants';
 import type { PaywallTrigger } from '../../lib/subscriptions/paywallTriggers';
 import { headlineForTrigger } from '../../lib/subscriptions/paywallTriggers';
+import { PRO_FEATURE_BULLETS } from '../../lib/subscriptions/proCopy';
 import { hapticSelection } from '../../lib/utils/haptics';
 import { borderRadius, spacing, typography, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
@@ -31,11 +32,7 @@ import { IronPathLogo } from '../ui/IronPathLogo';
 import { LogoEdgeLoader } from '../ui/LogoEdgeLoader';
 import { Button } from '../ui/Button';
 
-const BULLETS = [
-  'AI plans your week',
-  'Split-aware exercise picks',
-  'Saves planning time',
-] as const;
+const BULLETS = PRO_FEATURE_BULLETS;
 
 type PlanId = 'annual' | 'monthly';
 
@@ -44,6 +41,7 @@ interface PaywallModalProps {
   trigger: PaywallTrigger;
   monthlyPackage: PurchasesPackage | null;
   annualPackage: PurchasesPackage | null;
+  isLoading: boolean;
   isPurchasing: boolean;
   onDismiss: () => void;
   onPurchase: (pkg: PurchasesPackage) => void;
@@ -103,6 +101,7 @@ export function PaywallModal({
   trigger,
   monthlyPackage,
   annualPackage,
+  isLoading,
   isPurchasing,
   onDismiss,
   onPurchase,
@@ -198,6 +197,11 @@ export function PaywallModal({
           <Text style={styles.subhead}>Cancel anytime</Text>
 
           <View style={styles.plans}>
+            {isLoading && !annualPackage && !monthlyPackage ? (
+              <View style={styles.plansLoading}>
+                <LogoEdgeLoader size="small" />
+              </View>
+            ) : null}
             {annualPackage ? (
               <PlanRow
                 styles={styles}
@@ -221,7 +225,7 @@ export function PaywallModal({
                 onPress={() => setSelectedPlan('monthly')}
               />
             ) : null}
-            {!annualPackage && !monthlyPackage ? (
+            {!isLoading && !annualPackage && !monthlyPackage ? (
               <Text style={styles.plansUnavailable}>
                 Subscription options are unavailable right now. Restore purchases or try again later.
               </Text>
@@ -367,6 +371,10 @@ function createStyles(colors: ThemeColors) {
   },
   plans: {
     gap: spacing.sm,
+  },
+  plansLoading: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
   },
   plansUnavailable: {
     color: colors.textSecondary,

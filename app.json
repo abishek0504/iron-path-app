@@ -195,7 +195,8 @@
       "./plugins/withXcodeShellScriptPhases.js",
       "./plugins/withAutomaticCodeSigning.js",
       "./plugins/withLocalNotificationsOnly.js",
-      "./plugins/withSentryLocalBuildSkip.js"
+      "./plugins/withSentryLocalBuildSkip.js",
+      "./plugins/withStoreKitConfig.js"
     ],
     "scheme": "ironpath",
     "extra": {

@@ -435,6 +435,12 @@ export type Database = {
       }
       v2_profiles: {
         Row: {
+          ai_coach_day_focus: Record<string, string>
+          ai_coach_enabled: boolean
+          ai_coach_exercises_per_session: number
+          ai_coach_notes: string | null
+          ai_coach_planned_week_start: string | null
+          ai_coach_session_minutes: number
           app_tour_completed_at: string | null
           avatar_url: string | null
           created_at: string | null
@@ -461,6 +467,12 @@ export type Database = {
           workout_days: string[] | null
         }
         Insert: {
+          ai_coach_day_focus?: Record<string, string>
+          ai_coach_enabled?: boolean
+          ai_coach_exercises_per_session?: number
+          ai_coach_notes?: string | null
+          ai_coach_planned_week_start?: string | null
+          ai_coach_session_minutes?: number
           app_tour_completed_at?: string | null
           avatar_url?: string | null
           created_at?: string | null
@@ -487,6 +499,12 @@ export type Database = {
           workout_days?: string[] | null
         }
         Update: {
+          ai_coach_day_focus?: Record<string, string>
+          ai_coach_enabled?: boolean
+          ai_coach_exercises_per_session?: number
+          ai_coach_notes?: string | null
+          ai_coach_planned_week_start?: string | null
+          ai_coach_session_minutes?: number
           app_tour_completed_at?: string | null
           avatar_url?: string | null
           created_at?: string | null

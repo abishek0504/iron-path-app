@@ -14,7 +14,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw, Timer, Download, Compass, Camera } from 'lucide-react-native';
+import { User, Bell, HelpCircle, LogOut, Mail, Shield, Trash2, Heart, Sparkles, RefreshCw, Timer, Download, Compass, Camera, CalendarX } from 'lucide-react-native';
 import { spacing, borderRadius, typography, THEME_OPTIONS, getThemeLabel, type ThemeColors } from '../../lib/utils/theme';
 import { useTheme, useThemeMode } from '../../lib/utils/ThemeContext';
 import { useRouter } from 'expo-router';
@@ -26,9 +26,14 @@ import { requestAccountDeletion, updateUserProfile } from '../../lib/supabase/qu
 import { invalidateProfileCache } from '../../lib/cache/dashboardStatsCache';
 import { presentCustomerCenter } from '../../lib/subscriptions/revenueCat';
 import { usePaywall } from '../paywall/PaywallProvider';
+import {
+  PRO_SETTINGS_SUBLABEL_ACTIVE,
+  PRO_SETTINGS_SUBLABEL_FREE,
+} from '../../lib/subscriptions/proCopy';
 import { useTourStore } from '../../stores/tourStore';
 import { setPendingAppTour } from '../../lib/onboarding/tourBridge';
 import { signOutAndClearLocalState } from '../../lib/auth/signOutAndClear';
+import { clearUserWeeklyPlan } from '../../lib/planner/clearWeeklyPlan';
 
 interface SettingsMenuProps {
   onClose?: () => void;
@@ -47,6 +52,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showClearPlanConfirm, setShowClearPlanConfirm] = useState(false);
+  const [isClearingPlan, setIsClearingPlan] = useState(false);
 
   const handleNavigate = (path: string) => {
     if (onClose) {
@@ -96,6 +103,30 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     }
     showToast('Logged out', 'success');
     router.replace('/login');
+  };
+
+  const handleClearPlan = async () => {
+    if (isClearingPlan) return;
+    const userId = profile?.id;
+    if (!userId) {
+      showToast('Please log in', 'error');
+      return;
+    }
+
+    setIsClearingPlan(true);
+    try {
+      const result = await clearUserWeeklyPlan(userId);
+      if (!result.ok) {
+        showToast(result.message, 'error');
+        return;
+      }
+      setShowClearPlanConfirm(false);
+      showToast('Weekly plan cleared', 'success');
+    } catch {
+      showToast('Unable to clear plan', 'error');
+    } finally {
+      setIsClearingPlan(false);
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -185,7 +216,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     {
       id: 'ironpath-pro',
       label: isPro ? 'IronPath Pro' : 'Upgrade to Pro',
-      sublabel: isPro ? 'Active' : undefined,
+      sublabel: isPro ? PRO_SETTINGS_SUBLABEL_ACTIVE : PRO_SETTINGS_SUBLABEL_FREE,
       icon: Sparkles,
       onPress: handleUpgradeOrManage,
     },
@@ -265,6 +296,21 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
           <Text style={styles.dangerHeading}>Danger zone</Text>
           <TouchableOpacity
             style={[styles.menuItem, styles.menuItemDanger]}
+            onPress={() => setShowClearPlanConfirm(true)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Clear weekly plan"
+          >
+            <View style={[styles.iconContainer, styles.iconContainerDanger]}>
+              <CalendarX size={24} color={colors.error} />
+            </View>
+            <Text style={[styles.menuLabel, styles.menuLabelDanger]}>Clear weekly plan</Text>
+          </TouchableOpacity>
+          <Text style={styles.dangerHelp}>
+            Removes planned workouts from your week. Completed sessions stay.
+          </Text>
+          <TouchableOpacity
+            style={[styles.menuItem, styles.menuItemDanger]}
             onPress={() => setShowDeleteConfirm(true)}
             activeOpacity={0.7}
           >
@@ -283,6 +329,18 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
           <LegalLinks compact />
         </View>
       </ScrollView>
+
+      <ConfirmDialog
+        visible={showClearPlanConfirm}
+        title="Clear weekly plan?"
+        message="This removes planned exercises and unfinished workouts. Completed sessions stay. You can generate a new week after this."
+        confirmLabel={isClearingPlan ? 'Clearing…' : 'Clear plan'}
+        cancelLabel="Cancel"
+        confirmDestructive
+        confirmDisabled={isClearingPlan}
+        onConfirm={() => void handleClearPlan()}
+        onCancel={() => setShowClearPlanConfirm(false)}
+      />
 
       <ConfirmDialog
         visible={showDeleteConfirm}

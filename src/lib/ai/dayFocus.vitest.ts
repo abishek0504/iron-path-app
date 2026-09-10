@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TRAINING_SPLITS } from '../constants/trainingSplits';
 import {
   exerciseHitsAvoidedMuscles,
   exerciseMatchesDayFocus,
@@ -49,6 +50,58 @@ describe('filterExercisesByDayFocus', () => {
   it('drops off-focus lifts from the catalog', () => {
     const filtered = filterExercisesByDayFocus([hipThrust, bench, row], 'Push');
     expect(filtered.map((e) => e.name)).toEqual(['Bench Press (Barbell)']);
+  });
+});
+
+describe('split focus catalogs', () => {
+  const catalog = [
+    hipThrust,
+    bench,
+    row,
+    {
+      name: 'Snatch',
+      movement_pattern: null,
+      primary_muscles: ['quads', 'glutes', 'upper back'],
+    },
+    {
+      name: 'Clean & Jerk',
+      movement_pattern: null,
+      primary_muscles: ['quads', 'glutes', 'upper back'],
+    },
+    {
+      name: 'Back Squat',
+      movement_pattern: 'squat',
+      primary_muscles: ['quads'],
+    },
+    {
+      name: 'Barbell Curl',
+      movement_pattern: 'pull',
+      primary_muscles: ['biceps'],
+    },
+    {
+      name: 'Overhead Press (Barbell)',
+      movement_pattern: 'push',
+      primary_muscles: ['anterior deltoids', 'lateral deltoids'],
+    },
+  ];
+
+  it('keeps a non-empty catalog for every split focus label', () => {
+    for (const split of Object.values(TRAINING_SPLITS)) {
+      for (const focus of split.dayFocusOptions) {
+        const filtered = filterExercisesByDayFocus(catalog, focus);
+        expect(filtered.length, `${split.id} / ${focus}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('treats PHAT chest/arms and accessories as usable focuses', () => {
+    expect(exerciseMatchesDayFocus(bench, 'Chest/Arms Hypertrophy')).toBe(true);
+    expect(exerciseMatchesDayFocus(hipThrust, 'Accessories')).toBe(true);
+    expect(exerciseMatchesDayFocus({ name: 'Snatch', movement_pattern: null, primary_muscles: [] }, 'Snatch Focus')).toBe(true);
+    expect(exerciseMatchesDayFocus({ name: 'Clean & Jerk', movement_pattern: null, primary_muscles: [] }, 'Clean & Jerk Focus')).toBe(true);
+    expect(exerciseMatchesDayFocus({ name: 'Back Squat', movement_pattern: 'squat', primary_muscles: ['quads'] }, 'Strength')).toBe(true);
+    expect(exerciseMatchesDayFocus(hipThrust, 'Push + Legs')).toBe(true);
+    expect(exerciseMatchesDayFocus(bench, 'Push + Legs')).toBe(true);
   });
 });
 

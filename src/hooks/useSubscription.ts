@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { InteractionManager } from 'react-native';
 import type { PurchasesPackage } from 'react-native-purchases';
 import { ENTITLEMENT_ID } from '../lib/subscriptions/constants';
+import { resolveOfferingPackages } from '../lib/subscriptions/offeringPackages';
 import {
   checkProEntitlement,
   configureRevenueCat,
@@ -9,6 +10,8 @@ import {
   logOutRevenueCat,
 } from '../lib/subscriptions/revenueCat';
 import { devLog } from '../lib/utils/logger';
+
+const SUBSCRIPTION_REFRESH_FALLBACK_MS = 400;
 
 export function useSubscription(userId: string | null) {
   const [isPro, setIsPro] = useState(false);
@@ -30,35 +33,30 @@ export function useSubscription(userId: string | null) {
       const ready = await configureRevenueCat(userId);
       if (!ready) {
         setIsPro(false);
+        setMonthlyPackage(null);
+        setAnnualPackage(null);
         return;
       }
 
       const Purchases = getPurchases();
+      let hasMonthly = false;
+      let hasAnnual = false;
       if (Purchases) {
         const offerings = await Purchases.default.getOfferings();
-        const current = offerings.current;
-        if (current) {
-          setMonthlyPackage(
-            current.monthly ??
-              current.availablePackages.find(
-                (p) => p.packageType === Purchases.PACKAGE_TYPE.MONTHLY,
-              ) ??
-              null,
-          );
-          setAnnualPackage(
-            current.annual ??
-              current.availablePackages.find(
-                (p) => p.packageType === Purchases.PACKAGE_TYPE.ANNUAL,
-              ) ??
-              null,
-          );
-        }
+        const resolved = resolveOfferingPackages(offerings.current);
+        hasMonthly = resolved.monthly != null;
+        hasAnnual = resolved.annual != null;
+        setMonthlyPackage(resolved.monthly);
+        setAnnualPackage(resolved.annual);
+      } else {
+        setMonthlyPackage(null);
+        setAnnualPackage(null);
       }
 
       const pro = await checkProEntitlement();
       setIsPro(pro);
       if (__DEV__) {
-        devLog('subscription', { action: 'refresh', isPro: pro, userId });
+        devLog('subscription', { action: 'refresh', isPro: pro, userId, hasMonthly, hasAnnual });
       }
     } catch (e) {
       if (__DEV__) {
@@ -69,16 +67,27 @@ export function useSubscription(userId: string | null) {
     }
   }, [userId]);
 
-  // Defer RC configure/offerings until after first interactions so cold start paints sooner.
   useEffect(() => {
     if (!userId) {
       void refresh();
       return;
     }
-    const task = InteractionManager.runAfterInteractions(() => {
+
+    let cancelled = false;
+    let started = false;
+    const start = () => {
+      if (cancelled || started) return;
+      started = true;
       void refresh();
-    });
-    return () => task.cancel();
+    };
+
+    const task = InteractionManager.runAfterInteractions(start);
+    const fallback = setTimeout(start, SUBSCRIPTION_REFRESH_FALLBACK_MS);
+    return () => {
+      cancelled = true;
+      task.cancel();
+      clearTimeout(fallback);
+    };
   }, [refresh, userId]);
 
   const purchasePackage = useCallback(async (pkg: PurchasesPackage): Promise<boolean> => {

@@ -50,8 +50,10 @@ export function getLocalDayBoundsIso(date: Date = new Date()): { startIso: strin
  * computed from LOCAL midnight of the target day.
  * Used to fetch sessions for a selected plan day.
  */
-export function getDateBoundsForDayName(dayName: string): { startIso: string; endIsoExclusive: string } {
-  const now = new Date();
+export function getDateBoundsForDayName(
+  dayName: string,
+  now: Date = new Date(),
+): { startIso: string; endIsoExclusive: string } {
   const todayIndex = now.getDay();
   const targetIndex = WEEK_DAYS.indexOf(dayName as (typeof WEEK_DAYS)[number]);
   if (targetIndex < 0) {
@@ -60,6 +62,27 @@ export function getDateBoundsForDayName(dayName: string): { startIso: string; en
   const targetDate = new Date(now);
   targetDate.setDate(now.getDate() + (targetIndex - todayIndex));
   return getLocalDayBoundsIso(targetDate);
+}
+
+/** Local `YYYY-MM-DD` for Sunday of the Sun–Sat week containing `now`. */
+export function getLocalWeekSundayKey(now: Date = new Date()): string {
+  const sunday = new Date(now);
+  sunday.setHours(0, 0, 0, 0);
+  sunday.setDate(sunday.getDate() - sunday.getDay());
+  return getLocalDayKey(sunday);
+}
+
+/** Inclusive local Sunday start, exclusive next Sunday, for the week containing `now`. */
+export function getLocalWeekBoundsIso(now: Date = new Date()): {
+  startIso: string;
+  endIsoExclusive: string;
+} {
+  const sunday = new Date(now);
+  sunday.setHours(0, 0, 0, 0);
+  sunday.setDate(sunday.getDate() - sunday.getDay());
+  const nextSunday = new Date(sunday);
+  nextSunday.setDate(nextSunday.getDate() + 7);
+  return { startIso: sunday.toISOString(), endIsoExclusive: nextSunday.toISOString() };
 }
 
 /**

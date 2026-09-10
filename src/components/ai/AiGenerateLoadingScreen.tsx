@@ -13,9 +13,15 @@ import { useTheme } from '../../lib/utils/ThemeContext';
 
 export interface AiGenerateLoadingScreenProps {
   dayName: string;
+  subtitle?: string;
+  steps?: readonly string[];
 }
 
-export function AiGenerateLoadingScreen({ dayName }: AiGenerateLoadingScreenProps) {
+export function AiGenerateLoadingScreen({
+  dayName,
+  subtitle,
+  steps,
+}: AiGenerateLoadingScreenProps) {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const messages = useMemo(() => getShuffledAiLoadingMessages(), []);
@@ -28,10 +34,10 @@ export function AiGenerateLoadingScreen({ dayName }: AiGenerateLoadingScreenProp
         </View>
 
         <View style={styles.stepsRegion}>
-          <AiGenerateSteps />
+          <AiGenerateSteps steps={steps} />
         </View>
 
-        <Text style={styles.subtitle}>Building {dayName} with AI</Text>
+        <Text style={styles.subtitle}>{subtitle ?? `Building ${dayName} with AI`}</Text>
       </View>
     </SafeAreaView>
   );

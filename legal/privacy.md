@@ -31,9 +31,9 @@ If you use the IronPath Apple Watch companion, workout state (such as the active
 ### Diagnostics
 - Crash reports and performance diagnostics are collected via Sentry to keep the App stable. These may include device model, OS version, and app state at the time of a crash. They are not used to track you across other apps.
 
-## AI workout generation
+## AI Coach and workout generation
 
-When you use "Generate with AI", a summary of your training context (experience level, preferred training split, available days, recent workout performance such as sets, reps, weight and effort ratings, and muscle-group coverage) is sent to OpenAI's API to generate a workout plan. Your email, name, and Apple Health data are **not** sent. AI generation requires an IronPath Pro subscription and is rate-limited to 40 workout days per rolling 7-day period. Generations are logged in your account so you can review what was created.
+When you use AI Coach or "Generate with AI", a summary of your training context (experience level, preferred training split, available days, recent workout performance such as sets, reps, weight and effort ratings, and muscle-group coverage) is sent to OpenAI's API to generate a workout plan. Your email, name, and Apple Health data are **not** sent. AI generation requires an IronPath Pro subscription and is rate-limited to 40 workout days per rolling 7-day period. Generations are logged in your account so you can review what was created.
 
 ## How we store data
 
@@ -55,7 +55,7 @@ You can delete your account in the App (Settings → Danger zone → Delete acco
 | --- | --- | --- |
 | Supabase | Database, authentication, backend functions | Account, profile, workout data |
 | RevenueCat | In-app subscription management (iOS) | Anonymous app user ID linked to your account; purchase and entitlement status |
-| OpenAI API | AI workout generation (on request) | Training context summary only |
+| OpenAI API | AI Coach and day generation (on request) | Training context summary only |
 | Sentry | Crash and performance diagnostics | Device/app diagnostics |
 | Apple HealthKit | Optional health sync | Body weight, heart rate, active energy (read); workouts, body weight, heart rate, active energy (write) |
 

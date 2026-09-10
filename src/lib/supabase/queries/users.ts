@@ -23,6 +23,12 @@ const PROFILE_UPDATE_FIELDS = [
   'use_imperial',
   'avatar_url',
   'app_tour_completed_at',
+  'ai_coach_enabled',
+  'ai_coach_planned_week_start',
+  'ai_coach_session_minutes',
+  'ai_coach_exercises_per_session',
+  'ai_coach_day_focus',
+  'ai_coach_notes',
 ] as const satisfies readonly (keyof UserProfile)[];
 
 const PROFILE_CREATE_FIELDS = [...PROFILE_UPDATE_FIELDS] as const;

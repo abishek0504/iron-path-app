@@ -29,6 +29,12 @@ export interface UserProfile {
   subscription_expires_at?: string | null;
   revenuecat_app_user_id?: string | null;
   app_tour_completed_at?: string | null;
+  ai_coach_enabled?: boolean;
+  ai_coach_planned_week_start?: string | null;
+  ai_coach_session_minutes?: number;
+  ai_coach_exercises_per_session?: number;
+  ai_coach_day_focus?: Record<string, string>;
+  ai_coach_notes?: string | null;
 }
 
 interface UserState {
