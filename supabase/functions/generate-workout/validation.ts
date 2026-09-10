@@ -54,7 +54,7 @@ export function sanitizeTargets(plan: AiExercisePlan, exercise: AllowListedExerc
   } else {
     if (
       plan.reps === null || !Number.isInteger(plan.reps) ||
-      !inRange(plan.reps, TARGET_BOUNDS.reps.min, TARGET_BOUNDS.reps.max)
+      plan.reps < TARGET_BOUNDS.reps.min
     ) {
       return nulled;
     }

@@ -61,10 +61,10 @@ export const DEFAULT_MODEL = 'gpt-5.6-luna';
 /** Hard timeout for the OpenAI call so a slow upstream can't hold the function open. */
 export const OPENAI_TIMEOUT_MS = 30_000;
 
-/** Bounds for AI-prescribed targets. Mirror v2_session_sets CHECK constraints. */
+/** Bounds for AI-prescribed targets. Reps have a floor only — logged sets are uncapped. */
 export const TARGET_BOUNDS = {
   sets: { min: 1, max: 10 },
-  reps: { min: 1, max: 50 },
+  reps: { min: 1 },
   weight: { min: 0, max: 2000 },
   durationSec: { min: 5, max: 3600 },
   rpe: { min: 5, max: 10 },

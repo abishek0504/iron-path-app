@@ -45,7 +45,6 @@ export type ImportCsvResult = {
 
 const MAX_IMPORT_ROWS = 10000;
 const MAX_IMPORT_SESSIONS = 500;
-const MAX_REPS = 50;
 const MIN_DURATION_SEC = 5;
 const MAX_DURATION_SEC = 3600;
 
@@ -206,7 +205,7 @@ export function parseStrongHevyCsv(text: string): {
     const repsRaw = parseNumber(cell(row, repsIdx));
     const durationRaw = parseNumber(cell(row, durationIdx));
     const reps =
-      repsRaw != null && repsRaw >= 1 ? Math.min(MAX_REPS, Math.round(repsRaw)) : null;
+      repsRaw != null && repsRaw >= 1 ? Math.round(repsRaw) : null;
     const durationSec =
       durationRaw != null && durationRaw >= MIN_DURATION_SEC
         ? Math.min(MAX_DURATION_SEC, Math.round(durationRaw))

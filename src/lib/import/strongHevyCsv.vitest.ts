@@ -51,6 +51,13 @@ describe('parseStrongHevyCsv', () => {
     expect(parsed.workouts[0].exercises[0].sets[1].reps).toBe(8);
   });
 
+  it('keeps high-rep sets instead of clamping them', () => {
+    const parsed = parseStrongHevyCsv(`Date,Workout Name,Exercise Name,Set Order,Weight,Weight Unit,Reps
+2026-08-01 18:00:00,Push,Push-Up,1,0,lbs,100
+`);
+    expect(parsed.workouts[0].exercises[0].sets[0].reps).toBe(100);
+  });
+
   it('returns unknown for unrelated CSV', () => {
     const parsed = parseStrongHevyCsv('foo,bar\n1,2');
     expect(parsed.format).toBe('unknown');

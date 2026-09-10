@@ -36,7 +36,6 @@ import { invalidateWorkoutStatsCache } from '../src/lib/cache/dashboardStatsCach
 import type { Exercise } from '../src/types/exercisePicker';
 
 const REPS_MIN = 1;
-const REPS_MAX = 50;
 const DURATION_MIN = 5;
 const DURATION_MAX = 3600;
 const RPE_MIN = 1;
@@ -97,11 +96,11 @@ function validateSet(set: FormSet, isTimed: boolean): {
     }
     const r = set.reps.trim();
     if (!r) {
-      err.reps = `Required (${REPS_MIN}–${REPS_MAX})`;
+      err.reps = `Required (${REPS_MIN}+)`;
     } else {
       const n = parseInt(r, 10);
-      if (Number.isNaN(n) || n < REPS_MIN || n > REPS_MAX) {
-        err.reps = `Enter ${REPS_MIN}–${REPS_MAX}`;
+      if (Number.isNaN(n) || n < REPS_MIN) {
+        err.reps = `Enter ${REPS_MIN} or more`;
       }
     }
   }
@@ -478,7 +477,7 @@ export default function LogPastWorkoutScreen() {
                               style={[styles.input, err.reps && styles.inputError]}
                               value={set.reps}
                               onChangeText={(v) => updateSet(ex.key, set.id, 'reps', v)}
-                              placeholder={`${REPS_MIN}–${REPS_MAX}`}
+                              placeholder={`${REPS_MIN}+`}
                               placeholderTextColor={colors.textMuted}
                               keyboardType="numeric"
                             />

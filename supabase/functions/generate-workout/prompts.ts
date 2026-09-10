@@ -36,7 +36,7 @@ export function buildResponseSchema(): Record<string, unknown> {
               sets: { type: 'integer', description: 'Number of working sets (1-10).' },
               reps: {
                 type: ['integer', 'null'],
-                description: 'Target reps per set (1-50). Null for timed exercises.',
+                description: 'Target reps per set (1 or more). Null for timed exercises.',
               },
               duration_sec: {
                 type: ['integer', 'null'],
@@ -134,7 +134,7 @@ export function buildSystemPrompt(
     '- Timed exercises (is_timed=true) get duration_sec and null reps; rep exercises get reps and null duration_sec.',
     '- Bodyweight exercises get null weight.',
     '- STRETCHES (from STRETCH CATALOG): prescribe exactly 2 working sets, duration_sec 40–60 s per hold (beginner ~40, intermediate ~50, advanced ~60), null weight, null target_rpe. Stretches are not scored with RPE and do not use progressive overload.',
-    `- sets must be ${TARGET_BOUNDS.sets.min}-${TARGET_BOUNDS.sets.max}, reps ${TARGET_BOUNDS.reps.min}-${TARGET_BOUNDS.reps.max}, duration_sec ${TARGET_BOUNDS.durationSec.min}-${TARGET_BOUNDS.durationSec.max}, target_rpe ${TARGET_BOUNDS.rpe.min}-${TARGET_BOUNDS.rpe.max}.`,
+    `- sets must be ${TARGET_BOUNDS.sets.min}-${TARGET_BOUNDS.sets.max}, reps ${TARGET_BOUNDS.reps.min}+, duration_sec ${TARGET_BOUNDS.durationSec.min}-${TARGET_BOUNDS.durationSec.max}, target_rpe ${TARGET_BOUNDS.rpe.min}-${TARGET_BOUNDS.rpe.max}.`,
   ].join('\n');
 }
 

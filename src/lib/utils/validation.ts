@@ -153,8 +153,8 @@ export function validateCustomExerciseTargets(
 
     if (exercise.reps_max === undefined || exercise.reps_max === null) {
       errors.push('reps_max is required for reps mode');
-    } else if (exercise.reps_max < 1 || exercise.reps_max > 50) {
-      errors.push('reps_max must be between 1 and 50');
+    } else if (exercise.reps_max < 1) {
+      errors.push('reps_max must be >= 1');
     }
 
     if (

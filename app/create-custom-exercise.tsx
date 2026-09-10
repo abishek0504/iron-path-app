@@ -45,7 +45,6 @@ const NAME_MAX_LENGTH = 60;
 const SETS_MIN_ALLOWED = 1;
 const SETS_MAX_ALLOWED = 10;
 const REPS_MIN_ALLOWED = 1;
-const REPS_MAX_ALLOWED = 50;
 const DURATION_MIN_ALLOWED = 5;
 const DURATION_MAX_ALLOWED = 3600;
 
@@ -120,8 +119,8 @@ function validate(form: FormState): string | null {
     const repsMin = parseIntOrNull(form.repsMin);
     const repsMax = parseIntOrNull(form.repsMax);
     if (repsMin === null || repsMax === null) return 'Enter valid rep numbers';
-    if (repsMin < REPS_MIN_ALLOWED || repsMax > REPS_MAX_ALLOWED) {
-      return `Reps must be between ${REPS_MIN_ALLOWED} and ${REPS_MAX_ALLOWED}`;
+    if (repsMin < REPS_MIN_ALLOWED || repsMax < REPS_MIN_ALLOWED) {
+      return `Reps must be at least ${REPS_MIN_ALLOWED}`;
     }
     if (repsMin > repsMax) return 'Min reps cannot exceed max reps';
   } else {

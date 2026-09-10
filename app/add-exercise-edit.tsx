@@ -3,7 +3,7 @@
  * per-set editor (weight/reps/duration/rest + set-type cycle), optional
  * "superset with previous", and explicit scope actions: "Add to routine"
  * (template slot + session sync) vs "Add to this day only".
- * Validation: weight >= 0, reps 1–50, duration 5–3600, rest 0–3600.
+ * Validation: weight >= 0, reps >= 1, duration 5–3600, rest 0–3600.
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -85,7 +85,6 @@ function normalizeDayName(value: string | string[] | undefined): string | undefi
   return day;
 }
 const REPS_MIN = 1;
-const REPS_MAX = 50;
 const DURATION_MIN = 5;
 const DURATION_MAX = 3600;
 const REST_MIN = 0;
@@ -124,11 +123,11 @@ function validateSet(set: EditSet, isTimedMode: boolean): { weight?: string; rep
     }
     const r = set.reps.trim();
     if (!r) {
-      err.reps = 'Required (1–50)';
+      err.reps = `Required (${REPS_MIN}+)`;
     } else {
       const n = parseInt(r, 10);
-      if (Number.isNaN(n) || n < REPS_MIN || n > REPS_MAX) {
-        err.reps = `Enter ${REPS_MIN}–${REPS_MAX}`;
+      if (Number.isNaN(n) || n < REPS_MIN) {
+        err.reps = `Enter ${REPS_MIN} or more`;
       }
     }
   }
@@ -1114,7 +1113,7 @@ export default function AddExerciseEditScreen() {
                             style={[styles.input, err.reps && styles.inputError]}
                             value={set.reps}
                             onChangeText={(v) => updateSet(set.id, 'reps', v)}
-                            placeholder={`${REPS_MIN}–${REPS_MAX}`}
+                            placeholder={`${REPS_MIN}+`}
                             placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                           />
