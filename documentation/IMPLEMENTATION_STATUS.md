@@ -110,7 +110,7 @@
 | Exercise prefill | ✅ Complete | Copies from template slots |
 | Target calculation | ✅ Complete | Progressive overload with suggested weights |
 | Set prefill | ✅ Complete | Prefills with targets, performed_at=NULL |
-| Active workout UI | ✅ Complete | Exercise-by-exercise flow with phases |
+| Active workout UI | ✅ Complete | Exercise-by-exercise flow with phases; Complete Set / timed Continue pinned as a footer outside the ScrollView |
 | Set completion tracking | ✅ Complete | performed_at timestamp marks completion |
 | Batch logging screen | ✅ Complete | Log all sets after exercise complete |
 | Edit weight/reps/duration | ✅ Complete | In batch logging screen |
@@ -283,6 +283,10 @@
 1. **Sandbox purchase verify** — ensure App Store Connect Paid Apps agreement is **Active** (tax + banking, including Canada GST/HST Form 506 when required); confirm TestFlight paywall loads store packages (trial CTA enabled); complete sandbox purchase/restore. See `SUBSCRIPTION_SETUP.md`.
 2. **Final TestFlight pass** — run core flows on a physical device (workout, watch mirror, HealthKit, paywall).
 
+### Resolved (2026-09-11)
+
+- ✅ **Active workout Complete Set below the fold** — execution Complete Set and timed-set Continue are pinned below the ScrollView; exercise title uses `xl` + 1-line ellipsis so the CTA stays on-screen.
+
 ### Non-blocking
 
 3. **Partial Derived Cache Implementation**
@@ -290,6 +294,9 @@
    - **Future**: Add daily stress cache rebuild job if needed
 
 ## Completed Features (Recent)
+
+### Active workout Complete Set visibility (2026-09-11)
+- ✅ Execution Complete Set / timed Continue is pinned below the ScrollView as a footer; exercise title uses `xl` + 1-line ellipsis. Logging Save & Continue and Finish Workout stay in-scroll.
 
 ### Paywall layout (2026-09-11)
 - ✅ Paywall last-bullet overlap: scrolling body + pinned footer in `PaywallModal` (no copy or purchase-logic change)

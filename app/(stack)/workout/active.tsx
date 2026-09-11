@@ -2052,7 +2052,7 @@ export default function ActiveWorkoutScreen() {
       >
         {workoutPhase.type === 'rest' && restEndsAtEpoch != null ? (
           <View style={styles.restContainer}>
-            <Text style={[styles.exerciseName, styles.restExerciseName]} numberOfLines={2} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
+            <Text style={[styles.exerciseName, styles.restExerciseName]} numberOfLines={1} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
             <RestTimer
               endsAtEpoch={restEndsAtEpoch}
               startedAtEpoch={restStartedAtEpoch ?? undefined}
@@ -2088,7 +2088,7 @@ export default function ActiveWorkoutScreen() {
         </View>
 
         {/* Exercise Name */}
-        <Text style={styles.exerciseName} numberOfLines={2} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
+        <Text style={styles.exerciseName} numberOfLines={1} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
 
         {/* Superset badge */}
         {currentExercise.superset_group != null && (() => {
@@ -2299,12 +2299,7 @@ export default function ActiveWorkoutScreen() {
                   }
                 }}
               />
-            ) : (
-              <TouchableOpacity style={styles.completeSetButton} onPress={() => void handleCompleteSet()}>
-                <CheckCircle size={20} color={colors.onPrimaryContrast} />
-                <Text style={styles.completeSetText}>Complete Set</Text>
-              </TouchableOpacity>
-            )}
+            ) : null}
           </View>
         )}
 
@@ -2349,13 +2344,6 @@ export default function ActiveWorkoutScreen() {
                 />
               )}
             </View>
-            <TouchableOpacity
-              style={styles.completeSetButton}
-              onPress={() => void handleCompleteSet()}
-            >
-              <CheckCircle size={20} color={colors.onPrimaryContrast} />
-              <Text style={styles.completeSetText}>Continue</Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -2615,6 +2603,21 @@ export default function ActiveWorkoutScreen() {
           </>
         )}
       </ScrollView>
+
+      {((workoutPhase.type === 'execution' && currentExercise.mode !== 'timed') ||
+        workoutPhase.type === 'timedSetRpe') && (
+        <View style={styles.completeSetFooter}>
+          <TouchableOpacity
+            style={styles.completeSetButton}
+            onPress={() => void handleCompleteSet()}
+          >
+            <CheckCircle size={20} color={colors.onPrimaryContrast} />
+            <Text style={styles.completeSetText}>
+              {workoutPhase.type === 'timedSetRpe' ? 'Continue' : 'Complete Set'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Workout overflow menu: anchored top-right via the overlay; tap outside to dismiss. */}
       <Modal
@@ -2949,7 +2952,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     backgroundColor: colors.primary,
   },
   exerciseName: {
-    fontSize: typography.sizes['3xl'],
+    fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
     color: colors.textPrimary,
     marginBottom: spacing.xs,
@@ -3072,6 +3075,13 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
+  completeSetFooter: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.cardBorder,
+    backgroundColor: colors.background,
+  },
   completeSetButton: {
     backgroundColor: colors.success,
     borderRadius: borderRadius.md,
@@ -3080,7 +3090,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginTop: spacing.md,
   },
   completeSetText: {
     fontSize: typography.sizes.lg,

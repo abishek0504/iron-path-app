@@ -5,6 +5,14 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - Active workout: Complete Set pinned as footer
+---------------------------------------------------------
+- Complete Set sat at the bottom of a ScrollView under a 42px (`3xl`) two-line title, target card, and RPE slider, so every set required a scroll on small phones.
+- Exercise name (execution + rest) now uses `typography.sizes.xl` with `numberOfLines={1}` (ellipsis). Complete Set and timed-set Continue (`completeSetButton`) are pinned below the ScrollView like Edit Profile / workout-settings sticky CTAs; SafeAreaView already pads the home indicator. Logging Save & Continue and Finish Workout stay in-scroll.
+- File: `app/(stack)/workout/active.tsx`.
+
+---
+
 2026-09-11 - Paywall last-bullet overlap
 ----------------------------------------
 - Paywall body (logo, headline, subhead, plans, `PRO_FEATURE_BULLETS`) now lives in a top-aligned ScrollView; CTA, disclosure, Restore, and LegalLinks stay pinned in a sibling footer.
