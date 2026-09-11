@@ -16,6 +16,7 @@ import {
   minWeightIncrement,
   roundLiftWeight,
 } from '../utils/units';
+import { canProgressAddedLoad } from '../workout/addedLoad';
 
 export interface ExerciseTarget {
   exercise_id: string;
@@ -225,8 +226,13 @@ export async function selectExerciseTargets(
         const lastWeight = history.lastWeight;
         const avgRPE = history.avgRPE;
 
-        // If hit top of rep band with acceptable effort (RPE <= 7), increase weight
-        if (lastReps >= prescription.reps_max * 0.9 && (!avgRPE || avgRPE <= 7)) {
+        // If hit top of rep band with acceptable effort (RPE <= 7), increase added load.
+        // lastWeight 0 is bodyweight — bump reps, never auto-add 2.5 lb.
+        if (
+          canProgressAddedLoad(lastWeight) &&
+          lastReps >= prescription.reps_max * 0.9 &&
+          (!avgRPE || avgRPE <= 7)
+        ) {
           const weightIncrease = Math.max(
             lastWeight * 0.025,
             minWeightIncrement(isImperial)

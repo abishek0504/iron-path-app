@@ -186,7 +186,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
             .insert({
               session_exercise_id: sessionExerciseId,
               set_number: set.set_number,
-              weight: set.weight || null,
+              weight: set.weight ?? null,
               reps: set.reps || null,
               duration_sec: set.duration_sec || null,
               rpe: isStretch ? null : (set.rpe || null),
@@ -205,7 +205,7 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
             .from('v2_session_sets')
             .update({
               set_number: set.set_number,
-              weight: set.weight || null,
+              weight: set.weight ?? null,
               reps: set.reps || null,
               duration_sec: set.duration_sec || null,
               rpe: isStretch ? null : (set.rpe || null),
@@ -249,7 +249,11 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
         s.id === setId
           ? {
               ...s,
-              [field]: value === '' ? undefined : field === 'rpe' ? parseInt(value) || undefined : parseFloat(value) || undefined,
+              [field]: (() => {
+                if (value === '') return undefined;
+                const parsed = field === 'rpe' ? parseInt(value, 10) : parseFloat(value);
+                return Number.isFinite(parsed) ? parsed : undefined;
+              })(),
             }
           : s
       )

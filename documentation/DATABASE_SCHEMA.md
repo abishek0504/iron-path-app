@@ -2,7 +2,7 @@
 
 **Purpose**: Document database structure, migrations, and RLS policies.
 
-**Last Updated**: 2026-09-03
+**Last Updated**: 2026-09-11
 
 ## Migration Order
 
@@ -201,13 +201,13 @@ v2_support (Help & Support submissions)
 
 **Why rows look similar (bands vs weights)**
 - Rep/set **bands** (e.g. beginner 3 sets, 8–12 reps) are shared by design across many rep-based exercises for hypertrophy. So Chin Up and Squat can have the same sets_min/max and reps_min/max for a given experience/mode. That is intentional: the band is “do 8–12 reps in 3 sets,” not “do the same weight.”
-- What differs per exercise is **suggested_weight_multiplier_bw**: e.g. Squat (Barbell) 0.85/1.5/1.75× BW; Chin Up (Supinated) 0 (bodyweight-only). Suggested weight is always calculated: current_weight × multiplier (fallback 150 lb / 70 kg when profile has no current_weight). No NULLs: bodyweight exercises use multiplier 0 so suggested weight = 0. So “different exercises use different prescriptions” means: same rep band is possible, but each exercise has its own row and its own starting weight (or NULL for bodyweight).
+- What differs per exercise is **suggested_weight_multiplier_bw**: e.g. Squat (Barbell) 0.85/1.5/1.75× BW; Chin Up (Supinated) 0 (bodyweight-only). Suggested **added load** is calculated as current_weight × multiplier (fallback 150 lb / 70 kg when profile has no current_weight) for weighted lifts. Multiplier `0` yields suggested added load **0** (bodyweight / no extra load) — not `NULL`, and never a copy of profile body mass onto the set. Timed/stretch sets keep `NULL` weight. So “different exercises use different prescriptions” means: same rep band is possible, but each exercise has its own row and its own starting added load (`0` for unweighted calisthenics).
 
 **Chin-ups vs squats (harder vs easier)**
 - Chin-ups are harder per rep than squats. The system does not give “the same amount” of work: it gives the same **rep band** (e.g. 8–12) and **exercise-specific starting weight**. For chin-ups, multiplier = 0 so suggested weight = 0 (bodyweight; user can add weight via belt). For squats, multiplier = 0.85/1.5/1.75× BW so suggested = e.g. 128 lbs for 150 lb beginner. So the first time: chin-up suggests “3 sets × 8–12 reps” at bodyweight; squat suggests “3 sets × 8–12 reps” at 95 lbs (beginner). After the user logs sessions, the algorithm uses **tracked values** (last weight, last reps, RPE) to progress: for chin-ups progress is usually more reps or added weight (belt/dumbbell) within the band; for squats it is weight increases when hitting top of rep band at acceptable RPE.
 
 **End-to-end flow: prescription → user edit → algorithm**
-1. **Fill from prescription**: When starting a session, `selectExerciseTargets()` uses the prescription band (sets/reps or duration) and, if no history, **suggested weight = current_weight × suggested_weight_multiplier_bw** (fallback 150 lb or 70 kg). Always a number; no NULLs. Targets are prefilled into `v2_session_sets` (e.g. 3 sets × 10 reps @ 128 lbs for 150 lb beginner squat).
+1. **Fill from prescription**: When starting a session, `selectExerciseTargets()` uses the prescription band (sets/reps or duration) and, if no history, **suggested added load = current_weight × suggested_weight_multiplier_bw** (fallback 150 lb or 70 kg). Multiplier `0` → `0` on `v2_session_sets.weight` (bodyweight; do not copy `current_weight`). Timed stays `NULL`. Targets are prefilled into `v2_session_sets` (e.g. 3 sets × 10 reps @ 128 lbs for 150 lb beginner squat; pull-ups @ 0). Progressive overload does **not** add 2.5 lb when lastWeight is `0` — bump reps instead.
 2. **User edits**: The user can change weight, reps, RPE, and duration before or after completing a set. Saving marks the set complete (`performed_at` set) and stores the actual values in `v2_session_sets`.
 3. **Algorithm uses tracked values**: On the next session, `getExerciseHistory()` returns last weight, last reps, last duration, and average RPE. `selectExerciseTargets()` uses that for progressive overload: e.g. if last reps ≥ 90% of reps_max and RPE ≤ 7, suggest weight increase and reset reps to reps_min; otherwise suggest lastReps+1 at same weight. So future targets are driven by **performed truth**, not by the static prescription; the prescription only defines the valid band and the initial/default suggestion.
 
@@ -374,7 +374,7 @@ v2_support (Help & Support submissions)
 - `session_exercise_id` (FK to v2_session_exercises)
 - `set_number`: 1, 2, 3, ...
 - `reps` (1-50) XOR `duration_sec` (5-3600) - CHECK constraints enforce
-- `weight` (>= 0)
+- `weight` (>= 0, nullable): **Added load only**, never total system weight and never `v2_profiles.current_weight`. `0` = bodyweight / no extra load. `NULL` = unset or timed. `> 0` = extra load (belt / vest / DBs). Prefill and save paths must use `?? null` (not `|| null`) so legitimate `0` is not wiped. No `is_bodyweight` column.
 - `rpe` (0-10, widened from 1-10 in 20260510000000) XOR `rir` (0-15) - CHECK constraints enforce
 - `rest_sec` (0-3600, widened from 0-600 in 20260903120000)
 - `set_type` (20260609000000): 'normal' | 'warmup' | 'drop' | 'failure' (NOT NULL DEFAULT 'normal'). Warm-up sets are excluded from PR and volume calculations.

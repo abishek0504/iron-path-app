@@ -29,6 +29,11 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../../sr
 import { useTheme } from '../../../src/lib/utils/ThemeContext';
 import { RestTimer } from '../../../src/components/workout/RestTimer';
 import { ExerciseTimer } from '../../../src/components/workout/ExerciseTimer';
+import { BodyweightLoadToggle } from '../../../src/components/workout/BodyweightLoadToggle';
+import {
+  BODYWEIGHT_LOAD_LABEL,
+  parseAddedLoadInput,
+} from '../../../src/lib/workout/addedLoad';
 import { computeHeldDurationSec, clampSessionDurationSec } from '../../../src/lib/utils/workoutDuration';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { RPESlider } from '../../../src/components/workout/RPESlider';
@@ -611,7 +616,9 @@ export default function ActiveWorkoutScreen() {
         return set.duration_sec ? `${set.duration_sec}s hold` : '';
       }
       const reps = set.reps ?? 0;
-      return set.weight ? `${set.weight} ${unitsLabel} × ${reps}` : `${reps} reps`;
+      if (set.weight == null) return `${reps} reps`;
+      if (set.weight === 0) return `${BODYWEIGHT_LOAD_LABEL} × ${reps}`;
+      return `${set.weight} ${unitsLabel} × ${reps}`;
     };
 
     const members = getSupersetMembers(exercises, currentExerciseIndex);
@@ -846,7 +853,7 @@ export default function ActiveWorkoutScreen() {
             ex.mode === 'reps' &&
             !ex.is_stretch &&
             ex.sets.every((s) => s.completed) &&
-            ex.sets.some((s) => (s.weight ?? 0) <= 0),
+            ex.sets.some((s) => s.weight == null),
         );
         if (placeholderLogIndex >= 0) {
           const logExercise = exercisesWithMeta[placeholderLogIndex];
@@ -1226,10 +1233,10 @@ export default function ActiveWorkoutScreen() {
       const persistPromise =
         exercise.mode === 'reps'
           ? (() => {
-              const draftedWeight = parseFloat(liveWeight);
+              const draftedWeight = parseAddedLoadInput(liveWeight);
               const draftedReps = parseInt(liveReps, 10);
               const weight =
-                Number.isFinite(draftedWeight) && draftedWeight >= 0
+                draftedWeight != null
                   ? draftedWeight
                   : currentSet.weight ?? 0;
               const reps =
@@ -1353,10 +1360,9 @@ export default function ActiveWorkoutScreen() {
 
     const hasErrors = setLogs.some(log => {
       if (exercise.mode === 'reps') {
-        // Allow 0 weight for bodyweight exercises
-        const weight = parseFloat(log.weight);
+        const weight = parseAddedLoadInput(log.weight);
         const reps = parseInt(log.reps);
-        return log.weight === '' || isNaN(weight) || weight < 0 || log.reps === '' || isNaN(reps) || reps <= 0;
+        return weight == null || weight < 0 || log.reps === '' || isNaN(reps) || reps <= 0;
       }
       // timed: require a positive duration
       const duration = parseInt(log.duration_sec);
@@ -1386,7 +1392,7 @@ export default function ActiveWorkoutScreen() {
           : { rpe: log.rpe ?? 7 };
       const payload = exercise.mode === 'reps'
         ? {
-            weight: parseFloat(log.weight),
+            weight: parseAddedLoadInput(log.weight) ?? 0,
             reps: parseInt(log.reps),
             ...intensityWrite,
             set_type: log.setType,
@@ -1414,7 +1420,7 @@ export default function ActiveWorkoutScreen() {
               if (ex.mode === 'reps') {
                 return {
                   ...s,
-                  weight: parseFloat(log.weight),
+                  weight: parseAddedLoadInput(log.weight) ?? 0,
                   reps: parseInt(log.reps),
                   ...(ex.is_stretch
                     ? {}
@@ -1853,9 +1859,24 @@ export default function ActiveWorkoutScreen() {
       return;
     }
     const firstWorking = exercise.sets.find((set) => set.set_type !== 'warmup') ?? exercise.sets[0];
-    const workingWeight = firstWorking?.weight && firstWorking.weight > 0
-      ? firstWorking.weight
-      : parseFloat(setLogs.find((log) => log.setType !== 'warmup')?.weight ?? '');
+    const fromSet =
+      firstWorking?.weight != null && firstWorking.weight > 0 ? firstWorking.weight : null;
+    const fromDraft = parseAddedLoadInput(
+      setLogs.find((log) => log.setType !== 'warmup')?.weight ?? liveWeight,
+    );
+    const workingWeight = fromSet ?? fromDraft;
+    if (workingWeight == null || workingWeight <= 0) {
+      if (__DEV__) {
+        devLog('workout-active', {
+          action: 'add_warmups_skipped',
+          reason: workingWeight === 0 || firstWorking?.weight === 0 ? 'bodyweight' : 'no_weight',
+        });
+      }
+      if (workingWeight !== 0 && firstWorking?.weight !== 0) {
+        toast.error('Set a working weight first');
+      }
+      return;
+    }
     setIsMutatingExercises(true);
     try {
       const result = await insertWarmupSets(exercise.id, workingWeight, resolveUseImperial(profile?.use_imperial));
@@ -1911,6 +1932,18 @@ export default function ActiveWorkoutScreen() {
       </SafeAreaView>
     );
   }
+  const firstWorkingSet =
+    currentExercise.sets.find((set) => set.set_type !== 'warmup') ?? currentExercise.sets[0];
+  const warmupWorkingLoad =
+    firstWorkingSet?.weight != null
+      ? firstWorkingSet.weight
+      : parseAddedLoadInput(
+          setLogs.find((log) => log.setType !== 'warmup')?.weight ?? liveWeight,
+        );
+  const showAddWarmups =
+    currentExercise.mode === 'reps' &&
+    currentExercise.is_stretch !== true &&
+    warmupWorkingLoad !== 0;
   const remainingMinutes = estimateSessionTimeMinutes(
     exercises
       .map((ex) => ({
@@ -2148,10 +2181,11 @@ export default function ActiveWorkoutScreen() {
               </Text>
               {currentExercise.mode === 'reps' && !currentExercise.is_stretch ? (
                 <View style={styles.logInputRow}>
-                  <TextInput
-                    style={styles.logInput}
+                  <BodyweightLoadToggle
+                    style={styles.logInputGroup}
                     value={liveWeight}
-                    onChangeText={setLiveWeight}
+                    onChange={setLiveWeight}
+                    inputStyle={styles.logInput}
                     keyboardType="decimal-pad"
                     {...NUMERIC_NEXT_PROPS}
                     onSubmitEditing={() => liveRepsRef.current?.focus()}
@@ -2414,7 +2448,13 @@ export default function ActiveWorkoutScreen() {
                         ? `${prevSet.duration_sec} sec`
                         : '—'
                       : prevSet.reps != null
-                        ? `${prevSet.weight != null && prevSet.weight > 0 ? `${prevSet.weight} ${unitsLabel} × ` : ''}${prevSet.reps}`
+                        ? `${
+                            prevSet.weight == null
+                              ? ''
+                              : prevSet.weight === 0
+                                ? `${BODYWEIGHT_LOAD_LABEL} × `
+                                : `${prevSet.weight} ${unitsLabel} × `
+                          }${prevSet.reps}`
                         : '—';
                   return (
                     <View style={styles.logCompareRow}>
@@ -2434,26 +2474,26 @@ export default function ActiveWorkoutScreen() {
                     <>
                       <View style={styles.logInputGroup}>
                         <Text style={styles.logInputLabel}>Weight ({unitsLabel})</Text>
-                        <View style={styles.weightInputRow}>
-                          <TextInput
-                            style={styles.logInput}
-                            placeholder="0"
-                            placeholderTextColor={colors.textMuted}
-                            keyboardType="numeric"
-                            returnKeyType="next"
-                            value={log.weight}
-                            onChangeText={(text) => {
-                              const updated = [...setLogs];
-                              updated[idx].weight = text;
-                              setSetLogs(updated);
-                            }}
-                          />
+                        <BodyweightLoadToggle
+                          value={log.weight}
+                          onChange={(text) => {
+                            const updated = [...setLogs];
+                            updated[idx].weight = text;
+                            setSetLogs(updated);
+                          }}
+                          inputStyle={styles.logInput}
+                          placeholder="Added"
+                          placeholderTextColor={colors.textMuted}
+                          keyboardType="numeric"
+                          returnKeyType="next"
+                          accessibilityLabel="Weight"
+                        >
                           {!currentExercise.is_stretch ? (
                             <TouchableOpacity
                               style={styles.plateButton}
                               onPress={() => {
-                                const parsed = parseFloat(log.weight);
-                                setPlateTarget(Number.isFinite(parsed) ? parsed : null);
+                                const parsed = parseAddedLoadInput(log.weight);
+                                setPlateTarget(parsed != null && parsed > 0 ? parsed : null);
                                 setShowPlateCalculator(true);
                               }}
                               accessibilityRole="button"
@@ -2462,7 +2502,7 @@ export default function ActiveWorkoutScreen() {
                               <Layers size={16} color={colors.primary} />
                             </TouchableOpacity>
                           ) : null}
-                        </View>
+                        </BodyweightLoadToggle>
                       </View>
 
                       <View style={styles.logInputGroup}>
@@ -2644,19 +2684,19 @@ export default function ActiveWorkoutScreen() {
               <Text style={styles.overflowItemLabel}>Add exercise</Text>
             </TouchableOpacity>
             <View style={styles.overflowItemDivider} />
-            <TouchableOpacity
-              style={[styles.overflowItem, isMutatingExercises && styles.overflowItemDisabled]}
-              onPress={() => void handleAddWarmups()}
-              disabled={
-                isMutatingExercises ||
-                currentExercise.mode !== 'reps' ||
-                currentExercise.is_stretch === true
-              }
-            >
-              <Flame size={18} color={colors.textPrimary} />
-              <Text style={styles.overflowItemLabel}>Add warmups</Text>
-            </TouchableOpacity>
-            <View style={styles.overflowItemDivider} />
+            {showAddWarmups ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.overflowItem, isMutatingExercises && styles.overflowItemDisabled]}
+                  onPress={() => void handleAddWarmups()}
+                  disabled={isMutatingExercises}
+                >
+                  <Flame size={18} color={colors.textPrimary} />
+                  <Text style={styles.overflowItemLabel}>Add warmups</Text>
+                </TouchableOpacity>
+                <View style={styles.overflowItemDivider} />
+              </>
+            ) : null}
             <TouchableOpacity
               style={[styles.overflowItem, isMutatingExercises && styles.overflowItemDisabled]}
               onPress={openReplaceExercisePicker}

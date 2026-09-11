@@ -15,6 +15,7 @@ import {
 import { formatDurationCompact } from '../../utils/formatDuration';
 import { estimateOneRepMaxLbs } from '../../analytics/progression';
 import { buildWarmupLadder } from '../../workout/warmupGenerator';
+import { nullableAddedLoad } from '../../workout/addedLoad';
 import { selectExerciseTargets } from '../../engine/targetSelection';
 import { writeCompletedWorkoutToHealth } from '../../health/healthIntegration';
 import { consumeWorkoutHealthBuffer } from '../../health/workoutHealthBuffer';
@@ -2160,7 +2161,7 @@ export async function prefillSessionSets(
           session_exercise_id: sessionExercise.id,
           set_number: setNumber,
           reps: target.reps || null,
-          weight: target.weight || null,
+          weight: nullableAddedLoad(target.weight),
           duration_sec: target.duration_sec || null,
           rpe: null,
           rir: null,
@@ -2312,6 +2313,7 @@ export async function insertWarmupSets(
   workingWeight: number,
   useImperial: boolean,
 ): Promise<InsertWarmupSetsResult> {
+  // Warmup ladder is % of added working load. Bodyweight (0) / unset has no ladder.
   const ladder = buildWarmupLadder(workingWeight, useImperial);
   if (ladder.length === 0) {
     return { ok: false, reason: 'no_weight' };

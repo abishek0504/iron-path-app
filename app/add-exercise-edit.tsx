@@ -25,6 +25,8 @@ import { useTheme } from '../src/lib/utils/ThemeContext';
 import { useUserStore } from '../src/stores/userStore';
 import { useUIStore } from '../src/stores/uiStore';
 import { useToast } from '../src/hooks/useToast';
+import { BodyweightLoadToggle } from '../src/components/workout/BodyweightLoadToggle';
+import { parseAddedLoadInput } from '../src/lib/workout/addedLoad';
 import { tryRandomPaywallFromOutside } from '../src/lib/subscriptions/paywallBridge';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
@@ -532,9 +534,10 @@ export default function AddExerciseEditScreen() {
       return;
     }
     const firstWorking = sets.find((set) => set.set_type !== 'warmup');
-    const workingWeight = firstWorking?.weight.trim() ? parseFloat(firstWorking.weight) : NaN;
+    const workingWeight = parseAddedLoadInput(firstWorking?.weight ?? '') ?? NaN;
     const ladder = buildWarmupLadder(workingWeight, useImperial);
     if (ladder.length === 0) {
+      if (workingWeight === 0) return;
       toast.error('Set a working weight first');
       return;
     }
@@ -951,6 +954,13 @@ export default function AddExerciseEditScreen() {
   const canAddDayOnly =
     !!sessionId || dateContext.isToday || (daySessionCount != null && daySessionCount > 0);
   const setsValid = allSetsValid(sets, isTimedMode);
+  const firstWorkingWeight = parseAddedLoadInput(
+    sets.find((set) => set.set_type !== 'warmup')?.weight ?? '',
+  );
+  const showAddWarmups =
+    !isTimedMode &&
+    exerciseInfo?.is_stretch !== true &&
+    firstWorkingWeight !== 0;
   const primaryMuscles = exerciseInfo?.primary_muscles ?? [];
   const secondaryMuscles = exerciseInfo?.secondary_muscles ?? [];
   const equipment = exerciseInfo?.equipment_needed ?? [];
@@ -1112,18 +1122,19 @@ export default function AddExerciseEditScreen() {
                       <View style={styles.inputRow}>
                         <View style={styles.inputGroup}>
                           <Text style={styles.label}>Weight</Text>
-                          <TextInput
-                            ref={(node) => {
+                          <BodyweightLoadToggle
+                            inputRef={(node) => {
                               setInputRefs.current[`${set.id}:weight`] = node;
                             }}
-                            style={[styles.input, err.weight && styles.inputError]}
                             value={set.weight}
-                            onChangeText={(v) => updateSet(set.id, 'weight', v)}
-                            placeholder="0 = bodyweight"
+                            onChange={(v) => updateSet(set.id, 'weight', v)}
+                            inputStyle={[styles.input, err.weight && styles.inputError]}
+                            placeholder="Added"
                             placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                             {...NUMERIC_NEXT_PROPS}
                             onSubmitEditing={() => setInputRefs.current[`${set.id}:reps`]?.focus()}
+                            accessibilityLabel="Weight"
                           />
                           {err.weight ? <Text style={styles.errorText}>{err.weight}</Text> : null}
                         </View>
@@ -1177,7 +1188,7 @@ export default function AddExerciseEditScreen() {
             );
           })}
 
-          {!isTimedMode && exerciseInfo?.is_stretch !== true ? (
+          {showAddWarmups ? (
             <TouchableOpacity
               style={styles.addSetButton}
               onPress={addWarmups}

@@ -23,6 +23,10 @@ export function formatPreviousPerformanceLabel(
 
   if (prevSet.reps == null) return null;
   const weightPart =
-    prevSet.weight != null && prevSet.weight > 0 ? `${prevSet.weight} ${unitsLabel} × ` : '';
+    prevSet.weight == null
+      ? ''
+      : prevSet.weight === 0
+        ? 'Bodyweight × '
+        : `${prevSet.weight} ${unitsLabel} × `;
   return `${weightPart}${prevSet.reps} reps`;
 }

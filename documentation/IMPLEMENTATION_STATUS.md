@@ -297,7 +297,12 @@
    - **Impact**: v2_muscle_freshness updated via Edge Function; v2_daily_muscle_stress still computed on-demand
    - **Future**: Add daily stress cache rebuild job if needed
 
+4. **Bodyweight added-load** — logging used to show `0` and resume treated completed BW sets as unlogged; resolved 2026-09-11 (`0` = Bodyweight / no extra load, not profile lbs).
+
 ## Completed Features (Recent)
+
+### Bodyweight added-load contract (2026-09-11)
+- ✅ `v2_session_sets.weight` is added load (`0` = Bodyweight, `null` = unset/timed, `>0` = extra). Logging shows Bodyweight (not `0`); prefill/edit preserve `0`; resume does not send finished pull-ups back to logging; overload skips +2.5 lb when lastWeight is `0`; warmup ladder hidden for BW.
 
 ### Settings logout Modal race (2026-09-11)
 - ✅ Settings Log Out waits for the settings sheet to close, then signs out and `replace('/get-started')`. Tab session guard skips a second replace when an explicit logout is already navigating (avoids RootErrorBoundary during RN Modal teardown).

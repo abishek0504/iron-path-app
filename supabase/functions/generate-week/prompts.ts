@@ -44,7 +44,10 @@ export function buildWeekResponseSchema(): Record<string, unknown> {
                     sets: { type: 'integer' },
                     reps: { type: ['integer', 'null'] },
                     duration_sec: { type: ['integer', 'null'] },
-                    weight: { type: ['number', 'null'] },
+                    weight: {
+                      type: ['number', 'null'],
+                      description: 'Added load. Null or 0 for bodyweight/unweighted calisthenics. Never copy current_weight.',
+                    },
                     target_rpe: { type: ['number', 'null'] },
                   },
                 },
@@ -91,7 +94,8 @@ export function buildWeekSystemPrompt(args: {
     '- Never jump weight more than ~10% in one step.',
     '- Weight unit matches uses_imperial_units. Leave weight null when you cannot estimate safely.',
     '- Timed exercises get duration_sec and null reps; rep exercises get reps and null duration_sec.',
-    '- Bodyweight exercises get null weight.',
+    '- Weight is added load only (belt, vest, dumbbells). Never copy current_weight / body mass into set weight.',
+    '- The catalog does not mark bodyweight movements. If equipment is bodyweight-only or the movement is an unweighted calisthenics lift (pull-up, chin-up, dip, push-up, etc.), or the prescription multiplier is 0, weight must be null or 0.',
     `- sets must be ${TARGET_BOUNDS.sets.min}-${TARGET_BOUNDS.sets.max}, reps ${TARGET_BOUNDS.reps.min}+, duration_sec ${TARGET_BOUNDS.durationSec.min}-${TARGET_BOUNDS.durationSec.max}, target_rpe ${TARGET_BOUNDS.rpe.min}-${TARGET_BOUNDS.rpe.max}.`,
   ].join('\n');
 }

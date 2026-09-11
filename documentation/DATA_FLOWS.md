@@ -235,7 +235,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
                └→ getMergedExercise() → determine mode
                └→ getExercisePrescription() → get target bands (exercise_id + experience + mode)
                └→ getExerciseHistory() → check for progressive overload
-               └→ Calculate targets within bands (uses suggested_weight if no history; bodyweight exercises use NULL weight)
+               └→ Calculate targets within bands (uses suggested added load if no history; bodyweight / multiplier-0 movements use added-load **0**, not profile `current_weight`. `null` weight is unset or timed only)
            └→ Build targetsMap entry for this exercise:
                └→ sets = prescription sets
                └→ reps/duration/weight = prescription targets (with progressive overload if history exists)
@@ -276,9 +276,11 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    LOGGING PHASE (after all sets for exercise):
    └→ Display batch logging screen
    └→ Show all sets with editable weight/reps/RPE fields
+   └→ Weight is **added load**: Bodyweight chip stores/displays `0` as "Bodyweight"; "Added weight" reveals the numeric field. Progress (`formatPerformedSetLine`) uses the same 0/null → Bodyweight mapping.
+   └→ Warmup ladder is % of added working load — hidden / skipped when weight ≤ 0 (no "Set a working weight first" toast for BW).
    └→ RPE sliders allow final adjustments
    └→ User taps "Save & Continue"
-       └→ Validate: weight ≥ 0, reps > 0 (or duration > 0)
+       └→ Validate: weight ≥ 0 (0 = bodyweight), reps > 0 (or duration > 0)
        └→ For each edited set:
            └→ markSetComplete(setId, { updated values })
        └→ Load weight suggestion for next exercise
@@ -416,7 +418,7 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ Context still loaded in parallel with the catalog (independent of focus filter): profile (including current_weight / use_imperial), v2_muscle_freshness last 48h, completed non-warmup session_sets last 60 days
    └→ OpenAI + finalizeAiSessions (up to 2 attempts): drop off-focus / avoided / duplicate names
    └→ commit_ai_generation RPC: clear_plan_day_for_ai_replace (slots + unperformed sets + empty sessions; performed sets and completed sessions are left alone), then insert unique exercise_ids
-   └→ resolve_ai_exercise_targets writes sets/reps/weight: LLM weight wins; null LLM weight is filled from prescription × profile bodyweight (20260903150000)
+   └→ resolve_ai_exercise_targets writes sets/reps/weight: LLM weight wins; null LLM weight is filled from prescription × profile bodyweight (20260903150000) for weighted lifts. Multiplier 0 / unweighted calisthenics stay 0 or null — never copy current_weight onto the set.
    └→ Audit row only after successful commit (source 'openai')
    └→ Fallback rows logged for observability; do not count toward quota
 

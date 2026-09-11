@@ -5,6 +5,16 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - Bodyweight is added-load 0 (not profile lbs / not wiped 0)
+------------------------------------------------------------------------
+- Contract: `v2_session_sets.weight` is extra load. `0` = bodyweight, `null` = unset/timed, `>0` = belt/vest/DBs. Never copy `v2_profiles.current_weight` onto a set.
+- Logging/Progress: Bodyweight chip stores `0` and displays "Bodyweight" (aligned with `formatPerformedSetLine`). Warmup ladder hidden for BW.
+- Data: `|| null` no longer wipes `0` (prefill + session edit). Resume no longer sends completed pull-ups back to logging because weight is `0`. Overload skips +2.5 lb when lastWeight is `0`. Watch target uses a null check so `0` can show as Bodyweight.
+- AI prompts: do not copy current_weight; unweighted calisthenics stay null or 0.
+- Plan: `documentation/PLAN_2026-09-11_bodyweight_added_load.md`.
+
+---
+
 2026-09-11 - iOS number-pad dismiss (Done/Next accessory)
 --------------------------------------------------------
 - iOS decimal-pad / number-pad / numeric has no Return key. RN only injects a Next/Done accessory bar when `returnKeyType` is set; several numeric fields were missing it so users had to tap above the pad.

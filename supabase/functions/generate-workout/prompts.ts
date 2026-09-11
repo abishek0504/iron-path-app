@@ -45,7 +45,7 @@ export function buildResponseSchema(): Record<string, unknown> {
               },
               weight: {
                 type: ['number', 'null'],
-                description: 'Target working weight in the same unit as the history values. Null for bodyweight.',
+                description: 'Added load in the same unit as history. Null or 0 for bodyweight/unweighted calisthenics. Never copy current_weight (body mass) onto a set.',
               },
               target_rpe: {
                 type: ['number', 'null'],
@@ -136,7 +136,8 @@ export function buildSystemPrompt(
     '- Weight must be in the same unit as the history values (the user context says whether the user uses imperial units).',
     '- If there is no history for an exercise, prescribe a conservative starting target appropriate for the user\'s experience level; leave weight null if you cannot estimate it safely.',
     '- Timed exercises (is_timed=true) get duration_sec and null reps; rep exercises get reps and null duration_sec.',
-    '- Bodyweight exercises get null weight.',
+    '- Weight is added load only (belt, vest, dumbbells). Never copy current_weight / body mass into set weight.',
+    '- The catalog does not mark bodyweight movements. If equipment is bodyweight-only or the movement is an unweighted calisthenics lift (pull-up, chin-up, dip, push-up, etc.), or the prescription multiplier is 0, weight must be null or 0.',
     '- STRETCHES (from STRETCH CATALOG): prescribe exactly 2 working sets, duration_sec 40–60 s per hold (beginner ~40, intermediate ~50, advanced ~60), null weight, null target_rpe. Stretches are not scored with RPE and do not use progressive overload.',
     `- sets must be ${TARGET_BOUNDS.sets.min}-${TARGET_BOUNDS.sets.max}, reps ${TARGET_BOUNDS.reps.min}+, duration_sec ${TARGET_BOUNDS.durationSec.min}-${TARGET_BOUNDS.durationSec.max}, target_rpe ${TARGET_BOUNDS.rpe.min}-${TARGET_BOUNDS.rpe.max}.`,
   ].join('\n');

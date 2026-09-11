@@ -95,7 +95,9 @@ describe('week prompt contracts', () => {
     expect(prompts).toContain('training day ${entry.day.trainingDayIndex + 1}');
     expect(prompts).toContain('replace_existing_plan');
     expect(prompts).toContain('request_id');
-    expect(prompts).not.toContain('athlete will not set');
+    expect(prompts).toContain('Never copy current_weight');
+    expect(dayPrompts).toContain('unweighted calisthenics');
+    expect(dayPrompts).not.toContain('athlete will not set');
   });
 
   it('embeds notes as an untrusted block that cannot change counts', () => {
