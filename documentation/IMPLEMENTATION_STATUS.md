@@ -158,8 +158,8 @@
 |---------|--------|-------|
 | Weekly completion metric | ✅ Complete | Completed vs target |
 | Week range calculation | ✅ Complete | Sunday-Saturday, local time |
-| Recent sessions list | ✅ Complete | Last 5 completed |
-| Top PRs | ✅ Complete | Weight + duration PRs |
+| Recent sessions list | ✅ Complete | Last 5 completed; long labels ellipsize in-row |
+| Top PRs | ✅ Complete | Weight + duration PRs; long names ellipsize; header opens `/prs` |
 | PR recency sorting | ✅ Complete | Most recent first |
 | Muscle status button | ✅ Complete | Opens heatmap |
 | Heatmap display | ✅ Complete | `react-native-body-highlighter` visualization, 29 muscle keys mapped (Skia removed) |
@@ -261,6 +261,10 @@
 | Time estimation | ✅ Complete | `src/lib/utils/timeEstimation.ts` implements the ALGORITHMS formula (`estimateExerciseTimeSec` / `estimateSessionTimeSec`) |
 
 ## Known Issues / Remaining Manual Steps
+
+### Resolved (verified 2026-09-11)
+
+- ✅ **Dashboard list overflow + sheet grabber** — Top PRs / Recent sessions truncate in-row; close-X stack modals (`/prs`, `/edit-profile`, `/help-support`) show a BottomSheet-matching grabber because native iOS chrome is hidden (`headerShown` false). Back-chevron stack screens stay grabber-free.
 
 ### Resolved (verified 2026-07-23)
 

@@ -416,27 +416,28 @@ export default function DashboardTab() {
         </TourTarget>
 
         <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
+          <TouchableOpacity
+            style={styles.cardHeaderRow}
+            onPress={() => router.push('/prs')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="View all PRs"
+          >
             <View style={styles.cardTitleRow}>
               <Trophy size={20} color={colors.primary} />
               <Text style={styles.cardTitle}>Top PRs</Text>
             </View>
-            <TouchableOpacity
-              onPress={() => router.push('/prs')}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="View all PRs"
-            >
-              <ChevronRight size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
+            <ChevronRight size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
           {prs.length === 0 ? (
             <Text style={styles.emptyText}>No PRs yet</Text>
           ) : (
             prs.map((p) => (
               <View key={p.set_id} style={styles.listRow}>
-                <Text style={styles.listPrimary}>{p.name}</Text>
-                <Text style={styles.listSecondary}>
+                <Text style={styles.listPrimary} numberOfLines={1}>
+                  {p.name}
+                </Text>
+                <Text style={styles.listSecondary} numberOfLines={1}>
                   {formatPRDisplay(p, unitsLabel, { includeTheoretical1Rm: false })}
                 </Text>
               </View>
@@ -460,8 +461,10 @@ export default function DashboardTab() {
                   : s.day_name || 'Session';
               return (
                 <View key={s.id} style={styles.listRow}>
-                  <Text style={styles.listPrimary}>{weekdayLabel}</Text>
-                  <Text style={styles.listSecondary}>
+                  <Text style={styles.listPrimary} numberOfLines={1}>
+                    {weekdayLabel}
+                  </Text>
+                  <Text style={styles.listSecondary} numberOfLines={1}>
                     {completedAt
                       ? `${getLocalDayKey(completedAt)} ${completedAt.toLocaleTimeString('en-US', {
                           hour: 'numeric',
@@ -545,6 +548,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     borderColor: colors.cardBorder,
     padding: spacing.md,
     gap: spacing.sm,
+    overflow: 'hidden',
   },
   cardTitleRow: {
     flexDirection: 'row',
@@ -620,10 +624,14 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   listPrimary: {
+    flex: 1,
+    flexShrink: 1,
+    marginRight: spacing.sm,
     color: colors.textPrimary,
     fontSize: typography.sizes.base,
   },
   listSecondary: {
+    flexShrink: 0,
     color: colors.textSecondary,
     fontSize: typography.sizes.sm,
   },

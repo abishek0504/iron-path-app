@@ -26,6 +26,7 @@ import { LegalLinks } from '../src/components/ui/LegalLinks';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { Button } from '../src/components/ui/Button';
+import { SheetGrabber } from '../src/components/ui/ScreenHeader';
 
 const SUPPORT_MESSAGE_MAX_LENGTH = 5000;
 
@@ -110,6 +111,7 @@ export default function HelpSupportScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <SheetGrabber />
       <View style={styles.header}>
         <Text style={styles.title}>Help & Support</Text>
         <TouchableOpacity onPress={handleClose} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Close">

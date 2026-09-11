@@ -2,7 +2,7 @@
 
 **Purpose**: Document core architectural decisions and WHY they were made.
 
-**Last Updated**: 2026-09-03
+**Last Updated**: 2026-09-11
 
 ## Core Principles
 
@@ -371,18 +371,21 @@ const hasActiveWorkout =
 
 ### Route Types
 
-**Stack Routes** (slide animations):
+**Stack Routes** (slide animations unless noted):
 - `/` - Bootstrap/auth check
 - `/get-started` - Landing page
 - `/login`, `/signup`, `/signup-success` - Auth
 - `/onboarding` - Multi-step setup
 - `/(tabs)/*` - Main app tabs
-- `/workout/active` - Active workout (modal presentation)
-- `/edit-profile` - Profile editing (modal presentation)
+- `/workout/active` - Active workout (modal presentation; swipe-down off)
+- `/edit-profile` - Profile editing (modal presentation, close X + sheet grabber)
 - `/add-exercise`, `/add-exercise-edit` - Exercise search and slot editing
-- `/prs` - Personal records
-- `/health-connect` - Apple Health connection
-- `/help-support`, `/workout-reminders` - Settings sub-screens
+- `/prs` - Personal records (modal presentation, close X + sheet grabber)
+- `/health-connect` - Apple Health connection (modal presentation, back chevron — no grabber)
+- `/help-support` - Help form (modal presentation, close X + sheet grabber)
+- `/workout-reminders` - Settings sub-screen (modal presentation, back chevron — no grabber)
+
+**Sheet-style stack modals vs pushed pages:** Expo Router screens with `presentation: 'modal'` and `gestureEnabled: true` dismiss by swiping down on iOS. The stack navigator keeps `headerShown` false, so the native iOS grabber never appears. `ScreenHeader` optional `showGrabber` (and exported `SheetGrabber` for custom close-X headers) draws the same 44×4pt `colors.cardBorder` pill as `BottomSheet` `dragHandle`. Enable only on close-X sheet modals (`/prs`, `/edit-profile`, `/help-support`). Do not enable on back-chevron screens that feel like pushed pages (`/health-connect`, `/appearance`, `/workout-settings`, and other `onBack` headers).
 
 **Tab Routes** (bottom tab bar):
 - `/(tabs)/index` - Workout (today's plan)

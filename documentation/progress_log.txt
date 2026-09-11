@@ -5,6 +5,14 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - Dashboard PR overflow + sheet-modal grabber
+------------------------------------------------------------------------
+- Dashboard Top PRs and Recent sessions share `listRow`. Long exercise names overflowed the card because `listPrimary` / `listSecondary` had no shrink or `numberOfLines`. Primary now flexes and ellipsizes; the value stays visible (`flexShrink: 0`). Cards clip overflow. Top PRs header (title + chevron) opens `/prs`.
+- `/prs` is a swipe-down stack modal with native header off, so iOS showed no grabber — only ScreenHeader's X. `ScreenHeader` gained optional `showGrabber` (44×4pt pill, same as BottomSheet `dragHandle`). Enabled on `/prs`. `/edit-profile` and `/help-support` (custom close-X headers) use shared `SheetGrabber`. Back-chevron stack screens stay grabber-free.
+- Files: `app/(tabs)/dashboard.tsx`, `src/components/ui/ScreenHeader.tsx`, `app/prs.tsx`, `app/edit-profile.tsx`, `app/help-support.tsx`. Plan: `documentation/PLAN_2026-09-11_ux_prs_overflow_grabber.md`.
+
+---
+
 2026-09-11 - Settings Log Out: wait for sheet close, land on /get-started
 ------------------------------------------------------------------------
 - Bug: Settings → Log Out hit RootErrorBoundary ("Something went wrong"). handleLogout called onClose then immediately signOut + replace('/login') while the RN Modal was still animating. Tab useSessionGuard on SIGNED_OUT concurrently replaced to /get-started and mounted AuthVideoBackground. Dual navigation + Modal teardown crashed.

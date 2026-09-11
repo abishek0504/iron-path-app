@@ -5,7 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { spacing, borderRadius, typography, type ThemeColors } from '../src/lib/utils/theme';
 import { useTheme } from '../src/lib/utils/ThemeContext';
-import { SCREEN_HEADER_HEIGHT, ScreenHeader } from '../src/components/ui/ScreenHeader';
+import {
+  SCREEN_HEADER_GRABBER_HEIGHT,
+  SCREEN_HEADER_HEIGHT,
+  ScreenHeader,
+} from '../src/components/ui/ScreenHeader';
 import { useUIStore } from '../src/stores/uiStore';
 import { useUserStore } from '../src/stores/userStore';
 import { supabase } from '../src/lib/supabase/client';
@@ -76,13 +80,13 @@ export default function PRsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScreenHeader title="PRs" onClose={() => router.back()} />
+      <ScreenHeader title="PRs" onClose={() => router.back()} showGrabber />
       {loading ? (
         <LoadingScreen
           message="Loading PRs..."
           style={styles.loadingContainer}
           centerInViewport
-          chrome={{ top: SCREEN_HEADER_HEIGHT, bottom: 0 }}
+          chrome={{ top: SCREEN_HEADER_HEIGHT + SCREEN_HEADER_GRABBER_HEIGHT, bottom: 0 }}
         />
       ) : (
         <ScrollView contentContainerStyle={styles.content}>

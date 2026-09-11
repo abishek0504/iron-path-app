@@ -42,6 +42,7 @@ import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { LogoEdgeLoader } from '../src/components/ui/LogoEdgeLoader';
 import { LoadingScreen } from '../src/components/ui/LoadingScreen';
 import { Button } from '../src/components/ui/Button';
+import { SheetGrabber } from '../src/components/ui/ScreenHeader';
 import { Chip } from '../src/components/ui/Chip';
 import { calculateAge, formatDateOfBirth } from '../src/lib/utils/date';
 import { rescheduleRemindersAfterProfileWorkoutDays } from '../src/lib/utils/notifications';
@@ -407,6 +408,7 @@ export default function EditProfileScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
       {/* Header */}
+      <SheetGrabber />
       <View style={styles.header}>
         <Text style={styles.title}>Edit Profile</Text>
         <TouchableOpacity onPress={safeClose} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Close">
