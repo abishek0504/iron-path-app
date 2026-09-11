@@ -13,6 +13,7 @@ import { spacing, borderRadius, typography, type ThemeColors } from '../../lib/u
 import { useTheme } from '../../lib/utils/ThemeContext';
 import { BottomSheet, type BottomSheetHandle } from '../ui/BottomSheet';
 import { Button } from '../ui/Button';
+import { NUMERIC_DONE_PROPS } from '../../lib/constants/numericKeyboard';
 import { supabase } from '../../lib/supabase/client';
 import { devLog, devError } from '../../lib/utils/logger';
 import type { SetType } from '../../lib/supabase/queries/workouts';
@@ -328,6 +329,8 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                 placeholder="90"
                 placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
+                {...NUMERIC_DONE_PROPS}
+                onSubmitEditing={Keyboard.dismiss}
                 value={restSec}
                 onChangeText={(value) => {
                   setRestSec(value);

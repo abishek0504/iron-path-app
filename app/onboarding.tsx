@@ -22,6 +22,7 @@ import {
   Platform,
   UIManager,
   Dimensions,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -63,6 +64,7 @@ import Animated, {
 import { SplitPicker } from '../src/components/ui/SplitPicker';
 import { DayFocusMapEditor } from '../src/components/ai/DayFocusMapEditor';
 import { seedDayFocusMap, type DayFocusMap } from '../src/lib/constants/trainingSplits';
+import { NUMERIC_DONE_PROPS } from '../src/lib/constants/numericKeyboard';
 import { Button } from '../src/components/ui/Button';
 import { convertBodyWeight } from '../src/lib/utils/units';
 import { useModal } from '../src/hooks/useModal';
@@ -592,6 +594,8 @@ export default function Onboarding() {
           placeholderTextColor={colors.textMuted}
           style={styles.input}
           keyboardType="decimal-pad"
+          {...NUMERIC_DONE_PROPS}
+          onSubmitEditing={Keyboard.dismiss}
           maxLength={6}
           accessibilityLabel={`Current weight in ${useImperial ? 'lbs' : 'kg'}`}
         />

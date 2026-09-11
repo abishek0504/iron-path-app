@@ -44,6 +44,7 @@ import {
 import { estimateSessionTimeMinutes } from '../../../src/lib/utils/timeEstimation';
 import { shareWorkoutCardImage, type ShareWorkoutStats } from '../../../src/lib/workout/shareWorkout';
 import { listMergedExercisesCached } from '../../../src/lib/cache/exerciseCache';
+import { NUMERIC_DONE_PROPS, NUMERIC_NEXT_PROPS } from '../../../src/lib/constants/numericKeyboard';
 import {
   getActiveSession,
   getSessionById,
@@ -213,6 +214,7 @@ export default function ActiveWorkoutScreen() {
   const [suggestedWeight, setSuggestedWeight] = useState<string>('');
   const [liveWeight, setLiveWeight] = useState('');
   const [liveReps, setLiveReps] = useState('');
+  const liveRepsRef = useRef<TextInput>(null);
 
   // Previous performance for the current exercise (Hevy-style "last time" prefill context)
   const [prevPerformance, setPrevPerformance] = useState<PreviousPerformance | null>(null);
@@ -2151,15 +2153,20 @@ export default function ActiveWorkoutScreen() {
                     value={liveWeight}
                     onChangeText={setLiveWeight}
                     keyboardType="decimal-pad"
+                    {...NUMERIC_NEXT_PROPS}
+                    onSubmitEditing={() => liveRepsRef.current?.focus()}
                     placeholder="Weight"
                     placeholderTextColor={colors.textMuted}
                     accessibilityLabel="Weight"
                   />
                   <TextInput
+                    ref={liveRepsRef}
                     style={styles.logInput}
                     value={liveReps}
                     onChangeText={setLiveReps}
                     keyboardType="number-pad"
+                    {...NUMERIC_DONE_PROPS}
+                    onSubmitEditing={Keyboard.dismiss}
                     placeholder="Reps"
                     placeholderTextColor={colors.textMuted}
                     accessibilityLabel="Reps"

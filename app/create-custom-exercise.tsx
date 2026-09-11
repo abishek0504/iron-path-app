@@ -11,7 +11,7 @@
  * templates, sessions, PRs, and analytics via custom_exercise_id.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  Keyboard,
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,6 +35,7 @@ import { Chip } from '../src/components/ui/Chip';
 import { supabase } from '../src/lib/supabase/client';
 import { devError } from '../src/lib/utils/logger';
 import { MUSCLE_KEY_TO_DISPLAY_NAME } from '../src/lib/constants/muscleHeatmapSlugs';
+import { NUMERIC_DONE_PROPS, NUMERIC_NEXT_PROPS } from '../src/lib/constants/numericKeyboard';
 import {
   createUserCustomExercise,
   updateUserCustomExercise,
@@ -179,6 +181,9 @@ export default function CreateCustomExerciseScreen() {
   const [form, setForm] = useState<FormState>(makeInitialForm);
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
+  const setsMaxRef = useRef<TextInput>(null);
+  const repsMaxRef = useRef<TextInput>(null);
+  const durationMaxRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (profileId) {
@@ -359,6 +364,8 @@ export default function CreateCustomExerciseScreen() {
                 value={form.setsMin}
                 onChangeText={(v) => update('setsMin', v)}
                 keyboardType="numeric"
+                {...NUMERIC_NEXT_PROPS}
+                onSubmitEditing={() => setsMaxRef.current?.focus()}
                 placeholder={DEFAULT_SETS_MIN}
                 placeholderTextColor={colors.textMuted}
               />
@@ -366,10 +373,13 @@ export default function CreateCustomExerciseScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.subLabel}>Max</Text>
               <TextInput
+                ref={setsMaxRef}
                 style={styles.input}
                 value={form.setsMax}
                 onChangeText={(v) => update('setsMax', v)}
                 keyboardType="numeric"
+                {...NUMERIC_DONE_PROPS}
+                onSubmitEditing={Keyboard.dismiss}
                 placeholder={DEFAULT_SETS_MAX}
                 placeholderTextColor={colors.textMuted}
               />
@@ -387,6 +397,8 @@ export default function CreateCustomExerciseScreen() {
                     value={form.repsMin}
                     onChangeText={(v) => update('repsMin', v)}
                     keyboardType="numeric"
+                    {...NUMERIC_NEXT_PROPS}
+                    onSubmitEditing={() => repsMaxRef.current?.focus()}
                     placeholder={DEFAULT_REPS_MIN}
                     placeholderTextColor={colors.textMuted}
                   />
@@ -394,10 +406,13 @@ export default function CreateCustomExerciseScreen() {
                 <View style={styles.inputGroup}>
                   <Text style={styles.subLabel}>Max</Text>
                   <TextInput
+                    ref={repsMaxRef}
                     style={styles.input}
                     value={form.repsMax}
                     onChangeText={(v) => update('repsMax', v)}
                     keyboardType="numeric"
+                    {...NUMERIC_DONE_PROPS}
+                    onSubmitEditing={Keyboard.dismiss}
                     placeholder={DEFAULT_REPS_MAX}
                     placeholderTextColor={colors.textMuted}
                   />
@@ -415,6 +430,8 @@ export default function CreateCustomExerciseScreen() {
                     value={form.durationMin}
                     onChangeText={(v) => update('durationMin', v)}
                     keyboardType="numeric"
+                    {...NUMERIC_NEXT_PROPS}
+                    onSubmitEditing={() => durationMaxRef.current?.focus()}
                     placeholder={DEFAULT_DURATION_MIN}
                     placeholderTextColor={colors.textMuted}
                   />
@@ -422,10 +439,13 @@ export default function CreateCustomExerciseScreen() {
                 <View style={styles.inputGroup}>
                   <Text style={styles.subLabel}>Max</Text>
                   <TextInput
+                    ref={durationMaxRef}
                     style={styles.input}
                     value={form.durationMax}
                     onChangeText={(v) => update('durationMax', v)}
                     keyboardType="numeric"
+                    {...NUMERIC_DONE_PROPS}
+                    onSubmitEditing={Keyboard.dismiss}
                     placeholder={DEFAULT_DURATION_MAX}
                     placeholderTextColor={colors.textMuted}
                   />

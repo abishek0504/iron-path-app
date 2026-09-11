@@ -121,7 +121,7 @@
 | Exit mid-workout | ✅ Complete | Progress saved, resume on return |
 | Weight suggestions | ✅ Complete | From history or prescription seed data |
 | Exercise info display | ✅ Complete | Shows target muscles and tips |
-| Keyboard dismiss | ✅ Complete | Done/Next buttons on inputs |
+| Keyboard dismiss | ✅ Complete | Done/Next accessory on iOS number/decimal-pad via `returnKeyType` (live execution, onboarding weight, add-exercise, WeightEntrySheet, log-past, custom exercise, session rest; batch logging already had it) |
 | Rest timer | ✅ Complete | Auto-start; per-exercise `rest_sec` → per-set → 90s default |
 | Exercise notes display | ✅ Complete | Shows slot notes from template |
 | Add exercise mid-workout | ✅ Complete | Multi-select picker, batch prefill |
@@ -424,6 +424,7 @@
 3. ✅ Dark mode toggle (Light/Dark/System)
 4. ✅ Empty states across tabs
 5. ✅ Workout history viewer (progress calendar + session detail sheet)
+6. ✅ iOS number-pad dismiss — `returnKeyType` Done/Next on remaining numeric inputs (2026-09-11)
 
 ### Phase 4: Advanced Features
 1. ⚠️ Implement derived cache rebuild jobs (daily stress still on-demand)
@@ -505,7 +506,7 @@ Target performance (not yet measured):
 
 - ⚠️ Tab bar + settings rows labeled; full VoiceOver pass still recommended
 - ⚠️ No screen reader testing
-- ⚠️ No keyboard navigation testing
+- ⚠️ No full keyboard navigation testing; iOS number-pad dismiss (Done/Next accessory) fixed 2026-09-11
 - ⚠️ Color contrast not verified
 
 ## Documentation Status

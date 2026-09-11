@@ -5,6 +5,14 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - iOS number-pad dismiss (Done/Next accessory)
+--------------------------------------------------------
+- iOS decimal-pad / number-pad / numeric has no Return key. RN only injects a Next/Done accessory bar when `returnKeyType` is set; several numeric fields were missing it so users had to tap above the pad.
+- Added shared `NUMERIC_DONE_PROPS` / `NUMERIC_NEXT_PROPS` (`src/lib/constants/numericKeyboard.ts`) with `blurOnSubmit`. Onboarding body weight also `Keyboard.dismiss` so the pinned Next stays reachable. Live execution weight→reps, add-exercise weight/reps/duration/rest, log-past weight/reps/duration/RPE, custom-exercise min/max, WeightEntrySheet (plus BottomSheet `avoidKeyboard`), and SessionExerciseEditSheet rest seconds. Batch logging already had next/done and was left unchanged.
+- Plan: `documentation/PLAN_2026-09-11_keyboard_dismiss.md`.
+
+---
+
 2026-09-11 - Dashboard PR overflow + sheet-modal grabber
 ------------------------------------------------------------------------
 - Dashboard Top PRs and Recent sessions share `listRow`. Long exercise names overflowed the card because `listPrimary` / `listSecondary` had no shrink or `numberOfLines`. Primary now flexes and ellipsizes; the value stays visible (`flexShrink: 0`). Cards clip overflow. Top PRs header (title + chevron) opens `/prs`.

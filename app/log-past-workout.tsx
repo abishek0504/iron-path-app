@@ -7,7 +7,7 @@
  * the calendar, and progressive-overload history. No timers/rest flow.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  Keyboard,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,6 +35,7 @@ import { createBackloggedWorkout, type BackloggedExerciseInput } from '../src/li
 import { invalidateSessionsInRangeForUser } from '../src/lib/cache/sessionsCache';
 import { invalidateWorkoutStatsCache } from '../src/lib/cache/dashboardStatsCache';
 import type { Exercise } from '../src/types/exercisePicker';
+import { NUMERIC_DONE_PROPS, NUMERIC_NEXT_PROPS } from '../src/lib/constants/numericKeyboard';
 
 const REPS_MIN = 1;
 const DURATION_MIN = 5;
@@ -173,6 +175,7 @@ export default function LogPastWorkoutScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [exercises, setExercises] = useState<FormExercise[]>([]);
   const [saving, setSaving] = useState(false);
+  const setInputRefs = useRef<Record<string, TextInput | null>>({});
 
   useEffect(() => {
     if (profileId) {
@@ -410,6 +413,7 @@ export default function LogPastWorkoutScreen() {
               {ex.sets.map((set, index) => {
                 const err = validateSet(set, ex.isTimed);
                 const isWarmup = set.set_type === 'warmup';
+                const inputKey = `${ex.key}:${set.id}`;
                 return (
                   <View key={set.id} style={[styles.setCard, isWarmup && styles.setCardWarmup]}>
                     <View style={styles.setHeaderRow}>
@@ -446,12 +450,17 @@ export default function LogPastWorkoutScreen() {
                         <View style={styles.inputGroup}>
                           <Text style={styles.label}>Duration (sec)</Text>
                           <TextInput
+                            ref={(node) => {
+                              setInputRefs.current[`${inputKey}:duration`] = node;
+                            }}
                             style={[styles.input, err.duration_sec && styles.inputError]}
                             value={set.duration_sec}
                             onChangeText={(v) => updateSet(ex.key, set.id, 'duration_sec', v)}
                             placeholder={`${DURATION_MIN}–${DURATION_MAX}`}
                             placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
+                            {...NUMERIC_NEXT_PROPS}
+                            onSubmitEditing={() => setInputRefs.current[`${inputKey}:rpe`]?.focus()}
                           />
                           {err.duration_sec ? (
                             <Text style={styles.errorText}>{err.duration_sec}</Text>
@@ -462,24 +471,34 @@ export default function LogPastWorkoutScreen() {
                           <View style={styles.inputGroup}>
                             <Text style={styles.label}>Weight</Text>
                             <TextInput
+                              ref={(node) => {
+                                setInputRefs.current[`${inputKey}:weight`] = node;
+                              }}
                               style={[styles.input, err.weight && styles.inputError]}
                               value={set.weight}
                               onChangeText={(v) => updateSet(ex.key, set.id, 'weight', v)}
                               placeholder="0 = bodyweight"
                               placeholderTextColor={colors.textMuted}
                               keyboardType="numeric"
+                              {...NUMERIC_NEXT_PROPS}
+                              onSubmitEditing={() => setInputRefs.current[`${inputKey}:reps`]?.focus()}
                             />
                             {err.weight ? <Text style={styles.errorText}>{err.weight}</Text> : null}
                           </View>
                           <View style={styles.inputGroup}>
                             <Text style={styles.label}>Reps</Text>
                             <TextInput
+                              ref={(node) => {
+                                setInputRefs.current[`${inputKey}:reps`] = node;
+                              }}
                               style={[styles.input, err.reps && styles.inputError]}
                               value={set.reps}
                               onChangeText={(v) => updateSet(ex.key, set.id, 'reps', v)}
                               placeholder={`${REPS_MIN}+`}
                               placeholderTextColor={colors.textMuted}
                               keyboardType="numeric"
+                              {...NUMERIC_NEXT_PROPS}
+                              onSubmitEditing={() => setInputRefs.current[`${inputKey}:rpe`]?.focus()}
                             />
                             {err.reps ? <Text style={styles.errorText}>{err.reps}</Text> : null}
                           </View>
@@ -488,12 +507,17 @@ export default function LogPastWorkoutScreen() {
                       <View style={styles.inputGroupSmall}>
                         <Text style={styles.label}>RPE</Text>
                         <TextInput
+                          ref={(node) => {
+                            setInputRefs.current[`${inputKey}:rpe`] = node;
+                          }}
                           style={[styles.input, err.rpe && styles.inputError]}
                           value={set.rpe}
                           onChangeText={(v) => updateSet(ex.key, set.id, 'rpe', v)}
                           placeholder="1–10"
                           placeholderTextColor={colors.textMuted}
                           keyboardType="numeric"
+                          {...NUMERIC_DONE_PROPS}
+                          onSubmitEditing={Keyboard.dismiss}
                         />
                         {err.rpe ? <Text style={styles.errorText}>{err.rpe}</Text> : null}
                       </View>

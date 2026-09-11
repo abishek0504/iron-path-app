@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from './BottomSheet';
+import { NUMERIC_DONE_PROPS } from '../../lib/constants/numericKeyboard';
 import { spacing, borderRadius, typography } from '../../lib/utils/theme';
 import { useTheme } from '../../lib/utils/ThemeContext';
 
@@ -88,6 +89,7 @@ export function WeightEntrySheet({
       onClosed={onClosed}
       title={`Enter weight (${unitsLabel})`}
       height={260}
+      avoidKeyboard
     >
       <ScrollView
         style={styles.pickerScroll}
@@ -104,6 +106,8 @@ export function WeightEntrySheet({
             value={weightInput}
             onChangeText={setWeightInput}
             keyboardType="decimal-pad"
+            {...NUMERIC_DONE_PROPS}
+            onSubmitEditing={Keyboard.dismiss}
             placeholder={placeholder}
             placeholderTextColor={colors.textMuted}
             autoFocus

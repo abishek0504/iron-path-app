@@ -6,7 +6,7 @@
  * Validation: weight >= 0, reps >= 1, duration 5–3600, rest 0–3600.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
+  Keyboard,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -50,6 +51,7 @@ import {
   upsertUserExerciseDefaults,
 } from '../src/lib/supabase/queries/exercises';
 import { listMergedExercisesCached, type MergedExercise } from '../src/lib/cache/exerciseCache';
+import { NUMERIC_DONE_PROPS, NUMERIC_NEXT_PROPS } from '../src/lib/constants/numericKeyboard';
 import { ExerciseDemoMedia } from '../src/components/workout/ExerciseDemoMedia';
 import { buildWarmupLadder } from '../src/lib/workout/warmupGenerator';
 import { supabase } from '../src/lib/supabase/client';
@@ -193,6 +195,7 @@ export default function AddExerciseEditScreen() {
     });
   }
   const [removing, setRemoving] = useState(false);
+  const setInputRefs = useRef<Record<string, TextInput | null>>({});
 
   const profileId = useUserStore((s) => s.profile?.id);
   const experience = useUserStore((s) => s.profile?.experience_level) || 'beginner';
@@ -1050,6 +1053,7 @@ export default function AddExerciseEditScreen() {
             const err = validateSet(set, isTimedMode);
             const setType = set.set_type ?? 'normal';
             const isNonNormal = setType !== 'normal';
+            const hasRestAfter = index < sets.length - 1;
             return (
               <View key={set.id}>
                 <View style={[styles.setCard, isNonNormal && styles.setCardTyped]}>
@@ -1083,12 +1087,23 @@ export default function AddExerciseEditScreen() {
                     <View style={styles.section}>
                       <Text style={styles.label}>Duration (sec)</Text>
                       <TextInput
+                        ref={(node) => {
+                          setInputRefs.current[`${set.id}:duration`] = node;
+                        }}
                         style={[styles.input, err.duration_sec && styles.inputError]}
                         value={set.duration_sec}
                         onChangeText={(v) => updateSet(set.id, 'duration_sec', v)}
                         placeholder={`${DURATION_MIN}–${DURATION_MAX}`}
                         placeholderTextColor={colors.textMuted}
                         keyboardType="numeric"
+                        {...(hasRestAfter ? NUMERIC_NEXT_PROPS : NUMERIC_DONE_PROPS)}
+                        onSubmitEditing={() => {
+                          if (hasRestAfter) {
+                            setInputRefs.current[`${set.id}:rest`]?.focus();
+                          } else {
+                            Keyboard.dismiss();
+                          }
+                        }}
                       />
                       {err.duration_sec ? <Text style={styles.errorText}>{err.duration_sec}</Text> : null}
                     </View>
@@ -1098,24 +1113,40 @@ export default function AddExerciseEditScreen() {
                         <View style={styles.inputGroup}>
                           <Text style={styles.label}>Weight</Text>
                           <TextInput
+                            ref={(node) => {
+                              setInputRefs.current[`${set.id}:weight`] = node;
+                            }}
                             style={[styles.input, err.weight && styles.inputError]}
                             value={set.weight}
                             onChangeText={(v) => updateSet(set.id, 'weight', v)}
                             placeholder="0 = bodyweight"
                             placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
+                            {...NUMERIC_NEXT_PROPS}
+                            onSubmitEditing={() => setInputRefs.current[`${set.id}:reps`]?.focus()}
                           />
                           {err.weight ? <Text style={styles.errorText}>{err.weight}</Text> : null}
                         </View>
                         <View style={styles.inputGroup}>
                           <Text style={styles.label}>Reps</Text>
                           <TextInput
+                            ref={(node) => {
+                              setInputRefs.current[`${set.id}:reps`] = node;
+                            }}
                             style={[styles.input, err.reps && styles.inputError]}
                             value={set.reps}
                             onChangeText={(v) => updateSet(set.id, 'reps', v)}
                             placeholder={`${REPS_MIN}+`}
                             placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
+                            {...(hasRestAfter ? NUMERIC_NEXT_PROPS : NUMERIC_DONE_PROPS)}
+                            onSubmitEditing={() => {
+                              if (hasRestAfter) {
+                                setInputRefs.current[`${set.id}:rest`]?.focus();
+                              } else {
+                                Keyboard.dismiss();
+                              }
+                            }}
                           />
                           {err.reps ? <Text style={styles.errorText}>{err.reps}</Text> : null}
                         </View>
@@ -1127,12 +1158,17 @@ export default function AddExerciseEditScreen() {
                   <View style={styles.restSection}>
                     <Text style={styles.label}>Rest after set {set.set_number} (sec)</Text>
                     <TextInput
+                      ref={(node) => {
+                        setInputRefs.current[`${set.id}:rest`] = node;
+                      }}
                       style={[styles.input, err.rest_sec && styles.inputError]}
                       value={set.rest_sec}
                       onChangeText={(v) => updateSet(set.id, 'rest_sec', v)}
                       placeholder={`${REST_MIN}–${REST_MAX}`}
                       placeholderTextColor={colors.textMuted}
                       keyboardType="numeric"
+                      {...NUMERIC_DONE_PROPS}
+                      onSubmitEditing={Keyboard.dismiss}
                     />
                     {err.rest_sec ? <Text style={styles.errorText}>{err.rest_sec}</Text> : null}
                   </View>
