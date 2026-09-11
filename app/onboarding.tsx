@@ -195,7 +195,7 @@ export default function Onboarding() {
             profile.ai_coach_day_focus,
           ),
         );
-        setEquipment(profile.equipment_access || []);
+        setEquipment((profile.equipment_access || []).slice(0, 1));
         setProfile(profile);
       }
     } catch (error) {
@@ -206,15 +206,6 @@ export default function Onboarding() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const toggleEquipment = (value: string) => {
-    setEquipment((prev) => {
-      if (prev.includes(value)) {
-        return prev.filter((v) => v !== value);
-      }
-      return [...prev, value];
-    });
   };
 
   const handleDaysPerWeekSliderChange = (value: number) => {
@@ -278,7 +269,7 @@ export default function Onboarding() {
         errors.preferredSplit = 'Pick a split or describe your own.';
       }
     } else if (step === 7) {
-      if (!equipment.length) errors.equipment = 'Select at least one option.';
+      if (equipment.length !== 1) errors.equipment = 'Select an option.';
     }
 
     setFieldErrors(errors);
@@ -786,7 +777,7 @@ export default function Onboarding() {
             <TouchableOpacity
               key={option.value}
               style={[styles.optionRow, selected && styles.optionRowSelected]}
-              onPress={() => toggleEquipment(option.value)}
+              onPress={() => setEquipment([option.value])}
             >
               <Text style={[styles.optionRowText, selected && styles.optionRowTextSelected]}>
                 {option.label}

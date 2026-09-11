@@ -1,6 +1,6 @@
 # Implementation Status
 
-**Last Updated**: 2026-09-03  
+**Last Updated**: 2026-09-11  
 
 ## Summary
 
@@ -58,7 +58,7 @@
 | Imperial/metric toggle | ✅ Complete | Persisted in profile |
 | Experience level | ✅ Complete | Beginner/Intermediate/Advanced |
 | Days per week | ✅ Complete | 2-7 days |
-| Equipment access | ✅ Complete | Multi-select chips |
+| Equipment access | ✅ Complete | Single-select (radio); stored as one-element `equipment_access[]` |
 | Template creation | ✅ Complete | Auto-creates on completion |
 | 7-day week setup | ✅ Complete | Ensures all weekdays exist |
 | Validation | ✅ Complete | Required fields enforced |
@@ -286,6 +286,9 @@
    - **Future**: Add daily stress cache rebuild job if needed
 
 ## Completed Features (Recent)
+
+### Equipment access single-select (2026-09-11)
+- ✅ Onboarding and Edit Profile treat equipment as one choice stored as `[selected]` in `equipment_access[]`; existing multi-value profiles show the first option on edit.
 
 ### Leftover prelaunch fixes (2026-09-03)
 - ✅ Adductors heatmap λ `0.060` on client matches `update-muscle-freshness` (`b1f948f`)

@@ -2,7 +2,7 @@
 
 **Purpose**: Document how components, queries, and stores connect. Show critical user flows end-to-end.
 
-**Last Updated**: 2026-09-03
+**Last Updated**: 2026-09-11
 
 ## Query → Store → Component Patterns
 
@@ -164,7 +164,13 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
      - days_per_week (chips)
    
    Step 3: Equipment
-     - equipment_access[] (multi-select chips)
+     - equipment_access (single choice stored as a one-element string[]: [selected])
+       Options: Full gym, Dumbbells, Bands, Bodyweight only. Onboarding uses
+       option-row radio (pressing another replaces; pressing the selected row
+       keeps it). Edit Profile chips match session-length single-select:
+       onPress sets equipment to [option]. Column type stays string[]; UI
+       never stores more than one value. Existing multi-value profiles show
+       the first option selected; save writes one. No DB migration.
    
    Submit:
      └→ createUserProfile(userId, profileData)

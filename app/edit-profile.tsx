@@ -155,7 +155,7 @@ export default function EditProfileScreen() {
         setWorkoutDays(p.workout_days ?? []);
         setPreferredSplit(p.preferred_training_style ?? null);
         setUseImperial(p.use_imperial ?? true);
-        setEquipment(p.equipment_access ?? []);
+        setEquipment((p.equipment_access ?? []).slice(0, 1));
         setAiCoachEnabled(p.ai_coach_enabled ?? false);
         setSessionMinutes(clampCoachSessionMinutes(p.ai_coach_session_minutes));
         setExercisesPerSession(clampCoachExercisesPerSession(p.ai_coach_exercises_per_session));
@@ -675,11 +675,7 @@ export default function EditProfileScreen() {
                   key={option}
                   label={option}
                   selected={selected}
-                  onPress={() =>
-                    setEquipment((prev) =>
-                      prev.includes(option) ? prev.filter((v) => v !== option) : [...prev, option]
-                    )
-                  }
+                  onPress={() => setEquipment([option])}
                 />
               );
             })}

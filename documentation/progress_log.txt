@@ -5,6 +5,16 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - Equipment access is single-select
+------------------------------------------------------------------------
+- Product: users must pick one of Full gym, Dumbbells, Bands, or Bodyweight only — not Full Gym AND Bodyweight Only.
+- Onboarding (`app/onboarding.tsx`): equipment option rows now replace like experience (`setEquipment([value])`); pressing a selected row keeps it. Validation requires exactly one option (`Select an option.`).
+- Edit Profile (`app/edit-profile.tsx`): equipment chips match session-length single-select (`setEquipment([option])`). Workout-day chips stay multi-select.
+- Column `equipment_access` remains `string[]` and stores exactly one value, e.g. `[selected]`. Existing multi-value profiles show the first option selected; save writes one. No DB migration. Chip stays `accessibilityRole="button"`.
+- Docs: `documentation/DATA_FLOWS.md`, `documentation/IMPLEMENTATION_STATUS.md`.
+
+---
+
 2026-09-03 - AI generate ecosystem check (fatigue, weight, PRs, progress, edits)
 --------------------------------------------------------------------------------
 - Fatigue: generate-workout still queries `v2_muscle_freshness` (48h) and puts it in the prompt. Independent of the focus catalog filter. Test user has 28 freshness rows; none in the last 48h (last trained 2026-01-31), so generate correctly sees `{}`.
