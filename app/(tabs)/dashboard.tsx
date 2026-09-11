@@ -85,7 +85,8 @@ export default function DashboardTab() {
           invalidateProfileCache(userId);
           setWeightRefreshKey((k) => k + 1);
           const updatedProfile = await getUserProfileCached(userId);
-          if (updatedProfile) setProfile(updatedProfile);
+          const storeId = useUserStore.getState().profile?.id;
+          if (updatedProfile && storeId === updatedProfile.id) setProfile(updatedProfile);
         }
         if (__DEV__) {
           devLog('profile-dashboard', {
@@ -149,7 +150,8 @@ export default function DashboardTab() {
       let userProfile = profile;
       if (!userProfile) {
         userProfile = await getUserProfileCached(userId);
-        if (userProfile) setProfile(userProfile);
+        const storeId = useUserStore.getState().profile?.id;
+        if (userProfile && storeId === userProfile.id) setProfile(userProfile);
       }
       const targetDays = userProfile?.days_per_week ?? 0;
 

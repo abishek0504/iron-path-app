@@ -19,7 +19,8 @@ import { useTourStore } from "../../src/stores/tourStore";
 import { useUserStore } from "../../src/stores/userStore";
 import { TourTarget } from "../../src/components/tour/TourTarget";
 import { syncSessionAuthToWatch } from "../../src/lib/watch/syncWatchAuth";
-import { signOutAndClearLocalState, clearLocalAuthState } from "../../src/lib/auth/signOutAndClear";
+import { signOutAndClearLocalState, clearLocalAuthState, consumeExplicitLogout } from "../../src/lib/auth/signOutAndClear";
+import { devLog } from "../../src/lib/utils/logger";
 
 const CustomTabBar = (props: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
@@ -160,6 +161,8 @@ const CustomTabBar = (props: BottomTabBarProps) => {
  * - Lifetime: subscribes to auth state and redirects on sign-out / user-deleted events
  *   so background sign-outs (token revocation, password change, account deletion) drop
  *   the user back to the unauthenticated entry point instead of stranding them on a tab.
+ * - Explicit Settings logout sets beginExplicitLogout() and navigates after the sheet
+ *   closes; this guard still clears local auth but skips router.replace to avoid dual nav.
  */
 function useSessionGuard(): { ready: boolean; authenticated: boolean } {
   const router = useRouter();
@@ -225,6 +228,12 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
         setAuthenticated(false);
         void clearLocalAuthState();
+        if (consumeExplicitLogout()) {
+          if (__DEV__) {
+            devLog('session-guard', { event, skippedReplace: true });
+          }
+          return;
+        }
         router.replace('/get-started');
       } else if (event === 'SIGNED_IN' && session) {
         setAuthenticated(true);

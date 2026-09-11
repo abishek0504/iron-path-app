@@ -32,8 +32,13 @@ import {
 } from '../../lib/subscriptions/proCopy';
 import { useTourStore } from '../../stores/tourStore';
 import { setPendingAppTour } from '../../lib/onboarding/tourBridge';
-import { signOutAndClearLocalState } from '../../lib/auth/signOutAndClear';
+import {
+  beginExplicitLogout,
+  consumeExplicitLogout,
+  signOutAndClearLocalState,
+} from '../../lib/auth/signOutAndClear';
 import { clearUserWeeklyPlan } from '../../lib/planner/clearWeeklyPlan';
+import { devLog } from '../../lib/utils/logger';
 
 interface SettingsMenuProps {
   onClose?: () => void;
@@ -92,17 +97,30 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
     await restoreSubscription();
   };
 
-  const handleLogout = async () => {
-    if (onClose) {
-      onClose();
-    }
-    const { error } = await signOutAndClearLocalState();
-    if (error) {
-      showToast('Unable to log out', 'error');
-      return;
-    }
-    showToast('Logged out', 'success');
-    router.replace('/login');
+  /** Close settings sheet first so sign-out + replace do not race RN Modal teardown. */
+  const handleLogout = () => {
+    runAfterBottomSheetClosed(() => {
+      void (async () => {
+        try {
+          if (__DEV__) {
+            devLog('auth', { action: 'explicitLogout', destination: '/get-started' });
+          }
+          beginExplicitLogout();
+          const { error } = await signOutAndClearLocalState();
+          if (error) {
+            consumeExplicitLogout();
+            showToast('Unable to log out', 'error');
+            return;
+          }
+          showToast('Logged out', 'success');
+          router.replace('/get-started');
+        } catch {
+          consumeExplicitLogout();
+          showToast('Unable to log out', 'error');
+        }
+      })();
+    });
+    onClose?.();
   };
 
   const handleClearPlan = async () => {
@@ -139,21 +157,36 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
         return;
       }
 
-      await signOutAndClearLocalState();
-      if (profile?.id) {
-        invalidateProfileCache(profile.id);
-      }
-
+      const profileId = profile?.id;
+      const graceDays = result.grace_days;
       setShowDeleteConfirm(false);
-      if (onClose) {
-        onClose();
-      }
-      showToast(
-        `Account scheduled for deletion in ${result.grace_days} days. Sign in before then to restore.`,
-        'success',
-      );
-      router.replace('/login');
+      runAfterBottomSheetClosed(() => {
+        void (async () => {
+          try {
+            beginExplicitLogout();
+            const { error: signOutError } = await signOutAndClearLocalState();
+            if (signOutError) {
+              consumeExplicitLogout();
+              showToast('Unable to delete account', 'error');
+              return;
+            }
+            if (profileId) {
+              invalidateProfileCache(profileId);
+            }
+            showToast(
+              `Account scheduled for deletion in ${graceDays} days. Sign in before then to restore.`,
+              'success',
+            );
+            router.replace('/login');
+          } catch {
+            consumeExplicitLogout();
+            showToast('Unable to delete account', 'error');
+          }
+        })();
+      });
+      onClose?.();
     } catch {
+      consumeExplicitLogout();
       showToast('Unable to delete account', 'error');
     } finally {
       setIsDeleting(false);

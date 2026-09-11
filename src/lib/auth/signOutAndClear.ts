@@ -13,6 +13,24 @@ import { syncSessionAuthToWatch } from '../watch/syncWatchAuth';
 import { logOutRevenueCat } from '../subscriptions/revenueCat';
 import { devLog } from '../utils/logger';
 
+/**
+ * Settings (and delete-account) set this before signOut so tab useSessionGuard
+ * does not router.replace while the caller is already navigating after the sheet closes.
+ * Background SIGNED_OUT (token revoke) leaves the flag false and still replaces.
+ */
+let explicitLogoutPending = false;
+
+export function beginExplicitLogout(): void {
+  explicitLogoutPending = true;
+}
+
+/** Returns true if an explicit logout is navigating; clears the flag either way. */
+export function consumeExplicitLogout(): boolean {
+  const pending = explicitLogoutPending;
+  explicitLogoutPending = false;
+  return pending;
+}
+
 /** Wipe profile, caches, pending AI work, watch auth, and RevenueCat. Session may already be gone. */
 export async function clearLocalAuthState(): Promise<void> {
   const userId = useUserStore.getState().profile?.id;
@@ -32,10 +50,18 @@ export async function clearLocalAuthState(): Promise<void> {
 
 /** Sign out remotely, then clear local state. Does not clear local state if sign-out fails. */
 export async function signOutAndClearLocalState(): Promise<{ error: Error | null }> {
-  const { error } = await supabase.auth.signOut();
-  if (error) {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      return { error };
+    }
+    await clearLocalAuthState();
+    return { error: null };
+  } catch (thrown) {
+    const error = thrown instanceof Error ? thrown : new Error(String(thrown));
+    if (__DEV__) {
+      devLog('auth', { action: 'signOutAndClearLocalState', threw: true });
+    }
     return { error };
   }
-  await clearLocalAuthState();
-  return { error: null };
 }

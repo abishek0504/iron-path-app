@@ -5,6 +5,15 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - Settings Log Out: wait for sheet close, land on /get-started
+------------------------------------------------------------------------
+- Bug: Settings → Log Out hit RootErrorBoundary ("Something went wrong"). handleLogout called onClose then immediately signOut + replace('/login') while the RN Modal was still animating. Tab useSessionGuard on SIGNED_OUT concurrently replaced to /get-started and mounted AuthVideoBackground. Dual navigation + Modal teardown crashed.
+- Fix: Settings queues logout with runAfterBottomSheetClosed (same as paywall), then onClose. After the sheet is closed: beginExplicitLogout, signOutAndClearLocalState (try/catch), toast, router.replace('/get-started'). Session guard still clears auth on SIGNED_OUT but skips replace when consumeExplicitLogout() is true. Flag cleared on logout error. Dashboard ignores setProfile after logout when store profile is null or id mismatches.
+- Delete-account still goes to /login (grace-period restore) but also waits for the sheet to close.
+- Plan: documentation/PLAN_2026-09-11_logout_modal_race.md.
+
+---
+
 2026-09-11 - Active workout: Complete Set pinned as footer
 ---------------------------------------------------------
 - Complete Set sat at the bottom of a ScrollView under a 42px (`3xl`) two-line title, target card, and RPE slider, so every set required a scroll on small phones.

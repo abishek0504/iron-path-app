@@ -295,6 +295,9 @@
 
 ## Completed Features (Recent)
 
+### Settings logout Modal race (2026-09-11)
+- ✅ Settings Log Out waits for the settings sheet to close, then signs out and `replace('/get-started')`. Tab session guard skips a second replace when an explicit logout is already navigating (avoids RootErrorBoundary during RN Modal teardown).
+
 ### Active workout Complete Set visibility (2026-09-11)
 - ✅ Execution Complete Set / timed Continue is pinned below the ScrollView as a footer; exercise title uses `xl` + 1-line ellipsis. Logging Save & Continue and Finish Workout stay in-scroll.
 

@@ -409,6 +409,18 @@ const hasActiveWorkout =
 5. Else → /(tabs) (main app)
 ```
 
+**Tab session guard** (`app/(tabs)/_layout.tsx` `useSessionGuard`):
+- Initial mount: no session → `router.replace('/get-started')`
+- Auth `SIGNED_OUT` / empty `TOKEN_REFRESHED`: `setAuthenticated(false)`, `clearLocalAuthState()`
+- Background sign-out (token revoke, password change): also `router.replace('/get-started')`
+- Explicit Settings logout: `beginExplicitLogout()` in `src/lib/auth/signOutAndClear.ts` before `signOut`. The guard `consumeExplicitLogout()` and **skips** replace; Settings navigates after the sheet has fully closed. Dual `router.replace` during RN Modal teardown (~280ms) previously crashed into `RootErrorBoundary` ("Something went wrong") while `AuthVideoBackground` mounted.
+
+**Settings logout** (`src/components/settings/SettingsMenu.tsx`):
+- Same close-then-act pattern as paywall: `runAfterBottomSheetClosed(...)` then `onClose?.()`
+- After the sheet is closed: `signOutAndClearLocalState()`, toast, `router.replace('/get-started')` (no session → landing, not `/login`)
+- Do not navigate while the settings Modal is still animating out
+- Delete-account still goes to `/login` (grace-period restore) but also waits for the sheet to close and sets the explicit-logout flag so the session guard does not dual-nav
+
 **Onboarding Gate**:
 - Required fields: `first_name`, `date_of_birth`, `current_weight`, `use_imperial`, `experience_level`, `days_per_week`, `equipment_access[]`
 - Multi-step flow (3 steps)
@@ -449,6 +461,7 @@ try {
 - **Inline errors**: Auth screens (red text below input)
 - **Toast notifications**: CRUD operations (success/error/info)
 - **Empty states**: No data scenarios (helpful messaging)
+- **RootErrorBoundary** (`src/components/ui/RootErrorBoundary.tsx`, wraps the tree in `app/_layout.tsx`): uncaught render errors show "Something went wrong" + Try again, and report to Sentry. Settings logout used to hit this when dual navigation raced RN Modal teardown; logout now waits for the sheet to close and the session guard skips a second `replace`.
 
 **Example:**
 ```typescript

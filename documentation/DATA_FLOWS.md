@@ -192,6 +192,33 @@ Active workout and exercise selection use **local state** (no workoutStore or ex
    └→ Display weekly plan
 ```
 
+### Flow 1b: Settings Log Out
+
+```
+1. User opens Settings (settingsMenu bottom sheet) → Log Out
+   └→ runAfterBottomSheetClosed(signOut + replace) then onClose()
+       (same pattern as paywall: do not navigate while the RN Modal is animating ~280ms)
+
+2. After onBottomSheetClosed:
+   └→ beginExplicitLogout()  (src/lib/auth/signOutAndClear.ts)
+   └→ signOutAndClearLocalState()
+       └→ supabase.auth.signOut() (try/catch; does not clear local state if sign-out fails)
+       └→ clearLocalAuthState() (profile, caches, watch, RevenueCat)
+
+3. Tab useSessionGuard on SIGNED_OUT:
+   └→ setAuthenticated(false) + clearLocalAuthState()
+   └→ If consumeExplicitLogout() → skip router.replace (Settings owns navigation)
+   └→ Else (background token revoke) → router.replace('/get-started')
+
+4. Settings on success:
+   └→ toast "Logged out"
+   └→ router.replace('/get-started')  (no session → landing; not /login)
+
+5. On sign-out error:
+   └→ consumeExplicitLogout() so a later SIGNED_OUT is not swallowed
+   └→ toast "Unable to log out"; user stays on tabs
+```
+
 ### Flow 2: Start Workout → Complete → View Progress
 
 ```
@@ -552,6 +579,9 @@ onBottomSheetClosed()
   └→ If pendingBottomSheet exists:
       └→ Call openBottomSheet(pendingBottomSheet, pendingBottomSheetProps)
       └→ Clear pendingBottomSheet
+  └→ Else if pendingAfterClose exists (runAfterBottomSheetClosed):
+      └→ Run the queued action (paywall, logout signOut + replace('/get-started'), etc.)
+      └→ Settings logout and paywall must wait for this so navigation does not overlap Modal teardown
 ```
 
 ### Example: Sequential Sheet Opening
