@@ -5,6 +5,14 @@ This file tracks major milestones and progress.
 
 ---
 
+2026-09-11 - Paywall last-bullet overlap
+----------------------------------------
+- Paywall body (logo, headline, subhead, plans, `PRO_FEATURE_BULLETS`) now lives in a top-aligned ScrollView; CTA, disclosure, Restore, and LegalLinks stay pinned in a sibling footer.
+- Removed `justifyContent: 'center'` on the flex:1 body so bullets cannot paint through **Start 7-day free trial**. Scroll `paddingBottom` (`spacing.lg`) plus footer `paddingTop` (`spacing.md`) keep the last bullet (`Sets, reps, and loads from your history`) clear of the CTA.
+- File: `src/components/paywall/PaywallModal.tsx`. Copy and purchase/dismiss logic unchanged.
+
+---
+
 2026-09-11 - Equipment access is single-select
 ------------------------------------------------------------------------
 - Product: users must pick one of Full gym, Dumbbells, Bands, or Bodyweight only — not Full Gym AND Bodyweight Only.

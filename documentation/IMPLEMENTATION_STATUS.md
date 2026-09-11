@@ -274,6 +274,10 @@
 - ✅ **RevenueCat + App Store Connect setup** — products (`ironpath_pro_monthly`/`ironpath_pro_annual`), entitlement `Ironpath Pro`, default offering, webhook, and API keys configured (`eas.json` / env). See `SUBSCRIPTION_SETUP.md`.
 - ⛔ **Supabase leaked-password protection** — advisor WARN accepted as **permanently out of scope** (dashboard toggle unavailable / cannot enable). Do not treat as open work.
 
+### Resolved (verified 2026-09-11)
+
+- ✅ **Paywall last-bullet overlap** — body (logo, headline, plans, bullets) now scrolls above a pinned CTA/footer in `PaywallModal`; last Pro bullet no longer paints through **Start 7-day free trial**.
+
 ### Blocking submission (external, not code)
 
 1. **Sandbox purchase verify** — ensure App Store Connect Paid Apps agreement is **Active** (tax + banking, including Canada GST/HST Form 506 when required); confirm TestFlight paywall loads store packages (trial CTA enabled); complete sandbox purchase/restore. See `SUBSCRIPTION_SETUP.md`.
@@ -286,6 +290,9 @@
    - **Future**: Add daily stress cache rebuild job if needed
 
 ## Completed Features (Recent)
+
+### Paywall layout (2026-09-11)
+- ✅ Paywall last-bullet overlap: scrolling body + pinned footer in `PaywallModal` (no copy or purchase-logic change)
 
 ### Equipment access single-select (2026-09-11)
 - ✅ Onboarding and Edit Profile treat equipment as one choice stored as `[selected]` in `equipment_access[]`; existing multi-value profiles show the first option on edit.

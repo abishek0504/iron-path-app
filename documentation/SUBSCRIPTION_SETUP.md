@@ -144,13 +144,17 @@ After changing env vars or native deps, rebuild and reinstall on the test device
 | `No offerings` / empty plans | RevenueCat offering packages linked to products; API key matches iOS app; ASC Paid Apps Active |
 | Works in RC sandbox but profile still `free` | Webhook URL and Authorization header; `app_user_id` in RC matches Supabase auth user id |
 
+## Paywall UI layout
+
+`PaywallModal` (`src/components/paywall/PaywallModal.tsx`) is a full-screen modal. Close sits at the top. Logo, headline, subhead, plan radios, and feature bullets (`PRO_FEATURE_BULLETS` in `src/lib/subscriptions/proCopy.ts`) live in a top-aligned `ScrollView` so they cannot overflow onto the CTA. The footer (trial/subscribe button, price disclosure, Restore Purchases, `LegalLinks`) is a sibling below the scroll view and stays pinned to the bottom. Scroll content uses `paddingBottom: spacing.lg` and the footer uses `paddingTop: spacing.md` so the last bullet cannot paint through the CTA. Purchase logic, the 4s soft-dismiss delay (`SOFT_DISMISS_DELAY_MS`), and plan radio behavior are unchanged.
+
 ## Code map
 
 | File | Role |
 |------|------|
 | `src/lib/subscriptions/revenueCat.ts` | SDK configure, offerings, entitlement check |
 | `src/hooks/useSubscription.ts` | `isPro`, purchase, restore |
-| `src/components/paywall/PaywallModal.tsx` | Custom paywall UI |
+| `src/components/paywall/PaywallModal.tsx` | Custom paywall UI — scrolling body + pinned footer |
 | `src/components/paywall/PaywallProvider.tsx` | Global modal + triggers |
 | `src/lib/subscriptions/paywallTriggers.ts` | Session caps, cooldowns |
 | `supabase/functions/revenuecat-webhook/index.ts` | Sync entitlement → `v2_profiles` |

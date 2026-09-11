@@ -3,6 +3,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -191,7 +192,11 @@ export function PaywallModal({
           <View style={styles.closePlaceholder} />
         )}
 
-        <View style={styles.content}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+        >
           <IronPathLogo size={72} style={styles.logo} />
           <Text style={styles.headline}>{headline}</Text>
           <Text style={styles.subhead}>Cancel anytime</Text>
@@ -239,7 +244,7 @@ export function PaywallModal({
               </Text>
             ))}
           </View>
-        </View>
+        </ScrollView>
 
         <View style={styles.footer}>
           <Animated.View style={canDismiss ? ctaAnimatedStyle : undefined}>
@@ -348,8 +353,10 @@ function createStyles(colors: ThemeColors) {
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
+  },
+  contentContainer: {
     gap: spacing.md,
+    paddingBottom: spacing.lg,
   },
   logo: {
     alignSelf: 'center',
@@ -466,6 +473,7 @@ function createStyles(colors: ThemeColors) {
   },
   footer: {
     gap: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
   cta: {
