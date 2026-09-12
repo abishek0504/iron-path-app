@@ -2,7 +2,9 @@ import type { ImageSourcePropType } from 'react-native';
 
 // React Native requires static require() calls, so images are mapped explicitly
 // by master-exercise name rather than derived from slugs at runtime.
-const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
+type ExerciseImageSource = (() => ImageSourcePropType) | ImageSourcePropType;
+
+const EXERCISE_IMAGES: Record<string, ExerciseImageSource> = {
   "180-Degree Jump": () => require('../../assets/exercises/180-degree-jump.jpg'),
   "45-Degree Back Extension": () => require('../../assets/exercises/45-degree-back-extension.jpg'),
   "90/90 Hip Switch": () => require('../../assets/exercises/90-90-hip-switch.jpg'),
@@ -50,7 +52,7 @@ const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
   "Box Squat": () => require('../../assets/exercises/box-squat.jpg'),
   "Broad Jump": () => require('../../assets/exercises/broad-jump.jpg'),
   "Bulgarian Split Squat": () => require('../../assets/exercises/bulgarian-split-squat.jpg'),
-  Burpee: require('../../assets/exercises/burpee.jpg'),
+  Burpee: () => require('../../assets/exercises/burpee.jpg'),
   "Burpee Broad Jump": () => require('../../assets/exercises/burpee-broad-jump.jpg'),
   "Butterfly Stretch": () => require('../../assets/exercises/butterfly-stretch.jpg'),
   "Cable Crunch": () => require('../../assets/exercises/cable-crunch.jpg'),
@@ -91,7 +93,7 @@ const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
   "Countermovement Jump": () => require('../../assets/exercises/countermovement-jump.jpg'),
   "Cross-Body Shoulder Stretch": () => require('../../assets/exercises/cross-body-shoulder-stretch.jpg'),
   "Crucifix Hold": () => require('../../assets/exercises/crucifix-hold.jpg'),
-  Crunch: require('../../assets/exercises/crunch.jpg'),
+  Crunch: () => require('../../assets/exercises/crunch.jpg'),
   "Cuban Press": () => require('../../assets/exercises/cuban-press.jpg'),
   "Curtsy Lunge": () => require('../../assets/exercises/curtsy-lunge.jpg'),
   "Dead Bug": () => require('../../assets/exercises/dead-bug.jpg'),
@@ -106,7 +108,7 @@ const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
   "Depth Jump": () => require('../../assets/exercises/depth-jump.jpg'),
   "Depth Push-Up": () => require('../../assets/exercises/depth-push-up.jpg'),
   "Diamond Push Up": () => require('../../assets/exercises/diamond-push-up.jpg'),
-  Dip: require('../../assets/exercises/dip.jpg'),
+  Dip: () => require('../../assets/exercises/dip.jpg'),
   "Donkey Calf Raise": () => require('../../assets/exercises/donkey-calf-raise.jpg'),
   "Donkey Kick": () => require('../../assets/exercises/donkey-kick.jpg'),
   "Doorway Pec Stretch": () => require('../../assets/exercises/doorway-pec-stretch.jpg'),
@@ -123,7 +125,7 @@ const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
   "Dumbbell Squat": () => require('../../assets/exercises/dumbbell-squat.jpg'),
   "Dumbbell Thruster": () => require('../../assets/exercises/dumbbell-thruster.jpg'),
   "Dumbbell Tricep Kickback": () => require('../../assets/exercises/dumbbell-tricep-kickback.jpg'),
-  Elliptical: require('../../assets/exercises/elliptical.jpg'),
+  Elliptical: () => require('../../assets/exercises/elliptical.jpg'),
   "Explosive Pull-Up": () => require('../../assets/exercises/explosive-pull-up.jpg'),
   "EZ-Bar Curl": () => require('../../assets/exercises/ez-bar-curl.jpg'),
   "Face Pull": () => require('../../assets/exercises/face-pull.jpg'),
@@ -315,7 +317,7 @@ const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
   "Sissy Squat": () => require('../../assets/exercises/sissy-squat.jpg'),
   "Skater Bound": () => require('../../assets/exercises/skater-bound.jpg'),
   "Skin the Cat": () => require('../../assets/exercises/skin-the-cat.jpg'),
-  Skullcrusher: require('../../assets/exercises/skullcrusher.jpg'),
+  Skullcrusher: () => require('../../assets/exercises/skullcrusher.jpg'),
   "Sled Pull": () => require('../../assets/exercises/sled-pull.jpg'),
   "Sled Push": () => require('../../assets/exercises/sled-push.jpg'),
   "Smith Machine Squat": () => require('../../assets/exercises/smith-machine-squat.jpg'),
@@ -393,11 +395,17 @@ const EXERCISE_IMAGES: Record<string, () => ImageSourcePropType> = {
   "Zottman Curl": () => require('../../assets/exercises/zottman-curl.jpg'),
 };
 
+export function resolveExerciseImageSource(
+  loader: ExerciseImageSource | undefined,
+): ImageSourcePropType | null {
+  if (typeof loader === 'function') return loader();
+  return loader ?? null;
+}
+
 /**
  * Returns the bundled anatomical illustration for a master exercise,
  * or null for exercises without one (e.g. user custom exercises).
  */
 export function getExerciseImage(exerciseName: string): ImageSourcePropType | null {
-  const loader = EXERCISE_IMAGES[exerciseName];
-  return loader ? loader() : null;
+  return resolveExerciseImageSource(EXERCISE_IMAGES[exerciseName]);
 }

@@ -22,6 +22,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.alexpreo.ironpath",
       "buildNumber": "1",
+      "deploymentTarget": "16.2",
       "appleTeamId": "JWUD8ZKQLN",
       "entitlements": {
         "com.apple.security.application-groups": [
