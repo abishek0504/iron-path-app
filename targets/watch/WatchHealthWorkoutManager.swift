@@ -48,7 +48,11 @@ final class WatchHealthWorkoutManager: NSObject, ObservableObject {
 
         Task { @MainActor in
             do {
-                try await healthStore.requestAuthorization(toShare: [heartRateType], read: [heartRateType])
+                var shareTypes: Set<HKSampleType> = [heartRateType]
+                var readTypes: Set<HKObjectType> = [heartRateType]
+                shareTypes.insert(HKObjectType.workoutType())
+                readTypes.insert(HKObjectType.workoutType())
+                try await healthStore.requestAuthorization(toShare: shareTypes, read: readTypes)
 
                 let workoutSession = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
                 let workoutBuilder = workoutSession.associatedWorkoutBuilder()

@@ -357,7 +357,7 @@ export default function WorkoutTab() {
       setSessionsToday(sessionsForToday);
 
       // Which workout to show: preserve selection, select last (after Add Workout), or first incomplete
-      const firstIncomplete = sessionsForToday.findIndex((s) => s.status !== 'completed');
+      const firstIncomplete = sessionsForToday.findIndex((s) => s.status === 'active');
       const indexToUse =
         options?.selectLast && sessionsForToday.length > 0
           ? sessionsForToday.length - 1
@@ -704,7 +704,7 @@ export default function WorkoutTab() {
 
       if (borrowing) {
         const existingBorrowed = ensured.sessions.find(
-          (s) => planDayNamesMatch(s.day_name ?? '', selectedPlanDayName) && s.status !== 'completed',
+          (s) => planDayNamesMatch(s.day_name ?? '', selectedPlanDayName) && s.status === 'active',
         );
         if (existingBorrowed) {
           if (existingBorrowed.control_device === 'watch') {
@@ -754,9 +754,9 @@ export default function WorkoutTab() {
       }
 
       setSessionsToday(ensured.sessions);
-      const firstIncomplete = ensured.sessions.findIndex((s) => s.status !== 'completed');
-      const openIndex = firstIncomplete >= 0 ? firstIncomplete : 0;
-      const openSession = ensured.sessions[openIndex] ?? null;
+      const firstIncomplete = ensured.sessions.findIndex((s) => s.status === 'active');
+      const openIndex = firstIncomplete >= 0 ? firstIncomplete : -1;
+      const openSession = openIndex >= 0 ? ensured.sessions[openIndex] ?? null : null;
 
       if (!openSession) {
         toast.error(

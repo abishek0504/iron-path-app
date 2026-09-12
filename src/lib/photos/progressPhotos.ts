@@ -1,5 +1,6 @@
 /**
- * Progress photo list / upload / delete against v2_progress_photos + avatars bucket.
+ * Progress photo list / upload / delete against v2_progress_photos
+ * and a private storage bucket. Display URLs are short-lived signed URLs.
  */
 
 import { supabase } from '../supabase/client';
@@ -15,11 +16,23 @@ export type ProgressPhoto = {
   public_url: string;
 };
 
-const AVATARS_BUCKET = 'avatars';
+const PROGRESS_PHOTOS_BUCKET = 'progress-photos';
+const SIGNED_URL_TTL_SEC = 60 * 60;
 
-function publicUrlFor(storagePath: string): string {
-  const { data } = supabase.storage.from(AVATARS_BUCKET).getPublicUrl(storagePath);
-  return data.publicUrl;
+async function signedUrlFor(storagePath: string): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from(PROGRESS_PHOTOS_BUCKET)
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    if (__DEV__) {
+      devError('progress-photos', error ?? new Error('signed url failed'), {
+        action: 'signed_url',
+        storagePath,
+      });
+    }
+    return '';
+  }
+  return data.signedUrl;
 }
 
 export async function listProgressPhotos(userId: string): Promise<ProgressPhoto[]> {
@@ -40,10 +53,12 @@ export async function listProgressPhotos(userId: string): Promise<ProgressPhoto[
     return [];
   }
 
-  return (data ?? []).map((row) => ({
-    ...row,
-    public_url: publicUrlFor(row.storage_path),
-  }));
+  return Promise.all(
+    (data ?? []).map(async (row) => ({
+      ...row,
+      public_url: await signedUrlFor(row.storage_path),
+    })),
+  );
 }
 
 export async function uploadProgressPhoto(
@@ -62,7 +77,7 @@ export async function uploadProgressPhoto(
     const response = await fetch(localUri);
     const body = await response.arrayBuffer();
     const { error: uploadError } = await supabase.storage
-      .from(AVATARS_BUCKET)
+      .from(PROGRESS_PHOTOS_BUCKET)
       .upload(storagePath, body, {
         contentType: 'image/jpeg',
         upsert: false,
@@ -94,13 +109,13 @@ export async function uploadProgressPhoto(
           storagePath,
         });
       }
-      await supabase.storage.from(AVATARS_BUCKET).remove([storagePath]);
+      await supabase.storage.from(PROGRESS_PHOTOS_BUCKET).remove([storagePath]);
       return null;
     }
 
     return {
       ...data,
-      public_url: publicUrlFor(data.storage_path),
+      public_url: await signedUrlFor(data.storage_path),
     };
   } catch (error) {
     if (__DEV__) {
@@ -119,7 +134,7 @@ export async function deleteProgressPhoto(
   }
 
   const { error: storageError } = await supabase.storage
-    .from(AVATARS_BUCKET)
+    .from(PROGRESS_PHOTOS_BUCKET)
     .remove([photo.storage_path]);
   if (storageError && __DEV__) {
     devError('progress-photos', storageError, { action: 'storage_delete', path: photo.storage_path });

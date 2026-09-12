@@ -75,6 +75,14 @@
             ]
           },
           {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypePhotosorVideos",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
             "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCrashData",
             "NSPrivacyCollectedDataTypeLinked": false,
             "NSPrivacyCollectedDataTypeTracking": false,
@@ -192,6 +200,13 @@
       ],
       "expo-secure-store",
       "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "IronPath uses your photo library to add progress photos.",
+          "cameraPermission": "IronPath uses the camera to take progress photos."
+        }
+      ],
       "./plugins/withIosDependencyWarnings.js",
       "./plugins/withXcodeShellScriptPhases.js",
       "./plugins/withAutomaticCodeSigning.js",
@@ -213,6 +228,15 @@
                   "targetName": "IronPathWatch",
                   "entitlements": {
                     "com.apple.developer.healthkit": true,
+                    "com.apple.security.application-groups": [
+                      "group.com.alexpreo.ironpath.shared"
+                    ]
+                  }
+                },
+                {
+                  "bundleIdentifier": "com.alexpreo.ironpath.liveactivity",
+                  "targetName": "IronPathLiveActivity",
+                  "entitlements": {
                     "com.apple.security.application-groups": [
                       "group.com.alexpreo.ironpath.shared"
                     ]

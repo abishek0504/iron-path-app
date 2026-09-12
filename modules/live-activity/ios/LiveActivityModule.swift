@@ -16,6 +16,9 @@ public class LiveActivityModule: Module {
     AsyncFunction("startRestLiveActivity") { (endsAtEpoch: Double) in
       #if canImport(ActivityKit)
       if #available(iOS 16.2, *) {
+        for activity in Activity<RestTimerAttributes>.activities {
+          await activity.end(nil, dismissalPolicy: .immediate)
+        }
         let attributes = RestTimerAttributes(title: "Rest")
         let state = RestTimerAttributes.ContentState(endsAtEpoch: endsAtEpoch)
         let staleDate = Date(timeIntervalSince1970: endsAtEpoch)

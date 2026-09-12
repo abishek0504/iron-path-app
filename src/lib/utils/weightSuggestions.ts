@@ -19,6 +19,7 @@ import {
   roundLiftWeight,
   weightUnitLabel,
 } from './units';
+import { BODYWEIGHT_LOAD_LABEL, canProgressAddedLoad } from '../workout/addedLoad';
 
 interface WeightSuggestion {
   weight?: number;
@@ -78,7 +79,13 @@ export async function calculateWeightSuggestion(
 
     if (mode === 'reps') {
       // Progressive overload: if last time hit target reps cleanly, suggest plate step up
-      if (recentSet.reps && targetReps && recentSet.reps >= targetReps && recentSet.weight) {
+      if (
+        recentSet.reps &&
+        targetReps &&
+        recentSet.reps >= targetReps &&
+        recentSet.weight != null &&
+        canProgressAddedLoad(recentSet.weight)
+      ) {
         const increment = plateWeightIncrement(recentSet.weight, useImperial);
         return {
           weight: roundLiftWeight(recentSet.weight + increment, useImperial),
@@ -88,8 +95,8 @@ export async function calculateWeightSuggestion(
         };
       }
 
-      // Otherwise, use last successful weight
-      if (recentSet.weight && recentSet.reps) {
+      // Otherwise, use last successful weight (0 is bodyweight, not missing)
+      if (recentSet.weight != null && recentSet.reps) {
         return {
           weight: recentSet.weight,
           reps: targetReps || recentSet.reps,
@@ -170,6 +177,7 @@ export function formatWeightSuggestion(
   useImperial: boolean
 ): string {
   if (typeof suggestion.weight === 'number') {
+    if (suggestion.weight === 0) return BODYWEIGHT_LOAD_LABEL;
     return `${suggestion.weight} ${weightUnitLabel(useImperial)}`;
   }
 

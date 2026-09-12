@@ -8,8 +8,8 @@ const STORAGE_KEY = 'ironpath.offline_set_queue.v1';
 export interface QueuedSetWrite {
   setId: string;
   values: {
-    reps?: number;
-    weight?: number;
+    reps?: number | null;
+    weight?: number | null;
     duration_sec?: number;
     rpe?: number | null;
     rir?: number | null;

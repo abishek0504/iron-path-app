@@ -6,7 +6,5 @@
     <array>
       <string>group.com.alexpreo.ironpath.shared</string>
     </array>
-    <key>NSSupportsLiveActivities</key>
-    <true/>
   </dict>
 </plist>

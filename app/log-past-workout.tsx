@@ -36,6 +36,7 @@ import { invalidateSessionsInRangeForUser } from '../src/lib/cache/sessionsCache
 import { invalidateWorkoutStatsCache } from '../src/lib/cache/dashboardStatsCache';
 import type { Exercise } from '../src/types/exercisePicker';
 import { NUMERIC_DONE_PROPS, NUMERIC_NEXT_PROPS } from '../src/lib/constants/numericKeyboard';
+import { BodyweightLoadToggle } from '../src/components/workout/BodyweightLoadToggle';
 
 const REPS_MIN = 1;
 const DURATION_MIN = 5;
@@ -470,14 +471,14 @@ export default function LogPastWorkoutScreen() {
                         <>
                           <View style={styles.inputGroup}>
                             <Text style={styles.label}>Weight</Text>
-                            <TextInput
-                              ref={(node) => {
+                            <BodyweightLoadToggle
+                              inputRef={(node) => {
                                 setInputRefs.current[`${inputKey}:weight`] = node;
                               }}
-                              style={[styles.input, err.weight && styles.inputError]}
                               value={set.weight}
-                              onChangeText={(v) => updateSet(ex.key, set.id, 'weight', v)}
-                              placeholder="0 = bodyweight"
+                              onChange={(v) => updateSet(ex.key, set.id, 'weight', v)}
+                              inputStyle={[styles.input, err.weight && styles.inputError]}
+                              placeholder="Added"
                               placeholderTextColor={colors.textMuted}
                               keyboardType="numeric"
                               {...NUMERIC_NEXT_PROPS}

@@ -150,47 +150,43 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({ onClose }) => {
   const handleDeleteAccount = async () => {
     if (isDeleting) return;
     setIsDeleting(true);
-    try {
-      const result = await requestAccountDeletion();
-      if (!result.success) {
-        showToast(result.error || 'Unable to delete account', 'error');
-        return;
-      }
+    beginExplicitLogout();
+    setShowDeleteConfirm(false);
+    onClose?.();
+    runAfterBottomSheetClosed(() => {
+      void (async () => {
+        try {
+          const result = await requestAccountDeletion();
+          if (!result.success) {
+            consumeExplicitLogout();
+            showToast(result.error || 'Unable to delete account', 'error');
+            return;
+          }
 
-      const profileId = profile?.id;
-      const graceDays = result.grace_days;
-      setShowDeleteConfirm(false);
-      runAfterBottomSheetClosed(() => {
-        void (async () => {
-          try {
-            beginExplicitLogout();
-            const { error: signOutError } = await signOutAndClearLocalState();
-            if (signOutError) {
-              consumeExplicitLogout();
-              showToast('Unable to delete account', 'error');
-              return;
-            }
-            if (profileId) {
-              invalidateProfileCache(profileId);
-            }
-            showToast(
-              `Account scheduled for deletion in ${graceDays} days. Sign in before then to restore.`,
-              'success',
-            );
-            router.replace('/login');
-          } catch {
+          const profileId = profile?.id;
+          const graceDays = result.grace_days;
+          const { error: signOutError } = await signOutAndClearLocalState();
+          if (signOutError) {
             consumeExplicitLogout();
             showToast('Unable to delete account', 'error');
+            return;
           }
-        })();
-      });
-      onClose?.();
-    } catch {
-      consumeExplicitLogout();
-      showToast('Unable to delete account', 'error');
-    } finally {
-      setIsDeleting(false);
-    }
+          if (profileId) {
+            invalidateProfileCache(profileId);
+          }
+          showToast(
+            `Account scheduled for deletion in ${graceDays} days. Sign in before then to restore.`,
+            'success',
+          );
+          router.replace('/login');
+        } catch {
+          consumeExplicitLogout();
+          showToast('Unable to delete account', 'error');
+        } finally {
+          setIsDeleting(false);
+        }
+      })();
+    });
   };
 
   const themeOption = THEME_OPTIONS.find((option) => option.id === themeMode) ?? THEME_OPTIONS[0];

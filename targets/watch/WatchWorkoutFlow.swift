@@ -42,6 +42,9 @@ enum WatchWorkoutFlow {
         case .reps:
             let reps = set.effectiveReps ?? 0
             if let weight = set.effectiveWeight {
+                if weight == 0 {
+                    return "Bodyweight × \(reps)"
+                }
                 let unit = useImperial ? "lbs" : "kg"
                 let weightText = weight == floor(weight) ? String(Int(weight)) : String(format: "%g", weight)
                 return "\(weightText) \(unit) × \(reps)"

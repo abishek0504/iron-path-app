@@ -14,9 +14,5 @@ module.exports = {
   frameworks: ['SwiftUI', 'WidgetKit', 'ActivityKit'],
   entitlements: {
     'com.apple.security.application-groups': ['group.com.alexpreo.ironpath.shared'],
-    NSSupportsLiveActivities: true,
-  },
-  infoPlist: {
-    NSSupportsLiveActivities: true,
   },
 };

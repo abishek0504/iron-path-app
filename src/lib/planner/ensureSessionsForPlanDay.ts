@@ -83,8 +83,9 @@ export async function ensureSessionsForPlanDay(
   let materialized = false;
 
   const suppressed = await isMaterializeSuppressed(userId, startIso);
+  const hasLiveOrCompleted = sessions.some((s) => s.status !== 'abandoned');
   const canMaterialize =
-    sessions.length === 0 &&
+    !hasLiveOrCompleted &&
     !skipMaterialize &&
     !suppressed &&
     !!templateId &&

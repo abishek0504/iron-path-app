@@ -743,7 +743,7 @@ export async function completeWorkoutSession(sessionId: string): Promise<boolean
     }
 
     if (!completed) {
-      return true;
+      return false;
     }
 
     // Fallback: call Edge Function directly (DB trigger may not be configured)
@@ -2209,8 +2209,8 @@ export async function prefillSessionSets(
 export async function markSetComplete(
   setId: string,
   values: {
-    reps?: number;
-    weight?: number;
+    reps?: number | null;
+    weight?: number | null;
     duration_sec?: number;
     rpe?: number;
     rir?: number;
@@ -2230,8 +2230,8 @@ export async function markSetComplete(
 
   try {
     const update: {
-      reps?: number;
-      weight?: number;
+      reps?: number | null;
+      weight?: number | null;
       duration_sec?: number;
       rpe?: number | null;
       rir?: number | null;

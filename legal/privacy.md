@@ -1,6 +1,6 @@
 # IronPath Privacy Policy
 
-**Effective date:** June 9, 2026
+**Effective date:** September 11, 2026
 
 IronPath ("the App", "we", "us") is a workout planning and tracking app for iPhone and Apple Watch. This policy explains what data we collect, why, and what control you have over it. Publish at: `https://tryironpath.com/privacy`.
 
@@ -14,6 +14,7 @@ IronPath ("the App", "we", "us") is a workout planning and tracking app for iPho
 - Identity details: first and last name, date of birth, and (optionally) gender. Date of birth is used to confirm you meet the minimum age and to tailor training recommendations.
 - Profile details: experience level, training goals, body weight, height, unit preference.
 - Workout data: planned routines, exercises, sets, reps, weights, durations, RPE/RIR ratings, personal records, exercise notes, and workout schedules.
+- Progress photos: images you take with the camera or pick from your photo library to track physique changes. These photos are stored privately in your account and are not used for advertising.
 
 ### Purchase data
 If you subscribe to IronPath Pro, we store your subscription status, plan tier, and expiry date, along with an identifier linking your account to your RevenueCat subscriber record. Payment details are handled entirely by Apple; **we never receive your payment card or Apple ID credentials.**
@@ -47,7 +48,7 @@ Your data is stored with Supabase (PostgreSQL) with row-level security: only you
 
 ## Data retention and account deletion
 
-You can delete your account in the App (Settings → Danger zone → Delete account). Deletion is scheduled immediately and your data is permanently purged from our systems after a grace period of 30 days. During that window you can cancel the deletion by signing back in, or by contacting us. When configured, we also request deletion of your RevenueCat subscriber record. Workouts and health samples written to Apple Health remain in Apple Health unless you remove them there. Deleting your account does not cancel an active subscription — cancel it in your Apple ID Account Settings.
+You can delete your account in the App (Settings → Danger zone → Delete account). Deletion is scheduled immediately and your data is permanently purged from our systems after a grace period of 30 days. During that window you can cancel the deletion by signing back in, or by contacting us. Progress photos stored for your account are purged with the rest of your data. When configured, we also request deletion of your RevenueCat subscriber record. Workouts and health samples written to Apple Health remain in Apple Health unless you remove them there. Deleting your account does not cancel an active subscription — cancel it in your Apple ID Account Settings.
 
 ## Third-party services
 

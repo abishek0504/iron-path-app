@@ -4,8 +4,7 @@
 
 import { createUserCustomExercise } from '../supabase/queries/customExerciseMutations';
 import { listMergedExercises, type MergedExercise } from '../supabase/queries/exercises';
-import { createWorkoutSession } from '../supabase/queries/workouts';
-import { supabase } from '../supabase/client';
+import { createBackloggedWorkout } from '../supabase/queries/workouts';
 import { convertLiftWeight } from '../utils/units';
 import { WEEK_DAYS } from '../utils/date';
 import { resolveUseImperial } from '../units/resolveImperial';
@@ -362,29 +361,21 @@ export async function importStrongHevyCsv(
 
   for (const workout of parsed.workouts) {
     const startedAt = workout.startedAt.toISOString();
-    const session = await createWorkoutSession(
-      userId,
-      undefined,
-      workout.dayName,
-      startedAt,
-      'manual',
-    );
-    if (!session) {
-      if (__DEV__) {
-        devError('csv-import', new Error('createWorkoutSession failed'), {
-          workoutName: workout.workoutName,
-          startedAt,
-        });
-      }
-      continue;
-    }
+    const backloggedExercises: {
+      exercise_id?: string;
+      custom_exercise_id?: string;
+      sets: {
+        reps: number | null;
+        weight: number | null;
+        duration_sec: number | null;
+        set_type: ParsedCsvSet['setType'];
+      }[];
+    }[] = [];
 
-    let sortOrder = 1;
-    let insertedSets = 0;
     for (const exercise of workout.exercises) {
       const matched = matchExercise(exercise.name, catalog);
-      let exerciseId: string | null = null;
-      let customExerciseId: string | null = null;
+      let exerciseId: string | undefined;
+      let customExerciseId: string | undefined;
       if (matched) {
         if (matched.source === 'custom') {
           customExerciseId = matched.id;
@@ -392,13 +383,14 @@ export async function importStrongHevyCsv(
           exerciseId = matched.id;
         }
       } else {
-        customExerciseId = await ensureCustomExercise(
+        const createdId = await ensureCustomExercise(
           userId,
           exercise.name,
           exercise.sets.length,
           customCache,
         );
-        if (customExerciseId) {
+        if (createdId) {
+          customExerciseId = createdId;
           result.unmatchedExercises += 1;
         }
       }
@@ -412,64 +404,44 @@ export async function importStrongHevyCsv(
         continue;
       }
 
-      const { data: sessionExercise, error: seError } = await supabase
-        .from('v2_session_exercises')
-        .insert({
-          session_id: session.id,
-          exercise_id: exerciseId,
-          custom_exercise_id: customExerciseId,
-          sort_order: sortOrder,
-        })
-        .select('id')
-        .single();
-      if (seError || !sessionExercise) {
-        if (__DEV__) {
-          devError('csv-import', seError ?? new Error('session exercise insert failed'), {
-            sessionId: session.id,
-            name: exercise.name,
-          });
-        }
-        continue;
-      }
-      sortOrder += 1;
-
-      const setRows = exercise.sets.map((set, index) => {
-        const fromImperial = set.weightIsImperial ?? storeImperial;
-        const weight =
-          set.weight == null
-            ? null
-            : convertLiftWeight(set.weight, { fromImperial, toImperial: storeImperial });
-        return {
-          session_exercise_id: sessionExercise.id,
-          set_number: set.setNumber > 0 ? set.setNumber : index + 1,
-          reps: set.reps,
-          weight,
-          duration_sec: set.durationSec,
-          set_type: set.setType,
-          performed_at: startedAt,
-        };
+      backloggedExercises.push({
+        exercise_id: exerciseId,
+        custom_exercise_id: customExerciseId,
+        sets: exercise.sets.map((set) => {
+          const fromImperial = set.weightIsImperial ?? storeImperial;
+          const weight =
+            set.weight == null
+              ? null
+              : convertLiftWeight(set.weight, { fromImperial, toImperial: storeImperial });
+          return {
+            reps: set.reps,
+            weight,
+            duration_sec: set.durationSec,
+            set_type: set.setType,
+          };
+        }),
       });
+    }
 
-      const { error: setsError } = await supabase.from('v2_session_sets').insert(setRows);
-      if (setsError) {
-        if (__DEV__) {
-          devError('csv-import', setsError, { sessionId: session.id, name: exercise.name });
-        }
-        continue;
+    if (backloggedExercises.length === 0) {
+      continue;
+    }
+
+    const sessionId = await createBackloggedWorkout(userId, {
+      performedAtIso: startedAt,
+      exercises: backloggedExercises,
+    });
+    if (!sessionId) {
+      if (__DEV__) {
+        devError('csv-import', new Error('createBackloggedWorkout failed'), {
+          workoutName: workout.workoutName,
+          startedAt,
+        });
       }
-      insertedSets += setRows.length;
+      continue;
     }
 
-    const completedAt = new Date(workout.startedAt.getTime() + 60 * 60 * 1000).toISOString();
-    const { error: completeError } = await supabase
-      .from('v2_workout_sessions')
-      .update({ status: 'completed', completed_at: completedAt })
-      .eq('id', session.id)
-      .eq('user_id', userId);
-    if (completeError && __DEV__) {
-      devError('csv-import', completeError, { action: 'complete_session', sessionId: session.id });
-    }
-
+    const insertedSets = backloggedExercises.reduce((sum, ex) => sum + ex.sets.length, 0);
     result.sessionCount += 1;
     result.setCount += insertedSets;
   }

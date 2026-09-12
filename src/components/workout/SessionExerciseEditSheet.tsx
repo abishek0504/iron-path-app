@@ -22,6 +22,7 @@ import {
   cycleSetType,
   suggestDropWeight,
 } from '../../lib/workout/setTypes';
+import { BodyweightLoadToggle } from './BodyweightLoadToggle';
 
 const REST_MIN = 0;
 const REST_MAX = 3600;
@@ -444,14 +445,14 @@ export const SessionExerciseEditSheet: React.FC<SessionExerciseEditSheetProps> =
                     <>
                       <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>Weight ({weightUnit})</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="0"
+                        <BodyweightLoadToggle
+                          value={set.weight === 0 ? '0' : set.weight?.toString() || ''}
+                          onChange={(value) => updateSet(set.id, 'weight', value)}
+                          inputStyle={styles.input}
+                          placeholder="Added"
                           placeholderTextColor={colors.textMuted}
                           keyboardType="numeric"
                           returnKeyType="next"
-                          value={set.weight?.toString() || ''}
-                          onChangeText={(value) => updateSet(set.id, 'weight', value)}
                         />
                       </View>
 

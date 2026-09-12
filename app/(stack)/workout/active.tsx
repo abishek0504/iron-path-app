@@ -152,8 +152,8 @@ interface Exercise {
 interface SetData {
   id: string;
   set_number: number;
-  reps?: number;
-  weight?: number;
+  reps?: number | null;
+  weight?: number | null;
   duration_sec?: number;
   rpe?: number;
   rir?: number;
@@ -964,7 +964,7 @@ export default function ActiveWorkoutScreen() {
       userId,
       firstSet.set_number,
       exercise.mode,
-      firstSet.reps,
+      firstSet.reps ?? undefined,
       firstSet.duration_sec,
       profile?.experience_level,
       resolveUseImperial(profile?.use_imperial)
@@ -1238,11 +1238,13 @@ export default function ActiveWorkoutScreen() {
               const weight =
                 draftedWeight != null
                   ? draftedWeight
-                  : currentSet.weight ?? 0;
+                  : currentSet.weight ?? null;
               const reps =
                 Number.isFinite(draftedReps) && draftedReps > 0
                   ? draftedReps
-                  : currentSet.reps || 0;
+                  : currentSet.reps != null && currentSet.reps > 0
+                    ? currentSet.reps
+                    : null;
               return markSetComplete(currentSet.id, {
                 weight,
                 reps,
@@ -1392,7 +1394,7 @@ export default function ActiveWorkoutScreen() {
           : { rpe: log.rpe ?? 7 };
       const payload = exercise.mode === 'reps'
         ? {
-            weight: parseAddedLoadInput(log.weight) ?? 0,
+            weight: parseAddedLoadInput(log.weight),
             reps: parseInt(log.reps),
             ...intensityWrite,
             set_type: log.setType,
@@ -1420,7 +1422,7 @@ export default function ActiveWorkoutScreen() {
               if (ex.mode === 'reps') {
                 return {
                   ...s,
-                  weight: parseAddedLoadInput(log.weight) ?? 0,
+                  weight: parseAddedLoadInput(log.weight),
                   reps: parseInt(log.reps),
                   ...(ex.is_stretch
                     ? {}

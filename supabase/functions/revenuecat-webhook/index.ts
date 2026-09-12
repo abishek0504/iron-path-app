@@ -129,15 +129,17 @@ Deno.serve(async (req) => {
   });
 
   if (event.id) {
-    const { error: eventInsertError } = await serviceClient
+    const { data: existingEvent, error: existingEventError } = await serviceClient
       .from('revenuecat_webhook_events')
-      .insert({ event_id: event.id, event_type: event.type });
-    if (eventInsertError) {
-      if (eventInsertError.code === '23505') {
-        return jsonResponse({ ok: true, duplicate: true }, 200);
-      }
-      console.error('revenuecat-webhook event insert failed', eventInsertError.message);
+      .select('event_id')
+      .eq('event_id', event.id)
+      .maybeSingle();
+    if (existingEventError) {
+      console.error('revenuecat-webhook event lookup failed', existingEventError.message);
       return jsonResponse({ error: 'Failed to record event' }, 500);
+    }
+    if (existingEvent) {
+      return jsonResponse({ ok: true, duplicate: true }, 200);
     }
   }
 
@@ -155,6 +157,16 @@ Deno.serve(async (req) => {
   if (error) {
     console.error('revenuecat-webhook update failed', error.message);
     return jsonResponse({ error: 'Failed to update profile' }, 500);
+  }
+
+  if (event.id) {
+    const { error: eventInsertError } = await serviceClient
+      .from('revenuecat_webhook_events')
+      .insert({ event_id: event.id, event_type: event.type });
+    if (eventInsertError && eventInsertError.code !== '23505') {
+      console.error('revenuecat-webhook event insert failed', eventInsertError.message);
+      return jsonResponse({ error: 'Failed to record event' }, 500);
+    }
   }
 
   return jsonResponse({ ok: true, tier }, 200);

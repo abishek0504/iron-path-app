@@ -10,10 +10,28 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.5"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
+      revenuecat_webhook_events: {
+        Row: {
+          event_id: string
+          event_type: string
+          processed_at: string
+        }
+        Insert: {
+          event_id: string
+          event_type: string
+          processed_at?: string
+        }
+        Update: {
+          event_id?: string
+          event_type?: string
+          processed_at?: string
+        }
+        Relationships: []
+      }
       v2_ai_generation_jobs: {
         Row: {
           constraints: Json
@@ -103,6 +121,7 @@ export type Database = {
           source: string
           template_id: string | null
           user_id: string
+          week_job_id: string | null
         }
         Insert: {
           created_at?: string
@@ -117,6 +136,7 @@ export type Database = {
           source: string
           template_id?: string | null
           user_id: string
+          week_job_id?: string | null
         }
         Update: {
           created_at?: string
@@ -131,6 +151,7 @@ export type Database = {
           source?: string
           template_id?: string | null
           user_id?: string
+          week_job_id?: string | null
         }
         Relationships: [
           {
@@ -145,6 +166,13 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "v2_workout_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "v2_ai_generations_week_job_id_fkey"
+            columns: ["week_job_id"]
+            isOneToOne: false
+            referencedRelation: "v2_ai_week_jobs"
             referencedColumns: ["id"]
           },
         ]
@@ -184,6 +212,65 @@ export type Database = {
           },
         ]
       }
+      v2_ai_week_jobs: {
+        Row: {
+          created_at: string
+          days_json: Json
+          error_code: string | null
+          expires_at: string
+          id: string
+          mode: string
+          model: string | null
+          sessions_json: Json | null
+          slots_created: number
+          status: string
+          template_id: string
+          updated_at: string
+          user_id: string
+          week_start_date: string
+        }
+        Insert: {
+          created_at?: string
+          days_json?: Json
+          error_code?: string | null
+          expires_at?: string
+          id: string
+          mode: string
+          model?: string | null
+          sessions_json?: Json | null
+          slots_created?: number
+          status?: string
+          template_id: string
+          updated_at?: string
+          user_id: string
+          week_start_date: string
+        }
+        Update: {
+          created_at?: string
+          days_json?: Json
+          error_code?: string | null
+          expires_at?: string
+          id?: string
+          mode?: string
+          model?: string | null
+          sessions_json?: Json | null
+          slots_created?: number
+          status?: string
+          template_id?: string
+          updated_at?: string
+          user_id?: string
+          week_start_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "v2_ai_week_jobs_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "v2_workout_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v2_daily_muscle_stress: {
         Row: {
           date: string
@@ -215,6 +302,42 @@ export type Database = {
             referencedColumns: ["key"]
           },
         ]
+      }
+      v2_daily_workout_stats: {
+        Row: {
+          active_duration_sec: number
+          avg_rpe: number | null
+          date: string
+          session_count: number
+          total_sets: number
+          total_volume_lbs: number
+          training_load: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_duration_sec?: number
+          avg_rpe?: number | null
+          date: string
+          session_count?: number
+          total_sets?: number
+          total_volume_lbs?: number
+          training_load?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_duration_sec?: number
+          avg_rpe?: number | null
+          date?: string
+          session_count?: number
+          total_sets?: number
+          total_volume_lbs?: number
+          training_load?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       v2_exercise_prescriptions: {
         Row: {
@@ -291,8 +414,8 @@ export type Database = {
         Row: {
           avg_time_per_set_sec: number
           created_at: string | null
-          density_score: number
           demo_video_url: string | null
+          density_score: number
           description: string | null
           equipment_needed: string[] | null
           id: string
@@ -311,8 +434,8 @@ export type Database = {
         Insert: {
           avg_time_per_set_sec: number
           created_at?: string | null
-          density_score: number
           demo_video_url?: string | null
+          density_score: number
           description?: string | null
           equipment_needed?: string[] | null
           id?: string
@@ -331,8 +454,8 @@ export type Database = {
         Update: {
           avg_time_per_set_sec?: number
           created_at?: string | null
-          density_score?: number
           demo_video_url?: string | null
+          density_score?: number
           description?: string | null
           equipment_needed?: string[] | null
           id?: string
@@ -435,7 +558,7 @@ export type Database = {
       }
       v2_profiles: {
         Row: {
-          ai_coach_day_focus: Record<string, string>
+          ai_coach_day_focus: Json
           ai_coach_enabled: boolean
           ai_coach_exercises_per_session: number
           ai_coach_notes: string | null
@@ -450,7 +573,7 @@ export type Database = {
           deleted_at: string | null
           equipment_access: string[] | null
           experience_level: string | null
-          first_name: string
+          first_name: string | null
           gender: string | null
           goal: string | null
           goal_weight: number | null
@@ -467,7 +590,7 @@ export type Database = {
           workout_days: string[] | null
         }
         Insert: {
-          ai_coach_day_focus?: Record<string, string>
+          ai_coach_day_focus?: Json
           ai_coach_enabled?: boolean
           ai_coach_exercises_per_session?: number
           ai_coach_notes?: string | null
@@ -482,7 +605,7 @@ export type Database = {
           deleted_at?: string | null
           equipment_access?: string[] | null
           experience_level?: string | null
-          first_name: string
+          first_name?: string | null
           gender?: string | null
           goal?: string | null
           goal_weight?: number | null
@@ -499,7 +622,7 @@ export type Database = {
           workout_days?: string[] | null
         }
         Update: {
-          ai_coach_day_focus?: Record<string, string>
+          ai_coach_day_focus?: Json
           ai_coach_enabled?: boolean
           ai_coach_exercises_per_session?: number
           ai_coach_notes?: string | null
@@ -514,7 +637,7 @@ export type Database = {
           deleted_at?: string | null
           equipment_access?: string[] | null
           experience_level?: string | null
-          first_name?: string
+          first_name?: string | null
           gender?: string | null
           goal?: string | null
           goal_weight?: number | null
@@ -529,6 +652,33 @@ export type Database = {
           updated_at?: string | null
           use_imperial?: boolean | null
           workout_days?: string[] | null
+        }
+        Relationships: []
+      }
+      v2_progress_photos: {
+        Row: {
+          captured_at: string
+          created_at: string | null
+          id: string
+          note: string | null
+          storage_path: string
+          user_id: string
+        }
+        Insert: {
+          captured_at?: string
+          created_at?: string | null
+          id?: string
+          note?: string | null
+          storage_path: string
+          user_id: string
+        }
+        Update: {
+          captured_at?: string
+          created_at?: string | null
+          id?: string
+          note?: string | null
+          storage_path?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -582,6 +732,59 @@ export type Database = {
             foreignKeyName: "v2_session_exercises_session_id_fkey"
             columns: ["session_id"]
             isOneToOne: false
+            referencedRelation: "v2_workout_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v2_session_health_metrics: {
+        Row: {
+          active_duration_sec: number | null
+          active_energy_kcal: number | null
+          avg_heart_rate_bpm: number | null
+          created_at: string
+          energy_source: string | null
+          heart_rate_sample_count: number
+          hk_energy_sample_uuid: string | null
+          max_heart_rate_bpm: number | null
+          session_id: string
+          total_volume_kg: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_duration_sec?: number | null
+          active_energy_kcal?: number | null
+          avg_heart_rate_bpm?: number | null
+          created_at?: string
+          energy_source?: string | null
+          heart_rate_sample_count?: number
+          hk_energy_sample_uuid?: string | null
+          max_heart_rate_bpm?: number | null
+          session_id: string
+          total_volume_kg?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_duration_sec?: number | null
+          active_energy_kcal?: number | null
+          avg_heart_rate_bpm?: number | null
+          created_at?: string
+          energy_source?: string | null
+          heart_rate_sample_count?: number
+          hk_energy_sample_uuid?: string | null
+          max_heart_rate_bpm?: number | null
+          session_id?: string
+          total_volume_kg?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "v2_session_health_metrics_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: true
             referencedRelation: "v2_workout_sessions"
             referencedColumns: ["id"]
           },
@@ -775,15 +978,22 @@ export type Database = {
           created_at: string | null
           density_score: number
           description: string | null
+          duration_sec_max: number | null
+          duration_sec_min: number | null
           equipment_needed: string[] | null
           id: string
           implicit_hits: Json
           is_timed: boolean
           is_unilateral: boolean
+          mode: string | null
           movement_pattern: string | null
           name: string
           primary_muscles: string[]
+          reps_max: number | null
+          reps_min: number | null
           secondary_muscles: string[] | null
+          sets_max: number | null
+          sets_min: number | null
           setup_buffer_sec: number
           tempo_category: string | null
           updated_at: string | null
@@ -794,15 +1004,22 @@ export type Database = {
           created_at?: string | null
           density_score: number
           description?: string | null
+          duration_sec_max?: number | null
+          duration_sec_min?: number | null
           equipment_needed?: string[] | null
           id?: string
           implicit_hits: Json
           is_timed?: boolean
           is_unilateral: boolean
+          mode?: string | null
           movement_pattern?: string | null
           name: string
           primary_muscles: string[]
+          reps_max?: number | null
+          reps_min?: number | null
           secondary_muscles?: string[] | null
+          sets_max?: number | null
+          sets_min?: number | null
           setup_buffer_sec: number
           tempo_category?: string | null
           updated_at?: string | null
@@ -813,15 +1030,22 @@ export type Database = {
           created_at?: string | null
           density_score?: number
           description?: string | null
+          duration_sec_max?: number | null
+          duration_sec_min?: number | null
           equipment_needed?: string[] | null
           id?: string
           implicit_hits?: Json
           is_timed?: boolean
           is_unilateral?: boolean
+          mode?: string | null
           movement_pattern?: string | null
           name?: string
           primary_muscles?: string[]
+          reps_max?: number | null
+          reps_min?: number | null
           secondary_muscles?: string[] | null
+          sets_max?: number | null
+          sets_min?: number | null
           setup_buffer_sec?: number
           tempo_category?: string | null
           updated_at?: string | null
@@ -1090,6 +1314,7 @@ export type Database = {
       v2_workout_sessions: {
         Row: {
           completed_at: string | null
+          control_device: string
           day_name: string | null
           hk_workout_uuid: string | null
           id: string
@@ -1101,6 +1326,7 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          control_device?: string
           day_name?: string | null
           hk_workout_uuid?: string | null
           id?: string
@@ -1112,6 +1338,7 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          control_device?: string
           day_name?: string | null
           hk_workout_uuid?: string | null
           id?: string
@@ -1158,6 +1385,27 @@ export type Database = {
         }
         Relationships: []
       }
+      waitlist: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          source: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          source?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          source?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -1165,11 +1413,52 @@ export type Database = {
     Functions: {
       adjust_bw_exercises: { Args: { pd: Json }; Returns: Json }
       adjust_plan_data: { Args: { pd: Json }; Returns: Json }
+      apply_ai_day_plan: {
+        Args: {
+          p_bodyweight: number
+          p_day_id: string
+          p_day_name: string
+          p_experience: string
+          p_session_end: string
+          p_session_start: string
+          p_sessions_json: Json
+          p_template_id: string
+          p_use_imperial: boolean
+          p_user_id: string
+        }
+        Returns: number
+      }
+      clear_plan_day_for_ai_replace: {
+        Args: {
+          p_day_id: string
+          p_session_end: string
+          p_session_start: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       commit_ai_generation: { Args: { p_job_id: string }; Returns: Json }
-      convert_user_stored_weights: { Args: { p_to_imperial: boolean }; Returns: Json }
+      commit_ai_week: { Args: { p_job_id: string }; Returns: Json }
+      convert_user_stored_weights: {
+        Args: { p_to_imperial: boolean }
+        Returns: Json
+      }
+      join_waitlist: {
+        Args: { p_email: string; p_source?: string }
+        Returns: string
+      }
       migrate_rep_range: { Args: { value: Json }; Returns: Json }
       purge_expired_ai_generation_jobs: { Args: never; Returns: number }
+      purge_expired_ai_week_jobs: { Args: never; Returns: number }
       purge_soft_deleted_accounts: { Args: never; Returns: number }
+      recompute_user_exercise_pr: {
+        Args: {
+          p_custom_exercise_id: string
+          p_exercise_id: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       resolve_ai_exercise_targets: {
         Args: {
           p_ai_plan: Json
@@ -1203,12 +1492,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1232,11 +1521,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1257,11 +1546,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1282,11 +1571,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1299,11 +1588,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

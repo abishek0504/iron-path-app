@@ -115,6 +115,27 @@ describe('ensureSessionsForPlanDay', () => {
     expect(result.materialized).toBe(true);
   });
 
+  it('materializes when only abandoned sessions exist', async () => {
+    const abandoned = session({ id: 's-abandoned', status: 'abandoned' });
+    const created = session({ id: 's-new', day_name: 'Monday' });
+    getSessionsMock
+      .mockResolvedValueOnce([abandoned])
+      .mockResolvedValueOnce([abandoned, created]);
+    materializeMock.mockResolvedValueOnce(created);
+
+    const result = await ensureSessionsForPlanDay({
+      userId: 'user-1',
+      dayName: 'Monday',
+      templateId: 'tmpl-1',
+      slots: [slot],
+      now: monday,
+    });
+
+    expect(materializeMock).toHaveBeenCalledTimes(1);
+    expect(result.materialized).toBe(true);
+    expect(result.sessions).toEqual([abandoned, created]);
+  });
+
   it('does not materialize when sessions already exist', async () => {
     const existing = session({ id: 's1' });
     getSessionsMock.mockResolvedValueOnce([existing]);

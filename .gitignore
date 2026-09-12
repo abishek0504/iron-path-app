@@ -52,6 +52,7 @@ node_modules/
 
 # supabase schema
 schema/
+supabase/exports/
 
 # cursor rules
 .cursor/

@@ -107,6 +107,20 @@
             </array>
         </dict>
 
+        <!-- Photos — progress photos taken with the camera or picked from the library. -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <true/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
+
         <!-- Other user content — exercise notes, workout names. -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>

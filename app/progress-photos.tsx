@@ -82,16 +82,12 @@ export default function ProgressPhotosScreen() {
         return;
       }
 
-      const permission =
-        source === 'camera'
-          ? await ImagePicker.requestCameraPermissionsAsync()
-          : await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        showToast(
-          source === 'camera' ? 'Camera permission is required' : 'Photo library permission is required',
-          'error',
-        );
-        return;
+      if (source === 'camera') {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          showToast('Camera permission is required', 'error');
+          return;
+        }
       }
 
       const options = {

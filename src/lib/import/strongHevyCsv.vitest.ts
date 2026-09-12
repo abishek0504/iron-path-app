@@ -10,7 +10,7 @@ vi.mock('../supabase/queries/exercises', () => ({
   listMergedExercises: vi.fn(),
 }));
 vi.mock('../supabase/queries/workouts', () => ({
-  createWorkoutSession: vi.fn(),
+  createBackloggedWorkout: vi.fn(),
 }));
 
 import { parseStrongHevyCsv } from './strongHevyCsv';
