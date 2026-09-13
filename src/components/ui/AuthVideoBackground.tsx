@@ -14,6 +14,14 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const AUTH_BACKGROUND_VIDEO = require('../../../assets/cover-video.mp4');
 
+function safePlayerCall(run: () => void): void {
+  try {
+    run();
+  } catch {
+    // expo-video native object can already be released on unmount
+  }
+}
+
 export function AuthVideoBackground() {
   const colors = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -23,20 +31,20 @@ export function AuthVideoBackground() {
     videoPlayer.loop = true;
     videoPlayer.muted = true;
     videoPlayer.keepScreenOnWhilePlaying = false;
-    videoPlayer.play();
+    safePlayerCall(() => videoPlayer.play());
   });
 
   useEffect(() => {
     if (isFocused) {
-      player.play();
+      safePlayerCall(() => player.play());
     } else {
-      player.pause();
+      safePlayerCall(() => player.pause());
     }
   }, [isFocused, player]);
 
   useEffect(() => {
     return () => {
-      player.pause();
+      safePlayerCall(() => player.pause());
     };
   }, [player]);
 
@@ -44,13 +52,15 @@ export function AuthVideoBackground() {
     <View style={styles.container}>
       <View style={styles.base} />
       <View style={styles.accent} />
-      <VideoView
-        player={player}
-        style={styles.video}
-        contentFit="cover"
-        nativeControls={false}
-        {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as const } : {})}
-      />
+      {isFocused ? (
+        <VideoView
+          player={player}
+          style={styles.video}
+          contentFit="cover"
+          nativeControls={false}
+          {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as const } : {})}
+        />
+      ) : null}
       <View style={styles.overlay} pointerEvents="none" />
     </View>
   );

@@ -33,7 +33,7 @@ export default function GetStarted() {
         <View style={styles.card}>
           <Button
             label="Get Started"
-            onPress={() => router.push('/signup')}
+            onPress={() => router.replace('/signup')}
             fullWidth
             style={styles.primaryButton}
           />
@@ -41,7 +41,7 @@ export default function GetStarted() {
           <Button
             label="Already have an account? Log in"
             variant="ghost"
-            onPress={() => router.push('/login')}
+            onPress={() => router.replace('/login')}
             fullWidth
             style={styles.secondaryButton}
             textStyle={styles.secondaryButtonText}

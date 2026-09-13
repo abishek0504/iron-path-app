@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
+import { shouldDropSentryEvent } from './sentryFilters';
 
 const SENSITIVE_KEYS = new Set([
   'email',
@@ -59,6 +60,7 @@ export function initSentry(): void {
       return breadcrumb;
     },
     beforeSend(event) {
+      if (shouldDropSentryEvent(event)) return null;
       if (event.user?.email) delete event.user.email;
       if (event.request?.headers) {
         for (const key of Object.keys(event.request.headers)) {
