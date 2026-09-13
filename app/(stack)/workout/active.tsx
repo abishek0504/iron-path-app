@@ -39,6 +39,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { RPESlider } from '../../../src/components/workout/RPESlider';
 import { RIRSlider } from '../../../src/components/workout/RIRSlider';
 import { PlateCalculatorSheet } from '../../../src/components/workout/PlateCalculatorSheet';
+import { MissedTargetSheet } from '../../../src/components/workout/MissedTargetSheet';
 import { WorkoutShareCard } from '../../../src/components/workout/WorkoutShareCard';
 import { ExerciseDemoMedia } from '../../../src/components/workout/ExerciseDemoMedia';
 import {
@@ -201,6 +202,7 @@ export default function ActiveWorkoutScreen() {
   const [workoutSettings, setWorkoutSettings] = useState<WorkoutSettings>(DEFAULT_WORKOUT_SETTINGS);
   const [plateTarget, setPlateTarget] = useState<number | null>(null);
   const [showPlateCalculator, setShowPlateCalculator] = useState(false);
+  const [showMissedTargetSheet, setShowMissedTargetSheet] = useState(false);
   const shareCardRef = useRef<View>(null);
   const [controlDevice, setControlDevice] = useState<'phone' | 'watch'>('phone');
   const controlDeviceRef = useRef<'phone' | 'watch'>('phone');
@@ -219,7 +221,6 @@ export default function ActiveWorkoutScreen() {
   const [suggestedWeight, setSuggestedWeight] = useState<string>('');
   const [liveWeight, setLiveWeight] = useState('');
   const [liveReps, setLiveReps] = useState('');
-  const liveRepsRef = useRef<TextInput>(null);
 
   // Previous performance for the current exercise (Hevy-style "last time" prefill context)
   const [prevPerformance, setPrevPerformance] = useState<PreviousPerformance | null>(null);
@@ -2182,32 +2183,51 @@ export default function ActiveWorkoutScreen() {
                     }`}
               </Text>
               {currentExercise.mode === 'reps' && !currentExercise.is_stretch ? (
-                <View style={styles.logInputRow}>
-                  <BodyweightLoadToggle
-                    style={styles.logInputGroup}
-                    value={liveWeight}
-                    onChange={setLiveWeight}
-                    inputStyle={styles.logInput}
-                    keyboardType="decimal-pad"
-                    {...NUMERIC_NEXT_PROPS}
-                    onSubmitEditing={() => liveRepsRef.current?.focus()}
-                    placeholder="Weight"
-                    placeholderTextColor={colors.textMuted}
-                    accessibilityLabel="Weight"
-                  />
-                  <TextInput
-                    ref={liveRepsRef}
-                    style={styles.logInput}
-                    value={liveReps}
-                    onChangeText={setLiveReps}
-                    keyboardType="number-pad"
-                    {...NUMERIC_DONE_PROPS}
-                    onSubmitEditing={Keyboard.dismiss}
-                    placeholder="Reps"
-                    placeholderTextColor={colors.textMuted}
-                    accessibilityLabel="Reps"
-                  />
-                </View>
+                <>
+                  {(() => {
+                    const currentSet = currentExercise.sets[workoutPhase.setIndex];
+                    const targetReps = currentSet?.reps ?? null;
+                    const targetWeight =
+                      currentSet?.weight ??
+                      (suggestedWeight === BODYWEIGHT_LOAD_LABEL
+                        ? 0
+                        : parseAddedLoadInput(suggestedWeight));
+                    const loggedWeight = parseAddedLoadInput(liveWeight);
+                    const loggedReps = parseInt(liveReps, 10);
+                    const repsDiffer =
+                      Number.isFinite(loggedReps) &&
+                      loggedReps > 0 &&
+                      loggedReps !== targetReps;
+                    const weightDiffer =
+                      loggedWeight != null &&
+                      (targetWeight == null || loggedWeight !== targetWeight);
+                    if (!repsDiffer && !weightDiffer) return null;
+                    const load =
+                      loggedWeight === 0
+                        ? BODYWEIGHT_LOAD_LABEL
+                        : loggedWeight != null
+                          ? `${loggedWeight} ${unitsLabel}`
+                          : null;
+                    return (
+                      <Text style={styles.loggedOverrideText}>
+                        Logging {Number.isFinite(loggedReps) && loggedReps > 0 ? `${loggedReps} reps` : 'this set'}
+                        {load ? ` @ ${load}` : ''}
+                      </Text>
+                    );
+                  })()}
+                  <TouchableOpacity
+                    style={styles.missedTargetButton}
+                    onPress={() => setShowMissedTargetSheet(true)}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel="Didn't quite make your target?"
+                  >
+                    <Text style={styles.missedTargetButtonText}>
+                      Didn't quite make your target?
+                    </Text>
+                    <ChevronRight size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                </>
               ) : null}
               {(() => {
                 const prevLabel = formatPreviousPerformanceLabel(prevPerformance, {
@@ -2848,6 +2868,18 @@ export default function ActiveWorkoutScreen() {
         onClose={() => setShowPlateCalculator(false)}
       />
 
+      <MissedTargetSheet
+        visible={showMissedTargetSheet}
+        unitsLabel={unitsLabel}
+        initialWeight={liveWeight}
+        initialReps={liveReps}
+        onSave={(weight, reps) => {
+          setLiveWeight(weight);
+          setLiveReps(reps);
+        }}
+        onClose={() => setShowMissedTargetSheet(false)}
+      />
+
       <ConfirmDialog
         visible={showAbandonConfirm}
         title="Abandon this workout?"
@@ -3082,6 +3114,33 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.medium,
     color: colors.primary,
+  },
+  loggedOverrideText: {
+    marginTop: spacing.sm,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.textSecondary,
+  },
+  missedTargetButton: {
+    marginTop: spacing.md,
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.primarySubtleBg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: borderRadius.md,
+  },
+  missedTargetButtonText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.primary,
+    textAlign: 'center',
   },
   targetCard: {
     backgroundColor: colors.card,

@@ -1,5 +1,5 @@
 Pod::Spec.new do |s|
-  s.name           = 'IronPathLiveActivity'
+  s.name           = 'IronPathLiveActivityBridge'
   s.version        = '1.0.0'
   s.summary        = 'Rest timer Live Activity bridge'
   s.description    = 'Starts, updates, and ends an iOS Live Activity for the workout rest timer.'

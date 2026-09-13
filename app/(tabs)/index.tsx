@@ -754,17 +754,34 @@ export default function WorkoutTab() {
       }
 
       setSessionsToday(ensured.sessions);
-      const firstIncomplete = ensured.sessions.findIndex((s) => s.status === 'active');
-      const openIndex = firstIncomplete >= 0 ? firstIncomplete : -1;
-      const openSession = openIndex >= 0 ? ensured.sessions[openIndex] ?? null : null;
+      let openIndex = ensured.sessions.findIndex((s) => s.status === 'active');
+      let openSession = openIndex >= 0 ? ensured.sessions[openIndex] ?? null : null;
+      let createdOnStart = false;
 
       if (!openSession) {
-        toast.error(
-          slots.length === 0
-            ? 'No exercises scheduled for this day'
-            : 'Failed to start workout',
-        );
-        return;
+        if (slots.length === 0) {
+          toast.error('No exercises scheduled for this day');
+          return;
+        }
+        const created = await materializeWorkoutFromTemplateSlots({
+          userId,
+          templateId: activeTemplate.id,
+          dayName: todayName,
+          slots,
+          experience: profile?.experience_level || 'beginner',
+          origin: 'manual',
+        });
+        if (!created) {
+          toast.error('Failed to start workout');
+          return;
+        }
+        invalidateSessionsInRangeForUser(userId);
+        invalidateWorkoutStatsCache(userId);
+        const nextSessions = [...ensured.sessions, created];
+        setSessionsToday(nextSessions);
+        openIndex = nextSessions.length - 1;
+        openSession = created;
+        createdOnStart = true;
       }
 
       if (openSession.control_device === 'watch') {
@@ -773,7 +790,7 @@ export default function WorkoutTab() {
       }
 
       setSelectedWorkoutIndex(openIndex);
-      if (ensured.materialized) {
+      if (createdOnStart || ensured.materialized) {
         toast.success('Workout started');
       }
       router.push({ pathname: '/workout/active', params: { sessionId: openSession.id } });
