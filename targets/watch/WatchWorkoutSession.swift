@@ -4,8 +4,15 @@ import WatchKit
 
 private let restExtendSec = 15
 private let completionRetrySec: TimeInterval = 5
+private let authRequestTimeoutSec: TimeInterval = 4
 
 private let workoutContextMessageType = "workoutContext"
+private let watchContextMessageType = "watchContext"
+private let watchAuthMessageType = "auth"
+private let watchAuthClearMessageType = "clearAuth"
+private let watchAuthRequestMessageType = "requestAuth"
+private let requestTakeoverMessageType = "requestTakeover"
+private let yieldControlMessageType = "yieldControl"
 
 private func intFromPayload(_ value: Any?) -> Int? {
     guard let value else { return nil }
@@ -25,12 +32,28 @@ private func intFromPayload(_ value: Any?) -> Int? {
     return nil
 }
 
+private func doubleFromPayload(_ value: Any?) -> Double? {
+    if let doubleValue = value as? Double, doubleValue.isFinite { return doubleValue }
+    if let number = value as? NSNumber { return number.doubleValue }
+    if let intValue = value as? Int { return Double(intValue) }
+    return nil
+}
+
 enum CompletionSyncStatus: Equatable {
     case idle
     case sending
     case sent
     case queued
     case retry
+}
+
+private struct MirrorDraft {
+    var sessionId: String
+    var setNumber: Int
+    var weight: Double?
+    var reps: Int?
+    var durationSec: Int?
+    var rpe: Int?
 }
 
 /// Phone-mirrored snapshot OR projection from the local standalone engine.
@@ -52,6 +75,7 @@ struct WorkoutState: Equatable {
     var exerciseEndsAt: Date?
     var nextUp: String?
     var supersetLabel: String?
+    var rpeText: String?
 }
 
 @MainActor
@@ -60,6 +84,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
     @Published var isSendingCompletion = false
     @Published var pendingCompletionKey: String?
     @Published var completionSyncStatus: CompletionSyncStatus = .idle
+    @Published var phoneReachable = false
 
     let healthManager = WatchHealthWorkoutManager()
     let standalone = WatchStandaloneEngine()
@@ -68,6 +93,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
     private var previousSetNumber = 0
     private var previousPhase = "execution"
     private let sessionBridge = WatchSessionBridge()
+    private var mirrorDraft: MirrorDraft?
 
     var isStandaloneActive: Bool {
         standalone.isActive
@@ -83,7 +109,25 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
                 }
             }
         }
-        publishStandaloneIfNeeded()
+        standalone.pullAuthFromPhone = { [weak self] in
+            await self?.requestAuthFromPhone(force: true)
+        }
+        standalone.isPhoneReachable = { [weak self] in
+            self?.phoneReachable ?? false
+        }
+        standalone.isPhoneMirrorActive = { [weak self] in
+            guard let self else { return false }
+            return self.state.active && self.state.controlDevice == "phone"
+        }
+        standalone.onSnapshotChange = { [weak self] in
+            self?.publishStandaloneIfNeeded()
+        }
+        standalone.onMirrorAdjust = { [weak self] field, value in
+            self?.applyMirrorAdjust(field: field, value: value)
+        }
+        standalone.onMirrorCycleAdjust = { [weak self] in
+            self?.cycleMirrorAdjust()
+        }
 
         sessionBridge.onContext = { [weak self] context in
             Task { @MainActor in
@@ -95,7 +139,22 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
                 self?.standalone.authDidUpdate()
             }
         }
+        sessionBridge.onReachable = { [weak self] reachable in
+            Task { @MainActor in
+                guard let self else { return }
+                self.phoneReachable = reachable
+                if reachable {
+                    self.standalone.flushOutbox()
+                }
+            }
+        }
+        sessionBridge.onTakeover = { [weak self] sessionId, reply in
+            Task { @MainActor in
+                await self?.handleTakeoverRequest(sessionId: sessionId, reply: reply)
+            }
+        }
         sessionBridge.activate()
+        publishStandaloneIfNeeded()
     }
 
     func publishStandaloneIfNeededPublic() {
@@ -104,6 +163,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
 
     func resetToIdle() {
         state = WorkoutState()
+        mirrorDraft = nil
         completionSyncStatus = .idle
         pendingCompletionKey = nil
         isSendingCompletion = false
@@ -123,21 +183,53 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
             sessionId: next.sessionId,
             phase: next.phase
         )
+        pushWatchContextToPhone(next)
     }
 
-    // MARK: - WCSession bridge helpers
+    private func pushWatchContextToPhone(_ next: WorkoutState) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        var context: [String: Any] = [
+            "type": watchContextMessageType,
+            "active": next.active || next.phase == "complete",
+            "sessionId": next.sessionId,
+            "controlDevice": "watch",
+            "exerciseName": next.exerciseName,
+            "setNumber": next.setNumber,
+            "totalSets": next.totalSets,
+            "targetText": next.targetText,
+            "setType": next.setType,
+            "phase": next.phase,
+            "progressText": next.progressText,
+            "timedSetRpe": next.timedSetRpe,
+            "updatedAt": Date().timeIntervalSince1970,
+        ]
+        if let nextUp = next.nextUp { context["nextUp"] = nextUp }
+        if let superset = next.supersetLabel { context["supersetLabel"] = superset }
+        if let rpeText = next.rpeText { context["rpeText"] = rpeText }
+        if let rest = next.restEndsAt {
+            context["restEndsAt"] = rest.timeIntervalSince1970
+        }
+        try? session.updateApplicationContext(context)
+        if session.isReachable {
+            session.sendMessage(context, replyHandler: nil, errorHandler: { _ in })
+        }
+    }
+
+    func requestAuthFromPhone(force: Bool) async {
+        await sessionBridge.requestAuth(force: force, timeout: authRequestTimeoutSec)
+    }
 
     // MARK: - State
 
     private func apply(context: [String: Any]) {
         let controlDevice = context["controlDevice"] as? String ?? "phone"
-        // Ignore phone mirror pushes while a watch-owned workout is running.
         if standalone.isActive || standalone.snapshot?.phase == .complete {
             if controlDevice != "watch" {
                 return
             }
         }
-        // Never let phone context drive a watch-owned remote session id mismatch.
         if controlDevice == "watch" {
             return
         }
@@ -145,12 +237,13 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         let priorPendingKey = pendingCompletionKey
         let priorSetNumber = state.setNumber
         let priorPhase = state.phase
+        let priorSession = state.sessionId
 
         var next = state
         next.controlDevice = controlDevice
 
         if context.keys.contains("active") {
-            next.active = context["active"] as? Bool ?? false
+            next.active = (context["active"] as? Bool) ?? (context["active"] as? NSNumber)?.boolValue ?? false
             if !next.active {
                 next = WorkoutState()
                 next.active = false
@@ -159,6 +252,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
                     next.sessionId = sessionId
                 }
                 state = next
+                mirrorDraft = nil
                 writeComplicationSnapshot(from: next)
                 completionSyncStatus = .idle
                 pendingCompletionKey = nil
@@ -196,7 +290,9 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
             next.phase = phase
         }
         if context.keys.contains("timedSetRpe") {
-            next.timedSetRpe = context["timedSetRpe"] as? Bool ?? false
+            next.timedSetRpe = (context["timedSetRpe"] as? Bool)
+                ?? (context["timedSetRpe"] as? NSNumber)?.boolValue
+                ?? false
         }
         if context.keys.contains("nextUp") {
             next.nextUp = context["nextUp"] as? String
@@ -204,8 +300,11 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         if context.keys.contains("supersetLabel") {
             next.supersetLabel = context["supersetLabel"] as? String
         }
+        if context.keys.contains("rpeText") {
+            next.rpeText = context["rpeText"] as? String
+        }
         if context.keys.contains("exerciseEndsAt") {
-            if let exerciseEndsAtEpoch = context["exerciseEndsAt"] as? Double, exerciseEndsAtEpoch > 0 {
+            if let exerciseEndsAtEpoch = doubleFromPayload(context["exerciseEndsAt"]), exerciseEndsAtEpoch > 0 {
                 next.exerciseEndsAt = Date(timeIntervalSince1970: exerciseEndsAtEpoch)
             } else {
                 next.exerciseEndsAt = nil
@@ -214,7 +313,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
             next.exerciseEndsAt = nil
         }
         if context.keys.contains("restEndsAt") {
-            if let restEndsAtEpoch = context["restEndsAt"] as? Double, restEndsAtEpoch > 0 {
+            if let restEndsAtEpoch = doubleFromPayload(context["restEndsAt"]), restEndsAtEpoch > 0 {
                 next.restEndsAt = Date(timeIntervalSince1970: restEndsAtEpoch)
             } else {
                 next.restEndsAt = nil
@@ -223,8 +322,15 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
             next.restEndsAt = nil
         }
 
+        if let draft = mirrorDraft, (draft.sessionId != next.sessionId || draft.setNumber != next.setNumber) {
+            mirrorDraft = nil
+        }
+        if let draft = mirrorDraft, draft.sessionId == next.sessionId, draft.setNumber == next.setNumber {
+            next = overlayDraft(draft, on: next)
+        }
+
         #if DEBUG
-        let updatedAt = context["updatedAt"] as? Double ?? 0
+        let updatedAt = doubleFromPayload(context["updatedAt"]) ?? 0
         NSLog(
             "IronPath watch apply phase=%@ set=%d/%d active=%@ updatedAt=%.0f",
             next.phase,
@@ -243,6 +349,7 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
                 next.setNumber != priorSetNumber
                 || next.phase != priorPhase
                 || next.phase != "execution"
+                || next.sessionId != priorSession
             if advanced {
                 completionSyncStatus = .sent
                 pendingCompletionKey = nil
@@ -263,6 +370,31 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
             sessionId: next.sessionId,
             phase: next.phase
         )
+    }
+
+    private func overlayDraft(_ draft: MirrorDraft, on state: WorkoutState) -> WorkoutState {
+        var next = state
+        if let rpe = draft.rpe {
+            next.rpeText = "RPE \(rpe)"
+        }
+        if let duration = draft.durationSec {
+            next.targetText = "\(duration)s hold"
+            return next
+        }
+        if draft.weight != nil || draft.reps != nil {
+            let reps = draft.reps ?? 0
+            if let weight = draft.weight {
+                if weight == 0 {
+                    next.targetText = "Bodyweight × \(reps)"
+                } else {
+                    let weightText = weight == floor(weight) ? String(Int(weight)) : String(format: "%g", weight)
+                    next.targetText = "\(weightText) × \(reps)"
+                }
+            } else if reps > 0 {
+                next.targetText = "\(reps) reps"
+            }
+        }
+        return next
     }
 
     private func writeComplicationSnapshot(from state: WorkoutState) {
@@ -332,6 +464,9 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         guard state.active, state.phase == "setRpe", state.timedSetRpe, !state.sessionId.isEmpty else {
             return
         }
+        var draft = upsertMirrorDraft()
+        draft.rpe = rpe
+        mirrorDraft = draft
         sendEvent([
             "type": "submitRpe",
             "sessionId": state.sessionId,
@@ -352,12 +487,18 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
 
         WKInterfaceDevice.current().play(.click)
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "type": "completeSet",
             "sessionId": state.sessionId,
             "setNumber": state.setNumber,
             "sentAt": Date().timeIntervalSince1970,
         ]
+        if let draft = mirrorDraft, draft.sessionId == state.sessionId, draft.setNumber == state.setNumber {
+            if let reps = draft.reps { payload["reps"] = reps }
+            if let weight = draft.weight { payload["weight"] = weight }
+            if let duration = draft.durationSec { payload["durationSec"] = duration }
+            if let rpe = draft.rpe { payload["rpe"] = rpe }
+        }
 
         pendingCompletionKey = currentCompletionKey
         isSendingCompletion = true
@@ -392,13 +533,94 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
 
     func startStandaloneWorkout() {
         Task {
+            let needsAuth = WatchSharedAuth.load() == nil || WatchSharedAuth.credentialsNeedRefresh()
+            if needsAuth {
+                await requestAuthFromPhone(force: true)
+            }
             await standalone.startTodaysWorkout()
             publishStandaloneIfNeeded()
         }
     }
 
     func beginAdjustTargets() {
-        standalone.beginAdjust()
+        if standalone.isActive {
+            standalone.beginAdjust()
+            return
+        }
+        guard state.active, state.phase == "execution" else { return }
+        seedMirrorAdjustFields()
+        standalone.showAdjustSheet = true
+    }
+
+    func cycleAdjustTargets() {
+        standalone.cycleAdjustField()
+    }
+
+    private func seedMirrorAdjustFields() {
+        let timed = state.exerciseEndsAt != nil || state.targetText.contains("hold")
+        let draft = mirrorDraft
+        if timed {
+            standalone.adjustField = .duration
+            standalone.adjustValue = Double(draft?.durationSec ?? 30)
+        } else if draft?.weight != nil {
+            standalone.adjustField = .weight
+            standalone.adjustValue = draft?.weight ?? 0
+        } else {
+            standalone.adjustField = .reps
+            standalone.adjustValue = Double(draft?.reps ?? 8)
+        }
+    }
+
+    private func cycleMirrorAdjust() {
+        let timed = state.exerciseEndsAt != nil || state.targetText.contains("hold")
+        let draft = upsertMirrorDraft()
+        if timed {
+            if standalone.adjustField == .duration {
+                standalone.adjustField = .rpe
+                standalone.adjustValue = Double(draft.rpe ?? WatchStandaloneEngine.defaultStrengthRpe)
+            } else {
+                standalone.adjustField = .duration
+                standalone.adjustValue = Double(draft.durationSec ?? 30)
+            }
+            return
+        }
+        switch standalone.adjustField {
+        case .weight:
+            standalone.adjustField = .reps
+            standalone.adjustValue = Double(draft.reps ?? 8)
+        case .reps:
+            standalone.adjustField = .rpe
+            standalone.adjustValue = Double(draft.rpe ?? WatchStandaloneEngine.defaultStrengthRpe)
+        default:
+            standalone.adjustField = .weight
+            standalone.adjustValue = draft.weight ?? 0
+        }
+    }
+
+    private func applyMirrorAdjust(field: WatchStandaloneEngine.AdjustField, value: Double) {
+        var draft = upsertMirrorDraft()
+        switch field {
+        case .weight:
+            draft.weight = max(0, value)
+        case .reps:
+            draft.reps = max(0, Int(value.rounded()))
+        case .duration:
+            draft.durationSec = max(1, Int(value.rounded()))
+        case .rpe:
+            draft.rpe = min(10, max(1, Int(value.rounded())))
+        }
+        mirrorDraft = draft
+        state = overlayDraft(draft, on: state)
+    }
+
+    @discardableResult
+    private func upsertMirrorDraft() -> MirrorDraft {
+        if let draft = mirrorDraft, draft.sessionId == state.sessionId, draft.setNumber == state.setNumber {
+            return draft
+        }
+        let draft = MirrorDraft(sessionId: state.sessionId, setNumber: state.setNumber)
+        mirrorDraft = draft
+        return draft
     }
 
     private func sendEvent(_ payload: [String: Any]) {
@@ -409,6 +631,41 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
             })
         } else {
             session.transferUserInfo(payload)
+        }
+    }
+
+    private func handleTakeoverRequest(sessionId: String, reply: (([String: Any]) -> Void)?) async {
+        guard standalone.snapshot?.sessionId == sessionId || state.sessionId == sessionId else {
+            reply?(["ok": false])
+            return
+        }
+        standalone.flushOutbox()
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        let pending = standalone.drainOutboxEntries()
+        let writes: [[String: Any]] = pending.compactMap { entry in
+            guard entry.op == .markSetComplete, let setId = entry.setId else { return nil }
+            var row: [String: Any] = [
+                "op": entry.op.rawValue,
+                "setId": setId,
+                "sessionId": entry.sessionId,
+            ]
+            for (key, value) in entry.payload where !value.isEmpty {
+                row[key] = value
+            }
+            return row
+        }
+        standalone.yieldToPhone()
+        resetToIdle()
+        var response: [String: Any] = [
+            "ok": true,
+            "type": yieldControlMessageType,
+            "sessionId": sessionId,
+            "pendingWrites": writes,
+        ]
+        if let reply {
+            reply(response)
+        } else {
+            sendEvent(response)
         }
     }
 
@@ -430,14 +687,15 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
     }
 }
 
-private let watchAuthMessageType = "auth"
-private let watchAuthClearMessageType = "clearAuth"
-private let watchAuthRequestMessageType = "requestAuth"
-
 /// Nonisolated WCSession delegate that forwards context onto the main actor.
 private final class WatchSessionBridge: NSObject, WCSessionDelegate {
     var onContext: (([String: Any]) -> Void)?
     var onAuth: (() -> Void)?
+    var onReachable: ((Bool) -> Void)?
+    var onTakeover: ((String, (([String: Any]) -> Void)?) -> Void)?
+
+    private let waiterLock = NSLock()
+    private var authWaiters: [CheckedContinuation<Void, Never>] = []
 
     func activate() {
         guard WCSession.isSupported() else { return }
@@ -446,14 +704,27 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
         session.activate()
     }
 
+    func requestAuth(force: Bool, timeout: TimeInterval) async {
+        await withCheckedContinuation { continuation in
+            waiterLock.lock()
+            authWaiters.append(continuation)
+            waiterLock.unlock()
+            requestAuthIfNeeded(WCSession.default, force: force)
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self] in
+                self?.resumeAuthWaiters()
+            }
+        }
+    }
+
     func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
         ingest(session.receivedApplicationContext)
+        onReachable?(session.isReachable)
         if activationState == .activated {
-            requestAuthIfNeeded(session)
+            requestAuthIfNeeded(session, force: WatchSharedAuth.load() == nil || WatchSharedAuth.credentialsNeedRefresh())
         }
     }
 
@@ -470,6 +741,11 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
+        if message["type"] as? String == requestTakeoverMessageType {
+            let sessionId = message["sessionId"] as? String ?? ""
+            onTakeover?(sessionId, replyHandler)
+            return
+        }
         ingest(message)
         replyHandler(["ok": true])
     }
@@ -479,7 +755,11 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
-        requestAuthIfNeeded(session)
+        onReachable?(session.isReachable)
+        requestAuthIfNeeded(
+            session,
+            force: WatchSharedAuth.load() == nil || WatchSharedAuth.credentialsNeedRefresh()
+        )
     }
 
     private func ingest(_ payload: [String: Any]) {
@@ -492,6 +772,11 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
             || type == watchAuthRequestMessageType {
             return
         }
+        if type == requestTakeoverMessageType {
+            let sessionId = payload["sessionId"] as? String ?? ""
+            onTakeover?(sessionId, nil)
+            return
+        }
         if payload.keys.contains("active")
             || payload.keys.contains("sessionId")
             || type == workoutContextMessageType {
@@ -501,18 +786,31 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
 
     private func applyAuthIfPresent(_ payload: [String: Any]) {
         if payload["type"] as? String == watchAuthClearMessageType {
-            WatchSharedAuth.clear()
-            onAuth?()
+            var clearRecord = WatchSharedAuth.dictionary(from: payload["auth"]) ?? ["cleared": true]
+            if clearRecord["cleared"] == nil {
+                clearRecord["cleared"] = true
+            }
+            if WatchSharedAuth.save(from: clearRecord) {
+                onAuth?()
+                resumeAuthWaiters()
+                if WCSession.default.activationState == .activated {
+                    requestAuthIfNeeded(WCSession.default, force: true)
+                }
+            }
             return
         }
-        guard let auth = payload["auth"] as? [String: Any] else { return }
+        guard let auth = WatchSharedAuth.dictionary(from: payload["auth"]) else { return }
         if WatchSharedAuth.save(from: auth) {
             onAuth?()
+            resumeAuthWaiters()
         }
     }
 
-    private func requestAuthIfNeeded(_ session: WCSession) {
-        guard WatchSharedAuth.load() == nil else { return }
+    private func requestAuthIfNeeded(_ session: WCSession, force: Bool) {
+        if !force, WatchSharedAuth.load() != nil, !WatchSharedAuth.credentialsNeedRefresh() {
+            resumeAuthWaiters()
+            return
+        }
         guard session.activationState == .activated else { return }
         let payload: [String: Any] = ["type": watchAuthRequestMessageType]
         if session.isReachable {
@@ -524,6 +822,16 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
             })
         } else {
             session.transferUserInfo(payload)
+        }
+    }
+
+    private func resumeAuthWaiters() {
+        waiterLock.lock()
+        let waiters = authWaiters
+        authWaiters.removeAll()
+        waiterLock.unlock()
+        for waiter in waiters {
+            waiter.resume()
         }
     }
 }

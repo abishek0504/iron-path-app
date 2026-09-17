@@ -23,6 +23,7 @@ enum WatchSupabaseError: Error, LocalizedError {
     case http(Int, String)
     case decoding
     case offlineStart
+    case phoneLogging
 
     var errorDescription: String? {
         switch self {
@@ -34,6 +35,19 @@ enum WatchSupabaseError: Error, LocalizedError {
             return "Unexpected server response"
         case .offlineStart:
             return "Connect to start a workout"
+        case .phoneLogging:
+            return "Workout active on iPhone"
+        }
+    }
+
+    var isAuthFailure: Bool {
+        switch self {
+        case .notAuthenticated:
+            return true
+        case .http(let code, _):
+            return code == 401
+        default:
+            return false
         }
     }
 }
@@ -54,7 +68,16 @@ actor WatchSupabaseClient {
     var userId: String { credentials.userId }
 
     private func authorizedRequest(path: String, method: String, body: Data? = nil) async throws -> Data {
-        try await ensureFreshToken()
+        try await ensureFreshToken(force: false)
+        do {
+            return try await performAuthorizedRequest(path: path, method: method, body: body)
+        } catch let error as WatchSupabaseError where error.isAuthFailure {
+            try await ensureFreshToken(force: true)
+            return try await performAuthorizedRequest(path: path, method: method, body: body)
+        }
+    }
+
+    private func performAuthorizedRequest(path: String, method: String, body: Data?) async throws -> Data {
         guard let url = URL(string: "\(credentials.supabaseUrl)\(path)") else {
             throw WatchSupabaseError.decoding
         }
@@ -77,10 +100,10 @@ actor WatchSupabaseClient {
         return data
     }
 
-    private func ensureFreshToken() async throws {
+    private func ensureFreshToken(force: Bool) async throws {
         let now = Date().timeIntervalSince1970
-        // Refresh one minute early.
-        guard credentials.expiresAt > 0, credentials.expiresAt - 60 < now else { return }
+        let expired = credentials.expiresAt <= 0 || credentials.expiresAt - 60 < now
+        guard force || expired else { return }
 
         guard let url = URL(string: "\(credentials.supabaseUrl)/auth/v1/token?grant_type=refresh_token") else {
             throw WatchSupabaseError.decoding
@@ -139,6 +162,44 @@ actor WatchSupabaseClient {
         let json = try await getJSON(path: path)
         guard let rows = json as? [[String: Any]] else { return nil }
         return rows.first
+    }
+
+    func fetchTodaysSessions() async throws -> [[String: Any]] {
+        let bounds = Self.todayBoundsIso()
+        let start = Self.encodeQuery(bounds.start)
+        let end = Self.encodeQuery(bounds.endExclusive)
+        let path =
+            "/rest/v1/v2_workout_sessions?user_id=eq.\(credentials.userId)&started_at=gte.\(start)&started_at=lt.\(end)&select=id,status,control_device,template_id,day_name,started_at&order=started_at.asc"
+        return (try await getJSON(path: path) as? [[String: Any]]) ?? []
+    }
+
+    func claimOrCreateTodaysSession(phoneMirrorActive: Bool) async throws -> String {
+        let todays = try await fetchTodaysSessions()
+        if let watchOwned = todays.first(where: {
+            ($0["status"] as? String) == "active" && ($0["control_device"] as? String) == "watch"
+        }), let sessionId = watchOwned["id"] as? String {
+            return sessionId
+        }
+
+        let activeToday = todays.filter { ($0["status"] as? String) == "active" }
+        for row in activeToday {
+            guard let sessionId = row["id"] as? String else { continue }
+            let control = row["control_device"] as? String ?? "phone"
+            let hasPerformed = try await sessionHasPerformedSets(sessionId: sessionId)
+            if control == "watch" {
+                return sessionId
+            }
+            if phoneMirrorActive || hasPerformed {
+                throw WatchSupabaseError.phoneLogging
+            }
+            try await patchJSON(
+                path: "/rest/v1/v2_workout_sessions?id=eq.\(sessionId)",
+                body: ["control_device": "watch"]
+            )
+            return sessionId
+        }
+
+        return try await createWatchSessionFromTodayPlan()
     }
 
     func fetchSessionBundle(sessionId: String) async throws -> (
@@ -211,7 +272,6 @@ actor WatchSupabaseClient {
     }
 
     func createWatchSessionFromTodayPlan() async throws -> String {
-        // Active template for user (most recently updated).
         let templatesPath =
             "/rest/v1/v2_workout_templates?user_id=eq.\(credentials.userId)&is_active=eq.true&select=id&order=updated_at.desc.nullslast&limit=1"
         guard let templates = try await getJSON(path: templatesPath) as? [[String: Any]],
@@ -220,8 +280,9 @@ actor WatchSupabaseClient {
         }
 
         let dayName = Self.todayDayName()
+        let encodedDay = Self.encodeQuery(dayName)
         let daysPath =
-            "/rest/v1/v2_template_days?template_id=eq.\(templateId)&day_name=eq.\(dayName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dayName)&select=id&limit=1"
+            "/rest/v1/v2_template_days?template_id=eq.\(templateId)&day_name=eq.\(encodedDay)&select=id&limit=1"
         guard let days = try await getJSON(path: daysPath) as? [[String: Any]],
               let dayId = days.first?["id"] as? String else {
             throw WatchSupabaseError.http(404, "No exercises for \(dayName)")
@@ -234,20 +295,17 @@ actor WatchSupabaseClient {
             throw WatchSupabaseError.http(404, "No exercises for \(dayName)")
         }
 
-        // Abandon any leftover active session so one-active constraint succeeds.
-        if let active = try await fetchActiveSession(), let activeId = active["id"] as? String {
-            try await patchJSON(
-                path: "/rest/v1/v2_workout_sessions?id=eq.\(activeId)",
-                body: ["status": "abandoned"]
-            )
-        }
+        let historySets = try await fetchLastCompletedSetsByExercise(
+            templateId: templateId,
+            dayName: dayName
+        )
 
         let sessionBody: [String: Any] = [
             "user_id": credentials.userId,
             "template_id": templateId,
             "day_name": dayName,
             "status": "active",
-            "started_at": ISO8601DateFormatter().string(from: Date()),
+            "started_at": Self.jsIso(Date()),
             "origin": "manual",
             "control_device": "watch",
         ]
@@ -271,15 +329,33 @@ actor WatchSupabaseClient {
                 continue
             }
 
-            // Default 3 sets; targets filled loosely for watch confirm flow.
-            for setNumber in 1...3 {
-                let setBody: [String: Any] = [
-                    "session_exercise_id": seId,
-                    "set_number": setNumber,
-                    "reps": 8,
-                    "set_type": "normal",
-                ]
-                _ = try await postJSON(path: "/rest/v1/v2_session_sets", body: setBody)
+            let historyKey = (slot["exercise_id"] as? String) ?? (slot["custom_exercise_id"] as? String)
+            let templates = historyKey.flatMap { historySets[$0] } ?? []
+            if templates.isEmpty {
+                for setNumber in 1...3 {
+                    _ = try await postJSON(
+                        path: "/rest/v1/v2_session_sets",
+                        body: [
+                            "session_exercise_id": seId,
+                            "set_number": setNumber,
+                            "reps": 8,
+                            "set_type": "normal",
+                        ]
+                    )
+                }
+            } else {
+                for row in templates {
+                    var setBody: [String: Any] = [
+                        "session_exercise_id": seId,
+                        "set_number": intFromPayload(row["set_number"]) ?? 1,
+                        "set_type": row["set_type"] as? String ?? "normal",
+                    ]
+                    if let reps = intFromPayload(row["reps"]) { setBody["reps"] = reps }
+                    if let duration = intFromPayload(row["duration_sec"]) { setBody["duration_sec"] = duration }
+                    if let rest = intFromPayload(row["rest_sec"]) { setBody["rest_sec"] = rest }
+                    if let weight = Self.doubleValue(row["weight"]) { setBody["weight"] = weight }
+                    _ = try await postJSON(path: "/rest/v1/v2_session_sets", body: setBody)
+                }
             }
         }
 
@@ -291,25 +367,74 @@ actor WatchSupabaseClient {
         reps: Int?,
         weight: Double?,
         durationSec: Int?,
-        rpe: Int?
+        rpe: Int?,
+        setType: String?,
+        performedAt: String?
     ) async throws {
         var body: [String: Any] = [
-            "performed_at": ISO8601DateFormatter().string(from: Date()),
+            "performed_at": performedAt ?? Self.jsIso(Date()),
         ]
         if let reps { body["reps"] = reps }
         if let weight { body["weight"] = weight }
         if let durationSec { body["duration_sec"] = durationSec }
         if let rpe { body["rpe"] = rpe }
+        if let setType, !setType.isEmpty { body["set_type"] = setType }
         try await patchJSON(path: "/rest/v1/v2_session_sets?id=eq.\(setId)", body: body)
     }
 
     func completeSession(sessionId: String, hkWorkoutUuid: String?) async throws {
         var body: [String: Any] = [
             "status": "completed",
-            "completed_at": ISO8601DateFormatter().string(from: Date()),
+            "completed_at": Self.jsIso(Date()),
         ]
         if let hkWorkoutUuid { body["hk_workout_uuid"] = hkWorkoutUuid }
         try await patchJSON(path: "/rest/v1/v2_workout_sessions?id=eq.\(sessionId)", body: body)
+    }
+
+    private func sessionHasPerformedSets(sessionId: String) async throws -> Bool {
+        let exPath = "/rest/v1/v2_session_exercises?session_id=eq.\(sessionId)&select=id"
+        let exercises = (try await getJSON(path: exPath) as? [[String: Any]]) ?? []
+        let ids = exercises.compactMap { $0["id"] as? String }
+        guard !ids.isEmpty else { return false }
+        let joined = ids.joined(separator: ",")
+        let setsPath =
+            "/rest/v1/v2_session_sets?session_exercise_id=in.(\(joined))&performed_at=not.is.null&select=id&limit=1"
+        let rows = (try await getJSON(path: setsPath) as? [[String: Any]]) ?? []
+        return !rows.isEmpty
+    }
+
+    private func fetchLastCompletedSetsByExercise(
+        templateId: String,
+        dayName: String
+    ) async throws -> [String: [[String: Any]]] {
+        let encodedDay = Self.encodeQuery(dayName)
+        let path =
+            "/rest/v1/v2_workout_sessions?user_id=eq.\(credentials.userId)&template_id=eq.\(templateId)&day_name=eq.\(encodedDay)&status=eq.completed&select=id&order=completed_at.desc.nullslast&limit=1"
+        guard let rows = try await getJSON(path: path) as? [[String: Any]],
+              let previousId = rows.first?["id"] as? String else {
+            return [:]
+        }
+        let exPath =
+            "/rest/v1/v2_session_exercises?session_id=eq.\(previousId)&select=id,exercise_id,custom_exercise_id&order=sort_order.asc"
+        let exercises = (try await getJSON(path: exPath) as? [[String: Any]]) ?? []
+        let ids = exercises.compactMap { $0["id"] as? String }
+        guard !ids.isEmpty else { return [:] }
+        let joined = ids.joined(separator: ",")
+        let setsPath =
+            "/rest/v1/v2_session_sets?session_exercise_id=in.(\(joined))&select=session_exercise_id,set_number,reps,weight,duration_sec,rest_sec,set_type&order=set_number.asc"
+        let sets = (try await getJSON(path: setsPath) as? [[String: Any]]) ?? []
+        var setsBySe: [String: [[String: Any]]] = [:]
+        for set in sets {
+            guard let seId = set["session_exercise_id"] as? String else { continue }
+            setsBySe[seId, default: []].append(set)
+        }
+        var byExercise: [String: [[String: Any]]] = [:]
+        for ex in exercises {
+            let key = (ex["exercise_id"] as? String) ?? (ex["custom_exercise_id"] as? String)
+            guard let key, let seId = ex["id"] as? String else { continue }
+            byExercise[key] = setsBySe[seId] ?? []
+        }
+        return byExercise
     }
 
     private static func todayDayName() -> String {
@@ -317,5 +442,29 @@ actor WatchSupabaseClient {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "EEEE"
         return formatter.string(from: Date())
+    }
+
+    private static func todayBoundsIso() -> (start: String, endExclusive: String) {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        return (jsIso(start), jsIso(end))
+    }
+
+    private static func jsIso(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private static func encodeQuery(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let n = value as? NSNumber { return n.doubleValue }
+        return nil
     }
 }

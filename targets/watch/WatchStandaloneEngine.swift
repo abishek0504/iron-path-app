@@ -34,7 +34,20 @@ final class WatchStandaloneEngine: ObservableObject {
         case weight
         case reps
         case duration
+        case rpe
     }
+
+    static let defaultStrengthRpe = 7
+    static let needsPhoneAuthMessage = "Sign in on iPhone first"
+    static let waitingForPhoneMessage = "Waiting for iPhone…"
+    static let openPhoneToSyncMessage = "Open IronPath on iPhone to sync"
+
+    var pullAuthFromPhone: (() async -> Void)?
+    var isPhoneReachable: () -> Bool = { false }
+    var isPhoneMirrorActive: () -> Bool = { false }
+    var onSnapshotChange: (() -> Void)?
+    var onMirrorAdjust: ((AdjustField, Double) -> Void)?
+    var onMirrorCycleAdjust: (() -> Void)?
 
     private let store = WatchSessionStore.shared
     private var restTimer: Timer?
@@ -44,11 +57,11 @@ final class WatchStandaloneEngine: ObservableObject {
         snapshot != nil && snapshot?.phase != .complete
     }
 
-    static let needsPhoneAuthMessage = "Sign in on iPhone first"
-
     func authDidUpdate() {
         guard WatchSharedAuth.load() != nil else { return }
-        if statusMessage == Self.needsPhoneAuthMessage {
+        if statusMessage == Self.needsPhoneAuthMessage
+            || statusMessage == Self.waitingForPhoneMessage
+            || statusMessage == Self.openPhoneToSyncMessage {
             statusMessage = nil
         }
     }
@@ -70,33 +83,51 @@ final class WatchStandaloneEngine: ObservableObject {
         statusMessage = nil
         defer { isBusy = false }
 
-        guard let client = WatchSupabaseClient.makeIfPossible() else {
-            statusMessage = Self.needsPhoneAuthMessage
+        if isPhoneMirrorActive() {
+            statusMessage = "Workout active on iPhone"
+            return
+        }
+
+        if WatchSharedAuth.load() == nil || WatchSharedAuth.credentialsNeedRefresh() {
+            statusMessage = isPhoneReachable()
+                ? Self.waitingForPhoneMessage
+                : Self.openPhoneToSyncMessage
+            await pullAuthFromPhone?()
+        }
+
+        guard WatchSupabaseClient.makeIfPossible() != nil else {
+            statusMessage = isPhoneReachable()
+                ? Self.needsPhoneAuthMessage
+                : Self.openPhoneToSyncMessage
             return
         }
 
         do {
-            if let active = try await client.fetchActiveSession() {
-                let control = active["control_device"] as? String ?? "phone"
-                guard let sessionId = active["id"] as? String else {
-                    throw WatchSupabaseError.decoding
-                }
-                if control == "phone" {
-                    statusMessage = "Workout active on iPhone"
-                    return
-                }
-                try await loadSession(sessionId: sessionId, client: client)
-                statusMessage = nil
-                return
+            try await startAfterAuth()
+        } catch let error as WatchSupabaseError where error.isAuthFailure {
+            await pullAuthFromPhone?()
+            do {
+                try await startAfterAuth()
+            } catch {
+                statusMessage = WatchSharedAuth.load() == nil
+                    ? (isPhoneReachable() ? Self.needsPhoneAuthMessage : Self.openPhoneToSyncMessage)
+                    : error.localizedDescription
             }
-
-            let sessionId = try await client.createWatchSessionFromTodayPlan()
-            try await loadSession(sessionId: sessionId, client: client)
-            statusMessage = nil
-            flushOutbox()
         } catch {
             statusMessage = error.localizedDescription
         }
+    }
+
+    private func startAfterAuth() async throws {
+        guard let client = WatchSupabaseClient.makeIfPossible() else {
+            throw WatchSupabaseError.notAuthenticated
+        }
+        let sessionId = try await client.claimOrCreateTodaysSession(
+            phoneMirrorActive: isPhoneMirrorActive()
+        )
+        try await loadSession(sessionId: sessionId, client: client)
+        statusMessage = nil
+        flushOutbox()
     }
 
     private func loadSession(sessionId: String, client: WatchSupabaseClient) async throws {
@@ -128,7 +159,8 @@ final class WatchStandaloneEngine: ObservableObject {
                     completed: performed != nil,
                     adjustedReps: nil,
                     adjustedWeight: nil,
-                    adjustedDurationSec: nil
+                    adjustedDurationSec: nil,
+                    adjustedRpe: nil
                 )
             }
             exercises.append(
@@ -187,7 +219,6 @@ final class WatchStandaloneEngine: ObservableObject {
         guard snap.setIndex < exercise.sets.count else { return }
         var set = exercise.sets[snap.setIndex]
 
-        // Timed sets: collect RPE before committing.
         if snap.phase == .execution && exercise.mode == .timed {
             snap.pendingRpeSetIndex = snap.setIndex
             snap.pendingTimedDurationSec = set.effectiveDurationSec
@@ -198,16 +229,29 @@ final class WatchStandaloneEngine: ObservableObject {
         }
 
         if snap.phase == .setRpe {
-            set.rpe = rpe
+            set.adjustedRpe = rpe
+        } else if let rpe {
+            set.adjustedRpe = rpe
+        } else if set.effectiveRpe == nil, exercise.mode == .reps {
+            set.adjustedRpe = Self.defaultStrengthRpe
         }
 
         set.completed = true
-        set.performedAt = ISO8601DateFormatter().string(from: Date())
+        set.performedAt = isoNow()
         exercise.sets[snap.setIndex] = set
         snap.exercises[snap.exerciseIndex] = exercise
         snap.phase = .execution
         snap.pendingRpeSetIndex = nil
         snap.pendingTimedDurationSec = nil
+
+        var payload: [String: String] = [
+            "performed_at": set.performedAt ?? isoNow(),
+            "set_type": set.setType.rawValue,
+        ]
+        if let reps = set.effectiveReps { payload["reps"] = String(reps) }
+        if let weight = set.effectiveWeight { payload["weight"] = String(weight) }
+        if let duration = set.effectiveDurationSec { payload["duration_sec"] = String(duration) }
+        if let loggedRpe = set.effectiveRpe { payload["rpe"] = String(loggedRpe) }
 
         store.enqueue(
             WatchOutboxEntry(
@@ -215,12 +259,7 @@ final class WatchStandaloneEngine: ObservableObject {
                 op: .markSetComplete,
                 sessionId: snap.sessionId,
                 setId: set.id,
-                payload: [
-                    "reps": set.effectiveReps.map(String.init) ?? "",
-                    "weight": set.effectiveWeight.map { String($0) } ?? "",
-                    "duration_sec": set.effectiveDurationSec.map(String.init) ?? "",
-                    "rpe": set.rpe.map(String.init) ?? "",
-                ],
+                payload: payload,
                 createdAt: Date().timeIntervalSince1970
             )
         )
@@ -295,6 +334,10 @@ final class WatchStandaloneEngine: ObservableObject {
     }
 
     func beginAdjust() {
+        if snapshot == nil {
+            showAdjustSheet = true
+            return
+        }
         guard let snap = snapshot,
               snap.phase == .execution,
               snap.exerciseIndex < snap.exercises.count else { return }
@@ -318,18 +361,32 @@ final class WatchStandaloneEngine: ObservableObject {
     }
 
     func cycleAdjustField() {
+        if snapshot == nil {
+            onMirrorCycleAdjust?()
+            return
+        }
         guard let snap = snapshot,
               snap.exerciseIndex < snap.exercises.count else { return }
         let exercise = snap.exercises[snap.exerciseIndex]
         let set = exercise.sets[snap.setIndex]
         if exercise.mode == .timed {
-            adjustField = .duration
+            if adjustField == .duration {
+                adjustField = .rpe
+                adjustValue = Double(set.effectiveRpe ?? Self.defaultStrengthRpe)
+            } else {
+                adjustField = .duration
+                adjustValue = Double(set.effectiveDurationSec ?? 30)
+            }
             return
         }
-        if adjustField == .weight {
+        switch adjustField {
+        case .weight:
             adjustField = .reps
             adjustValue = Double(set.effectiveReps ?? 8)
-        } else {
+        case .reps:
+            adjustField = .rpe
+            adjustValue = Double(set.effectiveRpe ?? Self.defaultStrengthRpe)
+        default:
             adjustField = .weight
             adjustValue = set.effectiveWeight ?? 0
         }
@@ -339,6 +396,9 @@ final class WatchStandaloneEngine: ObservableObject {
         guard var snap = snapshot,
               snap.phase == .execution,
               snap.exerciseIndex < snap.exercises.count else {
+            if snapshot == nil {
+                onMirrorAdjust?(adjustField, adjustValue)
+            }
             showAdjustSheet = false
             return
         }
@@ -355,6 +415,8 @@ final class WatchStandaloneEngine: ObservableObject {
             set.adjustedReps = max(0, Int(adjustValue.rounded()))
         case .duration:
             set.adjustedDurationSec = max(1, Int(adjustValue.rounded()))
+        case .rpe:
+            set.adjustedRpe = min(10, max(1, Int(adjustValue.rounded())))
         }
         exercise.sets[snap.setIndex] = set
         snap.exercises[snap.exerciseIndex] = exercise
@@ -364,7 +426,11 @@ final class WatchStandaloneEngine: ObservableObject {
     }
 
     func stepAdjust(delta: Double) {
-        adjustValue = max(0, adjustValue + delta)
+        if adjustField == .rpe {
+            adjustValue = min(10, max(1, adjustValue + delta))
+        } else {
+            adjustValue = max(0, adjustValue + delta)
+        }
     }
 
     func abandonLocal() {
@@ -372,6 +438,41 @@ final class WatchStandaloneEngine: ObservableObject {
         store.clearSnapshot()
         snapshot = nil
         statusMessage = nil
+        onSnapshotChange?()
+    }
+
+    func dismissCompleteIfFlushed() -> Bool {
+        pendingOutboxCount = store.loadOutbox().count
+        if pendingOutboxCount > 0 {
+            flushOutbox()
+            return false
+        }
+        abandonLocal()
+        return true
+    }
+
+    func yieldToPhone() {
+        restTimer?.invalidate()
+        store.clearSnapshot()
+        snapshot = nil
+        showAdjustSheet = false
+        onSnapshotChange?()
+    }
+
+    func drainOutboxEntries() -> [WatchOutboxEntry] {
+        store.loadOutbox()
+    }
+
+    func clearFlushedOutbox(_ ids: [String]) {
+        for id in ids {
+            store.removeOutboxEntry(id: id)
+        }
+        pendingOutboxCount = store.loadOutbox().count
+        if var snap = snapshot {
+            snap.outboxPendingCount = pendingOutboxCount
+            snapshot = snap
+            store.saveSnapshot(snap)
+        }
     }
 
     // MARK: - Derived UI state
@@ -403,6 +504,9 @@ final class WatchStandaloneEngine: ObservableObject {
             mode: exercise.mode,
             useImperial: snap.useImperial
         )
+        if let rpe = set.effectiveRpe {
+            state.rpeText = "RPE \(rpe)"
+        }
         state.timedSetRpe = snap.phase == .setRpe
         if snap.phase == .setRpe, let held = snap.pendingTimedDurationSec {
             state.targetText = "\(held)s held"
@@ -428,11 +532,15 @@ final class WatchStandaloneEngine: ObservableObject {
     // MARK: - Persistence / sync
 
     private func persist() {
-        guard var snap = snapshot else { return }
+        guard var snap = snapshot else {
+            onSnapshotChange?()
+            return
+        }
         snap.outboxPendingCount = store.loadOutbox().count
         snapshot = snap
         store.saveSnapshot(snap)
         pendingOutboxCount = snap.outboxPendingCount
+        onSnapshotChange?()
     }
 
     private func scheduleRestAutoAdvanceIfNeeded() {
@@ -464,14 +572,15 @@ final class WatchStandaloneEngine: ObservableObject {
                             reps: Int(entry.payload["reps"] ?? ""),
                             weight: Double(entry.payload["weight"] ?? ""),
                             durationSec: Int(entry.payload["duration_sec"] ?? ""),
-                            rpe: Int(entry.payload["rpe"] ?? "")
+                            rpe: Int(entry.payload["rpe"] ?? ""),
+                            setType: entry.payload["set_type"].flatMap { $0.isEmpty ? nil : $0 },
+                            performedAt: entry.payload["performed_at"].flatMap { $0.isEmpty ? nil : $0 }
                         )
                     case .completeSession:
                         try await client.completeSession(
                             sessionId: entry.sessionId,
                             hkWorkoutUuid: entry.payload["hkWorkoutUuid"].flatMap { $0.isEmpty ? nil : $0 }
                         )
-                        // Keep local complete UI until the user taps Done.
                     case .linkHkWorkout:
                         if let uuid = entry.payload["hkWorkoutUuid"], !uuid.isEmpty {
                             try await client.patchJSON(
@@ -481,6 +590,9 @@ final class WatchStandaloneEngine: ObservableObject {
                         }
                     }
                     self.store.removeOutboxEntry(id: entry.id)
+                } catch let error as WatchSupabaseError where error.isAuthFailure {
+                    await self.pullAuthFromPhone?()
+                    break
                 } catch {
                     #if DEBUG
                     NSLog("IronPath watch outbox flush failed: %@", error.localizedDescription)
@@ -515,6 +627,12 @@ final class WatchStandaloneEngine: ObservableObject {
         )
         pendingOutboxCount = store.loadOutbox().count
         flushOutbox()
+    }
+
+    private func isoNow() -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: Date())
     }
 
     private static func doubleValue(_ value: Any?) -> Double? {

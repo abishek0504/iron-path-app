@@ -68,7 +68,9 @@ public class WatchConnectivityModule: Module {
       "onSubmitRpe",
       "onWatchStateChanged",
       "onHeartRate",
-      "onWorkoutEnded"
+      "onWorkoutEnded",
+      "onWatchWorkoutContext",
+      "onWatchYieldControl"
     )
 
     OnCreate {
@@ -92,6 +94,12 @@ public class WatchConnectivityModule: Module {
       }
       self.sessionDelegate.onStateChanged = { [weak self] payload in
         self?.emitOnMain("onWatchStateChanged", payload)
+      }
+      self.sessionDelegate.onWatchWorkoutContext = { [weak self] payload in
+        self?.emitOnMain("onWatchWorkoutContext", payload)
+      }
+      self.sessionDelegate.onWatchYieldControl = { [weak self] payload in
+        self?.emitOnMain("onWatchYieldControl", payload)
       }
       self.sessionDelegate.activate()
     }
@@ -139,6 +147,10 @@ public class WatchConnectivityModule: Module {
         NSLog("IronPath clear auth on watch failed: %@", error.localizedDescription)
       }
     }
+
+    AsyncFunction("requestWatchTakeover") { (sessionId: String) -> [String: Any] in
+      try await self.sessionDelegate.requestTakeover(sessionId: sessionId)
+    }
   }
 
   /// WCSession callbacks run off the JS thread; hop before Expo sendEvent.
@@ -153,6 +165,9 @@ public class WatchConnectivityModule: Module {
 private let watchAuthMessageType = "auth"
 private let watchAuthClearMessageType = "clearAuth"
 private let watchAuthRequestMessageType = "requestAuth"
+private let watchContextMessageType = "watchContext"
+private let requestTakeoverMessageType = "requestTakeover"
+private let yieldControlMessageType = "yieldControl"
 
 enum WatchSharedAuthStore {
   static let appGroupId = "group.com.alexpreo.ironpath.shared"
@@ -209,6 +224,8 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   var onHeartRate: (([String: Any]) -> Void)?
   var onWorkoutEnded: (([String: Any]) -> Void)?
   var onStateChanged: (([String: Any]) -> Void)?
+  var onWatchWorkoutContext: (([String: Any]) -> Void)?
+  var onWatchYieldControl: (([String: Any]) -> Void)?
 
   private let healthStore = HKHealthStore()
   private var pendingWorkoutContext: [String: Any]?
@@ -243,6 +260,8 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     onHeartRate = nil
     onWorkoutEnded = nil
     onStateChanged = nil
+    onWatchWorkoutContext = nil
+    onWatchYieldControl = nil
     if WCSession.isSupported(), WCSession.default.delegate === self {
       WCSession.default.delegate = nil
     }
@@ -311,7 +330,13 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     guard session.activationState == .activated else { return }
     sendOrQueue(
       session: session,
-      payload: ["type": watchAuthClearMessageType, "auth": ["cleared": true]]
+      payload: [
+        "type": watchAuthClearMessageType,
+        "auth": [
+          "cleared": true,
+          "updatedAt": Date().timeIntervalSince1970,
+        ],
+      ]
     )
   }
 
@@ -482,6 +507,33 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     handleIncoming(userInfo, replyHandler: nil)
   }
 
+  func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+    handleIncoming(applicationContext, replyHandler: nil)
+  }
+
+  func requestTakeover(sessionId: String) async throws -> [String: Any] {
+    guard WCSession.isSupported() else {
+      return ["ok": false]
+    }
+    let session = WCSession.default
+    let payload: [String: Any] = [
+      "type": requestTakeoverMessageType,
+      "sessionId": sessionId,
+    ]
+    if session.isReachable {
+      return try await withCheckedThrowingContinuation { continuation in
+        session.sendMessage(payload, replyHandler: { reply in
+          continuation.resume(returning: reply)
+        }, errorHandler: { error in
+          session.transferUserInfo(payload)
+          continuation.resume(throwing: error)
+        })
+      }
+    }
+    session.transferUserInfo(payload)
+    return ["ok": false, "queued": true]
+  }
+
   private func handleIncoming(
     _ payload: [String: Any],
     replyHandler: (([String: Any]) -> Void)?
@@ -492,15 +544,14 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     }
 
     if type == watchAuthRequestMessageType {
+      do {
+        try flushPendingWorkoutContextIfNeeded()
+        try pushAuthToWatch()
+      } catch {
+        NSLog("IronPath requestAuth push failed: %@", error.localizedDescription)
+      }
       if let record = WatchSharedAuthStore.loadRecord() {
         replyHandler?(["ok": true, "auth": record])
-        if replyHandler == nil {
-          do {
-            try pushAuthToWatch()
-          } catch {
-            NSLog("IronPath requestAuth push failed: %@", error.localizedDescription)
-          }
-        }
       } else {
         replyHandler?(["ok": true])
       }
@@ -523,12 +574,26 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
         return
       }
 
-      onSetCompleted?([
+      var event: [String: Any] = [
         "type": "completeSet",
         "sessionId": sessionId,
         "setNumber": setNumber,
         "sentAt": sentAt,
-      ])
+      ]
+      if let reps = WatchPayloadParsing.intFromPayload(payload["reps"]), reps >= 1 {
+        event["reps"] = reps
+      }
+      if let weight = WatchPayloadParsing.doubleFromPayload(payload["weight"]), weight >= 0 {
+        event["weight"] = weight
+      }
+      if let durationSec = WatchPayloadParsing.intFromPayload(payload["durationSec"]), durationSec >= 1 {
+        event["durationSec"] = durationSec
+      }
+      if let rpe = WatchPayloadParsing.intFromPayload(payload["rpe"]), rpe >= 1, rpe <= 10 {
+        event["rpe"] = rpe
+      }
+
+      onSetCompleted?(event)
       replyHandler?(["ok": true, "setNumber": setNumber])
       return
     }
@@ -615,6 +680,18 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
         "bpm": bpm,
         "timestamp": timestamp,
       ])
+      replyHandler?(["ok": true])
+      return
+    }
+
+    if type == watchContextMessageType {
+      onWatchWorkoutContext?(payload)
+      replyHandler?(["ok": true])
+      return
+    }
+
+    if type == yieldControlMessageType {
+      onWatchYieldControl?(payload)
       replyHandler?(["ok": true])
       return
     }

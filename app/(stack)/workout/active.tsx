@@ -62,6 +62,7 @@ import {
   abandonWorkoutSession,
   getPreviousExercisePerformance,
   insertWarmupSets,
+  setSessionControlDevice,
   type PreviousPerformance,
   type SetType,
 } from '../../../src/lib/supabase/queries/workouts';
@@ -103,8 +104,10 @@ import {
   addHeartRateListener,
   addWorkoutEndedListener,
   addWatchStateChangedListener,
+  addWatchWorkoutContextListener,
   getWatchState,
   startWatchApp,
+  requestWatchTakeover,
   type WatchWorkoutContext,
 } from '../../../modules/watch-connectivity';
 import { REST_EXTEND_SEC } from '../../../src/lib/workout/restConstants';
@@ -206,6 +209,8 @@ export default function ActiveWorkoutScreen() {
   const shareCardRef = useRef<View>(null);
   const [controlDevice, setControlDevice] = useState<'phone' | 'watch'>('phone');
   const controlDeviceRef = useRef<'phone' | 'watch'>('phone');
+  const [watchLiveContext, setWatchLiveContext] = useState<WatchWorkoutContext | null>(null);
+  const [isTakingOver, setIsTakingOver] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [workoutPhase, setWorkoutPhase] = useState<WorkoutPhase>({ type: 'execution', setIndex: 0 });
@@ -349,7 +354,11 @@ export default function ActiveWorkoutScreen() {
   // --- Apple Watch mirror ---------------------------------------------------
   // The watch renders whatever state the phone pushes; completion taps come
   // back as events and reuse the exact same handler as the on-screen button.
-  const handleCompleteSetRef = useRef<(elapsedDurationSec?: number, rpeOverride?: number) => void>(() => {});
+  const handleCompleteSetRef = useRef<(
+    elapsedDurationSec?: number,
+    rpeOverride?: number,
+    watchActuals?: { reps?: number; weight?: number; durationSec?: number; rpe?: number },
+  ) => void>(() => {});
   const savingLogsRef = useRef(false);
   const workoutPhaseRef = useRef(workoutPhase);
   workoutPhaseRef.current = workoutPhase;
@@ -483,7 +492,18 @@ export default function ActiveWorkoutScreen() {
         return;
       }
 
-      handleCompleteSetRef.current();
+      handleCompleteSetRef.current(
+        event.durationSec,
+        event.rpe,
+        event.reps != null || event.weight != null || event.durationSec != null || event.rpe != null
+          ? {
+              reps: event.reps,
+              weight: event.weight,
+              durationSec: event.durationSec,
+              rpe: event.rpe,
+            }
+          : undefined,
+      );
     });
     // Do not clear watch context on unmount — only on complete/abandon so mirror
     // mode survives navigating away from the active screen briefly.
@@ -555,6 +575,16 @@ export default function ActiveWorkoutScreen() {
       if (ctx?.active) {
         void updateWorkoutContext(ctx);
       }
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    const unsub = addWatchWorkoutContextListener((ctx) => {
+      if (!screenMountedRef.current) return;
+      const activeSessionId = sessionIdRef.current;
+      if (ctx.sessionId && activeSessionId && ctx.sessionId !== activeSessionId) return;
+      setWatchLiveContext(ctx);
     });
     return unsub;
   }, []);
@@ -726,6 +756,47 @@ export default function ActiveWorkoutScreen() {
     }
   };
 
+  const handleTakeOver = async () => {
+    if (!sessionId || isTakingOver) return;
+    setIsTakingOver(true);
+    try {
+      const result = await requestWatchTakeover(sessionId);
+      for (const write of result.pendingWrites) {
+        if (!write.setId) continue;
+        const reps = write.reps != null ? Number(write.reps) : undefined;
+        const weight = write.weight != null ? Number(write.weight) : undefined;
+        const durationSec = write.duration_sec != null ? Number(write.duration_sec) : undefined;
+        const rpe = write.rpe != null ? Number(write.rpe) : undefined;
+        await markSetComplete(write.setId, {
+          ...(Number.isFinite(reps) ? { reps } : {}),
+          ...(Number.isFinite(weight) ? { weight } : {}),
+          ...(Number.isFinite(durationSec) ? { duration_sec: durationSec } : {}),
+          ...(Number.isFinite(rpe) ? { rpe } : {}),
+          ...(write.set_type
+            ? { set_type: write.set_type as SetType }
+            : {}),
+        });
+      }
+      const flipped = await setSessionControlDevice(sessionId, 'phone');
+      if (!flipped && !result.ok) {
+        toast.error('Could not take over from Apple Watch');
+        return;
+      }
+      setControlDevice('phone');
+      controlDeviceRef.current = 'phone';
+      setWatchLiveContext(null);
+      await loadActiveSession();
+      toast.success('Taken over on iPhone');
+    } catch (error) {
+      if (__DEV__) {
+        devError('workout-active', error, { action: 'watch_takeover' });
+      }
+      toast.error('Could not take over from Apple Watch');
+    } finally {
+      setIsTakingOver(false);
+    }
+  };
+
   const loadActiveSession = async (gen?: number) => {
     if (!userId) return;
     const requestGen = gen ?? ++loadGenRef.current;
@@ -748,19 +819,6 @@ export default function ActiveWorkoutScreen() {
       }
 
       const device = session.control_device === 'watch' ? 'watch' : 'phone';
-      if (device === 'watch') {
-        if (__DEV__) {
-          const { devLog } = require('../../../src/lib/utils/logger');
-          devLog('workout-active', {
-            action: 'loadActiveSession_blocked_watch_owned',
-            sessionId: session.id,
-          });
-        }
-        toast.error('This workout is active on Apple Watch');
-        goBack();
-        return;
-      }
-
       setSessionId(session.id);
       setSessionTemplateId(session.template_id ?? null);
       setSessionDayName(session.day_name ?? null);
@@ -1141,7 +1199,11 @@ export default function ActiveWorkoutScreen() {
     setWorkoutPhase({ type: 'timedSetRpe', setIndex, elapsedDurationSec });
   };
 
-  const handleCompleteSet = async (elapsedDurationSec?: number, rpeOverride?: number) => {
+  const handleCompleteSet = async (
+    elapsedDurationSec?: number,
+    rpeOverride?: number,
+    watchActuals?: { reps?: number; weight?: number; durationSec?: number; rpe?: number },
+  ) => {
     if (completingSetRef.current) return;
     const exercise = exercises[currentExerciseIndex];
     if (!exercise) return;
@@ -1157,6 +1219,7 @@ export default function ActiveWorkoutScreen() {
       exercise.mode === 'timed' &&
       !isStretch &&
       elapsedDurationSec === undefined
+      && watchActuals?.durationSec == null
     ) {
       const elapsed = resolveTimedHoldElapsed(currentSetIdx);
       goToTimedSetRpeStep(currentSetIdx, elapsed);
@@ -1167,7 +1230,7 @@ export default function ActiveWorkoutScreen() {
     try {
     hapticHeavy();
 
-    let timedDurationSec = elapsedDurationSec;
+    let timedDurationSec = elapsedDurationSec ?? watchActuals?.durationSec;
     if (workoutPhase.type === 'timedSetRpe') {
       timedDurationSec = workoutPhase.elapsedDurationSec;
     } else if (exercise.mode === 'timed' && timedDurationSec === undefined) {
@@ -1176,10 +1239,11 @@ export default function ActiveWorkoutScreen() {
 
     // Update RPE for this set (strength only). Failure sets default to max effort.
     const updatedRPEs = [...currentSetRPEs];
+    const watchRpe = watchActuals?.rpe ?? rpeOverride;
     if (!isStretch) {
       const setType = exercise.sets[currentSetIdx]?.set_type ?? 'normal';
       const defaultRpe = setType === 'failure' ? FAILURE_DEFAULT_RPE : 7;
-      updatedRPEs[currentSetIdx] = rpeOverride ?? (currentSetRPEs[currentSetIdx] || defaultRpe);
+      updatedRPEs[currentSetIdx] = watchRpe ?? (currentSetRPEs[currentSetIdx] || defaultRpe);
       setCurrentSetRPEs(updatedRPEs);
     }
 
@@ -1222,11 +1286,13 @@ export default function ActiveWorkoutScreen() {
       );
       setExercises(updatedExercises);
 
-      const intensityWrite = isStretch
+        const intensityWrite = isStretch
         ? {}
-        : rpeOverride != null
-          ? { rpe: rpeOverride }
-          : workoutSettings.intensityMode === 'rir'
+        : watchRpe != null
+          ? { rpe: watchRpe }
+          : rpeOverride != null
+            ? { rpe: rpeOverride }
+            : workoutSettings.intensityMode === 'rir'
             ? { rir: currentSetRIRs[currentSetIdx] ?? DEFAULT_RIR }
             : { rpe: updatedRPEs[currentSetIdx] };
 
@@ -1237,15 +1303,34 @@ export default function ActiveWorkoutScreen() {
               const draftedWeight = parseAddedLoadInput(liveWeight);
               const draftedReps = parseInt(liveReps, 10);
               const weight =
-                draftedWeight != null
-                  ? draftedWeight
-                  : currentSet.weight ?? null;
+                watchActuals?.weight != null
+                  ? watchActuals.weight
+                  : draftedWeight != null
+                    ? draftedWeight
+                    : currentSet.weight ?? null;
               const reps =
-                Number.isFinite(draftedReps) && draftedReps > 0
-                  ? draftedReps
-                  : currentSet.reps != null && currentSet.reps > 0
-                    ? currentSet.reps
-                    : null;
+                watchActuals?.reps != null && watchActuals.reps > 0
+                  ? watchActuals.reps
+                  : Number.isFinite(draftedReps) && draftedReps > 0
+                    ? draftedReps
+                    : currentSet.reps != null && currentSet.reps > 0
+                      ? currentSet.reps
+                      : null;
+              if (__DEV__) {
+                const source =
+                  watchActuals?.reps != null || watchActuals?.weight != null
+                    ? 'watch'
+                    : draftedWeight != null || (Number.isFinite(draftedReps) && draftedReps > 0)
+                      ? 'phone_draft'
+                      : 'prescribed';
+                devLog('workout-active', {
+                  action: 'completeSet_values',
+                  source,
+                  hasWatchReps: watchActuals?.reps != null,
+                  hasWatchWeight: watchActuals?.weight != null,
+                  hasWatchRpe: watchActuals?.rpe != null,
+                });
+              }
               return markSetComplete(currentSet.id, {
                 weight,
                 reps,
@@ -2029,6 +2114,20 @@ export default function ActiveWorkoutScreen() {
           ) : null}
         </View>
         <View style={styles.headerActions}>
+          {controlDevice === 'watch' ? (
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => void handleTakeOver()}
+              disabled={isTakingOver}
+              accessibilityRole="button"
+              accessibilityLabel="Take over on iPhone"
+            >
+              <Text style={styles.heartRateText} maxFontSizeMultiplier={1.1}>
+                {isTakingOver ? '…' : 'Take over'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+          <>
           {(() => {
             const hasDivergence =
               staleness && (staleness.structural || staleness.target || staleness.biomechanical);
@@ -2080,6 +2179,8 @@ export default function ActiveWorkoutScreen() {
           >
             <MoreVertical size={20} color={colors.textPrimary} />
           </TouchableOpacity>
+          </>
+          )}
         </View>
       </View>
 
@@ -2088,6 +2189,44 @@ export default function ActiveWorkoutScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        {controlDevice === 'watch' && workoutPhase.type !== 'complete' ? (
+          <View style={styles.executionContainer}>
+            <Text style={styles.progressText}>
+              {watchLiveContext?.progressText
+                ?? `Exercise ${currentExerciseIndex + 1} of ${exercises.length}`}
+            </Text>
+            <Text style={styles.notesText}>Logging on Apple Watch</Text>
+            <Text style={styles.exerciseName} numberOfLines={2}>
+              {watchLiveContext?.exerciseName ?? currentExercise?.name ?? 'Workout'}
+            </Text>
+            <Text style={styles.setInfo}>
+              {watchLiveContext?.setNumber
+                ? `Set ${watchLiveContext.setNumber} of ${watchLiveContext.totalSets ?? currentExercise?.sets.length ?? 0}`
+                : currentExercise
+                  ? `Set ${workoutPhase.type === 'execution' ? workoutPhase.setIndex + 1 : 1} of ${currentExercise.sets.length}`
+                  : ''}
+            </Text>
+            {watchLiveContext?.targetText ? (
+              <Text style={styles.targetValue}>{watchLiveContext.targetText}</Text>
+            ) : null}
+            {watchLiveContext?.rpeText ? (
+              <Text style={styles.progressText}>{watchLiveContext.rpeText}</Text>
+            ) : null}
+            {watchLiveContext?.phase === 'rest' ? (
+              <Text style={styles.progressText}>Resting on Watch</Text>
+            ) : null}
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={() => void handleTakeOver()}
+              disabled={isTakingOver}
+            >
+              <Text style={styles.saveButtonText}>
+                {isTakingOver ? 'Taking over…' : 'Take over on iPhone'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+        <>
         {workoutPhase.type === 'rest' && restEndsAtEpoch != null ? (
           <View style={styles.restContainer}>
             <Text style={[styles.exerciseName, styles.restExerciseName]} numberOfLines={1} maxFontSizeMultiplier={1.2}>{currentExercise.name}</Text>
@@ -2671,9 +2810,11 @@ export default function ActiveWorkoutScreen() {
         )}
           </>
         )}
+          </>
+        )}
       </ScrollView>
 
-      {((workoutPhase.type === 'execution' && currentExercise.mode !== 'timed') ||
+      {controlDevice !== 'watch' && ((workoutPhase.type === 'execution' && currentExercise.mode !== 'timed') ||
         workoutPhase.type === 'timedSetRpe') && (
         <View style={styles.completeSetFooter}>
           <TouchableOpacity

@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl, AppState } from 'react-native';
 import { LoadingScreen } from '../../src/components/ui/LoadingScreen';
 import { ConfirmDialog } from '../../src/components/ui/ConfirmDialog';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,7 +37,7 @@ import {
 } from '../../src/lib/supabase/queries/workouts';
 import { resetSessionProgress } from '../../src/lib/supabase/queries/workouts_helpers';
 import { clearWorkoutHealthBuffer } from '../../src/lib/health/workoutHealthBuffer';
-import { clearWorkoutContext } from '../../modules/watch-connectivity';
+import { clearWorkoutContext, addWatchStateChangedListener } from '../../modules/watch-connectivity';
 import {
   getTemplateWithDaysAndSlotsCached,
   getUserTemplatesCached,
@@ -586,6 +586,29 @@ export default function WorkoutTab() {
     }, [hasInitiallyLoaded, setWorkoutNeedsRefetch, syncPlanDayToLocalCalendar])
   );
 
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active' || !hasInitiallyLoaded) return;
+      void (async () => {
+        const userId = await getCurrentUserId();
+        if (userId) invalidateSessionsInRangeForUser(userId);
+        loadTodayWorkout(selectedWorkoutIndex);
+      })();
+    });
+    return () => sub.remove();
+  }, [getCurrentUserId, hasInitiallyLoaded, loadTodayWorkout, selectedWorkoutIndex]);
+
+  useEffect(() => {
+    return addWatchStateChangedListener((state) => {
+      if (!state.reachable || !hasInitiallyLoaded) return;
+      void (async () => {
+        const userId = await getCurrentUserId();
+        if (userId) invalidateSessionsInRangeForUser(userId);
+        loadTodayWorkout(selectedWorkoutIndex);
+      })();
+    });
+  }, [getCurrentUserId, hasInitiallyLoaded, loadTodayWorkout, selectedWorkoutIndex]);
+
   /**
    * Pull-to-refresh: bypass focus throttle and in-flight guard so a deliberate user gesture
    * always re-runs the load pipeline against the currently selected workout index.
@@ -650,7 +673,7 @@ export default function WorkoutTab() {
       return;
     }
     if (selectedSession?.status === 'active' && selectedSession.control_device === 'watch') {
-      toast.info('Workout is running on Apple Watch. Finish or abandon it there first.');
+      router.push({ pathname: '/workout/active', params: { sessionId: selectedSession.id } });
       return;
     }
     hapticMedium();
@@ -661,10 +684,6 @@ export default function WorkoutTab() {
 
       // Continue / open existing active session (same session Plan shows)
       if (!borrowing && selectedSession?.status === 'active' && selectedSession.id) {
-        if (selectedSession.control_device === 'watch') {
-          toast.info('Workout is running on Apple Watch.');
-          return;
-        }
         router.push({ pathname: '/workout/active', params: { sessionId: selectedSession.id } });
         return;
       }
@@ -708,7 +727,7 @@ export default function WorkoutTab() {
         );
         if (existingBorrowed) {
           if (existingBorrowed.control_device === 'watch') {
-            toast.info('Workout is running on Apple Watch. Finish or abandon it there first.');
+            router.push({ pathname: '/workout/active', params: { sessionId: existingBorrowed.id } });
             return;
           }
           const openIndex = Math.max(0, ensured.sessions.findIndex((s) => s.id === existingBorrowed.id));
@@ -785,7 +804,7 @@ export default function WorkoutTab() {
       }
 
       if (openSession.control_device === 'watch') {
-        toast.info('Workout is running on Apple Watch. Finish or abandon it there first.');
+        router.push({ pathname: '/workout/active', params: { sessionId: openSession.id } });
         return;
       }
 
@@ -1046,7 +1065,7 @@ export default function WorkoutTab() {
 
                   {selectedSession?.status === 'active' && selectedSession.control_device === 'watch' && (
                     <Text style={styles.helperText}>
-                      Active on Apple Watch — finish or abandon there. Phone controls stay locked for this session.
+                      Active on Apple Watch — open to watch live or take over on iPhone.
                     </Text>
                   )}
 
@@ -1113,7 +1132,6 @@ export default function WorkoutTab() {
                   disabled={
                     !canStartFromPlan
                     || isStartingWorkout
-                    || (selectedSession?.status === 'active' && selectedSession.control_device === 'watch')
                   }
                   text={
                     selectedSession?.status === 'active' && selectedSession.control_device === 'watch'

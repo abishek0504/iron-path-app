@@ -32,10 +32,12 @@ struct WatchLocalSet: Codable, Equatable, Identifiable {
     var adjustedReps: Int?
     var adjustedWeight: Double?
     var adjustedDurationSec: Int?
+    var adjustedRpe: Int?
 
     var effectiveReps: Int? { adjustedReps ?? reps }
     var effectiveWeight: Double? { adjustedWeight ?? weight }
     var effectiveDurationSec: Int? { adjustedDurationSec ?? durationSec }
+    var effectiveRpe: Int? { adjustedRpe ?? rpe }
 }
 
 struct WatchLocalExercise: Codable, Equatable, Identifiable {

@@ -35,6 +35,7 @@ export interface WatchWorkoutContext {
   progressText?: string;
   /** True during timed-set RPE step (watch shows quick picker). */
   timedSetRpe?: boolean;
+  rpeText?: string;
   updatedAt?: number;
 }
 
@@ -52,6 +53,10 @@ export interface WatchSetCompletedEvent {
   sessionId: string;
   setNumber: number;
   sentAt: number;
+  reps?: number;
+  weight?: number;
+  durationSec?: number;
+  rpe?: number;
 }
 
 export interface WatchSkipRestEvent {
@@ -94,6 +99,24 @@ export interface WatchWorkoutEndedEvent {
   hkWorkoutUuid: string;
 }
 
+export interface WatchPendingSetWrite {
+  op?: string;
+  setId: string;
+  sessionId?: string;
+  reps?: string;
+  weight?: string;
+  duration_sec?: string;
+  rpe?: string;
+  set_type?: string;
+  performed_at?: string;
+}
+
+export interface WatchYieldControlEvent {
+  type: 'yieldControl';
+  sessionId: string;
+  pendingWrites: WatchPendingSetWrite[];
+}
+
 type WatchConnectivityEvents = {
   onSetCompleted(event: WatchSetCompletedEvent): void;
   onSkipRest(event: WatchSkipRestEvent): void;
@@ -102,6 +125,8 @@ type WatchConnectivityEvents = {
   onWatchStateChanged(event: WatchStateChangedEvent): void;
   onHeartRate(event: WatchHeartRateEvent): void;
   onWorkoutEnded(event: WatchWorkoutEndedEvent): void;
+  onWatchWorkoutContext(event: WatchWorkoutContext): void;
+  onWatchYieldControl(event: WatchYieldControlEvent): void;
 };
 
 declare class WatchConnectivityNativeModule extends NativeModule<WatchConnectivityEvents> {
@@ -117,6 +142,7 @@ declare class WatchConnectivityNativeModule extends NativeModule<WatchConnectivi
   startWatchApp(sessionId: string): Promise<void>;
   syncAuthToWatch(payload: Record<string, unknown>): Promise<void>;
   clearAuthFromWatch(): Promise<void>;
+  requestWatchTakeover(sessionId: string): Promise<Record<string, unknown>>;
 }
 
 const native =
@@ -224,6 +250,27 @@ export async function clearAuthFromWatch(): Promise<void> {
   }
 }
 
+export async function requestWatchTakeover(
+  sessionId: string,
+): Promise<{ ok: boolean; queued?: boolean; pendingWrites: WatchPendingSetWrite[] }> {
+  if (!native?.requestWatchTakeover) {
+    return { ok: false, pendingWrites: [] };
+  }
+  try {
+    const raw = await native.requestWatchTakeover(sessionId);
+    const pendingWrites = Array.isArray(raw.pendingWrites)
+      ? (raw.pendingWrites as WatchPendingSetWrite[])
+      : [];
+    return {
+      ok: raw.ok === true,
+      queued: raw.queued === true,
+      pendingWrites,
+    };
+  } catch {
+    return { ok: false, pendingWrites: [] };
+  }
+}
+
 const WATCH_EVENT_MAX_AGE_MS = 5 * 60 * 1000;
 
 function isFreshWatchEvent(sentAt: number): boolean {
@@ -301,6 +348,32 @@ export function addWorkoutEndedListener(
   return () => subscription.remove();
 }
 
+export function addWatchWorkoutContextListener(
+  listener: (event: WatchWorkoutContext) => void,
+): () => void {
+  if (!native) return () => {};
+  const subscription = native.addListener(
+    'onWatchWorkoutContext',
+    (raw: WatchWorkoutContext) => {
+      listener(raw);
+    },
+  );
+  return () => subscription.remove();
+}
+
+export function addWatchYieldControlListener(
+  listener: (event: WatchYieldControlEvent) => void,
+): () => void {
+  if (!native) return () => {};
+  const subscription = native.addListener(
+    'onWatchYieldControl',
+    (raw: WatchYieldControlEvent) => {
+      listener(raw);
+    },
+  );
+  return () => subscription.remove();
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -330,12 +403,30 @@ function normalizeWatchSetCompletedEvent(
     return null;
   }
 
-  return {
+  const sentAt = parseSentAt(raw);
+  const event: WatchSetCompletedEvent = {
     type: 'completeSet',
     sessionId,
     setNumber,
-    sentAt: parseSentAt(raw),
+    sentAt,
   };
+  const reps = Number(raw.reps);
+  if (Number.isFinite(reps) && Number.isInteger(reps) && reps >= 1) {
+    event.reps = reps;
+  }
+  const weight = Number(raw.weight);
+  if (Number.isFinite(weight) && weight >= 0) {
+    event.weight = weight;
+  }
+  const durationSec = Number(raw.durationSec);
+  if (Number.isFinite(durationSec) && Number.isInteger(durationSec) && durationSec >= 1) {
+    event.durationSec = durationSec;
+  }
+  const rpe = Number(raw.rpe);
+  if (Number.isFinite(rpe) && Number.isInteger(rpe) && rpe >= 1 && rpe <= 10) {
+    event.rpe = rpe;
+  }
+  return event;
 }
 
 function normalizeWatchSkipRestEvent(raw: Record<string, unknown>): WatchSkipRestEvent | null {

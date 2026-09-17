@@ -19,6 +19,7 @@ import { useTourStore } from "../../src/stores/tourStore";
 import { useUserStore } from "../../src/stores/userStore";
 import { TourTarget } from "../../src/components/tour/TourTarget";
 import { syncSessionAuthToWatch } from "../../src/lib/watch/syncWatchAuth";
+import { addWatchStateChangedListener } from "../../modules/watch-connectivity";
 import { signOutAndClearLocalState, clearLocalAuthState, consumeExplicitLogout } from "../../src/lib/auth/signOutAndClear";
 import { devLog } from "../../src/lib/utils/logger";
 
@@ -243,9 +244,17 @@ function useSessionGuard(): { ready: boolean; authenticated: boolean } {
       }
     });
 
+    const unsubWatch = addWatchStateChangedListener((state) => {
+      if (!state.reachable || !state.installed) return;
+      void supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!cancelled && session) void syncSessionAuthToWatch(session);
+      });
+    });
+
     return () => {
       cancelled = true;
       subscription.subscription.unsubscribe();
+      unsubWatch();
     };
   }, [router, setProfile]);
 

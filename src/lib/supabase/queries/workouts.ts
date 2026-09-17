@@ -560,7 +560,7 @@ export async function getSessionsForToday(
   try {
     const { data, error } = await supabase
       .from('v2_workout_sessions')
-      .select('id, user_id, template_id, day_name, status, started_at, completed_at')
+      .select('id, user_id, template_id, day_name, status, started_at, completed_at, control_device')
       .eq('user_id', userId)
       .gte('started_at', dayStartIso)
       .lt('started_at', dayEndIsoExclusive)
@@ -579,6 +579,33 @@ export async function getSessionsForToday(
       devError('workout-query', error, { userId, dayStartIso, dayEndIsoExclusive });
     }
     return [];
+  }
+}
+
+export async function setSessionControlDevice(
+  sessionId: string,
+  controlDevice: SessionControlDevice,
+): Promise<boolean> {
+  if (__DEV__) {
+    devLog('workout-query', { action: 'setSessionControlDevice', sessionId, controlDevice });
+  }
+  try {
+    const { error } = await supabase
+      .from('v2_workout_sessions')
+      .update({ control_device: controlDevice })
+      .eq('id', sessionId);
+    if (error) {
+      if (__DEV__) {
+        devError('workout-query', error, { sessionId, controlDevice });
+      }
+      return false;
+    }
+    return true;
+  } catch (error) {
+    if (__DEV__) {
+      devError('workout-query', error, { sessionId, controlDevice });
+    }
+    return false;
   }
 }
 

@@ -56,7 +56,7 @@ struct ContentView: View {
                         .foregroundStyle(.orange)
                         .multilineTextAlignment(.center)
                 } else {
-                    Text("Start today's workout on your Watch, or begin on iPhone to mirror here.")
+                    Text(idleSubtitle)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -77,6 +77,16 @@ struct ContentView: View {
             }
             .padding()
         }
+    }
+
+    private var idleSubtitle: String {
+        if WatchSharedAuth.load() != nil {
+            return "Start today's planned workout on your Watch."
+        }
+        if workout.phoneReachable {
+            return WatchStandaloneEngine.waitingForPhoneMessage
+        }
+        return WatchStandaloneEngine.openPhoneToSyncMessage
     }
 
     // MARK: - Execution (one primary + one secondary)
@@ -119,6 +129,12 @@ struct ContentView: View {
                             .font(.title3.weight(.semibold))
                             .lineLimit(1)
                             .padding(.vertical, 2)
+                    }
+
+                    if let rpeText = workout.state.rpeText, workout.state.exerciseEndsAt == nil {
+                        Text(rpeText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
                     }
 
                     if !workout.state.lastTimeText.isEmpty && workout.state.exerciseEndsAt == nil {
@@ -168,7 +184,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!workout.canCompleteSet)
 
-                if workout.isStandaloneActive, !isLuminanceReduced {
+                if !isLuminanceReduced {
                     Button("Adjust") {
                         workout.beginAdjustTargets()
                     }
@@ -223,6 +239,13 @@ struct ContentView: View {
 
     // MARK: - Adjust (Crown + steppers, one value)
 
+    private var adjustStep: Double {
+        switch standalone.adjustField {
+        case .weight: return 2.5
+        case .reps, .duration, .rpe: return 1
+        }
+    }
+
     private var adjustSheet: some View {
         VStack(spacing: 10) {
             Text(adjustTitle)
@@ -234,16 +257,15 @@ struct ContentView: View {
                 .focusable(true)
                 .digitalCrownRotation(
                     $standalone.adjustValue,
-                    from: 0,
-                    through: 1000,
-                    by: standalone.adjustField == .reps ? 1 : 2.5,
+                    from: standalone.adjustField == .rpe ? 1 : 0,
+                    through: standalone.adjustField == .rpe ? 10 : 1000,
+                    by: adjustStep,
                     sensitivity: .medium
                 )
 
             HStack(spacing: 8) {
                 Button {
-                    let step = standalone.adjustField == .reps ? -1.0 : -2.5
-                    standalone.stepAdjust(delta: step)
+                    standalone.stepAdjust(delta: -adjustStep)
                 } label: {
                     Text("−")
                         .frame(maxWidth: .infinity)
@@ -251,8 +273,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Button {
-                    let step = standalone.adjustField == .reps ? 1.0 : 2.5
-                    standalone.stepAdjust(delta: step)
+                    standalone.stepAdjust(delta: adjustStep)
                 } label: {
                     Text("+")
                         .frame(maxWidth: .infinity)
@@ -260,15 +281,11 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
             }
 
-            if let snap = standalone.snapshot,
-               let exercise = snap.exercises[safe: snap.exerciseIndex],
-               exercise.mode == .reps {
-                Button("Switch weight / reps") {
-                    standalone.cycleAdjustField()
-                }
-                .buttonStyle(.plain)
-                .font(.caption2)
+            Button(adjustCycleTitle) {
+                workout.cycleAdjustTargets()
             }
+            .buttonStyle(.plain)
+            .font(.caption2)
 
             Button("Done") {
                 standalone.applyAdjust()
@@ -284,6 +301,16 @@ struct ContentView: View {
         case .weight: return "Weight"
         case .reps: return "Reps"
         case .duration: return "Seconds"
+        case .rpe: return "RPE"
+        }
+    }
+
+    private var adjustCycleTitle: String {
+        switch standalone.adjustField {
+        case .duration, .rpe:
+            return "Switch duration / RPE"
+        default:
+            return "Switch weight / reps / RPE"
         }
     }
 
@@ -292,7 +319,7 @@ struct ContentView: View {
         switch standalone.adjustField {
         case .weight:
             return value == floor(value) ? "\(Int(value))" : String(format: "%g", value)
-        case .reps, .duration:
+        case .reps, .duration, .rpe:
             return "\(Int(value.rounded()))"
         }
     }
@@ -317,7 +344,7 @@ struct ContentView: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                ForEach([6, 7, 8, 9], id: \.self) { rpe in
+                ForEach([6, 7, 8, 9, 10], id: \.self) { rpe in
                     Button {
                         workout.submitRpe(rpe)
                     } label: {
@@ -425,10 +452,12 @@ struct ContentView: View {
 
             if workout.isStandaloneActive || standalone.snapshot?.phase == .complete {
                 Button("Done") {
-                    standalone.abandonLocal()
-                    workout.resetToIdle()
+                    if standalone.dismissCompleteIfFlushed() {
+                        workout.resetToIdle()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(standalone.pendingOutboxCount > 0)
             }
         }
         .padding()
@@ -456,11 +485,5 @@ struct ContentView: View {
 
     private func formatSeconds(_ seconds: Int) -> String {
         String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }

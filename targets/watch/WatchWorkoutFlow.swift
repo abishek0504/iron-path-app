@@ -22,13 +22,31 @@ enum WatchWorkoutFlow {
 
     static func findNextStep(exercises: [WatchLocalExercise], exerciseIndex: Int) -> NextStep {
         let members = getSupersetMembers(exercises: exercises, exerciseIndex: exerciseIndex)
-        guard let pos = members.firstIndex(of: exerciseIndex) else { return .complete }
+        guard let pos = members.firstIndex(of: exerciseIndex) else {
+            return nextIncompleteOutside(exercises: exercises, excluding: [])
+        }
 
         for offset in 1...members.count {
             let memberIdx = members[(pos + offset) % members.count]
+            guard memberIdx >= 0, memberIdx < exercises.count else { continue }
             if let setIndex = exercises[memberIdx].sets.firstIndex(where: { !$0.completed }) {
                 let wrapped = pos + offset >= members.count
-                return .execute(exerciseIndex: memberIdx, setIndex: setIndex, withRest: wrapped)
+                let nextSet = exercises[memberIdx].sets[setIndex]
+                let withRest = wrapped && nextSet.setType != .drop
+                return .execute(exerciseIndex: memberIdx, setIndex: setIndex, withRest: withRest)
+            }
+        }
+
+        return nextIncompleteOutside(exercises: exercises, excluding: Set(members))
+    }
+
+    private static func nextIncompleteOutside(
+        exercises: [WatchLocalExercise],
+        excluding: Set<Int>
+    ) -> NextStep {
+        for idx in exercises.indices where !excluding.contains(idx) {
+            if let setIndex = exercises[idx].sets.firstIndex(where: { !$0.completed }) {
+                return .execute(exerciseIndex: idx, setIndex: setIndex, withRest: true)
             }
         }
         return .complete
