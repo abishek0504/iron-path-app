@@ -100,7 +100,14 @@ actor WatchSupabaseClient {
         else {
             throw WatchSupabaseError.notAuthenticated
         }
-        let expiresIn = (json["expires_in"] as? Double) ?? 3600
+        let expiresIn: TimeInterval
+        if let value = json["expires_in"] as? Double, value.isFinite {
+            expiresIn = value
+        } else if let number = json["expires_in"] as? NSNumber {
+            expiresIn = number.doubleValue
+        } else {
+            expiresIn = 3600
+        }
         credentials.accessToken = accessToken
         credentials.refreshToken = refreshToken
         credentials.expiresAt = Date().timeIntervalSince1970 + expiresIn

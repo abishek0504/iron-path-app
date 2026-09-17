@@ -90,6 +90,11 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
                 self?.apply(context: context)
             }
         }
+        sessionBridge.onAuth = { [weak self] in
+            Task { @MainActor in
+                self?.standalone.authDidUpdate()
+            }
+        }
         sessionBridge.activate()
     }
 
@@ -425,9 +430,14 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
     }
 }
 
+private let watchAuthMessageType = "auth"
+private let watchAuthClearMessageType = "clearAuth"
+private let watchAuthRequestMessageType = "requestAuth"
+
 /// Nonisolated WCSession delegate that forwards context onto the main actor.
 private final class WatchSessionBridge: NSObject, WCSessionDelegate {
     var onContext: (([String: Any]) -> Void)?
+    var onAuth: (() -> Void)?
 
     func activate() {
         guard WCSession.isSupported() else { return }
@@ -441,16 +451,18 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        onContext?(session.receivedApplicationContext)
+        ingest(session.receivedApplicationContext)
+        if activationState == .activated {
+            requestAuthIfNeeded(session)
+        }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        onContext?(applicationContext)
+        ingest(applicationContext)
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        guard message["type"] as? String == workoutContextMessageType else { return }
-        onContext?(message)
+        ingest(message)
     }
 
     func session(
@@ -458,9 +470,60 @@ private final class WatchSessionBridge: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        if message["type"] as? String == workoutContextMessageType {
-            onContext?(message)
-        }
+        ingest(message)
         replyHandler(["ok": true])
+    }
+
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        ingest(userInfo)
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        requestAuthIfNeeded(session)
+    }
+
+    private func ingest(_ payload: [String: Any]) {
+        guard !payload.isEmpty else { return }
+        applyAuthIfPresent(payload)
+
+        let type = payload["type"] as? String
+        if type == watchAuthMessageType
+            || type == watchAuthClearMessageType
+            || type == watchAuthRequestMessageType {
+            return
+        }
+        if payload.keys.contains("active")
+            || payload.keys.contains("sessionId")
+            || type == workoutContextMessageType {
+            onContext?(payload)
+        }
+    }
+
+    private func applyAuthIfPresent(_ payload: [String: Any]) {
+        if payload["type"] as? String == watchAuthClearMessageType {
+            WatchSharedAuth.clear()
+            onAuth?()
+            return
+        }
+        guard let auth = payload["auth"] as? [String: Any] else { return }
+        if WatchSharedAuth.save(from: auth) {
+            onAuth?()
+        }
+    }
+
+    private func requestAuthIfNeeded(_ session: WCSession) {
+        guard WatchSharedAuth.load() == nil else { return }
+        guard session.activationState == .activated else { return }
+        let payload: [String: Any] = ["type": watchAuthRequestMessageType]
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: { [weak self] reply in
+                self?.ingest(reply)
+            }, errorHandler: { error in
+                NSLog("IronPath watch requestAuth failed: %@", error.localizedDescription)
+                session.transferUserInfo(payload)
+            })
+        } else {
+            session.transferUserInfo(payload)
+        }
     }
 }

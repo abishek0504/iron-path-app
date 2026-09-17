@@ -1,10 +1,14 @@
 /**
- * Mirror Supabase auth into the Watch App Group so standalone watch workouts
- * can call Supabase without the phone process.
+ * Push Supabase auth to the watch over WatchConnectivity so standalone
+ * watch workouts can call Supabase without the phone process.
  */
 
 import type { Session } from '@supabase/supabase-js';
-import { clearAuthFromWatch, syncAuthToWatch } from '../../../modules/watch-connectivity';
+import {
+  clearAuthFromWatch,
+  getWatchState,
+  syncAuthToWatch,
+} from '../../../modules/watch-connectivity';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -14,7 +18,13 @@ export async function syncSessionAuthToWatch(session: Session | null): Promise<v
     await clearAuthFromWatch();
     return;
   }
-  if (!supabaseUrl || !supabaseAnonKey) return;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    if (__DEV__) {
+      const { devLog } = require('../utils/logger');
+      devLog('watch-auth', { action: 'syncSessionAuthToWatch_skipped_missing_env' });
+    }
+    return;
+  }
 
   await syncAuthToWatch({
     accessToken: session.access_token,
@@ -27,10 +37,15 @@ export async function syncSessionAuthToWatch(session: Session | null): Promise<v
 
   if (__DEV__) {
     const { devLog } = require('../utils/logger');
+    const watchState = await getWatchState();
     devLog('watch-auth', {
       action: 'syncSessionAuthToWatch',
       userId: session.user.id,
       expiresAt: session.expires_at ?? null,
+      watchSupported: watchState.supported,
+      watchPaired: watchState.paired,
+      watchInstalled: watchState.installed,
+      watchReachable: watchState.reachable,
     });
   }
 }

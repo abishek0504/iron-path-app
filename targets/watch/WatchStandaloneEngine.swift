@@ -44,6 +44,15 @@ final class WatchStandaloneEngine: ObservableObject {
         snapshot != nil && snapshot?.phase != .complete
     }
 
+    static let needsPhoneAuthMessage = "Sign in on iPhone first"
+
+    func authDidUpdate() {
+        guard WatchSharedAuth.load() != nil else { return }
+        if statusMessage == Self.needsPhoneAuthMessage {
+            statusMessage = nil
+        }
+    }
+
     init() {
         if let existing = store.loadSnapshot(), existing.controlDevice == .watch {
             snapshot = existing
@@ -62,7 +71,7 @@ final class WatchStandaloneEngine: ObservableObject {
         defer { isBusy = false }
 
         guard let client = WatchSupabaseClient.makeIfPossible() else {
-            statusMessage = "Sign in on iPhone first"
+            statusMessage = Self.needsPhoneAuthMessage
             return
         }
 

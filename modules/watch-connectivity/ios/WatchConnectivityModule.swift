@@ -124,10 +124,20 @@ public class WatchConnectivityModule: Module {
 
     AsyncFunction("syncAuthToWatch") { (payload: [String: Any]) in
       WatchSharedAuthStore.save(payload)
+      do {
+        try self.sessionDelegate.pushAuthToWatch()
+      } catch {
+        NSLog("IronPath push auth to watch failed: %@", error.localizedDescription)
+      }
     }
 
     AsyncFunction("clearAuthFromWatch") { () in
       WatchSharedAuthStore.clear()
+      do {
+        try self.sessionDelegate.pushAuthClearToWatch()
+      } catch {
+        NSLog("IronPath clear auth on watch failed: %@", error.localizedDescription)
+      }
     }
   }
 
@@ -140,6 +150,10 @@ public class WatchConnectivityModule: Module {
 }
 
 /// App Group bridge so the watch can run standalone Supabase-backed workouts.
+private let watchAuthMessageType = "auth"
+private let watchAuthClearMessageType = "clearAuth"
+private let watchAuthRequestMessageType = "requestAuth"
+
 enum WatchSharedAuthStore {
   static let appGroupId = "group.com.alexpreo.ironpath.shared"
   static let authKey = "ironpath.watch.auth"
@@ -158,13 +172,28 @@ enum WatchSharedAuthStore {
     let record: [String: Any] = [
       "accessToken": accessToken,
       "refreshToken": refreshToken,
-      "expiresAt": payload["expiresAt"] as? Double ?? 0,
+      "expiresAt": WatchPayloadParsing.doubleFromPayload(payload["expiresAt"]) ?? 0,
       "userId": userId,
       "supabaseUrl": supabaseUrl,
       "supabaseAnonKey": supabaseAnonKey,
       "updatedAt": Date().timeIntervalSince1970,
     ]
     defaults.set(record, forKey: authKey)
+  }
+
+  static func loadRecord() -> [String: Any]? {
+    guard let record = UserDefaults(suiteName: appGroupId)?.dictionary(forKey: authKey) else {
+      return nil
+    }
+    guard let accessToken = record["accessToken"] as? String, !accessToken.isEmpty,
+          let refreshToken = record["refreshToken"] as? String, !refreshToken.isEmpty,
+          let userId = record["userId"] as? String, !userId.isEmpty,
+          let supabaseUrl = record["supabaseUrl"] as? String, !supabaseUrl.isEmpty,
+          let supabaseAnonKey = record["supabaseAnonKey"] as? String, !supabaseAnonKey.isEmpty
+    else {
+      return nil
+    }
+    return record
   }
 
   static func clear() {
@@ -183,6 +212,7 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
 
   private let healthStore = HKHealthStore()
   private var pendingWorkoutContext: [String: Any]?
+  private var pendingAuthClear = false
   private var lastHeartRateEmitAt: TimeInterval = 0
   private let heartRateMinInterval: TimeInterval = 5
   private var cachedState: [String: Any] = [
@@ -259,14 +289,85 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     ])
   }
 
+  /// App Groups are per-device. Auth must ride WatchConnectivity or the watch
+  /// never sees the phone session. Merge into applicationContext so the latest
+  /// credentials survive watch launches without overwriting workout state.
+  func pushAuthToWatch() throws {
+    pendingAuthClear = false
+    guard WatchSharedAuthStore.loadRecord() != nil else { return }
+    try flushPendingWorkoutContextIfNeeded()
+    guard WCSession.isSupported() else { return }
+    let session = WCSession.default
+    guard session.activationState == .activated,
+          let record = WatchSharedAuthStore.loadRecord() else { return }
+    sendOrQueue(session: session, payload: ["type": watchAuthMessageType, "auth": record])
+  }
+
+  func pushAuthClearToWatch() throws {
+    pendingAuthClear = true
+    try flushPendingWorkoutContextIfNeeded()
+    guard WCSession.isSupported() else { return }
+    let session = WCSession.default
+    guard session.activationState == .activated else { return }
+    sendOrQueue(
+      session: session,
+      payload: ["type": watchAuthClearMessageType, "auth": ["cleared": true]]
+    )
+  }
+
   private func flushPendingWorkoutContextIfNeeded() throws {
     guard WCSession.isSupported() else { return }
     let session = WCSession.default
-    guard session.activationState == .activated, let context = pendingWorkoutContext else {
-      return
+    guard session.activationState == .activated else { return }
+
+    let hasPendingWorkout = pendingWorkoutContext != nil
+    var context: [String: Any]
+    if let pending = pendingWorkoutContext {
+      context = pending
+    } else {
+      context = session.applicationContext
     }
-    try session.updateApplicationContext(context)
-    pushWorkoutContextMessageIfReachable(session: session, context: context)
+
+    if pendingAuthClear {
+      context["auth"] = ["cleared": true]
+    } else if let auth = WatchSharedAuthStore.loadRecord() {
+      context["auth"] = auth
+    } else if let existingAuth = session.applicationContext["auth"] {
+      context["auth"] = existingAuth
+    }
+
+    guard !context.isEmpty else { return }
+    let shouldClearAuth = pendingAuthClear
+    if !NSDictionary(dictionary: context).isEqual(to: session.applicationContext) {
+      try session.updateApplicationContext(context)
+    }
+    if shouldClearAuth {
+      pendingAuthClear = false
+    }
+    if hasPendingWorkout {
+      pushWorkoutContextMessageIfReachable(session: session, context: context)
+    }
+  }
+
+  private func sendOrQueue(session: WCSession, payload: [String: Any]) {
+    cancelOutstandingAuthTransfers(session)
+    if session.isReachable {
+      session.sendMessage(payload, replyHandler: nil) { error in
+        NSLog("IronPath sendMessage auth failed: %@", error.localizedDescription)
+        session.transferUserInfo(payload)
+      }
+    } else if session.isWatchAppInstalled {
+      session.transferUserInfo(payload)
+    }
+  }
+
+  private func cancelOutstandingAuthTransfers(_ session: WCSession) {
+    for transfer in session.outstandingUserInfoTransfers {
+      let type = transfer.userInfo["type"] as? String
+      if type == watchAuthMessageType || type == watchAuthClearMessageType {
+        transfer.cancel()
+      }
+    }
   }
 
   private func pushWorkoutContextMessageIfReachable(session: WCSession, context: [String: Any]) {
@@ -330,8 +431,9 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     if activationState == .activated {
       do {
         try flushPendingWorkoutContextIfNeeded()
+        try pushAuthToWatch()
       } catch {
-        NSLog("IronPath flush workout context after activation failed: %@", error.localizedDescription)
+        NSLog("IronPath flush after WCSession activation failed: %@", error.localizedDescription)
       }
     }
   }
@@ -346,10 +448,23 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
     emitState(session)
     do {
       try flushPendingWorkoutContextIfNeeded()
+      try pushAuthToWatch()
     } catch {
-      NSLog("IronPath flush workout context on reachability change failed: %@", error.localizedDescription)
+      NSLog("IronPath flush on reachability change failed: %@", error.localizedDescription)
     }
   }
+
+  #if os(iOS)
+  func sessionWatchStateDidChange(_ session: WCSession) {
+    emitState(session)
+    do {
+      try flushPendingWorkoutContextIfNeeded()
+      try pushAuthToWatch()
+    } catch {
+      NSLog("IronPath flush on watch state change failed: %@", error.localizedDescription)
+    }
+  }
+  #endif
 
   func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
     handleIncoming(message, replyHandler: nil)
@@ -373,6 +488,22 @@ final class PhoneWatchSessionDelegate: NSObject, WCSessionDelegate {
   ) {
     guard let type = WatchPayloadParsing.stringFromPayload(payload["type"]) else {
       replyHandler?(["ok": false])
+      return
+    }
+
+    if type == watchAuthRequestMessageType {
+      if let record = WatchSharedAuthStore.loadRecord() {
+        replyHandler?(["ok": true, "auth": record])
+        if replyHandler == nil {
+          do {
+            try pushAuthToWatch()
+          } catch {
+            NSLog("IronPath requestAuth push failed: %@", error.localizedDescription)
+          }
+        }
+      } else {
+        replyHandler?(["ok": true])
+      }
       return
     }
 

@@ -185,9 +185,15 @@ export async function startWatchApp(sessionId: string): Promise<void> {
   }
 }
 
-/** Share auth + Supabase config with the watch via App Group (standalone workouts). */
+/** Share auth + Supabase config with the watch via WatchConnectivity. */
 export async function syncAuthToWatch(payload: WatchAuthPayload): Promise<void> {
-  if (!native?.syncAuthToWatch) return;
+  if (!native?.syncAuthToWatch) {
+    if (__DEV__) {
+      const { devLog } = require('../../src/lib/utils/logger');
+      devLog('watch-connectivity', { action: 'syncAuthToWatch_skipped_no_native' });
+    }
+    return;
+  }
   try {
     await native.syncAuthToWatch({
       accessToken: payload.accessToken,
@@ -197,8 +203,14 @@ export async function syncAuthToWatch(payload: WatchAuthPayload): Promise<void> 
       supabaseUrl: payload.supabaseUrl,
       supabaseAnonKey: payload.supabaseAnonKey,
     });
-  } catch {
-    // Watch / App Group unavailable — phone workouts still work.
+  } catch (error) {
+    if (__DEV__) {
+      const { devLog } = require('../../src/lib/utils/logger');
+      devLog('watch-connectivity', {
+        action: 'syncAuthToWatch_failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }
 
